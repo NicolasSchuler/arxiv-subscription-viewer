@@ -2,6 +2,8 @@
 
 A terminal user interface (TUI) for browsing arXiv papers from email subscription archives.
 
+![arXiv Subscription Viewer Screenshot](screenshot.svg)
+
 ## Features
 
 - Interactive split-pane interface with paper list and detail view
