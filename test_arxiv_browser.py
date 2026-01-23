@@ -1110,6 +1110,31 @@ class TestBibTeXFormattingEdgeCases:
 
 
 # ============================================================================
+# Tests for PDF download configuration
+# ============================================================================
+
+
+class TestPdfDownloadConfig:
+    """Tests for PDF download configuration."""
+
+    def test_pdf_download_dir_default_empty(self):
+        """Default pdf_download_dir should be empty string."""
+        from arxiv_browser import UserConfig
+
+        config = UserConfig()
+        assert config.pdf_download_dir == ""
+
+    def test_pdf_download_dir_serialization_roundtrip(self):
+        """pdf_download_dir should survive config serialization."""
+        from arxiv_browser import UserConfig, _config_to_dict, _dict_to_config
+
+        config = UserConfig(pdf_download_dir="/custom/path")
+        data = _config_to_dict(config)
+        restored = _dict_to_config(data)
+        assert restored.pdf_download_dir == "/custom/path"
+
+
+# ============================================================================
 # Tests for __all__ exports
 # ============================================================================
 

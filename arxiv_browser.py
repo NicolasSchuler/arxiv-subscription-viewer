@@ -9,6 +9,7 @@ Usage:
 Key bindings:
     /       - Toggle search (fuzzy matching)
     o       - Open selected paper(s) in browser
+    P       - Open selected paper(s) as PDF
     c       - Copy selected paper(s) to clipboard
     b       - Copy as BibTeX
     B       - Export BibTeX to file (for Zotero import)
@@ -23,6 +24,7 @@ Key bindings:
     n       - Edit notes
     t       - Edit tags
     w       - Toggle watch list filter
+    W       - Manage watch list
     p       - Toggle abstract preview
     m       - Set mark (then press a-z)
     '       - Jump to mark (then press a-z)
@@ -36,12 +38,18 @@ Key bindings:
 Search filters:
     cat:<category>  - Filter by category (e.g., cat:cs.AI)
     tag:<tag>       - Filter by tag (e.g., tag:to-read)
+    author:<name>   - Filter by author substring
+    title:<text>    - Filter by title substring
+    abstract:<text> - Filter by abstract substring
     unread          - Show only unread papers
     starred         - Show only starred papers
     <text>          - Filter by title/author
+    "quoted phrase" - Match exact phrases
+    AND/OR/NOT      - Combine terms with boolean operators
 """
 
 import argparse
+import asyncio
 import functools
 import json
 import logging
@@ -51,15 +59,17 @@ import re
 import subprocess
 import sys
 import webbrowser
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from platformdirs import user_config_dir
 from rapidfuzz import fuzz
+from rich.markup import escape as escape_markup
 from textual import on
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, ScreenStackError
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
@@ -68,12 +78,14 @@ from textual.screen import ModalScreen
 from textual.timer import Timer
 from textual.widgets import (
     Button,
+    Checkbox,
     Footer,
     Header,
     Input,
     Label,
     ListItem,
     ListView,
+    Select,
     Static,
     TextArea,
 )
@@ -134,17 +146,31 @@ FUZZY_LIMIT = 100  # Maximum number of results to return
 
 # Paper similarity settings
 SIMILARITY_TOP_N = 10  # Number of similar papers to show
+SIMILARITY_RECENCY_WEIGHT = 0.08
+SIMILARITY_STARRED_BOOST = 0.05
+SIMILARITY_UNREAD_BOOST = 0.03
+SIMILARITY_READ_PENALTY = 0.02
+SIMILARITY_RECENCY_DAYS = 365
 
 # UI truncation limits
 RECOMMENDATION_TITLE_MAX_LEN = 60  # Max title length in recommendations modal
 PREVIEW_ABSTRACT_MAX_LEN = 150  # Max abstract preview length in list items
 BOOKMARK_NAME_MAX_LEN = 15  # Max bookmark name display length
+MAX_ABSTRACT_LOADS = 32  # Maximum concurrent abstract loads
 
 # BibTeX export settings
 DEFAULT_BIBTEX_EXPORT_DIR = "arxiv-exports"  # Default subdirectory in home folder
 
 # History file discovery limit
 MAX_HISTORY_FILES = 365  # Limit to ~1 year of history to prevent memory issues
+
+# PDF download settings
+DEFAULT_PDF_DOWNLOAD_DIR = "arxiv-pdfs"  # Relative to home directory
+PDF_DOWNLOAD_TIMEOUT = 60  # Seconds per download
+MAX_CONCURRENT_DOWNLOADS = 3  # Limit parallel downloads
+
+# Search debounce delay in seconds
+SEARCH_DEBOUNCE_DELAY = 0.3
 STOPWORDS = frozenset(
     {
         "a",
@@ -259,6 +285,8 @@ STOPWORDS = frozenset(
     }
 )
 
+WATCH_MATCH_TYPES = ("author", "title", "keyword")
+
 # Date format used in arXiv emails (e.g., "Mon, 15 Jan 2024")
 ARXIV_DATE_FORMAT = "%a, %d %b %Y"
 # Extract the date prefix when time/zone info is present
@@ -283,6 +311,39 @@ def truncate_text(text: str, max_len: int, suffix: str = "...") -> str:
     return text[:max_len] + suffix
 
 
+def escape_rich_text(text: str) -> str:
+    """Escape text for safe Rich markup rendering."""
+    return escape_markup(text) if text else ""
+
+
+def highlight_text(text: str, terms: list[str], color: str) -> str:
+    """Highlight terms inside text using Rich markup."""
+    if not text:
+        return text
+    escaped_text = escape_rich_text(text)
+    if not terms:
+        return escaped_text
+    normalized = []
+    seen = set()
+    for term in terms:
+        cleaned = term.strip()
+        if len(cleaned) < 2:
+            continue
+        key = cleaned.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(cleaned)
+    if not normalized:
+        return escaped_text
+    normalized.sort(key=len, reverse=True)
+    escaped_terms = [escape_rich_text(term) for term in normalized]
+    pattern = re.compile(
+        "|".join(re.escape(term) for term in escaped_terms), re.IGNORECASE
+    )
+    return pattern.sub(lambda match: f"[bold {color}]{match.group(0)}[/]", escaped_text)
+
+
 @dataclass(slots=True)
 class Paper:
     """Represents an arXiv paper entry."""
@@ -293,8 +354,9 @@ class Paper:
     authors: str
     categories: str
     comments: str | None
-    abstract: str
+    abstract: str | None
     url: str
+    abstract_raw: str = ""
 
 
 # ============================================================================
@@ -341,7 +403,17 @@ class SessionState:
     current_date: str | None = None  # YYYY-MM-DD format, None for non-history mode
 
 
-@dataclass
+@dataclass(slots=True)
+class QueryToken:
+    """Token used for advanced query parsing."""
+
+    kind: str  # "term" or "op"
+    value: str
+    field: str | None = None
+    phrase: bool = False
+
+
+@dataclass(slots=True)
 class UserConfig:
     """Complete user configuration including session state and preferences."""
 
@@ -352,6 +424,10 @@ class UserConfig:
     session: SessionState = field(default_factory=SessionState)
     show_abstract_preview: bool = False
     bibtex_export_dir: str = ""  # Empty = use ~/arxiv-exports/
+    pdf_download_dir: str = ""  # Empty = use ~/arxiv-pdfs/
+    prefer_pdf_url: bool = False
+    category_colors: dict[str, str] = field(default_factory=dict)
+    theme: dict[str, str] = field(default_factory=dict)
     version: int = 1
 
 
@@ -381,6 +457,10 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
         "version": config.version,
         "show_abstract_preview": config.show_abstract_preview,
         "bibtex_export_dir": config.bibtex_export_dir,
+        "pdf_download_dir": config.pdf_download_dir,
+        "prefer_pdf_url": config.prefer_pdf_url,
+        "category_colors": config.category_colors,
+        "theme": config.theme,
         "session": {
             "scroll_index": config.session.scroll_index,
             "current_filter": config.session.current_filter,
@@ -432,10 +512,14 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
     current_date_raw = session_data.get("current_date")
     current_date = current_date_raw if isinstance(current_date_raw, str) else None
 
+    sort_index = _safe_get(session_data, "sort_index", 0, int)
+    if sort_index < 0 or sort_index >= len(SORT_OPTIONS):
+        sort_index = 0
+
     session = SessionState(
         scroll_index=_safe_get(session_data, "scroll_index", 0, int),
         current_filter=_safe_get(session_data, "current_filter", "", str),
-        sort_index=_safe_get(session_data, "sort_index", 0, int),
+        sort_index=sort_index,
         selected_ids=_safe_get(session_data, "selected_ids", [], list),
         current_date=current_date,
     )
@@ -489,6 +573,24 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
     if not isinstance(marks, dict):
         marks = {}
 
+    category_colors = _safe_get(data, "category_colors", {}, dict)
+    if not isinstance(category_colors, dict):
+        category_colors = {}
+    safe_category_colors = {
+        str(key): str(value)
+        for key, value in category_colors.items()
+        if isinstance(key, str) and isinstance(value, str)
+    }
+
+    theme = _safe_get(data, "theme", {}, dict)
+    if not isinstance(theme, dict):
+        theme = {}
+    safe_theme = {
+        str(key): str(value)
+        for key, value in theme.items()
+        if isinstance(key, str) and isinstance(value, str)
+    }
+
     return UserConfig(
         paper_metadata=paper_metadata,
         watch_list=watch_list,
@@ -497,6 +599,10 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         session=session,
         show_abstract_preview=_safe_get(data, "show_abstract_preview", False, bool),
         bibtex_export_dir=_safe_get(data, "bibtex_export_dir", "", str),
+        pdf_download_dir=_safe_get(data, "pdf_download_dir", "", str),
+        prefer_pdf_url=_safe_get(data, "prefer_pdf_url", False, bool),
+        category_colors=safe_category_colors,
+        theme=safe_theme,
         version=_safe_get(data, "version", 1, int),
     )
 
@@ -588,8 +694,9 @@ _CATEGORIES_PATTERN = re.compile(r"Categories:\s*(.+?)$", re.MULTILINE)
 # Matches: "Comments: 10 pages, 5 figures" -> captures "10 pages, 5 figures"
 _COMMENTS_PATTERN = re.compile(r"Comments:\s*(.+?)$", re.MULTILINE)
 # Matches abstract text between \\ markers after Categories/Comments line
+# Uses .*? to handle multi-line Comments fields (continuation lines)
 _ABSTRACT_PATTERN = re.compile(
-    r"(?:Categories|Comments):[^\n]*\n\\\\\n(.+?)\n\\\\", re.DOTALL
+    r"(?:Categories|Comments):.*?\n\\\\\n(.+?)\n\\\\", re.DOTALL
 )
 # Matches: "( https://arxiv.org/abs/2301.12345" -> captures the URL
 _URL_PATTERN = re.compile(r"\(\s*(https://arxiv\.org/abs/\S+)")
@@ -684,9 +791,9 @@ def parse_arxiv_file(filepath: Path) -> list[Paper]:
         # Extract abstract (text between \\ markers)
         abstract_match = _ABSTRACT_PATTERN.search(entry)
         if abstract_match:
-            abstract = " ".join(abstract_match.group(1).split())
+            abstract_raw = " ".join(abstract_match.group(1).split())
         else:
-            abstract = ""
+            abstract_raw = ""
 
         # Extract URL
         url_match = _URL_PATTERN.search(entry)
@@ -700,7 +807,8 @@ def parse_arxiv_file(filepath: Path) -> list[Paper]:
                 authors=clean_latex(authors),
                 categories=categories,
                 comments=clean_latex(comments) if comments else None,
-                abstract=clean_latex(abstract),
+                abstract=None,
+                abstract_raw=abstract_raw,
                 url=url,
             )
         )
@@ -746,7 +854,7 @@ def discover_history_files(
 
 
 # Category color mapping (Monokai-inspired palette)
-CATEGORY_COLORS = {
+DEFAULT_CATEGORY_COLORS = {
     "cs.AI": "#f92672",  # Monokai pink
     "cs.CL": "#66d9ef",  # Monokai blue
     "cs.LG": "#a6e22e",  # Monokai green
@@ -758,6 +866,37 @@ CATEGORY_COLORS = {
     "cs.IR": "#ae81ff",  # Monokai purple
     "cs.CR": "#fd971f",  # Monokai orange
 }
+
+CATEGORY_COLORS = DEFAULT_CATEGORY_COLORS.copy()
+
+DEFAULT_THEME = {
+    "background": "#272822",
+    "panel": "#1e1e1e",
+    "panel_alt": "#3e3d32",
+    "border": "#75715e",
+    "text": "#f8f8f2",
+    "muted": "#75715e",
+    "accent": "#66d9ef",
+    "accent_alt": "#e6db74",
+    "green": "#a6e22e",
+    "yellow": "#e6db74",
+    "orange": "#fd971f",
+    "pink": "#f92672",
+    "purple": "#ae81ff",
+    "highlight": "#49483e",
+    "highlight_focus": "#5a5950",
+    "selection": "#3d4a32",
+    "selection_highlight": "#4d5a42",
+    "scrollbar_background": "#3e3d32",
+    "scrollbar_background_hover": "#49483e",
+    "scrollbar_background_active": "#5a5950",
+    "scrollbar": "#75715e",
+    "scrollbar_active": "#66d9ef",
+    "scrollbar_hover": "#a6e22e",
+    "scrollbar_corner_color": "#3e3d32",
+}
+
+THEME_COLORS = DEFAULT_THEME.copy()
 
 
 def parse_arxiv_date(date_str: str) -> datetime:
@@ -803,8 +942,10 @@ def format_categories(categories: str) -> str:
 # ============================================================================
 
 
-def _extract_keywords(text: str, min_length: int = 4) -> set[str]:
+def _extract_keywords(text: str | None, min_length: int = 4) -> set[str]:
     """Extract significant keywords from text, filtering stopwords."""
+    if not text:
+        return set()
     words = set()
     for word in text.lower().split():
         # Remove non-alphanumeric characters
@@ -839,7 +980,12 @@ def _jaccard_similarity(set_a: set, set_b: set) -> float:
     return intersection / union if union > 0 else 0.0
 
 
-def compute_paper_similarity(paper_a: Paper, paper_b: Paper) -> float:
+def compute_paper_similarity(
+    paper_a: Paper,
+    paper_b: Paper,
+    abstract_a: str | None = None,
+    abstract_b: str | None = None,
+) -> float:
     """Compute weighted similarity score between two papers.
 
     Weights:
@@ -870,8 +1016,12 @@ def compute_paper_similarity(paper_a: Paper, paper_b: Paper) -> float:
     title_sim = _jaccard_similarity(title_kw_a, title_kw_b)
 
     # Abstract keyword similarity (10%)
-    abstract_kw_a = _extract_keywords(paper_a.abstract)
-    abstract_kw_b = _extract_keywords(paper_b.abstract)
+    if abstract_a is None:
+        abstract_a = paper_a.abstract or ""
+    if abstract_b is None:
+        abstract_b = paper_b.abstract or ""
+    abstract_kw_a = _extract_keywords(abstract_a)
+    abstract_kw_b = _extract_keywords(abstract_b)
     abstract_sim = _jaccard_similarity(abstract_kw_a, abstract_kw_b)
 
     # Weighted sum
@@ -882,6 +1032,8 @@ def find_similar_papers(
     target: Paper,
     all_papers: list[Paper],
     top_n: int = SIMILARITY_TOP_N,
+    metadata: dict[str, PaperMetadata] | None = None,
+    abstract_lookup: Callable[[Paper], str] | None = None,
 ) -> list[tuple[Paper, float]]:
     """Find the top N most similar papers to the target.
 
@@ -894,10 +1046,51 @@ def find_similar_papers(
         List of (paper, score) tuples, sorted by score descending
     """
     scored = []
+    if abstract_lookup is None:
+        abstract_lookup = lambda paper: paper.abstract or ""
+
+    newest_date = datetime.min
+    for paper in all_papers:
+        paper_date = parse_arxiv_date(paper.date)
+        if paper_date > newest_date:
+            newest_date = paper_date
+
+    def metadata_boost(arxiv_id: str) -> float:
+        if not metadata:
+            return 0.0
+        entry = metadata.get(arxiv_id)
+        if not entry:
+            return 0.0
+        boost = 0.0
+        if entry.starred:
+            boost += SIMILARITY_STARRED_BOOST
+        if entry.is_read:
+            boost -= SIMILARITY_READ_PENALTY
+        else:
+            boost += SIMILARITY_UNREAD_BOOST
+        return boost
+
+    def recency_score(paper: Paper) -> float:
+        if newest_date == datetime.min:
+            return 0.0
+        paper_date = parse_arxiv_date(paper.date)
+        if paper_date == datetime.min:
+            return 0.0
+        age_days = max(0, (newest_date - paper_date).days)
+        return max(0.0, 1.0 - (age_days / SIMILARITY_RECENCY_DAYS))
+
     for paper in all_papers:
         if paper.arxiv_id == target.arxiv_id:
             continue
-        score = compute_paper_similarity(target, paper)
+        score = compute_paper_similarity(
+            target,
+            paper,
+            abstract_lookup(target),
+            abstract_lookup(paper),
+        )
+        score += SIMILARITY_RECENCY_WEIGHT * recency_score(paper)
+        score += metadata_boost(paper.arxiv_id)
+        score = max(0.0, min(1.0, score))
         if score > 0:
             scored.append((paper, score))
 
@@ -916,6 +1109,8 @@ class PaperListItem(ListItem):
         metadata: PaperMetadata | None = None,
         watched: bool = False,
         show_preview: bool = False,
+        abstract_text: str | None = None,
+        highlight_terms: dict[str, list[str]] | None = None,
     ) -> None:
         super().__init__()
         self.paper = paper
@@ -923,6 +1118,12 @@ class PaperListItem(ListItem):
         self._metadata = metadata
         self._watched = watched
         self._show_preview = show_preview
+        self._abstract_text = abstract_text
+        self._highlight_terms = highlight_terms or {
+            "title": [],
+            "author": [],
+            "abstract": [],
+        }
         if selected:
             self.add_class("selected")
 
@@ -939,30 +1140,49 @@ class PaperListItem(ListItem):
         self._metadata = metadata
         self._update_display()
 
+    def set_abstract_text(self, text: str | None) -> None:
+        """Update abstract text for preview and refresh display."""
+        self._abstract_text = text
+        if self._show_preview:
+            self._update_display()
+
     def _get_title_text(self) -> str:
         """Get the formatted title text based on selection and metadata state."""
         prefix_parts = []
 
         # Selection indicator
         if self._selected:
-            prefix_parts.append("[#a6e22e]●[/]")  # Monokai green
+            prefix_parts.append(f"[{THEME_COLORS['green']}]●[/]")
 
         # Watched indicator
         if self._watched:
-            prefix_parts.append("[#fd971f]👁[/]")  # Monokai orange
+            prefix_parts.append(f"[{THEME_COLORS['orange']}]👁[/]")
 
         # Starred indicator
         if self._metadata and self._metadata.starred:
-            prefix_parts.append("[#e6db74]⭐[/]")  # Monokai yellow
+            prefix_parts.append(f"[{THEME_COLORS['yellow']}]⭐[/]")
 
         # Read indicator
         if self._metadata and self._metadata.is_read:
-            prefix_parts.append("[#75715e]✓[/]")  # Monokai gray
+            prefix_parts.append(f"[{THEME_COLORS['muted']}]✓[/]")
 
         prefix = " ".join(prefix_parts)
+        title_text = highlight_text(
+            self.paper.title,
+            self._highlight_terms.get("title", []),
+            THEME_COLORS["accent"],
+        )
         if prefix:
-            return f"{prefix} {self.paper.title}"
-        return self.paper.title
+            return f"{prefix} {title_text}"
+        return title_text
+
+    def _get_authors_text(self) -> str:
+        """Get the formatted author text."""
+        return highlight_text(
+            self.paper.authors,
+            self._highlight_terms.get("author", []),
+            THEME_COLORS["accent"],
+        )
 
     def _get_meta_text(self) -> str:
         """Get the formatted metadata text."""
@@ -973,7 +1193,10 @@ class PaperListItem(ListItem):
 
         # Show tags if present
         if self._metadata and self._metadata.tags:
-            tag_str = " ".join(f"[#ae81ff]#{tag}[/]" for tag in self._metadata.tags)
+            tag_str = " ".join(
+                f"[{THEME_COLORS['purple']}]#{escape_rich_text(tag)}[/]"
+                for tag in self._metadata.tags
+            )
             parts.append(tag_str)
 
         return "  ".join(parts)
@@ -984,14 +1207,26 @@ class PaperListItem(ListItem):
         Returns formatted Rich markup for the abstract preview.
         Handles empty abstracts and truncates at word boundaries.
         """
-        abstract = self.paper.abstract
+        abstract = self._abstract_text
+        if abstract is None:
+            return "[dim italic]Loading abstract...[/]"
         if not abstract:
             return "[dim italic]No abstract available[/]"
         if len(abstract) <= PREVIEW_ABSTRACT_MAX_LEN:
-            return f"[dim italic]{abstract}[/]"
+            highlighted = highlight_text(
+                abstract,
+                self._highlight_terms.get("abstract", []),
+                THEME_COLORS["accent"],
+            )
+            return f"[dim italic]{highlighted}[/]"
         # Truncate at word boundary for cleaner display
         truncated = abstract[:PREVIEW_ABSTRACT_MAX_LEN].rsplit(" ", 1)[0]
-        return f"[dim italic]{truncated}...[/]"
+        highlighted = highlight_text(
+            truncated,
+            self._highlight_terms.get("abstract", []),
+            THEME_COLORS["accent"],
+        )
+        return f"[dim italic]{highlighted}...[/]"
 
     def _update_selection_class(self) -> None:
         """Update the CSS class based on selection state."""
@@ -1016,12 +1251,18 @@ class PaperListItem(ListItem):
     def _update_display(self) -> None:
         """Update the visual display based on selection state."""
         title_widget = self.query_one(".paper-title", Static)
+        authors_widget = self.query_one(".paper-authors", Static)
         meta_widget = self.query_one(".paper-meta", Static)
         title_widget.update(self._get_title_text())
+        authors_widget.update(self._get_authors_text())
         meta_widget.update(self._get_meta_text())
+        if self._show_preview:
+            preview_widget = self.query_one(".paper-preview", Static)
+            preview_widget.update(self._get_preview_text())
 
     def compose(self) -> ComposeResult:
         yield Static(self._get_title_text(), classes="paper-title")
+        yield Static(self._get_authors_text(), classes="paper-authors")
         yield Static(self._get_meta_text(), classes="paper-meta")
         if self._show_preview:
             yield Static(self._get_preview_text(), classes="paper-preview")
@@ -1034,41 +1275,64 @@ class PaperDetails(Static):
         super().__init__()
         self._paper: Paper | None = None
 
-    def update_paper(self, paper: Paper | None) -> None:
+    def update_paper(
+        self, paper: Paper | None, abstract_text: str | None = None
+    ) -> None:
         """Update the displayed paper details."""
         self._paper = paper
         if paper is None:
             self.update("[dim italic]Select a paper to view details[/]")
             return
 
+        loading = abstract_text is None and paper.abstract is None
+        if abstract_text is None:
+            abstract_text = paper.abstract or ""
+
         lines = []
+        safe_title = escape_rich_text(paper.title)
+        safe_authors = escape_rich_text(paper.authors)
+        safe_date = escape_rich_text(paper.date)
+        safe_comments = escape_rich_text(paper.comments or "")
+        safe_abstract = escape_rich_text(abstract_text)
+        safe_url = escape_rich_text(paper.url)
 
         # Title section (Monokai foreground)
-        lines.append(f"[bold #f8f8f2]{paper.title}[/]")
+        lines.append(f"[bold {THEME_COLORS['text']}]{safe_title}[/]")
         lines.append("")
 
         # Metadata section (Monokai blue for labels, purple for values)
-        lines.append(f"[bold #66d9ef]arXiv:[/] [#ae81ff]{paper.arxiv_id}[/]")
-        lines.append(f"[bold #66d9ef]Date:[/] {paper.date}")
         lines.append(
-            f"[bold #66d9ef]Categories:[/] {format_categories(paper.categories)}"
+            f"[bold {THEME_COLORS['accent']}]arXiv:[/] [{THEME_COLORS['purple']}]{paper.arxiv_id}[/]"
+        )
+        lines.append(f"[bold {THEME_COLORS['accent']}]Date:[/] {safe_date}")
+        lines.append(
+            f"[bold {THEME_COLORS['accent']}]Categories:[/] {format_categories(paper.categories)}"
         )
         if paper.comments:
-            lines.append(f"[bold #66d9ef]Comments:[/] [dim]{paper.comments}[/]")
+            lines.append(
+                f"[bold {THEME_COLORS['accent']}]Comments:[/] [dim]{safe_comments}[/]"
+            )
         lines.append("")
 
         # Authors section (Monokai green)
-        lines.append("[bold #a6e22e]Authors[/]")
-        lines.append(f"[#f8f8f2]{paper.authors}[/]")
+        lines.append(f"[bold {THEME_COLORS['green']}]Authors[/]")
+        lines.append(f"[{THEME_COLORS['text']}]{safe_authors}[/]")
         lines.append("")
 
         # Abstract section (Monokai orange)
-        lines.append("[bold #fd971f]Abstract[/]")
-        lines.append(f"[#f8f8f2]{paper.abstract}[/]")
+        lines.append(f"[bold {THEME_COLORS['orange']}]Abstract[/]")
+        if loading:
+            lines.append("[dim italic]Loading abstract...[/]")
+        elif abstract_text:
+            lines.append(f"[{THEME_COLORS['text']}]{safe_abstract}[/]")
+        else:
+            lines.append("[dim italic]No abstract available[/]")
         lines.append("")
 
         # URL section (Monokai pink/red for label, blue for URL)
-        lines.append(f"[bold #f92672]URL:[/] [#66d9ef]{paper.url}[/]")
+        lines.append(
+            f"[bold {THEME_COLORS['pink']}]URL:[/] [{THEME_COLORS['accent']}]{safe_url}[/]"
+        )
 
         self.update("\n".join(lines))
 
@@ -1266,6 +1530,224 @@ class TagsModal(ModalScreen[list[str]]):
         self.action_save()
 
 
+class WatchListItem(ListItem):
+    """List item for watch list entries."""
+
+    def __init__(self, entry: WatchListEntry, *children, **kwargs) -> None:
+        super().__init__(*children, **kwargs)
+        self.entry = entry
+
+
+class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
+    """Modal dialog for managing watch list entries."""
+
+    BINDINGS = [
+        Binding("ctrl+s", "save", "Save"),
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    CSS = """
+    WatchListModal {
+        align: center middle;
+    }
+
+    #watch-dialog {
+        width: 80%;
+        height: 70%;
+        min-width: 60;
+        min-height: 20;
+        background: #272822;
+        border: round #66d9ef;
+        padding: 1 2;
+    }
+
+    #watch-title {
+        text-style: bold;
+        color: #66d9ef;
+        margin-bottom: 1;
+    }
+
+    #watch-body {
+        height: 1fr;
+    }
+
+    #watch-list {
+        width: 2fr;
+        height: 1fr;
+        background: #1e1e1e;
+        border: round #75715e;
+        margin-right: 2;
+    }
+
+    #watch-form {
+        width: 1fr;
+        height: 1fr;
+    }
+
+    #watch-form Label {
+        color: #75715e;
+        margin-top: 1;
+    }
+
+    #watch-pattern,
+    #watch-type {
+        width: 100%;
+        background: #1e1e1e;
+        border: round #75715e;
+    }
+
+    #watch-pattern:focus,
+    #watch-type:focus {
+        border: round #66d9ef;
+    }
+
+    #watch-case {
+        margin-top: 1;
+    }
+
+    #watch-actions {
+        height: auto;
+        margin-top: 1;
+        align: left middle;
+    }
+
+    #watch-actions Button {
+        margin-right: 1;
+    }
+
+    #watch-buttons {
+        height: auto;
+        margin-top: 1;
+        align: right middle;
+    }
+
+    #watch-buttons Button {
+        margin-left: 1;
+    }
+    """
+
+    def __init__(self, entries: list[WatchListEntry]) -> None:
+        super().__init__()
+        self._entries = [
+            WatchListEntry(
+                pattern=entry.pattern,
+                match_type=entry.match_type,
+                case_sensitive=entry.case_sensitive,
+            )
+            for entry in entries
+        ]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="watch-dialog"):
+            yield Label("Watch List Manager", id="watch-title")
+            with Horizontal(id="watch-body"):
+                yield ListView(id="watch-list")
+                with Vertical(id="watch-form"):
+                    yield Label("Pattern")
+                    yield Input(placeholder="e.g., diffusion", id="watch-pattern")
+                    yield Label("Match Type")
+                    yield Select(
+                        [(value, value) for value in WATCH_MATCH_TYPES],
+                        id="watch-type",
+                    )
+                    yield Checkbox("Case sensitive", id="watch-case")
+                    with Horizontal(id="watch-actions"):
+                        yield Button("Add", variant="primary", id="watch-add")
+                        yield Button("Update", variant="default", id="watch-update")
+                        yield Button("Delete", variant="default", id="watch-delete")
+            with Horizontal(id="watch-buttons"):
+                yield Button("Cancel", variant="default", id="watch-cancel")
+                yield Button("Save (Ctrl+S)", variant="primary", id="watch-save")
+
+    def on_mount(self) -> None:
+        self._refresh_list()
+        self.query_one("#watch-pattern", Input).focus()
+
+    def _refresh_list(self) -> None:
+        list_view = self.query_one("#watch-list", ListView)
+        list_view.clear()
+        for entry in self._entries:
+            label = f"{entry.match_type}: {entry.pattern}"
+            if entry.case_sensitive:
+                label = f"{label} (Aa)"
+            list_view.mount(WatchListItem(entry, Label(label)))
+        if list_view.children:
+            list_view.index = 0
+            self._populate_form(list_view.highlighted_child)
+
+    def _populate_form(self, item: ListItem | None) -> None:
+        if not isinstance(item, WatchListItem):
+            return
+        self.query_one("#watch-pattern", Input).value = item.entry.pattern
+        self.query_one("#watch-type", Select).value = item.entry.match_type
+        self.query_one("#watch-case", Checkbox).value = item.entry.case_sensitive
+
+    def _build_entry_from_form(self) -> WatchListEntry | None:
+        pattern = self.query_one("#watch-pattern", Input).value.strip()
+        match_value = self.query_one("#watch-type", Select).value
+        match_type = match_value if isinstance(match_value, str) else "author"
+        case_sensitive = self.query_one("#watch-case", Checkbox).value
+        if not pattern:
+            self.notify("Pattern cannot be empty", title="Watch", severity="warning")
+            return None
+        if match_type not in WATCH_MATCH_TYPES:
+            match_type = "author"
+        return WatchListEntry(
+            pattern=pattern,
+            match_type=match_type,
+            case_sensitive=case_sensitive,
+        )
+
+    def action_save(self) -> None:
+        self.dismiss(self._entries)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    @on(ListView.Highlighted, "#watch-list")
+    def on_list_highlighted(self, event: ListView.Highlighted) -> None:
+        self._populate_form(event.item)
+
+    @on(Button.Pressed, "#watch-add")
+    def on_add_pressed(self) -> None:
+        entry = self._build_entry_from_form()
+        if not entry:
+            return
+        self._entries.append(entry)
+        self._refresh_list()
+
+    @on(Button.Pressed, "#watch-update")
+    def on_update_pressed(self) -> None:
+        list_view = self.query_one("#watch-list", ListView)
+        if not isinstance(list_view.highlighted_child, WatchListItem):
+            self.notify("Select a watch entry to update", title="Watch")
+            return
+        entry = self._build_entry_from_form()
+        if not entry:
+            return
+        index = list_view.index or 0
+        self._entries[index] = entry
+        self._refresh_list()
+
+    @on(Button.Pressed, "#watch-delete")
+    def on_delete_pressed(self) -> None:
+        list_view = self.query_one("#watch-list", ListView)
+        if not isinstance(list_view.highlighted_child, WatchListItem):
+            self.notify("Select a watch entry to delete", title="Watch")
+            return
+        index = list_view.index or 0
+        self._entries.pop(index)
+        self._refresh_list()
+
+    @on(Button.Pressed, "#watch-save")
+    def on_save_pressed(self) -> None:
+        self.action_save()
+
+    @on(Button.Pressed, "#watch-cancel")
+    def on_cancel_pressed(self) -> None:
+        self.action_cancel()
+
+
 class RecommendationListItem(ListItem):
     """A list item for the recommendations screen that stores a paper reference."""
 
@@ -1361,11 +1843,13 @@ class RecommendationsScreen(ModalScreen[str | None]):
     def on_mount(self) -> None:
         list_view = self.query_one("#recommendations-list", ListView)
         for paper, score in self._similar_papers:
+            safe_title = escape_rich_text(paper.title)
+            safe_categories = escape_rich_text(paper.categories)
             item = RecommendationListItem(
                 paper,
-                Static(f"[bold]{paper.title}[/]", classes="rec-title"),
+                Static(f"[bold]{safe_title}[/]", classes="rec-title"),
                 Static(
-                    f"[dim]{paper.arxiv_id}[/] | {paper.categories} | [#a6e22e]{score:.0%}[/] match",
+                    f"[dim]{paper.arxiv_id}[/] | {safe_categories} | [{THEME_COLORS['green']}]{score:.0%}[/] match",
                     classes="rec-meta",
                 ),
             )
@@ -1477,7 +1961,10 @@ class ArxivBrowser(App):
 
     TITLE = "arXiv Paper Browser"
 
-    # Monokai color theme
+    # Monokai color theme - using hardcoded colors to avoid conflicts with Textual's theme system
+    # Colors: background=#272822, panel=#1e1e1e, panel-alt=#3e3d32, border=#75715e,
+    #         text=#f8f8f2, muted=#75715e, accent=#66d9ef, accent-alt=#e6db74,
+    #         highlight=#49483e, highlight-focus=#5a5950, selection=#3d4a32, selection-highlight=#4d5a42
     CSS = """
     Screen {
         background: #272822;
@@ -1586,6 +2073,10 @@ class ArxivBrowser(App):
         text-style: bold;
     }
 
+    .paper-authors {
+        color: #75715e;
+    }
+
     .paper-meta {
         color: #75715e;
         margin-top: 0;
@@ -1612,8 +2103,13 @@ class ArxivBrowser(App):
     VerticalScroll {
         scrollbar-background: #3e3d32;
         scrollbar-color: #75715e;
-        scrollbar-color-hover: #a6a68a;
+        scrollbar-color-hover: #75715e;
         scrollbar-color-active: #66d9ef;
+    }
+
+    #status-bar {
+        padding: 0 2 1 2;
+        color: #75715e;
     }
     """
 
@@ -1622,6 +2118,7 @@ class ArxivBrowser(App):
         Binding("slash", "toggle_search", "Search"),
         Binding("escape", "cancel_search", "Cancel", show=False),
         Binding("o", "open_url", "Open Selected"),
+        Binding("P", "open_pdf", "Open PDF", show=False),
         Binding("c", "copy_selected", "Copy"),
         Binding("s", "cycle_sort", "Sort"),
         Binding("space", "toggle_select", "Select", show=False),
@@ -1636,6 +2133,7 @@ class ArxivBrowser(App):
         Binding("t", "edit_tags", "Tags"),
         # Phase 3: Watch list
         Binding("w", "toggle_watch_filter", "Watch"),
+        Binding("W", "manage_watch_list", "Watch List", show=False),
         # Phase 4: Bookmarked search tabs
         Binding("1", "goto_bookmark(0)", "Bookmark 1", show=False),
         Binding("2", "goto_bookmark(1)", "Bookmark 2", show=False),
@@ -1664,8 +2162,6 @@ class ArxivBrowser(App):
         Binding("bracketright", "next_date", "Newer", show=False),
     ]
 
-    DEBOUNCE_DELAY = 0.3  # seconds
-
     def __init__(
         self,
         papers: list[Paper],
@@ -1688,6 +2184,10 @@ class ArxivBrowser(App):
         self._config = config or UserConfig()
         self._restore_session = restore_session
 
+        # Theme and category overrides
+        self._apply_category_overrides()
+        self._apply_theme_overrides()
+
         # History mode: multiple date files
         self._history_files: list[tuple[date, Path]] = history_files or []
         self._current_date_index: int = current_date_index
@@ -1700,11 +2200,24 @@ class ArxivBrowser(App):
         # Abstract preview toggle
         self._show_abstract_preview: bool = self._config.show_abstract_preview
 
+        # Abstract cache for lazy loading
+        self._abstract_cache: dict[str, str] = {}
+        self._abstract_loading: set[str] = set()
+        self._abstract_queue: deque[Paper] = deque()
+        self._abstract_pending_ids: set[str] = set()
+
         # Bookmark state
         self._active_bookmark_index: int = -1  # -1 means no active bookmark
 
         # Fuzzy search match scores
         self._match_scores: dict[str, float] = {}
+
+        # Highlight terms for incremental search
+        self._highlight_terms: dict[str, list[str]] = {
+            "title": [],
+            "author": [],
+            "abstract": [],
+        }
 
         # Vim-style marks state
         self._pending_mark_action: str | None = None  # "set" or "goto"
@@ -1719,12 +2232,23 @@ class ArxivBrowser(App):
                 )
                 with Vertical(id="search-container"):
                     yield Input(
-                        placeholder=" Filter: text, cat:cs.AI, tag:name, unread, starred",
+                        placeholder=(
+                            " Filter: text, author:, title:, cat:, tag:, unread, starred, AND/OR/NOT"
+                        ),
                         id="search-input",
                     )
                 yield ListView(
-                    *[PaperListItem(p) for p in self.filtered_papers], id="paper-list"
+                    *[
+                        PaperListItem(
+                            p,
+                            abstract_text=self._get_abstract_text(p, allow_async=True),
+                            highlight_terms=self._highlight_terms,
+                        )
+                        for p in self.filtered_papers
+                    ],
+                    id="paper-list",
                 )
+                yield Label("", id="status-bar")
             with Vertical(id="right-pane"):
                 yield Label(" Paper Details", id="details-header")
                 with VerticalScroll(id="details-scroll"):
@@ -1763,6 +2287,9 @@ class ArxivBrowser(App):
             list_view = self.query_one("#paper-list", ListView)
             if list_view.children:
                 list_view.index = 0
+        self._update_status_bar()
+        # Focus the paper list so key bindings work
+        self.query_one("#paper-list", ListView).focus()
 
     def on_unmount(self) -> None:
         """Called when app is unmounted. Saves session state and cleans up timers.
@@ -1777,6 +2304,88 @@ class ArxivBrowser(App):
         self._search_timer = None
         if timer is not None:
             timer.stop()
+
+    def _apply_category_overrides(self) -> None:
+        """Apply category color overrides from config."""
+        CATEGORY_COLORS.clear()
+        CATEGORY_COLORS.update(DEFAULT_CATEGORY_COLORS)
+        CATEGORY_COLORS.update(self._config.category_colors)
+
+    def _apply_theme_overrides(self) -> None:
+        """Apply theme overrides from config to markup colors (THEME_COLORS dict).
+
+        Note: CSS variables are handled by Textual's built-in theme system.
+        THEME_COLORS is only used for Rich markup styling in the UI.
+        """
+        THEME_COLORS.clear()
+        THEME_COLORS.update(DEFAULT_THEME)
+        THEME_COLORS.update(self._config.theme)
+
+    def _schedule_abstract_load(self, paper: Paper) -> None:
+        """Schedule an abstract load with concurrency limits."""
+        if (
+            paper.arxiv_id in self._abstract_loading
+            or paper.arxiv_id in self._abstract_pending_ids
+        ):
+            return
+        if len(self._abstract_loading) < MAX_ABSTRACT_LOADS:
+            self._abstract_loading.add(paper.arxiv_id)
+            asyncio.create_task(self._load_abstract_async(paper))
+            return
+        self._abstract_queue.append(paper)
+        self._abstract_pending_ids.add(paper.arxiv_id)
+
+    def _drain_abstract_queue(self) -> None:
+        """Start queued abstract loads while capacity is available."""
+        while self._abstract_queue and len(self._abstract_loading) < MAX_ABSTRACT_LOADS:
+            paper = self._abstract_queue.popleft()
+            self._abstract_pending_ids.discard(paper.arxiv_id)
+            if paper.arxiv_id in self._abstract_loading:
+                continue
+            if paper.arxiv_id in self._abstract_cache:
+                continue
+            self._abstract_loading.add(paper.arxiv_id)
+            asyncio.create_task(self._load_abstract_async(paper))
+
+    def _get_abstract_text(self, paper: Paper, allow_async: bool) -> str | None:
+        """Return cached abstract text, scheduling async load if needed."""
+        cached = self._abstract_cache.get(paper.arxiv_id)
+        if cached is not None:
+            return cached
+        if not paper.abstract_raw:
+            self._abstract_cache[paper.arxiv_id] = ""
+            paper.abstract = ""
+            return ""
+        if not allow_async:
+            cleaned = clean_latex(paper.abstract_raw)
+            self._abstract_cache[paper.arxiv_id] = cleaned
+            paper.abstract = cleaned
+            return cleaned
+        self._schedule_abstract_load(paper)
+        return None
+
+    async def _load_abstract_async(self, paper: Paper) -> None:
+        cleaned = await asyncio.to_thread(clean_latex, paper.abstract_raw)
+        self._abstract_cache[paper.arxiv_id] = cleaned
+        # Only update if not already set (idempotent to avoid race conditions)
+        if paper.abstract is None:
+            paper.abstract = cleaned
+        self._abstract_loading.discard(paper.arxiv_id)
+        self._drain_abstract_queue()
+        self._update_abstract_display(paper.arxiv_id)
+
+    def _update_abstract_display(self, arxiv_id: str) -> None:
+        try:
+            details = self.query_one(PaperDetails)
+            if details.paper and details.paper.arxiv_id == arxiv_id:
+                abstract_text = self._abstract_cache.get(arxiv_id, "")
+                details.update_paper(details.paper, abstract_text)
+            list_view = self.query_one("#paper-list", ListView)
+            for item in list_view.children:
+                if isinstance(item, PaperListItem) and item.paper.arxiv_id == arxiv_id:
+                    item.set_abstract_text(self._abstract_cache.get(arxiv_id))
+        except NoMatches:
+            return
 
     def _save_session_state(self) -> None:
         """Save current session state to config.
@@ -1800,7 +2409,7 @@ class ArxivBrowser(App):
                 selected_ids=list(self.selected_ids),
                 current_date=current_date_str,
             )
-        except NoMatches:
+        except (NoMatches, ScreenStackError):
             # DOM already torn down during shutdown, save with defaults
             self._config.session = SessionState(
                 scroll_index=0,
@@ -1817,14 +2426,16 @@ class ArxivBrowser(App):
         """Handle paper selection."""
         if isinstance(event.item, PaperListItem):
             details = self.query_one(PaperDetails)
-            details.update_paper(event.item.paper)
+            abstract_text = self._get_abstract_text(event.item.paper, allow_async=True)
+            details.update_paper(event.item.paper, abstract_text)
 
     @on(ListView.Highlighted)
     def on_list_highlighted(self, event: ListView.Highlighted) -> None:
         """Handle paper highlight (keyboard navigation)."""
         if isinstance(event.item, PaperListItem):
             details = self.query_one(PaperDetails)
-            details.update_paper(event.item.paper)
+            abstract_text = self._get_abstract_text(event.item.paper, allow_async=True)
+            details.update_paper(event.item.paper, abstract_text)
 
     def action_toggle_search(self) -> None:
         """Toggle search input visibility."""
@@ -1877,7 +2488,7 @@ class ArxivBrowser(App):
             old_timer.stop()
         # Set new timer for debounced filter
         self._search_timer = self.set_timer(
-            self.DEBOUNCE_DELAY,
+            SEARCH_DEBOUNCE_DELAY,
             self._debounced_filter,
         )
 
@@ -1905,6 +2516,161 @@ class ArxivBrowser(App):
         if query:
             return f" Papers ({len(self.filtered_papers)}/{len(self.all_papers)}){date_info}{selection_info}{sort_info}"
         return f" Papers ({len(self.all_papers)} total){date_info}{selection_info}{sort_info}"
+
+    def _tokenize_query(self, query: str) -> list[QueryToken]:
+        """Tokenize a query string into terms and operators."""
+        tokens: list[QueryToken] = []
+        i = 0
+        query_len = len(query)
+        while i < query_len:
+            if query[i].isspace():
+                i += 1
+                continue
+            if query[i] == '"':
+                i += 1
+                start = i
+                while i < query_len and query[i] != '"':
+                    i += 1
+                value = query[start:i]
+                tokens.append(QueryToken(kind="term", value=value, phrase=True))
+                i += 1
+                continue
+            start = i
+            while i < query_len and not query[i].isspace() and query[i] != ":":
+                i += 1
+            if i < query_len and query[i] == ":":
+                field = query[start:i].lower()
+                if field in {"title", "author", "abstract", "cat", "tag"}:
+                    i += 1
+                    if i < query_len and query[i] == '"':
+                        i += 1
+                        value_start = i
+                        while i < query_len and query[i] != '"':
+                            i += 1
+                        value = query[value_start:i]
+                        tokens.append(
+                            QueryToken(
+                                kind="term", value=value, field=field, phrase=True
+                            )
+                        )
+                        i += 1
+                    else:
+                        value_start = i
+                        while i < query_len and not query[i].isspace():
+                            i += 1
+                        value = query[value_start:i]
+                        tokens.append(QueryToken(kind="term", value=value, field=field))
+                    continue
+            while i < query_len and not query[i].isspace():
+                i += 1
+            raw = query[start:i]
+            upper = raw.upper()
+            if upper in {"AND", "OR", "NOT"}:
+                tokens.append(QueryToken(kind="op", value=upper))
+            else:
+                tokens.append(QueryToken(kind="term", value=raw))
+        return tokens
+
+    def _is_advanced_query(self, tokens: list[QueryToken]) -> bool:
+        return any(
+            tok.kind == "op"
+            or tok.field
+            or tok.phrase
+            or tok.value.lower() in {"unread", "starred"}
+            for tok in tokens
+        )
+
+    def _build_highlight_terms(self, tokens: list[QueryToken]) -> None:
+        highlight = {"title": [], "author": [], "abstract": []}
+        for token in tokens:
+            if token.kind != "term":
+                continue
+            if token.value.lower() in {"unread", "starred"}:
+                continue
+            if token.field == "title":
+                highlight["title"].append(token.value)
+            elif token.field == "author":
+                highlight["author"].append(token.value)
+            elif token.field == "abstract":
+                highlight["abstract"].append(token.value)
+            elif token.field is None:
+                highlight["title"].append(token.value)
+                highlight["author"].append(token.value)
+        self._highlight_terms = highlight
+
+    def _insert_implicit_and(self, tokens: list[QueryToken]) -> list[QueryToken]:
+        result: list[QueryToken] = []
+        prev_was_term = False
+        for token in tokens:
+            token_is_term_start = token.kind == "term" or token.value == "NOT"
+            if prev_was_term and token_is_term_start:
+                result.append(QueryToken(kind="op", value="AND"))
+            result.append(token)
+            prev_was_term = token.kind == "term"
+        return result
+
+    def _to_rpn(self, tokens: list[QueryToken]) -> list[QueryToken]:
+        output: list[QueryToken] = []
+        ops: list[QueryToken] = []
+        precedence = {"OR": 1, "AND": 2, "NOT": 3}
+        for token in tokens:
+            if token.kind == "term":
+                output.append(token)
+                continue
+            while ops and precedence[ops[-1].value] >= precedence[token.value]:
+                output.append(ops.pop())
+            ops.append(token)
+        while ops:
+            output.append(ops.pop())
+        return output
+
+    def _matches_advanced_query(self, paper: Paper, rpn: list[QueryToken]) -> bool:
+        if not rpn:
+            return True
+        stack: list[bool] = []
+        for token in rpn:
+            if token.kind == "term":
+                stack.append(self._match_query_term(paper, token))
+                continue
+            if token.value == "NOT":
+                value = stack.pop() if stack else False
+                stack.append(not value)
+            else:
+                right = stack.pop() if stack else False
+                left = stack.pop() if stack else False
+                if token.value == "AND":
+                    stack.append(left and right)
+                else:
+                    stack.append(left or right)
+        return stack[-1] if stack else True
+
+    def _match_query_term(self, paper: Paper, token: QueryToken) -> bool:
+        value = token.value.strip()
+        if not value:
+            return True
+        value_lower = value.lower()
+        if token.field == "cat":
+            return value_lower in paper.categories.lower()
+        if token.field == "tag":
+            metadata = self._config.paper_metadata.get(paper.arxiv_id)
+            if not metadata:
+                return False
+            return any(value_lower in tag.lower() for tag in metadata.tags)
+        if token.field == "title":
+            return value_lower in paper.title.lower()
+        if token.field == "author":
+            return value_lower in paper.authors.lower()
+        if token.field == "abstract":
+            abstract_text = self._get_abstract_text(paper, allow_async=False) or ""
+            return value_lower in abstract_text.lower()
+        if value_lower == "unread":
+            metadata = self._config.paper_metadata.get(paper.arxiv_id)
+            return not metadata or not metadata.is_read
+        if value_lower == "starred":
+            metadata = self._config.paper_metadata.get(paper.arxiv_id)
+            return bool(metadata and metadata.starred)
+        haystack = f"{paper.title} {paper.authors}".lower()
+        return value_lower in haystack
 
     def _filter_by_category(self, category: str) -> list[Paper]:
         """Filter papers by category substring match."""
@@ -1975,24 +2741,26 @@ class ArxivBrowser(App):
         - <text>          - Fuzzy search on title/author
         """
         query = query.strip()
-        query_lower = query.lower()
 
         # Clear match scores by default (only fuzzy search populates them)
         self._match_scores.clear()
 
-        # Apply the appropriate filter based on query prefix
         if not query:
             self.filtered_papers = self.all_papers.copy()
-        elif query_lower.startswith("cat:"):
-            self.filtered_papers = self._filter_by_category(query[4:].strip())
-        elif query_lower.startswith("tag:"):
-            self.filtered_papers = self._filter_by_tag(query[4:].strip())
-        elif query_lower == "unread":
-            self.filtered_papers = self._filter_unread()
-        elif query_lower == "starred":
-            self.filtered_papers = self._filter_starred()
+            self._highlight_terms = {"title": [], "author": [], "abstract": []}
         else:
-            self.filtered_papers = self._fuzzy_search(query)
+            tokens = self._tokenize_query(query)
+            self._build_highlight_terms(tokens)
+            if self._is_advanced_query(tokens):
+                tokens = self._insert_implicit_and(tokens)
+                rpn = self._to_rpn(tokens)
+                self.filtered_papers = [
+                    paper
+                    for paper in self.all_papers
+                    if self._matches_advanced_query(paper, rpn)
+                ]
+            else:
+                self.filtered_papers = self._fuzzy_search(query)
 
         # Apply watch filter if active (intersects with other filters)
         if self._watch_filter_active:
@@ -2006,6 +2774,7 @@ class ArxivBrowser(App):
 
         # Update header with current query context
         self.query_one("#list-header", Label).update(self._format_header_text(query))
+        self._update_status_bar()
 
     def action_toggle_select(self) -> None:
         """Toggle selection of the currently highlighted paper."""
@@ -2072,6 +2841,10 @@ class ArxivBrowser(App):
                 metadata=self._config.paper_metadata.get(paper.arxiv_id),
                 watched=paper.arxiv_id in self._watched_paper_ids,
                 show_preview=self._show_abstract_preview,
+                abstract_text=self._get_abstract_text(
+                    paper, allow_async=self._show_abstract_preview
+                ),
+                highlight_terms=self._highlight_terms,
             )
             for paper in self.filtered_papers
         ]
@@ -2152,7 +2925,9 @@ class ArxivBrowser(App):
         if arxiv_id in self._config.paper_metadata:
             current_notes = self._config.paper_metadata[arxiv_id].notes
 
-        def on_notes_saved(notes: str) -> None:
+        def on_notes_saved(notes: str | None) -> None:
+            if notes is None:
+                return
             metadata = self._get_or_create_metadata(arxiv_id)
             metadata.notes = notes
             # Update the item's display
@@ -2174,7 +2949,9 @@ class ArxivBrowser(App):
         if arxiv_id in self._config.paper_metadata:
             current_tags = self._config.paper_metadata[arxiv_id].tags.copy()
 
-        def on_tags_saved(tags: list[str]) -> None:
+        def on_tags_saved(tags: list[str] | None) -> None:
+            if tags is None:
+                return
             metadata = self._get_or_create_metadata(arxiv_id)
             metadata.tags = tags
             # Update the item's display
@@ -2219,10 +2996,11 @@ class ArxivBrowser(App):
         elif entry.match_type == "keyword":
             # Match against title and abstract
             if entry.case_sensitive:
-                return pattern in paper.title or pattern in paper.abstract
+                return pattern in paper.title or pattern in paper.abstract_raw
             else:
                 return (
-                    pattern in paper.title.lower() or pattern in paper.abstract.lower()
+                    pattern in paper.title.lower()
+                    or pattern in paper.abstract_raw.lower()
                 )
         return False
 
@@ -2246,6 +3024,22 @@ class ArxivBrowser(App):
         # Re-apply current filter with watch list consideration
         query = self.query_one("#search-input", Input).value.strip()
         self._apply_filter(query)
+
+    def action_manage_watch_list(self) -> None:
+        """Open the watch list manager."""
+
+        def on_watch_list_updated(entries: list[WatchListEntry] | None) -> None:
+            if entries is None:
+                return
+            self._config.watch_list = entries
+            self._compute_watched_papers()
+            if self._watch_filter_active and not self._watched_paper_ids:
+                self._watch_filter_active = False
+            query = self.query_one("#search-input", Input).value.strip()
+            self._apply_filter(query)
+            self.notify("Watch list updated", title="Watch")
+
+        self.push_screen(WatchListModal(self._config.watch_list), on_watch_list_updated)
 
     # ========================================================================
     # Phase 4: Bookmarked Search Tabs
@@ -2546,6 +3340,7 @@ class ArxivBrowser(App):
 
     def _format_paper_as_markdown(self, paper: Paper) -> str:
         """Format a paper as Markdown."""
+        abstract_text = self._get_abstract_text(paper, allow_async=False) or ""
         lines = [
             f"## {paper.title}",
             "",
@@ -2561,7 +3356,7 @@ class ArxivBrowser(App):
                 "",
                 "### Abstract",
                 "",
-                paper.abstract,
+                abstract_text,
             ]
         )
         return "\n".join(lines)
@@ -2597,12 +3392,25 @@ class ArxivBrowser(App):
     def _get_papers_to_export(self) -> list[Paper]:
         """Get papers to export (selected or current)."""
         if self.selected_ids:
-            papers = [self._get_paper_by_id(aid) for aid in self.selected_ids]
-            return [p for p in papers if p is not None]
-        else:
-            details = self.query_one(PaperDetails)
-            if details.paper:
-                return [details.paper]
+            list_view = self.query_one("#paper-list", ListView)
+            ordered: list[Paper] = []
+            seen: set[str] = set()
+            for item in list_view.children:
+                if (
+                    isinstance(item, PaperListItem)
+                    and item.paper.arxiv_id in self.selected_ids
+                ):
+                    ordered.append(item.paper)
+                    seen.add(item.paper.arxiv_id)
+            remaining_ids = sorted(aid for aid in self.selected_ids if aid not in seen)
+            for arxiv_id in remaining_ids:
+                paper = self._get_paper_by_id(arxiv_id)
+                if paper is not None:
+                    ordered.append(paper)
+            return ordered
+        details = self.query_one(PaperDetails)
+        if details.paper:
+            return [details.paper]
         return []
 
     # ========================================================================
@@ -2617,7 +3425,15 @@ class ArxivBrowser(App):
             return
 
         target_paper = item.paper
-        similar_papers = find_similar_papers(target_paper, self.all_papers)
+        similar_papers = find_similar_papers(
+            target_paper,
+            self.all_papers,
+            metadata=self._config.paper_metadata,
+            abstract_lookup=lambda paper: self._get_abstract_text(
+                paper, allow_async=False
+            )
+            or "",
+        )
 
         if not similar_papers:
             self.notify("No similar papers found", title="Similar", severity="warning")
@@ -2668,6 +3484,11 @@ class ArxivBrowser(App):
         self.all_papers = parse_arxiv_file(path)
         self._papers_by_id = {p.arxiv_id: p for p in self.all_papers}
         self.filtered_papers = self.all_papers.copy()
+
+        self._abstract_cache.clear()
+        self._abstract_loading.clear()
+        self._abstract_queue.clear()
+        self._abstract_pending_ids.clear()
 
         # Clear selection when switching dates
         self.selected_ids.clear()
@@ -2722,10 +3543,33 @@ class ArxivBrowser(App):
         """Update header with selection count and sort info."""
         query = self.query_one("#search-input", Input).value.strip()
         self.query_one("#list-header", Label).update(self._format_header_text(query))
+        self._update_status_bar()
+
+    def _update_status_bar(self) -> None:
+        """Update the status bar with total, filtered, and selected counts."""
+        try:
+            status = self.query_one("#status-bar", Label)
+        except NoMatches:
+            return
+        status.update(
+            f"[dim]Total: {len(self.all_papers)}  Filtered: {len(self.filtered_papers)}  Selected: {len(self.selected_ids)}[/]"
+        )
 
     def _get_paper_by_id(self, arxiv_id: str) -> Paper | None:
         """Look up a paper by its arXiv ID. O(1) dict lookup."""
         return self._papers_by_id.get(arxiv_id)
+
+    def _get_pdf_url(self, paper: Paper) -> str:
+        """Get the PDF URL for a paper."""
+        if "arxiv.org/pdf/" in paper.url:
+            return paper.url if paper.url.endswith(".pdf") else f"{paper.url}.pdf"
+        return f"https://arxiv.org/pdf/{paper.arxiv_id}.pdf"
+
+    def _get_paper_url(self, paper: Paper) -> str:
+        """Get the preferred URL for a paper (abs or PDF)."""
+        if self._config.prefer_pdf_url:
+            return self._get_pdf_url(paper)
+        return paper.url
 
     def action_open_url(self) -> None:
         """Open selected papers' URLs in the default browser."""
@@ -2734,17 +3578,32 @@ class ArxivBrowser(App):
             for arxiv_id in self.selected_ids:
                 paper = self._get_paper_by_id(arxiv_id)
                 if paper:
-                    webbrowser.open(paper.url)
+                    webbrowser.open(self._get_paper_url(paper))
             self.notify(f"Opening {len(self.selected_ids)} papers", title="Browser")
         else:
             # Otherwise, open the currently highlighted paper
             details = self.query_one(PaperDetails)
             if details.paper:
-                webbrowser.open(details.paper.url)
+                webbrowser.open(self._get_paper_url(details.paper))
                 self.notify(f"Opening {details.paper.arxiv_id}", title="Browser")
+
+    def action_open_pdf(self) -> None:
+        """Open selected papers' PDF URLs in the default browser."""
+        if self.selected_ids:
+            for arxiv_id in self.selected_ids:
+                paper = self._get_paper_by_id(arxiv_id)
+                if paper:
+                    webbrowser.open(self._get_pdf_url(paper))
+            self.notify(f"Opening {len(self.selected_ids)} PDFs", title="PDF")
+        else:
+            details = self.query_one(PaperDetails)
+            if details.paper:
+                webbrowser.open(self._get_pdf_url(details.paper))
+                self.notify(f"Opening PDF for {details.paper.arxiv_id}", title="PDF")
 
     def _format_paper_for_clipboard(self, paper: Paper) -> str:
         """Format a paper's metadata for clipboard export."""
+        abstract_text = self._get_abstract_text(paper, allow_async=False) or ""
         lines = [
             f"Title: {paper.title}",
             f"Authors: {paper.authors}",
@@ -2756,7 +3615,7 @@ class ArxivBrowser(App):
             lines.append(f"Comments: {paper.comments}")
         lines.append(f"URL: {paper.url}")
         lines.append("")
-        lines.append(f"Abstract: {paper.abstract}")
+        lines.append(f"Abstract: {abstract_text}")
         return "\n".join(lines)
 
     def _copy_to_clipboard(self, text: str) -> bool:
