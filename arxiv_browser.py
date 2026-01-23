@@ -13,6 +13,7 @@ Key bindings:
     c       - Copy selected paper(s) to clipboard
     b       - Copy as BibTeX
     B       - Export BibTeX to file (for Zotero import)
+    d       - Download PDF(s) to local folder
     M       - Copy as Markdown
     space   - Toggle selection
     a       - Select all visible

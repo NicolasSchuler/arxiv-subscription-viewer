@@ -26,6 +26,7 @@ A terminal user interface (TUI) for browsing arXiv papers from email subscriptio
 - Copy paper metadata to clipboard
 - Export as BibTeX (clipboard or file for Zotero import)
 - Export as Markdown
+- Download PDFs to local folder (async batch downloads)
 
 ### Productivity
 - Session restore (scroll position, filters, selections persist across runs)
@@ -114,6 +115,7 @@ uv run python arxiv_browser.py --no-restore
 |-----|--------|
 | `b` | Copy as BibTeX |
 | `B` | Export BibTeX to file (for Zotero) |
+| `d` | Download PDF(s) to local folder |
 | `M` | Copy as Markdown |
 
 ### Marks & Similar Papers
@@ -156,6 +158,16 @@ history/
 - Session state (including current date) persists across runs
 - Falls back to `arxiv.txt` if no history directory exists
 - Limited to 365 most recent files to prevent memory issues
+
+## PDF Downloads
+
+Press `d` to download PDFs for selected papers (or current paper) to your local machine:
+
+- Default location: `~/arxiv-pdfs/`
+- Configure custom directory in `config.json` with `pdf_download_dir`
+- Already-downloaded files are skipped
+- Progress shown in status bar
+- Supports batch downloads with multi-select
 
 ## Input File Format
 

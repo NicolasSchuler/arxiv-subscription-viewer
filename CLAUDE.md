@@ -6,7 +6,7 @@ A Textual-based TUI application for browsing arXiv papers from email subscriptio
 
 ## Architecture
 
-### Main Application (`arxiv_browser.py` ~2760 lines)
+### Main Application (`arxiv_browser.py` ~3860 lines)
 
 **Data Models:**
 - `Paper` - Core paper data (arXiv ID, title, authors, etc.) with `__slots__`
@@ -42,7 +42,7 @@ A Textual-based TUI application for browsing arXiv papers from email subscriptio
 
 ### Test Suite (`test_arxiv_browser.py` ~1080 lines)
 
-92 tests covering:
+93 tests covering:
 - LaTeX cleaning edge cases (nested commands, math mode, accents)
 - Date parsing and sorting
 - Category formatting and caching
@@ -95,6 +95,7 @@ A Textual-based TUI application for browsing arXiv papers from email subscriptio
 **Runtime:**
 - **textual** (>=7.3.0): TUI framework
 - **rapidfuzz** (>=3.0.0): Fuzzy string matching for search
+- **httpx** (>=0.27.0): Async HTTP client for PDF downloads
 - **platformdirs**: Cross-platform config directories (transitive)
 
 **Development:**
@@ -170,6 +171,7 @@ o       - Open selected paper(s) in browser
 c       - Copy selected paper(s) to clipboard
 b       - Copy as BibTeX
 B       - Export BibTeX to file (for Zotero import)
+d       - Download PDF(s) to local folder
 M       - Copy as Markdown
 space   - Toggle selection
 a       - Select all visible
