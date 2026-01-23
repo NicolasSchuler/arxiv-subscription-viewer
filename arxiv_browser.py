@@ -66,6 +66,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from platformdirs import user_config_dir
+import httpx
 from rapidfuzz import fuzz
 from rich.markup import escape as escape_markup
 from textual import on
@@ -2239,6 +2240,12 @@ class ArxivBrowser(App):
 
         # Vim-style marks state
         self._pending_mark_action: str | None = None  # "set" or "goto"
+
+        # PDF download state
+        self._download_queue: deque[Paper] = deque()
+        self._downloading: set[str] = set()  # arxiv_ids currently downloading
+        self._download_results: dict[str, bool] = {}  # arxiv_id -> success
+        self._download_total: int = 0  # Total papers in current batch
 
     def compose(self) -> ComposeResult:
         yield Header()
