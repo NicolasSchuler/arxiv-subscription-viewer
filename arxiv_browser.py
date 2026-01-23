@@ -3626,6 +3626,69 @@ class ArxivBrowser(App):
             logger.debug(f"Download failed for {paper.arxiv_id}: {e}")
             return False
 
+    def _start_downloads(self) -> None:
+        """Start download tasks up to the concurrency limit."""
+        while self._download_queue and len(self._downloading) < MAX_CONCURRENT_DOWNLOADS:
+            paper = self._download_queue.popleft()
+            if paper.arxiv_id in self._downloading:
+                continue
+            self._downloading.add(paper.arxiv_id)
+            asyncio.create_task(self._process_single_download(paper))
+
+    async def _process_single_download(self, paper: Paper) -> None:
+        """Process a single download and update state."""
+        success = await self._download_pdf_async(paper)
+        self._download_results[paper.arxiv_id] = success
+        self._downloading.discard(paper.arxiv_id)
+
+        # Update progress
+        completed = len(self._download_results)
+        total = self._download_total
+        self._update_download_progress(completed, total)
+
+        # Start more downloads if queue has items
+        self._start_downloads()
+
+        # Check if batch is complete
+        if completed == total:
+            self._finish_download_batch()
+
+    def _update_download_progress(self, completed: int, total: int) -> None:
+        """Update status bar with download progress."""
+        try:
+            status_bar = self.query_one("#status-bar", Label)
+            status_bar.update(f"Downloading: {completed}/{total} complete")
+        except NoMatches:
+            pass
+
+    def _finish_download_batch(self) -> None:
+        """Handle completion of a download batch."""
+        successes = sum(1 for v in self._download_results.values() if v)
+        failures = len(self._download_results) - successes
+
+        # Get download directory for notification
+        if self._config.pdf_download_dir:
+            download_dir = self._config.pdf_download_dir
+        else:
+            download_dir = f"~/{DEFAULT_PDF_DOWNLOAD_DIR}"
+
+        if failures == 0:
+            self.notify(
+                f"Downloaded {successes} PDF{'s' if successes != 1 else ''} to {download_dir}",
+                title="Download Complete",
+            )
+        else:
+            self.notify(
+                f"Downloaded {successes}/{self._download_total} PDFs ({failures} failed)",
+                title="Download Complete",
+                severity="warning",
+            )
+
+        # Reset state
+        self._download_results.clear()
+        self._download_total = 0
+        self._update_status_bar()
+
     def action_open_url(self) -> None:
         """Open selected papers' URLs in the default browser."""
         # If papers are selected, open all of them
