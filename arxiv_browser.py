@@ -3596,6 +3596,36 @@ class ArxivBrowser(App):
             return self._get_pdf_url(paper)
         return paper.url
 
+    async def _download_pdf_async(self, paper: Paper) -> bool:
+        """Download a single PDF asynchronously.
+
+        Args:
+            paper: The paper to download.
+
+        Returns:
+            True if download succeeded, False otherwise.
+        """
+        url = self._get_pdf_url(paper)
+        path = get_pdf_download_path(paper, self._config)
+
+        # Create directory if needed
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    url,
+                    timeout=PDF_DOWNLOAD_TIMEOUT,
+                    follow_redirects=True,
+                )
+                response.raise_for_status()
+                path.write_bytes(response.content)
+            logger.debug(f"Downloaded PDF for {paper.arxiv_id} to {path}")
+            return True
+        except (httpx.HTTPError, OSError) as e:
+            logger.debug(f"Download failed for {paper.arxiv_id}: {e}")
+            return False
+
     def action_open_url(self) -> None:
         """Open selected papers' URLs in the default browser."""
         # If papers are selected, open all of them
