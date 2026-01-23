@@ -114,6 +114,7 @@ __all__ = [
     "format_categories",
     "find_similar_papers",
     "discover_history_files",
+    "get_pdf_download_path",
 ]
 
 # Module logger for debugging
@@ -851,6 +852,23 @@ def discover_history_files(
 
     # Sort newest first and limit to prevent memory issues
     return sorted(files, key=lambda x: x[0], reverse=True)[:limit]
+
+
+def get_pdf_download_path(paper: Paper, config: UserConfig) -> Path:
+    """Get the local file path for a downloaded PDF.
+
+    Args:
+        paper: The paper to get the download path for.
+        config: User configuration with optional custom download directory.
+
+    Returns:
+        Path where the PDF should be saved.
+    """
+    if config.pdf_download_dir:
+        base_dir = Path(config.pdf_download_dir)
+    else:
+        base_dir = Path.home() / DEFAULT_PDF_DOWNLOAD_DIR
+    return base_dir / f"{paper.arxiv_id}.pdf"
 
 
 # Category color mapping (Monokai-inspired palette)

@@ -1133,6 +1133,51 @@ class TestPdfDownloadConfig:
         restored = _dict_to_config(data)
         assert restored.pdf_download_dir == "/custom/path"
 
+    def test_get_pdf_download_path_default(self, tmp_path, monkeypatch):
+        """Default path should be ~/arxiv-pdfs/{arxiv_id}.pdf."""
+        from arxiv_browser import (
+            DEFAULT_PDF_DOWNLOAD_DIR,
+            Paper,
+            UserConfig,
+            get_pdf_download_path,
+        )
+
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        paper = Paper(
+            arxiv_id="2301.12345",
+            date="Mon, 15 Jan 2024",
+            title="Test Paper",
+            authors="Test Author",
+            categories="cs.AI",
+            comments=None,
+            abstract=None,
+            url="https://arxiv.org/abs/2301.12345",
+        )
+        config = UserConfig()
+
+        path = get_pdf_download_path(paper, config)
+        assert path == tmp_path / DEFAULT_PDF_DOWNLOAD_DIR / "2301.12345.pdf"
+
+    def test_get_pdf_download_path_custom_dir(self, tmp_path):
+        """Custom dir should be used when configured."""
+        from arxiv_browser import Paper, UserConfig, get_pdf_download_path
+
+        paper = Paper(
+            arxiv_id="2301.12345",
+            date="Mon, 15 Jan 2024",
+            title="Test Paper",
+            authors="Test Author",
+            categories="cs.AI",
+            comments=None,
+            abstract=None,
+            url="https://arxiv.org/abs/2301.12345",
+        )
+        config = UserConfig(pdf_download_dir=str(tmp_path / "my-pdfs"))
+
+        path = get_pdf_download_path(paper, config)
+        assert path == tmp_path / "my-pdfs" / "2301.12345.pdf"
+
 
 # ============================================================================
 # Tests for __all__ exports
