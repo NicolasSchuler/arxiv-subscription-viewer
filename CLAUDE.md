@@ -50,9 +50,30 @@ All tests must pass before commits.
 ## Running the Application
 
 ```bash
-# Default input file (arxiv.txt)
+# History mode: auto-loads newest file from history/
 uv run python arxiv_browser.py
 
-# Custom input file
+# List available dates
+uv run python arxiv_browser.py --list-dates
+
+# Open specific date
+uv run python arxiv_browser.py --date 2026-01-23
+
+# Custom input file (disables history mode)
 uv run python arxiv_browser.py -i <file>
 ```
+
+## History Mode
+
+Store arXiv emails in `history/` directory with `YYYY-MM-DD.txt` filenames:
+
+```
+history/
+├── 2026-01-20.txt
+├── 2026-01-21.txt
+└── 2026-01-23.txt
+```
+
+- App auto-discovers and loads newest file
+- Use `[` and `]` keys to navigate between dates
+- Falls back to `arxiv.txt` if no history directory exists
