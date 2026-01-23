@@ -51,7 +51,10 @@ class TestCleanLatex:
     def test_math_mode_content_preserved(self):
         """Math mode content should be preserved without dollar signs."""
         assert clean_latex(r"$x^2$") == "x^2"
-        assert clean_latex(r"The formula $E=mc^2$ is famous") == "The formula E=mc^2 is famous"
+        assert (
+            clean_latex(r"The formula $E=mc^2$ is famous")
+            == "The formula E=mc^2 is famous"
+        )
 
     def test_escaped_dollar_sign(self):
         """Escaped dollar signs should become literal dollar signs."""
@@ -61,7 +64,7 @@ class TestCleanLatex:
         """Common LaTeX accent commands should be converted."""
         assert clean_latex(r"caf\'e") == "café"
         # The umlaut pattern only handles braced form like \"{a}
-        assert clean_latex(r'M\"{u}ller') == "Müller"
+        assert clean_latex(r"M\"{u}ller") == "Müller"
         assert clean_latex(r"\c{c}") == "ç"
 
     def test_ampersand_escaped(self):
@@ -148,6 +151,13 @@ class TestParseArxivDate:
     def test_valid_date_parsing(self):
         """Valid arXiv date strings should be parsed correctly."""
         result = parse_arxiv_date("Mon, 15 Jan 2024")
+        assert result.year == 2024
+        assert result.month == 1
+        assert result.day == 15
+
+    def test_date_with_time_and_timezone(self):
+        """Dates with time and timezone should parse correctly."""
+        result = parse_arxiv_date("Mon, 15 Jan 2024 00:00:00 GMT")
         assert result.year == 2024
         assert result.month == 1
         assert result.day == 15
@@ -248,7 +258,7 @@ class TestParseArxivFile:
     @pytest.fixture
     def sample_arxiv_content(self):
         """Sample arXiv email content for testing."""
-        return '''------------------------------------------------------------------------------
+        return """------------------------------------------------------------------------------
 \\\\
 arXiv:2401.12345
 Date: Mon, 15 Jan 2024 00:00:00 GMT   (100kb)
@@ -275,7 +285,7 @@ Categories: cs.CL
 \\\\
 ( https://arxiv.org/abs/2401.67890 ,  50kb)
 ------------------------------------------------------------------------------
-'''
+"""
 
     @pytest.fixture
     def temp_arxiv_file(self, sample_arxiv_content, tmp_path):
@@ -351,11 +361,11 @@ Categories: cs.CL
 
     def test_parse_malformed_entries_skipped(self, tmp_path):
         """Parser should skip malformed entries without crashing."""
-        content = '''Some random text that is not a valid entry
+        content = """Some random text that is not a valid entry
 ------------------------------------------------------------------------------
 This is also not valid
 ------------------------------------------------------------------------------
-'''
+"""
         file_path = tmp_path / "malformed.txt"
         file_path.write_text(content)
         papers = parse_arxiv_file(file_path)
@@ -446,6 +456,7 @@ class TestNewDataclasses:
     def test_paper_metadata_defaults(self):
         """PaperMetadata should have correct defaults."""
         from arxiv_browser import PaperMetadata
+
         meta = PaperMetadata(arxiv_id="2401.12345")
         assert meta.arxiv_id == "2401.12345"
         assert meta.notes == ""
@@ -456,6 +467,7 @@ class TestNewDataclasses:
     def test_watch_list_entry_defaults(self):
         """WatchListEntry should have correct defaults."""
         from arxiv_browser import WatchListEntry
+
         entry = WatchListEntry(pattern="test")
         assert entry.pattern == "test"
         assert entry.match_type == "author"
@@ -464,6 +476,7 @@ class TestNewDataclasses:
     def test_search_bookmark_creation(self):
         """SearchBookmark should store name and query."""
         from arxiv_browser import SearchBookmark
+
         bookmark = SearchBookmark(name="AI Papers", query="cat:cs.AI")
         assert bookmark.name == "AI Papers"
         assert bookmark.query == "cat:cs.AI"
@@ -471,6 +484,7 @@ class TestNewDataclasses:
     def test_session_state_defaults(self):
         """SessionState should have correct defaults."""
         from arxiv_browser import SessionState
+
         session = SessionState()
         assert session.scroll_index == 0
         assert session.current_filter == ""
@@ -480,6 +494,7 @@ class TestNewDataclasses:
     def test_user_config_defaults(self):
         """UserConfig should have correct defaults."""
         from arxiv_browser import UserConfig
+
         config = UserConfig()
         assert config.paper_metadata == {}
         assert config.watch_list == []
@@ -500,8 +515,13 @@ class TestConfigPersistence:
     def test_config_to_dict_roundtrip(self):
         """Config should serialize and deserialize correctly."""
         from arxiv_browser import (
-            UserConfig, PaperMetadata, WatchListEntry, SearchBookmark,
-            SessionState, _config_to_dict, _dict_to_config
+            UserConfig,
+            PaperMetadata,
+            WatchListEntry,
+            SearchBookmark,
+            SessionState,
+            _config_to_dict,
+            _dict_to_config,
         )
 
         original = UserConfig(
@@ -519,6 +539,7 @@ class TestConfigPersistence:
             marks={"a": "2401.12345"},
             session=SessionState(scroll_index=5, current_filter="test"),
             show_abstract_preview=True,
+            bibtex_export_dir="custom-exports",
         )
 
         # Serialize and deserialize
@@ -534,10 +555,12 @@ class TestConfigPersistence:
         assert len(restored.bookmarks) == 1
         assert restored.marks["a"] == "2401.12345"
         assert restored.session.scroll_index == 5
+        assert restored.bibtex_export_dir == "custom-exports"
 
     def test_dict_to_config_handles_empty(self):
         """Loading empty dict should return default config."""
         from arxiv_browser import _dict_to_config, UserConfig
+
         config = _dict_to_config({})
         default = UserConfig()
         assert config.show_abstract_preview == default.show_abstract_preview
@@ -591,29 +614,34 @@ class TestPaperSimilarity:
     def test_jaccard_similarity_identical_sets(self):
         """Identical sets should have similarity of 1.0."""
         from arxiv_browser import _jaccard_similarity
+
         s = {"a", "b", "c"}
         assert _jaccard_similarity(s, s) == 1.0
 
     def test_jaccard_similarity_disjoint_sets(self):
         """Disjoint sets should have similarity of 0.0."""
         from arxiv_browser import _jaccard_similarity
+
         assert _jaccard_similarity({"a", "b"}, {"c", "d"}) == 0.0
 
     def test_jaccard_similarity_partial_overlap(self):
         """Partial overlap should return correct similarity."""
         from arxiv_browser import _jaccard_similarity
+
         # {a, b} ∩ {b, c} = {b}, |{b}| / |{a, b, c}| = 1/3
         result = _jaccard_similarity({"a", "b"}, {"b", "c"})
-        assert abs(result - 1/3) < 0.01
+        assert abs(result - 1 / 3) < 0.01
 
     def test_jaccard_similarity_empty_sets(self):
         """Empty sets should return 0.0."""
         from arxiv_browser import _jaccard_similarity
+
         assert _jaccard_similarity(set(), set()) == 0.0
 
     def test_extract_keywords_filters_stopwords(self):
         """Keywords extraction should filter stopwords."""
         from arxiv_browser import _extract_keywords
+
         keywords = _extract_keywords("the quick brown fox and the lazy dog")
         assert "the" not in keywords
         assert "and" not in keywords
@@ -623,6 +651,7 @@ class TestPaperSimilarity:
     def test_extract_keywords_min_length(self):
         """Keywords shorter than min_length should be excluded."""
         from arxiv_browser import _extract_keywords
+
         keywords = _extract_keywords("a big cat sat on the mat")
         assert "a" not in keywords
         assert "cat" not in keywords  # len("cat") = 3 < 4
@@ -630,6 +659,7 @@ class TestPaperSimilarity:
     def test_extract_author_lastnames(self):
         """Author lastname extraction should work correctly."""
         from arxiv_browser import _extract_author_lastnames
+
         lastnames = _extract_author_lastnames("John Smith, Jane Doe and Bob Wilson")
         assert "smith" in lastnames
         assert "doe" in lastnames
@@ -638,6 +668,7 @@ class TestPaperSimilarity:
     def test_similar_papers_have_higher_score(self, sample_papers):
         """Similar papers should have higher similarity than dissimilar ones."""
         from arxiv_browser import compute_paper_similarity
+
         nlp_paper = sample_papers[0]
         text_paper = sample_papers[1]
         quantum_paper = sample_papers[2]
@@ -651,6 +682,7 @@ class TestPaperSimilarity:
     def test_find_similar_papers_excludes_self(self, sample_papers):
         """find_similar_papers should not include the target paper."""
         from arxiv_browser import find_similar_papers
+
         target = sample_papers[0]
         similar = find_similar_papers(target, sample_papers)
 
@@ -660,6 +692,7 @@ class TestPaperSimilarity:
     def test_find_similar_papers_respects_top_n(self, sample_papers):
         """find_similar_papers should return at most top_n results."""
         from arxiv_browser import find_similar_papers
+
         target = sample_papers[0]
         similar = find_similar_papers(target, sample_papers, top_n=1)
 
@@ -705,21 +738,25 @@ class TestFuzzySearchConstants:
     def test_fuzzy_score_cutoff_valid_range(self):
         """FUZZY_SCORE_CUTOFF should be in valid range."""
         from arxiv_browser import FUZZY_SCORE_CUTOFF
+
         assert 0 <= FUZZY_SCORE_CUTOFF <= 100
 
     def test_fuzzy_limit_is_positive(self):
         """FUZZY_LIMIT should be positive."""
         from arxiv_browser import FUZZY_LIMIT
+
         assert FUZZY_LIMIT > 0
 
     def test_similarity_top_n_is_positive(self):
         """SIMILARITY_TOP_N should be positive."""
         from arxiv_browser import SIMILARITY_TOP_N
+
         assert SIMILARITY_TOP_N > 0
 
     def test_stopwords_contains_common_words(self):
         """STOPWORDS should contain common English stopwords."""
         from arxiv_browser import STOPWORDS
+
         assert "the" in STOPWORDS
         assert "and" in STOPWORDS
         assert "or" in STOPWORDS
@@ -737,26 +774,31 @@ class TestTruncateText:
     def test_short_text_unchanged(self):
         """Text shorter than max_len should be returned unchanged."""
         from arxiv_browser import truncate_text
+
         assert truncate_text("Hello", 10) == "Hello"
 
     def test_exact_length_unchanged(self):
         """Text exactly at max_len should be returned unchanged."""
         from arxiv_browser import truncate_text
+
         assert truncate_text("Hello", 5) == "Hello"
 
     def test_long_text_truncated(self):
         """Text longer than max_len should be truncated with suffix."""
         from arxiv_browser import truncate_text
+
         assert truncate_text("Hello World", 5) == "Hello..."
 
     def test_custom_suffix(self):
         """Custom suffix should be used when provided."""
         from arxiv_browser import truncate_text
+
         assert truncate_text("Hello World", 5, suffix=">>>") == "Hello>>>"
 
     def test_empty_string(self):
         """Empty string should be handled correctly."""
         from arxiv_browser import truncate_text
+
         assert truncate_text("", 10) == ""
 
 
@@ -771,18 +813,21 @@ class TestSafeGetAndTypeValidation:
     def test_safe_get_correct_type(self):
         """_safe_get should return value when type matches."""
         from arxiv_browser import _safe_get
+
         data = {"key": 42}
         assert _safe_get(data, "key", 0, int) == 42
 
     def test_safe_get_wrong_type(self):
         """_safe_get should return default when type doesn't match."""
         from arxiv_browser import _safe_get
+
         data = {"key": "not_an_int"}
         assert _safe_get(data, "key", 0, int) == 0
 
     def test_safe_get_missing_key(self):
         """_safe_get should return default for missing key."""
         from arxiv_browser import _safe_get
+
         data = {}
         assert _safe_get(data, "key", "default", str) == "default"
 
@@ -822,7 +867,7 @@ class TestPaperDeduplication:
     def test_duplicate_arxiv_ids_skipped(self, tmp_path):
         """Parser should skip papers with duplicate arXiv IDs."""
         # Create a file with duplicate entries
-        content = '''\\
+        content = """\\
 arXiv:2401.00001
 Date: Mon, 15 Jan 2024
 Title: First Paper
@@ -854,7 +899,7 @@ Categories: cs.CV
 This is the second unique paper abstract.
 \\\\
 ( https://arxiv.org/abs/2401.00002 ,
-'''
+"""
         file_path = tmp_path / "duplicates.txt"
         file_path.write_text(content)
 
@@ -882,16 +927,19 @@ class TestUIConstants:
     def test_recommendation_title_max_len_positive(self):
         """RECOMMENDATION_TITLE_MAX_LEN should be positive."""
         from arxiv_browser import RECOMMENDATION_TITLE_MAX_LEN
+
         assert RECOMMENDATION_TITLE_MAX_LEN > 0
 
     def test_preview_abstract_max_len_positive(self):
         """PREVIEW_ABSTRACT_MAX_LEN should be positive."""
         from arxiv_browser import PREVIEW_ABSTRACT_MAX_LEN
+
         assert PREVIEW_ABSTRACT_MAX_LEN > 0
 
     def test_bookmark_name_max_len_positive(self):
         """BOOKMARK_NAME_MAX_LEN should be positive."""
         from arxiv_browser import BOOKMARK_NAME_MAX_LEN
+
         assert BOOKMARK_NAME_MAX_LEN > 0
 
 
@@ -906,6 +954,7 @@ class TestHistoryFileDiscovery:
     def test_discover_history_files_empty_dir(self, tmp_path):
         """discover_history_files should return empty list for empty history dir."""
         from arxiv_browser import discover_history_files
+
         history_dir = tmp_path / "history"
         history_dir.mkdir()
         assert discover_history_files(tmp_path) == []
@@ -913,17 +962,19 @@ class TestHistoryFileDiscovery:
     def test_discover_history_files_no_history_dir(self, tmp_path):
         """discover_history_files should return empty list when history/ doesn't exist."""
         from arxiv_browser import discover_history_files
+
         assert discover_history_files(tmp_path) == []
 
     def test_discover_history_files_respects_limit(self, tmp_path):
         """discover_history_files should respect the limit parameter."""
         from arxiv_browser import discover_history_files
+
         history_dir = tmp_path / "history"
         history_dir.mkdir()
 
         # Create 10 history files
         for i in range(10):
-            (history_dir / f"2024-01-{i+10:02d}.txt").write_text("test")
+            (history_dir / f"2024-01-{i + 10:02d}.txt").write_text("test")
 
         # Request only 5
         result = discover_history_files(tmp_path, limit=5)
@@ -936,11 +987,13 @@ class TestHistoryFileDiscovery:
     def test_max_history_files_constant_is_positive(self):
         """MAX_HISTORY_FILES constant should be positive."""
         from arxiv_browser import MAX_HISTORY_FILES
+
         assert MAX_HISTORY_FILES > 0
 
     def test_discover_history_files_skips_invalid_names(self, tmp_path):
         """discover_history_files should skip files that don't match YYYY-MM-DD pattern."""
         from arxiv_browser import discover_history_files
+
         history_dir = tmp_path / "history"
         history_dir.mkdir()
 
@@ -969,8 +1022,14 @@ class TestYearExtractionEdgeCases:
 
         # Create minimal app to test method
         paper = Paper(
-            arxiv_id="test", date="   ", title="Test", authors="Test",
-            categories="cs.AI", comments=None, abstract="Test", url="http://test"
+            arxiv_id="test",
+            date="   ",
+            title="Test",
+            authors="Test",
+            categories="cs.AI",
+            comments=None,
+            abstract="Test",
+            url="http://test",
         )
         papers = [paper]
         app = ArxivBrowser(papers)
@@ -985,8 +1044,14 @@ class TestYearExtractionEdgeCases:
         from arxiv_browser import ArxivBrowser, Paper
 
         paper = Paper(
-            arxiv_id="test", date="", title="Test", authors="Test",
-            categories="cs.AI", comments=None, abstract="Test", url="http://test"
+            arxiv_id="test",
+            date="",
+            title="Test",
+            authors="Test",
+            categories="cs.AI",
+            comments=None,
+            abstract="Test",
+            url="http://test",
         )
         app = ArxivBrowser([paper])
 
@@ -1063,9 +1128,16 @@ class TestModuleExports:
     def test_main_exports_exist(self):
         """Key exports should be available."""
         from arxiv_browser import (
-            Paper, PaperMetadata, UserConfig, SessionState,
-            parse_arxiv_file, clean_latex, ArxivBrowser, main
+            Paper,
+            PaperMetadata,
+            UserConfig,
+            SessionState,
+            parse_arxiv_file,
+            clean_latex,
+            ArxivBrowser,
+            main,
         )
+
         # Just verify they're importable
         assert Paper is not None
         assert ArxivBrowser is not None

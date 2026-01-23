@@ -66,7 +66,17 @@ from textual.css.query import NoMatches
 from textual.events import Key
 from textual.screen import ModalScreen
 from textual.timer import Timer
-from textual.widgets import Button, Footer, Header, Input, Label, ListItem, ListView, Static, TextArea
+from textual.widgets import (
+    Button,
+    Footer,
+    Header,
+    Input,
+    Label,
+    ListItem,
+    ListView,
+    Static,
+    TextArea,
+)
 
 # Public API for this module
 __all__ = [
@@ -135,23 +145,126 @@ DEFAULT_BIBTEX_EXPORT_DIR = "arxiv-exports"  # Default subdirectory in home fold
 
 # History file discovery limit
 MAX_HISTORY_FILES = 365  # Limit to ~1 year of history to prevent memory issues
-STOPWORDS = frozenset({
-    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
-    "of", "with", "by", "from", "as", "is", "was", "are", "were", "been",
-    "be", "have", "has", "had", "do", "does", "did", "will", "would", "could",
-    "should", "may", "might", "must", "shall", "can", "need", "dare", "ought",
-    "used", "this", "that", "these", "those", "i", "you", "he", "she", "it",
-    "we", "they", "what", "which", "who", "whom", "whose", "where", "when",
-    "why", "how", "all", "each", "every", "both", "few", "more", "most",
-    "other", "some", "such", "no", "nor", "not", "only", "own", "same", "so",
-    "than", "too", "very", "just", "also", "now", "here", "there", "then",
-    "once", "again", "further", "still", "already", "always", "never",
-    "using", "based", "via", "novel", "new", "approach", "method", "methods",
-    "paper", "propose", "proposed", "show", "results", "model", "models",
-})
+STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "but",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "with",
+        "by",
+        "from",
+        "as",
+        "is",
+        "was",
+        "are",
+        "were",
+        "been",
+        "be",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "must",
+        "shall",
+        "can",
+        "need",
+        "dare",
+        "ought",
+        "used",
+        "this",
+        "that",
+        "these",
+        "those",
+        "i",
+        "you",
+        "he",
+        "she",
+        "it",
+        "we",
+        "they",
+        "what",
+        "which",
+        "who",
+        "whom",
+        "whose",
+        "where",
+        "when",
+        "why",
+        "how",
+        "all",
+        "each",
+        "every",
+        "both",
+        "few",
+        "more",
+        "most",
+        "other",
+        "some",
+        "such",
+        "no",
+        "nor",
+        "not",
+        "only",
+        "own",
+        "same",
+        "so",
+        "than",
+        "too",
+        "very",
+        "just",
+        "also",
+        "now",
+        "here",
+        "there",
+        "then",
+        "once",
+        "again",
+        "further",
+        "still",
+        "already",
+        "always",
+        "never",
+        "using",
+        "based",
+        "via",
+        "novel",
+        "new",
+        "approach",
+        "method",
+        "methods",
+        "paper",
+        "propose",
+        "proposed",
+        "show",
+        "results",
+        "model",
+        "models",
+    }
+)
 
 # Date format used in arXiv emails (e.g., "Mon, 15 Jan 2024")
 ARXIV_DATE_FORMAT = "%a, %d %b %Y"
+# Extract the date prefix when time/zone info is present
+_ARXIV_DATE_PREFIX_PATTERN = re.compile(
+    r"([A-Za-z]{3},\s+\d{1,2}\s+[A-Za-z]{3}\s+\d{4})"
+)
 
 
 def truncate_text(text: str, max_len: int, suffix: str = "...") -> str:
@@ -173,6 +286,7 @@ def truncate_text(text: str, max_len: int, suffix: str = "...") -> str:
 @dataclass(slots=True)
 class Paper:
     """Represents an arXiv paper entry."""
+
     arxiv_id: str
     date: str
     title: str
@@ -187,9 +301,11 @@ class Paper:
 # User Configuration Data Structures
 # ============================================================================
 
+
 @dataclass(slots=True)
 class PaperMetadata:
     """User annotations for a paper (notes, tags, read status)."""
+
     arxiv_id: str
     notes: str = ""
     tags: list[str] = field(default_factory=list)
@@ -200,6 +316,7 @@ class PaperMetadata:
 @dataclass(slots=True)
 class WatchListEntry:
     """Author or keyword to watch for highlighting papers."""
+
     pattern: str
     match_type: str = "author"  # "author" | "keyword" | "title"
     case_sensitive: bool = False
@@ -208,6 +325,7 @@ class WatchListEntry:
 @dataclass(slots=True)
 class SearchBookmark:
     """Saved search query for quick access."""
+
     name: str
     query: str
 
@@ -215,6 +333,7 @@ class SearchBookmark:
 @dataclass(slots=True)
 class SessionState:
     """State to restore on next run (scroll position, filters, etc.)."""
+
     scroll_index: int = 0
     current_filter: str = ""
     sort_index: int = 0
@@ -225,6 +344,7 @@ class SessionState:
 @dataclass
 class UserConfig:
     """Complete user configuration including session state and preferences."""
+
     paper_metadata: dict[str, PaperMetadata] = field(default_factory=dict)
     watch_list: list[WatchListEntry] = field(default_factory=list)
     bookmarks: list[SearchBookmark] = field(default_factory=list)
@@ -260,6 +380,7 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
     return {
         "version": config.version,
         "show_abstract_preview": config.show_abstract_preview,
+        "bibtex_export_dir": config.bibtex_export_dir,
         "session": {
             "scroll_index": config.session.scroll_index,
             "current_filter": config.session.current_filter,
@@ -284,10 +405,7 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
             }
             for entry in config.watch_list
         ],
-        "bookmarks": [
-            {"name": b.name, "query": b.query}
-            for b in config.bookmarks
-        ],
+        "bookmarks": [{"name": b.name, "query": b.query} for b in config.bookmarks],
         "marks": config.marks,
     }
 
@@ -344,11 +462,13 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         for entry in raw_watch_list:
             if not isinstance(entry, dict):
                 continue
-            watch_list.append(WatchListEntry(
-                pattern=_safe_get(entry, "pattern", "", str),
-                match_type=_safe_get(entry, "match_type", "author", str),
-                case_sensitive=_safe_get(entry, "case_sensitive", False, bool),
-            ))
+            watch_list.append(
+                WatchListEntry(
+                    pattern=_safe_get(entry, "pattern", "", str),
+                    match_type=_safe_get(entry, "match_type", "author", str),
+                    case_sensitive=_safe_get(entry, "case_sensitive", False, bool),
+                )
+            )
 
     # Parse bookmarks with type validation
     bookmarks = []
@@ -357,10 +477,12 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         for b in raw_bookmarks:
             if not isinstance(b, dict):
                 continue
-            bookmarks.append(SearchBookmark(
-                name=_safe_get(b, "name", "", str),
-                query=_safe_get(b, "query", "", str),
-            ))
+            bookmarks.append(
+                SearchBookmark(
+                    name=_safe_get(b, "name", "", str),
+                    query=_safe_get(b, "query", "", str),
+                )
+            )
 
     # Parse marks with type validation
     marks = data.get("marks", {})
@@ -374,6 +496,7 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         marks=marks,
         session=session,
         show_abstract_preview=_safe_get(data, "show_abstract_preview", False, bool),
+        bibtex_export_dir=_safe_get(data, "bibtex_export_dir", "", str),
         version=_safe_get(data, "version", 1, int),
     )
 
@@ -465,7 +588,9 @@ _CATEGORIES_PATTERN = re.compile(r"Categories:\s*(.+?)$", re.MULTILINE)
 # Matches: "Comments: 10 pages, 5 figures" -> captures "10 pages, 5 figures"
 _COMMENTS_PATTERN = re.compile(r"Comments:\s*(.+?)$", re.MULTILINE)
 # Matches abstract text between \\ markers after Categories/Comments line
-_ABSTRACT_PATTERN = re.compile(r"(?:Categories|Comments):[^\n]*\n\\\\\n(.+?)\n\\\\", re.DOTALL)
+_ABSTRACT_PATTERN = re.compile(
+    r"(?:Categories|Comments):[^\n]*\n\\\\\n(.+?)\n\\\\", re.DOTALL
+)
 # Matches: "( https://arxiv.org/abs/2301.12345" -> captures the URL
 _URL_PATTERN = re.compile(r"\(\s*(https://arxiv\.org/abs/\S+)")
 # Matches 70+ dashes used as entry separator
@@ -516,7 +641,7 @@ def parse_arxiv_file(filepath: Path) -> list[Paper]:
 
     for entry in entries:
         entry = entry.strip()
-        if not entry or not entry.startswith("\\"):
+        if not entry:
             continue
 
         # Extract arXiv ID
@@ -567,16 +692,18 @@ def parse_arxiv_file(filepath: Path) -> list[Paper]:
         url_match = _URL_PATTERN.search(entry)
         url = url_match.group(1) if url_match else f"https://arxiv.org/abs/{arxiv_id}"
 
-        papers.append(Paper(
-            arxiv_id=arxiv_id,
-            date=date,
-            title=clean_latex(title),
-            authors=clean_latex(authors),
-            categories=categories,
-            comments=clean_latex(comments) if comments else None,
-            abstract=clean_latex(abstract),
-            url=url,
-        ))
+        papers.append(
+            Paper(
+                arxiv_id=arxiv_id,
+                date=date,
+                title=clean_latex(title),
+                authors=clean_latex(authors),
+                categories=categories,
+                comments=clean_latex(comments) if comments else None,
+                abstract=clean_latex(abstract),
+                url=url,
+            )
+        )
 
     return papers
 
@@ -632,6 +759,7 @@ CATEGORY_COLORS = {
     "cs.CR": "#fd971f",  # Monokai orange
 }
 
+
 def parse_arxiv_date(date_str: str) -> datetime:
     """Parse arXiv date string to datetime for proper sorting.
 
@@ -641,10 +769,23 @@ def parse_arxiv_date(date_str: str) -> datetime:
     Returns:
         Parsed datetime object, or datetime.min for malformed dates.
     """
+    cleaned = date_str.strip()
+    if not cleaned:
+        return datetime.min
+
     try:
-        return datetime.strptime(date_str.strip(), ARXIV_DATE_FORMAT)
+        return datetime.strptime(cleaned, ARXIV_DATE_FORMAT)
     except ValueError:
-        return datetime.min  # Fallback for malformed dates
+        pass
+
+    match = _ARXIV_DATE_PREFIX_PATTERN.search(cleaned)
+    if match:
+        try:
+            return datetime.strptime(match.group(1), ARXIV_DATE_FORMAT)
+        except ValueError:
+            pass
+
+    return datetime.min  # Fallback for malformed dates
 
 
 @functools.lru_cache(maxsize=256)
@@ -660,6 +801,7 @@ def format_categories(categories: str) -> str:
 # ============================================================================
 # Paper Similarity Functions
 # ============================================================================
+
 
 def _extract_keywords(text: str, min_length: int = 4) -> set[str]:
     """Extract significant keywords from text, filtering stopwords."""
@@ -824,7 +966,10 @@ class PaperListItem(ListItem):
 
     def _get_meta_text(self) -> str:
         """Get the formatted metadata text."""
-        parts = [f"[dim]{self.paper.arxiv_id}[/]", format_categories(self.paper.categories)]
+        parts = [
+            f"[dim]{self.paper.arxiv_id}[/]",
+            format_categories(self.paper.categories),
+        ]
 
         # Show tags if present
         if self._metadata and self._metadata.tags:
@@ -905,7 +1050,9 @@ class PaperDetails(Static):
         # Metadata section (Monokai blue for labels, purple for values)
         lines.append(f"[bold #66d9ef]arXiv:[/] [#ae81ff]{paper.arxiv_id}[/]")
         lines.append(f"[bold #66d9ef]Date:[/] {paper.date}")
-        lines.append(f"[bold #66d9ef]Categories:[/] {format_categories(paper.categories)}")
+        lines.append(
+            f"[bold #66d9ef]Categories:[/] {format_categories(paper.categories)}"
+        )
         if paper.comments:
             lines.append(f"[bold #66d9ef]Comments:[/] [dim]{paper.comments}[/]")
         lines.append("")
@@ -933,6 +1080,7 @@ class PaperDetails(Static):
 # ============================================================================
 # Modal Screens for Notes and Tags
 # ============================================================================
+
 
 class NotesModal(ModalScreen[str]):
     """Modal dialog for editing paper notes."""
@@ -1078,7 +1226,10 @@ class TagsModal(ModalScreen[list[str]]):
     def compose(self) -> ComposeResult:
         with Vertical(id="tags-dialog"):
             yield Label(f"Tags for {self._arxiv_id}", id="tags-title")
-            yield Label("Separate tags with commas (e.g., to-read, llm, important)", id="tags-help")
+            yield Label(
+                "Separate tags with commas (e.g., to-read, llm, important)",
+                id="tags-help",
+            )
             yield Input(
                 value=", ".join(self._current_tags),
                 placeholder="Enter tags...",
@@ -1189,14 +1340,18 @@ class RecommendationsScreen(ModalScreen[str | None]):
     }
     """
 
-    def __init__(self, target_paper: Paper, similar_papers: list[tuple[Paper, float]]) -> None:
+    def __init__(
+        self, target_paper: Paper, similar_papers: list[tuple[Paper, float]]
+    ) -> None:
         super().__init__()
         self._target_paper = target_paper
         self._similar_papers = similar_papers
 
     def compose(self) -> ComposeResult:
         with Vertical(id="recommendations-dialog"):
-            truncated_title = truncate_text(self._target_paper.title, RECOMMENDATION_TITLE_MAX_LEN)
+            truncated_title = truncate_text(
+                self._target_paper.title, RECOMMENDATION_TITLE_MAX_LEN
+            )
             yield Label(f"Similar to: {truncated_title}", id="recommendations-title")
             yield ListView(id="recommendations-list")
             with Horizontal(id="recommendations-buttons"):
@@ -1292,18 +1447,28 @@ class BookmarkTabBar(Horizontal):
 
     def compose(self) -> ComposeResult:
         for i, bookmark in enumerate(self._bookmarks[:9]):  # Max 9 bookmarks
-            classes = "bookmark-tab active" if i == self._active_index else "bookmark-tab"
-            yield Label(f"{i + 1}: {bookmark.name}", classes=classes, id=f"bookmark-{i}")
+            classes = (
+                "bookmark-tab active" if i == self._active_index else "bookmark-tab"
+            )
+            yield Label(
+                f"{i + 1}: {bookmark.name}", classes=classes, id=f"bookmark-{i}"
+            )
         yield Label("[+]", classes="bookmark-add", id="bookmark-add")
 
-    async def update_bookmarks(self, bookmarks: list[SearchBookmark], active_index: int = -1) -> None:
+    async def update_bookmarks(
+        self, bookmarks: list[SearchBookmark], active_index: int = -1
+    ) -> None:
         """Update the displayed bookmarks."""
         self._bookmarks = bookmarks
         self._active_index = active_index
         await self.remove_children()
         for i, bookmark in enumerate(bookmarks[:9]):
-            classes = "bookmark-tab active" if i == self._active_index else "bookmark-tab"
-            self.mount(Label(f"{i + 1}: {bookmark.name}", classes=classes, id=f"bookmark-{i}"))
+            classes = (
+                "bookmark-tab active" if i == self._active_index else "bookmark-tab"
+            )
+            self.mount(
+                Label(f"{i + 1}: {bookmark.name}", classes=classes, id=f"bookmark-{i}")
+            )
         self.mount(Label("[+]", classes="bookmark-add", id="bookmark-add"))
 
 
@@ -1549,12 +1714,16 @@ class ArxivBrowser(App):
         with Horizontal(id="main-container"):
             with Vertical(id="left-pane"):
                 yield Label(f" Papers ({len(self.all_papers)} total)", id="list-header")
-                yield BookmarkTabBar(self._config.bookmarks, self._active_bookmark_index)
+                yield BookmarkTabBar(
+                    self._config.bookmarks, self._active_bookmark_index
+                )
                 with Vertical(id="search-container"):
-                    yield Input(placeholder=" Filter: text, cat:cs.AI, tag:name, unread, starred", id="search-input")
+                    yield Input(
+                        placeholder=" Filter: text, cat:cs.AI, tag:name, unread, starred",
+                        id="search-input",
+                    )
                 yield ListView(
-                    *[PaperListItem(p) for p in self.filtered_papers],
-                    id="paper-list"
+                    *[PaperListItem(p) for p in self.filtered_papers], id="paper-list"
                 )
             with Vertical(id="right-pane"):
                 yield Label(" Paper Details", id="details-header")
@@ -1616,7 +1785,9 @@ class ArxivBrowser(App):
         """
         # Get current date for history mode
         current_date = self._get_current_date()
-        current_date_str = current_date.strftime(HISTORY_DATE_FORMAT) if current_date else None
+        current_date_str = (
+            current_date.strftime(HISTORY_DATE_FORMAT) if current_date else None
+        )
 
         try:
             list_view = self.query_one("#paper-list", ListView)
@@ -1717,7 +1888,9 @@ class ArxivBrowser(App):
 
     def _format_header_text(self, query: str = "") -> str:
         """Format the header text with paper count, date info, and selection info."""
-        selection_info = f" [{len(self.selected_ids)} selected]" if self.selected_ids else ""
+        selection_info = (
+            f" [{len(self.selected_ids)} selected]" if self.selected_ids else ""
+        )
         sort_info = f" [dim]sorted by {SORT_OPTIONS[self._sort_index]}[/]"
 
         # Date info for history mode
@@ -1742,15 +1915,18 @@ class ArxivBrowser(App):
         """Filter papers that have the specified tag."""
         tag_lower = tag.lower()
         return [
-            p for p in self.all_papers
+            p
+            for p in self.all_papers
             if p.arxiv_id in self._config.paper_metadata
-            and tag_lower in [t.lower() for t in self._config.paper_metadata[p.arxiv_id].tags]
+            and tag_lower
+            in [t.lower() for t in self._config.paper_metadata[p.arxiv_id].tags]
         ]
 
     def _filter_unread(self) -> list[Paper]:
         """Filter to show only unread papers."""
         return [
-            p for p in self.all_papers
+            p
+            for p in self.all_papers
             if p.arxiv_id not in self._config.paper_metadata
             or not self._config.paper_metadata[p.arxiv_id].is_read
         ]
@@ -1758,7 +1934,8 @@ class ArxivBrowser(App):
     def _filter_starred(self) -> list[Paper]:
         """Filter to show only starred papers."""
         return [
-            p for p in self.all_papers
+            p
+            for p in self.all_papers
             if p.arxiv_id in self._config.paper_metadata
             and self._config.paper_metadata[p.arxiv_id].starred
         ]
@@ -1820,8 +1997,7 @@ class ArxivBrowser(App):
         # Apply watch filter if active (intersects with other filters)
         if self._watch_filter_active:
             self.filtered_papers = [
-                p for p in self.filtered_papers
-                if p.arxiv_id in self._watched_paper_ids
+                p for p in self.filtered_papers if p.arxiv_id in self._watched_paper_ids
             ]
 
         # Apply current sort order and refresh the list view
@@ -1871,7 +2047,9 @@ class ArxivBrowser(App):
             self.filtered_papers.sort(key=lambda p: p.title.lower())
         elif sort_key == "date":
             # Sort by date descending (newest first) using proper datetime parsing
-            self.filtered_papers.sort(key=lambda p: parse_arxiv_date(p.date), reverse=True)
+            self.filtered_papers.sort(
+                key=lambda p: parse_arxiv_date(p.date), reverse=True
+            )
         elif sort_key == "arxiv_id":
             # Sort by arxiv_id descending (newest first)
             self.filtered_papers.sort(key=lambda p: p.arxiv_id, reverse=True)
@@ -1900,6 +2078,12 @@ class ArxivBrowser(App):
         if items:
             list_view.mount(*items)
             list_view.index = 0
+        else:
+            try:
+                details = self.query_one(PaperDetails)
+                details.update_paper(None)
+            except NoMatches:
+                pass
 
     def action_cycle_sort(self) -> None:
         """Cycle through sort options: title, date, arxiv_id."""
@@ -1925,7 +2109,9 @@ class ArxivBrowser(App):
     def _get_current_paper_item(self) -> PaperListItem | None:
         """Get the currently highlighted paper list item."""
         list_view = self.query_one("#paper-list", ListView)
-        if list_view.highlighted_child and isinstance(list_view.highlighted_child, PaperListItem):
+        if list_view.highlighted_child and isinstance(
+            list_view.highlighted_child, PaperListItem
+        ):
             return list_view.highlighted_child
         return None
 
@@ -2035,7 +2221,9 @@ class ArxivBrowser(App):
             if entry.case_sensitive:
                 return pattern in paper.title or pattern in paper.abstract
             else:
-                return pattern in paper.title.lower() or pattern in paper.abstract.lower()
+                return (
+                    pattern in paper.title.lower() or pattern in paper.abstract.lower()
+                )
         return False
 
     def is_paper_watched(self, arxiv_id: str) -> bool:
@@ -2066,7 +2254,9 @@ class ArxivBrowser(App):
     async def _update_bookmark_bar(self) -> None:
         """Update the bookmark tab bar display."""
         bookmark_bar = self.query_one(BookmarkTabBar)
-        await bookmark_bar.update_bookmarks(self._config.bookmarks, self._active_bookmark_index)
+        await bookmark_bar.update_bookmarks(
+            self._config.bookmarks, self._active_bookmark_index
+        )
 
     async def action_goto_bookmark(self, index: int) -> None:
         """Switch to a bookmarked search query."""
@@ -2090,11 +2280,15 @@ class ArxivBrowser(App):
         query = self.query_one("#search-input", Input).value.strip()
 
         if not query:
-            self.notify("Enter a search query first", title="Bookmark", severity="warning")
+            self.notify(
+                "Enter a search query first", title="Bookmark", severity="warning"
+            )
             return
 
         if len(self._config.bookmarks) >= 9:
-            self.notify("Maximum 9 bookmarks allowed", title="Bookmark", severity="warning")
+            self.notify(
+                "Maximum 9 bookmarks allowed", title="Bookmark", severity="warning"
+            )
             return
 
         # Generate a short name from the query
@@ -2109,8 +2303,12 @@ class ArxivBrowser(App):
 
     async def action_remove_bookmark(self) -> None:
         """Remove the currently active bookmark."""
-        if self._active_bookmark_index < 0 or self._active_bookmark_index >= len(self._config.bookmarks):
-            self.notify("No active bookmark to remove", title="Bookmark", severity="warning")
+        if self._active_bookmark_index < 0 or self._active_bookmark_index >= len(
+            self._config.bookmarks
+        ):
+            self.notify(
+                "No active bookmark to remove", title="Bookmark", severity="warning"
+            )
             return
 
         removed = self._config.bookmarks.pop(self._active_bookmark_index)
@@ -2197,7 +2395,11 @@ class ArxivBrowser(App):
                 return
 
         # Paper not in current filtered list
-        self.notify(f"Paper not in current view (try clearing filter)", title="Mark", severity="warning")
+        self.notify(
+            f"Paper not in current view (try clearing filter)",
+            title="Mark",
+            severity="warning",
+        )
 
     # ========================================================================
     # Phase 8: Export Features
@@ -2299,7 +2501,10 @@ class ArxivBrowser(App):
 
         if self._copy_to_clipboard(bibtex_text):
             count = len(papers)
-            self.notify(f"Copied {count} BibTeX entr{'ies' if count > 1 else 'y'}", title="BibTeX")
+            self.notify(
+                f"Copied {count} BibTeX entr{'ies' if count > 1 else 'y'}",
+                title="BibTeX",
+            )
         else:
             self.notify("Failed to copy to clipboard", title="BibTeX", severity="error")
 
@@ -2314,8 +2519,6 @@ class ArxivBrowser(App):
         export_dir = Path(
             self._config.bibtex_export_dir or Path.home() / DEFAULT_BIBTEX_EXPORT_DIR
         )
-        export_dir.mkdir(parents=True, exist_ok=True)
-
         # Generate filename with timestamp
         timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         filename = f"arxiv-{timestamp}.bib"
@@ -2325,7 +2528,16 @@ class ArxivBrowser(App):
         bibtex_entries = [self._format_paper_as_bibtex(p) for p in papers]
         content = "\n\n".join(bibtex_entries)
 
-        filepath.write_text(content, encoding="utf-8")
+        try:
+            export_dir.mkdir(parents=True, exist_ok=True)
+            filepath.write_text(content, encoding="utf-8")
+        except OSError as exc:
+            self.notify(
+                f"Failed to export BibTeX: {exc}",
+                title="BibTeX Export",
+                severity="error",
+            )
+            return
 
         self.notify(
             f"Exported {len(papers)} paper(s) to {filepath.name}",
@@ -2344,12 +2556,14 @@ class ArxivBrowser(App):
         ]
         if paper.comments:
             lines.append(f"**Comments:** {paper.comments}")
-        lines.extend([
-            "",
-            "### Abstract",
-            "",
-            paper.abstract,
-        ])
+        lines.extend(
+            [
+                "",
+                "### Abstract",
+                "",
+                paper.abstract,
+            ]
+        )
         return "\n".join(lines)
 
     def action_export_markdown(self) -> None:
@@ -2371,9 +2585,14 @@ class ArxivBrowser(App):
 
         if self._copy_to_clipboard(markdown_text):
             count = len(papers)
-            self.notify(f"Copied {count} paper{'s' if count > 1 else ''} as Markdown", title="Markdown")
+            self.notify(
+                f"Copied {count} paper{'s' if count > 1 else ''} as Markdown",
+                title="Markdown",
+            )
         else:
-            self.notify("Failed to copy to clipboard", title="Markdown", severity="error")
+            self.notify(
+                "Failed to copy to clipboard", title="Markdown", severity="error"
+            )
 
     def _get_papers_to_export(self) -> list[Paper]:
         """Get papers to export (selected or current)."""
@@ -2409,13 +2628,22 @@ class ArxivBrowser(App):
                 # Find and scroll to the selected paper
                 list_view = self.query_one("#paper-list", ListView)
                 for i, list_item in enumerate(list_view.children):
-                    if isinstance(list_item, PaperListItem) and list_item.paper.arxiv_id == arxiv_id:
+                    if (
+                        isinstance(list_item, PaperListItem)
+                        and list_item.paper.arxiv_id == arxiv_id
+                    ):
                         list_view.index = i
                         return
                 # Paper not in current view
-                self.notify("Paper not in current view (try clearing filter)", title="Similar", severity="warning")
+                self.notify(
+                    "Paper not in current view (try clearing filter)",
+                    title="Similar",
+                    severity="warning",
+                )
 
-        self.push_screen(RecommendationsScreen(target_paper, similar_papers), on_paper_selected)
+        self.push_screen(
+            RecommendationsScreen(target_paper, similar_papers), on_paper_selected
+        )
 
     # ========================================================================
     # History Mode: Date Navigation
@@ -2468,7 +2696,9 @@ class ArxivBrowser(App):
         self._load_current_date()
         current_date = self._get_current_date()
         if current_date:
-            self.notify(f"Loaded {current_date.strftime(HISTORY_DATE_FORMAT)}", title="Navigate")
+            self.notify(
+                f"Loaded {current_date.strftime(HISTORY_DATE_FORMAT)}", title="Navigate"
+            )
 
     def action_next_date(self) -> None:
         """Navigate to next (newer) date file."""
@@ -2484,7 +2714,9 @@ class ArxivBrowser(App):
         self._load_current_date()
         current_date = self._get_current_date()
         if current_date:
-            self.notify(f"Loaded {current_date.strftime(HISTORY_DATE_FORMAT)}", title="Navigate")
+            self.notify(
+                f"Loaded {current_date.strftime(HISTORY_DATE_FORMAT)}", title="Navigate"
+            )
 
     def _update_header(self) -> None:
         """Update header with selection count and sort info."""
@@ -2553,7 +2785,7 @@ class ArxivBrowser(App):
                         shell=False,
                         timeout=SUBPROCESS_TIMEOUT,
                     )
-                except FileNotFoundError:
+                except (FileNotFoundError, subprocess.CalledProcessError):
                     subprocess.run(
                         ["xsel", "--clipboard", "--input"],
                         input=text.encode("utf-8"),
@@ -2573,8 +2805,12 @@ class ArxivBrowser(App):
                 logger.debug("Clipboard copy failed: unsupported platform %s", system)
                 return False
             return True
-        except (subprocess.CalledProcessError, FileNotFoundError,
-                subprocess.TimeoutExpired, OSError) as e:
+        except (
+            subprocess.CalledProcessError,
+            FileNotFoundError,
+            subprocess.TimeoutExpired,
+            OSError,
+        ) as e:
             logger.debug("Clipboard copy failed: %s", e)
             return False
 
@@ -2583,8 +2819,7 @@ class ArxivBrowser(App):
         # Get papers to copy
         if self.selected_ids:
             papers_to_copy = [
-                self._get_paper_by_id(arxiv_id)
-                for arxiv_id in self.selected_ids
+                self._get_paper_by_id(arxiv_id) for arxiv_id in self.selected_ids
             ]
             papers_to_copy = [p for p in papers_to_copy if p is not None]
         else:
@@ -2627,7 +2862,8 @@ def main() -> int:
         description="Browse arXiv papers from a text file in a TUI"
     )
     parser.add_argument(
-        "-i", "--input",
+        "-i",
+        "--input",
         type=Path,
         default=None,
         help="Input file containing arXiv metadata (overrides history mode)",
@@ -2684,7 +2920,10 @@ def main() -> int:
             print(f"Error: {arxiv_file} is a directory, not a file", file=sys.stderr)
             return 1
         if not os.access(arxiv_file, os.R_OK):
-            print(f"Error: {arxiv_file} is not readable (permission denied)", file=sys.stderr)
+            print(
+                f"Error: {arxiv_file} is not readable (permission denied)",
+                file=sys.stderr,
+            )
             return 1
 
         papers = parse_arxiv_file(arxiv_file)
@@ -2696,7 +2935,10 @@ def main() -> int:
             try:
                 target_date = datetime.strptime(args.date, HISTORY_DATE_FORMAT).date()
             except ValueError:
-                print(f"Error: Invalid date format '{args.date}', expected YYYY-MM-DD", file=sys.stderr)
+                print(
+                    f"Error: Invalid date format '{args.date}', expected YYYY-MM-DD",
+                    file=sys.stderr,
+                )
                 return 1
 
             found = False
@@ -2711,7 +2953,9 @@ def main() -> int:
         elif not args.no_restore and config.session.current_date:
             # Try to restore saved date
             try:
-                saved_date = datetime.strptime(config.session.current_date, HISTORY_DATE_FORMAT).date()
+                saved_date = datetime.strptime(
+                    config.session.current_date, HISTORY_DATE_FORMAT
+                ).date()
                 for i, (d, _) in enumerate(history_files):
                     if d == saved_date:
                         current_date_index = i
@@ -2733,7 +2977,10 @@ def main() -> int:
             print("  - Use -i to specify an input file", file=sys.stderr)
             return 1
         if not os.access(arxiv_file, os.R_OK):
-            print(f"Error: {arxiv_file} is not readable (permission denied)", file=sys.stderr)
+            print(
+                f"Error: {arxiv_file} is not readable (permission denied)",
+                file=sys.stderr,
+            )
             return 1
 
         papers = parse_arxiv_file(arxiv_file)
