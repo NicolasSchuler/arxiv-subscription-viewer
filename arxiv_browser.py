@@ -2174,6 +2174,7 @@ class ArxivBrowser(App):
         Binding("b", "copy_bibtex", "BibTeX"),
         Binding("B", "export_bibtex_file", "Export BibTeX", show=False),
         Binding("M", "export_markdown", "Markdown", show=False),
+        Binding("d", "download_pdf", "Download"),
         # Phase 9: Paper similarity
         Binding("R", "show_similar", "Similar"),
         # History mode: date navigation
@@ -3718,6 +3719,50 @@ class ArxivBrowser(App):
             if details.paper:
                 webbrowser.open(self._get_pdf_url(details.paper))
                 self.notify(f"Opening PDF for {details.paper.arxiv_id}", title="PDF")
+
+    def action_download_pdf(self) -> None:
+        """Download PDFs for selected papers (or current paper)."""
+        # Collect papers to download
+        papers_to_download: list[Paper] = []
+
+        if self.selected_ids:
+            for arxiv_id in self.selected_ids:
+                paper = self._get_paper_by_id(arxiv_id)
+                if paper:
+                    papers_to_download.append(paper)
+        else:
+            details = self.query_one(PaperDetails)
+            if details.paper:
+                papers_to_download.append(details.paper)
+
+        if not papers_to_download:
+            self.notify("No papers to download", title="Download", severity="warning")
+            return
+
+        # Filter out already downloaded
+        to_download: list[Paper] = []
+        for paper in papers_to_download:
+            path = get_pdf_download_path(paper, self._config)
+            if path.exists() and path.stat().st_size > 0:
+                logger.debug(f"Skipping {paper.arxiv_id}: already downloaded")
+            else:
+                to_download.append(paper)
+
+        if not to_download:
+            self.notify("All PDFs already downloaded", title="Download")
+            return
+
+        # Initialize download batch
+        self._download_queue.extend(to_download)
+        self._download_total = len(to_download)
+        self._download_results.clear()
+
+        # Notify and start downloads
+        self.notify(
+            f"Downloading {len(to_download)} PDF{'s' if len(to_download) != 1 else ''}...",
+            title="Download",
+        )
+        self._start_downloads()
 
     def _format_paper_for_clipboard(self, paper: Paper) -> str:
         """Format a paper's metadata for clipboard export."""
