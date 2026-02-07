@@ -10,12 +10,25 @@ from arxiv_browser import (
     ARXIV_DATE_FORMAT,
     DEFAULT_CATEGORY_COLOR,
     Paper,
+    PaperMetadata,
+    QueryToken,
     SORT_OPTIONS,
     SUBPROCESS_TIMEOUT,
+    UserConfig,
     clean_latex,
+    escape_bibtex,
+    extract_year,
     format_categories,
+    format_paper_as_bibtex,
+    generate_citation_key,
+    get_pdf_download_path,
+    insert_implicit_and,
+    load_config,
     parse_arxiv_date,
     parse_arxiv_file,
+    save_config,
+    to_rpn,
+    tokenize_query,
 )
 
 
@@ -455,8 +468,6 @@ class TestNewDataclasses:
 
     def test_paper_metadata_defaults(self):
         """PaperMetadata should have correct defaults."""
-        from arxiv_browser import PaperMetadata
-
         meta = PaperMetadata(arxiv_id="2401.12345")
         assert meta.arxiv_id == "2401.12345"
         assert meta.notes == ""
@@ -493,8 +504,6 @@ class TestNewDataclasses:
 
     def test_user_config_defaults(self):
         """UserConfig should have correct defaults."""
-        from arxiv_browser import UserConfig
-
         config = UserConfig()
         assert config.paper_metadata == {}
         assert config.watch_list == []
@@ -515,8 +524,6 @@ class TestConfigPersistence:
     def test_config_to_dict_roundtrip(self):
         """Config should serialize and deserialize correctly."""
         from arxiv_browser import (
-            UserConfig,
-            PaperMetadata,
             WatchListEntry,
             SearchBookmark,
             SessionState,
@@ -559,7 +566,7 @@ class TestConfigPersistence:
 
     def test_dict_to_config_handles_empty(self):
         """Loading empty dict should return default config."""
-        from arxiv_browser import _dict_to_config, UserConfig
+        from arxiv_browser import _dict_to_config
 
         config = _dict_to_config({})
         default = UserConfig()
@@ -709,8 +716,6 @@ class TestBibTeXExport:
 
     def test_escape_bibtex_special_chars(self):
         """Special characters should be escaped for BibTeX."""
-        from arxiv_browser import escape_bibtex
-
         assert escape_bibtex("A & B") == r"A \& B"
         assert escape_bibtex("100%") == r"100\%"
         assert escape_bibtex("a_b") == r"a\_b"
@@ -723,32 +728,22 @@ class TestBibTeXExport:
 
     def test_extract_year_from_date(self):
         """extract_year should find 4-digit years in date strings."""
-        from arxiv_browser import extract_year
-
         assert extract_year("Mon, 15 Jan 2024") == "2024"
         assert extract_year("Tue, 3 Feb 2026") == "2026"
 
     def test_extract_year_empty_string(self):
         """extract_year should return current year for empty strings."""
-        from arxiv_browser import extract_year
-        from datetime import datetime
-
         current_year = str(datetime.now().year)
         assert extract_year("") == current_year
         assert extract_year("   ") == current_year
 
     def test_extract_year_no_year(self):
         """extract_year should return current year when no year found."""
-        from arxiv_browser import extract_year
-        from datetime import datetime
-
         current_year = str(datetime.now().year)
         assert extract_year("no date here") == current_year
 
     def test_generate_citation_key(self):
         """generate_citation_key should create valid BibTeX keys."""
-        from arxiv_browser import generate_citation_key
-
         paper = Paper(
             arxiv_id="2401.12345",
             date="Mon, 15 Jan 2024",
@@ -764,8 +759,6 @@ class TestBibTeXExport:
 
     def test_generate_citation_key_unknown_author(self):
         """generate_citation_key should handle empty authors."""
-        from arxiv_browser import generate_citation_key
-
         paper = Paper(
             arxiv_id="2401.12345",
             date="Mon, 15 Jan 2024",
@@ -781,8 +774,6 @@ class TestBibTeXExport:
 
     def test_format_paper_as_bibtex(self):
         """format_paper_as_bibtex should produce valid BibTeX."""
-        from arxiv_browser import format_paper_as_bibtex
-
         paper = Paper(
             arxiv_id="2401.12345",
             date="Mon, 15 Jan 2024",
@@ -803,8 +794,6 @@ class TestBibTeXExport:
 
     def test_format_paper_as_bibtex_empty_categories(self):
         """format_paper_as_bibtex should use 'misc' for empty categories."""
-        from arxiv_browser import format_paper_as_bibtex
-
         paper = Paper(
             arxiv_id="2401.12345",
             date="Mon, 15 Jan 2024",
@@ -829,8 +818,6 @@ class TestQueryParser:
 
     def test_tokenize_simple_term(self):
         """Single word should produce one term token."""
-        from arxiv_browser import tokenize_query
-
         tokens = tokenize_query("attention")
         assert len(tokens) == 1
         assert tokens[0].kind == "term"
@@ -838,16 +825,12 @@ class TestQueryParser:
 
     def test_tokenize_multiple_terms(self):
         """Multiple words should produce multiple term tokens."""
-        from arxiv_browser import tokenize_query
-
         tokens = tokenize_query("attention mechanism")
         assert len(tokens) == 2
         assert all(t.kind == "term" for t in tokens)
 
     def test_tokenize_quoted_phrase(self):
         """Quoted text should produce a single phrase token."""
-        from arxiv_browser import tokenize_query
-
         tokens = tokenize_query('"attention mechanism"')
         assert len(tokens) == 1
         assert tokens[0].kind == "term"
@@ -856,8 +839,6 @@ class TestQueryParser:
 
     def test_tokenize_operators(self):
         """AND, OR, NOT should be recognized as operators."""
-        from arxiv_browser import tokenize_query
-
         tokens = tokenize_query("foo AND bar")
         assert len(tokens) == 3
         assert tokens[1].kind == "op"
@@ -865,8 +846,6 @@ class TestQueryParser:
 
     def test_tokenize_operators_case_insensitive(self):
         """Operators should be case-insensitive."""
-        from arxiv_browser import tokenize_query
-
         for op in ["and", "And", "AND"]:
             tokens = tokenize_query(f"foo {op} bar")
             assert tokens[1].kind == "op"
@@ -874,8 +853,6 @@ class TestQueryParser:
 
     def test_tokenize_field_prefix(self):
         """Field:value should set the field attribute."""
-        from arxiv_browser import tokenize_query
-
         tokens = tokenize_query("cat:cs.AI")
         assert len(tokens) == 1
         assert tokens[0].field == "cat"
@@ -883,8 +860,6 @@ class TestQueryParser:
 
     def test_tokenize_field_with_quoted_value(self):
         """Field:"quoted value" should work."""
-        from arxiv_browser import tokenize_query
-
         tokens = tokenize_query('title:"deep learning"')
         assert len(tokens) == 1
         assert tokens[0].field == "title"
@@ -893,15 +868,11 @@ class TestQueryParser:
 
     def test_tokenize_empty_query(self):
         """Empty string should produce no tokens."""
-        from arxiv_browser import tokenize_query
-
         assert tokenize_query("") == []
         assert tokenize_query("   ") == []
 
     def test_tokenize_not_operator(self):
         """NOT should be recognized as a unary operator."""
-        from arxiv_browser import tokenize_query
-
         tokens = tokenize_query("NOT starred")
         assert len(tokens) == 2
         assert tokens[0].kind == "op"
@@ -909,8 +880,6 @@ class TestQueryParser:
 
     def test_insert_implicit_and(self):
         """Adjacent terms should get AND inserted between them."""
-        from arxiv_browser import tokenize_query, insert_implicit_and
-
         tokens = tokenize_query("foo bar")
         result = insert_implicit_and(tokens)
         assert len(result) == 3
@@ -919,8 +888,6 @@ class TestQueryParser:
 
     def test_insert_implicit_and_with_explicit_or(self):
         """Explicit OR should not get extra AND inserted."""
-        from arxiv_browser import tokenize_query, insert_implicit_and
-
         tokens = tokenize_query("foo OR bar")
         result = insert_implicit_and(tokens)
         assert len(result) == 3
@@ -928,8 +895,6 @@ class TestQueryParser:
 
     def test_to_rpn_simple(self):
         """Simple AND expression should convert to RPN."""
-        from arxiv_browser import QueryToken, to_rpn
-
         tokens = [
             QueryToken(kind="term", value="a"),
             QueryToken(kind="op", value="AND"),
@@ -943,8 +908,6 @@ class TestQueryParser:
 
     def test_to_rpn_precedence(self):
         """AND should bind tighter than OR."""
-        from arxiv_browser import QueryToken, to_rpn
-
         # a OR b AND c  =>  a, b, c, AND, OR
         tokens = [
             QueryToken(kind="term", value="a"),
@@ -958,8 +921,6 @@ class TestQueryParser:
 
     def test_to_rpn_not_highest_precedence(self):
         """NOT should have highest precedence."""
-        from arxiv_browser import QueryToken, to_rpn
-
         # NOT a AND b  =>  a, NOT, b, AND
         tokens = [
             QueryToken(kind="op", value="NOT"),
@@ -972,8 +933,6 @@ class TestQueryParser:
 
     def test_all_field_types(self):
         """All supported field prefixes should be recognized."""
-        from arxiv_browser import tokenize_query
-
         for field in ["title", "author", "abstract", "cat", "tag"]:
             tokens = tokenize_query(f"{field}:test")
             assert tokens[0].field == field, f"Field {field} not recognized"
@@ -989,7 +948,7 @@ class TestConfigIO:
 
     def test_save_and_load_roundtrip(self, tmp_path, monkeypatch):
         """Config should survive save/load roundtrip."""
-        from arxiv_browser import UserConfig, save_config, load_config, get_config_path
+        from arxiv_browser import get_config_path
 
         config_file = tmp_path / "config.json"
         monkeypatch.setattr("arxiv_browser.get_config_path", lambda: config_file)
@@ -1002,8 +961,6 @@ class TestConfigIO:
 
     def test_load_missing_file(self, tmp_path, monkeypatch):
         """Missing config file should return default UserConfig."""
-        from arxiv_browser import UserConfig, load_config
-
         config_file = tmp_path / "nonexistent" / "config.json"
         monkeypatch.setattr("arxiv_browser.get_config_path", lambda: config_file)
 
@@ -1012,8 +969,6 @@ class TestConfigIO:
 
     def test_load_corrupted_json(self, tmp_path, monkeypatch):
         """Corrupted JSON should return default UserConfig."""
-        from arxiv_browser import UserConfig, load_config
-
         config_file = tmp_path / "config.json"
         config_file.write_text("not valid json {{{{", encoding="utf-8")
         monkeypatch.setattr("arxiv_browser.get_config_path", lambda: config_file)
@@ -1023,8 +978,6 @@ class TestConfigIO:
 
     def test_save_creates_directory(self, tmp_path, monkeypatch):
         """save_config should create parent directories."""
-        from arxiv_browser import UserConfig, save_config
-
         config_file = tmp_path / "deep" / "nested" / "config.json"
         monkeypatch.setattr("arxiv_browser.get_config_path", lambda: config_file)
 
@@ -1034,7 +987,6 @@ class TestConfigIO:
     def test_atomic_write_produces_valid_json(self, tmp_path, monkeypatch):
         """Atomic write should produce valid JSON that can be parsed."""
         import json
-        from arxiv_browser import UserConfig, save_config
 
         config_file = tmp_path / "config.json"
         monkeypatch.setattr("arxiv_browser.get_config_path", lambda: config_file)
@@ -1054,8 +1006,6 @@ class TestPdfDownloadPathValidation:
 
     def test_valid_arxiv_id_produces_correct_path(self, tmp_path):
         """Normal arXiv ID should produce correct path."""
-        from arxiv_browser import get_pdf_download_path, UserConfig
-
         paper = Paper(
             arxiv_id="2401.12345",
             date="",
@@ -1073,8 +1023,6 @@ class TestPdfDownloadPathValidation:
 
     def test_path_traversal_rejected(self, tmp_path):
         """arXiv ID with path traversal should raise ValueError."""
-        from arxiv_browser import get_pdf_download_path, UserConfig
-
         paper = Paper(
             arxiv_id="../../etc/passwd",
             date="",
@@ -1381,7 +1329,7 @@ class TestYearExtractionEdgeCases:
 
     def test_extract_year_whitespace_only(self):
         """Year extraction should handle whitespace-only date."""
-        from arxiv_browser import ArxivBrowser, Paper
+        from arxiv_browser import ArxivBrowser
 
         # Create minimal app to test method
         paper = Paper(
@@ -1404,7 +1352,7 @@ class TestYearExtractionEdgeCases:
 
     def test_extract_year_empty_string(self):
         """Year extraction should handle empty string."""
-        from arxiv_browser import ArxivBrowser, Paper
+        from arxiv_browser import ArxivBrowser
 
         paper = Paper(
             arxiv_id="test",
@@ -1433,7 +1381,7 @@ class TestBibTeXFormattingEdgeCases:
 
     def test_format_bibtex_empty_categories(self):
         """BibTeX formatting should handle empty categories."""
-        from arxiv_browser import ArxivBrowser, Paper
+        from arxiv_browser import ArxivBrowser
 
         paper = Paper(
             arxiv_id="2401.12345",
@@ -1453,7 +1401,7 @@ class TestBibTeXFormattingEdgeCases:
 
     def test_format_bibtex_whitespace_categories(self):
         """BibTeX formatting should handle whitespace-only categories."""
-        from arxiv_browser import ArxivBrowser, Paper
+        from arxiv_browser import ArxivBrowser
 
         paper = Paper(
             arxiv_id="2401.12345",
@@ -1482,14 +1430,12 @@ class TestPdfDownloadConfig:
 
     def test_pdf_download_dir_default_empty(self):
         """Default pdf_download_dir should be empty string."""
-        from arxiv_browser import UserConfig
-
         config = UserConfig()
         assert config.pdf_download_dir == ""
 
     def test_pdf_download_dir_serialization_roundtrip(self):
         """pdf_download_dir should survive config serialization."""
-        from arxiv_browser import UserConfig, _config_to_dict, _dict_to_config
+        from arxiv_browser import _config_to_dict, _dict_to_config
 
         config = UserConfig(pdf_download_dir="/custom/path")
         data = _config_to_dict(config)
@@ -1498,12 +1444,7 @@ class TestPdfDownloadConfig:
 
     def test_get_pdf_download_path_default(self, tmp_path, monkeypatch):
         """Default path should be ~/arxiv-pdfs/{arxiv_id}.pdf."""
-        from arxiv_browser import (
-            DEFAULT_PDF_DOWNLOAD_DIR,
-            Paper,
-            UserConfig,
-            get_pdf_download_path,
-        )
+        from arxiv_browser import DEFAULT_PDF_DOWNLOAD_DIR
 
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
@@ -1524,8 +1465,6 @@ class TestPdfDownloadConfig:
 
     def test_get_pdf_download_path_custom_dir(self, tmp_path):
         """Custom dir should be used when configured."""
-        from arxiv_browser import Paper, UserConfig, get_pdf_download_path
-
         paper = Paper(
             arxiv_id="2301.12345",
             date="Mon, 15 Jan 2024",
@@ -1561,12 +1500,7 @@ class TestModuleExports:
     def test_main_exports_exist(self):
         """Key exports should be available."""
         from arxiv_browser import (
-            Paper,
-            PaperMetadata,
-            UserConfig,
             SessionState,
-            parse_arxiv_file,
-            clean_latex,
             ArxivBrowser,
             main,
         )
