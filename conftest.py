@@ -10,6 +10,7 @@ import pytest
 from arxiv_browser import (
     CATEGORY_COLORS,
     DEFAULT_CATEGORY_COLORS,
+    DEFAULT_THEME,
     THEME_COLORS,
     Paper,
     PaperMetadata,
@@ -33,8 +34,6 @@ def _reset_global_dicts():
     """
     yield
     # Restore module-level dicts
-    from arxiv_browser import DEFAULT_THEME
-
     CATEGORY_COLORS.clear()
     CATEGORY_COLORS.update(DEFAULT_CATEGORY_COLORS)
     THEME_COLORS.clear()

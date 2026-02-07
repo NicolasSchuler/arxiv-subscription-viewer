@@ -2134,8 +2134,8 @@ class TestTextualIntegration:
                 await pilot.press("slash")
                 # Type a query that matches only the quantum paper
                 await pilot.press("Q", "u", "a", "n", "t", "u", "m")
-                # Wait for debounce (0.3s) + some margin
-                await pilot.pause(0.5)
+                # Wait for debounce (0.3s) + margin for DOM update
+                await pilot.pause(0.7)
                 list_view = app.query_one("#paper-list", ListView)
                 assert len(list_view.children) == 1
 
@@ -2156,7 +2156,7 @@ class TestTextualIntegration:
                 await pilot.press("slash")
                 for ch in "cat:nonexistent":
                     await pilot.press(ch)
-                await pilot.pause(0.5)
+                await pilot.pause(0.7)
                 list_view = app.query_one("#paper-list", ListView)
                 # Empty state shows a placeholder ListItem, not PaperListItems
                 paper_items = [
@@ -2166,7 +2166,7 @@ class TestTextualIntegration:
 
                 # Cancel search with escape
                 await pilot.press("escape")
-                await pilot.pause(0.2)
+                await pilot.pause(0.4)
                 paper_items = [
                     c for c in list_view.children if isinstance(c, PaperListItem)
                 ]
@@ -2313,36 +2313,53 @@ class TestStatusFilterIntegration:
         """Status bar should not crash when query contains Rich markup tokens."""
         from unittest.mock import patch
 
+        from textual.widgets import Input, Label
+
         app = self._make_app(make_paper)
         with patch("arxiv_browser.save_config", return_value=True):
             async with app.run_test() as pilot:
-                # Open search and type Rich markup characters
+                # Open search and inject Rich markup directly into input
+                # (bracket keys are intercepted by app bindings, so set value directly)
                 await pilot.press("slash")
-                # Type "[/]" which is a Rich markup closing tag
-                await pilot.press("bracketleft", "slash", "bracketright")
-                await pilot.pause(0.5)
-                # If we get here without crashing, the markup was escaped properly
-                # The app should still be responsive
+                search_input = app.query_one("#search-input", Input)
+                search_input.value = "[/]"
+                await pilot.pause(0.7)
+                # Verify the app didn't crash — status bar has content
+                status_bar = app.query_one("#status-bar", Label)
+                assert status_bar.content != ""
+                # Verify the app is still responsive
                 await pilot.press("escape")
 
     async def test_apply_filter_syncs_pending_query(self, make_paper):
-        """Applying a filter should sync _pending_query to the applied value."""
+        """Applying a filter should sync _pending_query and update UI."""
         from unittest.mock import patch
+
+        from textual.widgets import Label, ListView
 
         app = self._make_app(make_paper)
         with patch("arxiv_browser.save_config", return_value=True):
             async with app.run_test() as pilot:
-                # Open search and type a query
+                # Open search and type a query that won't match our paper
                 await pilot.press("slash")
                 await pilot.press(
                     "t", "r", "a", "n", "s", "f", "o", "r", "m", "e", "r"
                 )
-                await pilot.pause(0.5)
+                await pilot.pause(0.7)
+                # Verify internal state synced
                 assert app._pending_query == "transformer"
+                # Verify UI reflects the filter — header shows filtered/total count
+                header = app.query_one("#list-header", Label)
+                header_text = str(header.content)
+                # When filtered, header shows "(filtered/total)" instead of "(N total)"
+                assert "/1)" in header_text  # e.g. "(0/1)" or "(1/1)"
 
     async def test_stale_query_does_not_persist(self, make_paper):
-        """Cancelling search should clear the query state."""
+        """Cancelling search should clear the query state and restore UI."""
         from unittest.mock import patch
+
+        from textual.widgets import Input, ListView
+
+        from arxiv_browser import PaperListItem
 
         app = self._make_app(make_paper)
         with patch("arxiv_browser.save_config", return_value=True):
@@ -2350,13 +2367,22 @@ class TestStatusFilterIntegration:
                 # Search for something
                 await pilot.press("slash")
                 await pilot.press("t", "e", "s", "t")
-                await pilot.pause(0.5)
+                await pilot.pause(0.7)
                 assert app._pending_query == "test"
 
-                # Cancel search — should clear query
+                # Cancel search — should clear query and restore all papers
                 await pilot.press("escape")
-                await pilot.pause(0.2)
+                await pilot.pause(0.4)
                 assert app._pending_query == ""
+                # Verify search input was cleared
+                search_input = app.query_one("#search-input", Input)
+                assert search_input.value == ""
+                # Verify all papers are restored in the list
+                list_view = app.query_one("#paper-list", ListView)
+                paper_items = [
+                    c for c in list_view.children if isinstance(c, PaperListItem)
+                ]
+                assert len(paper_items) == 1  # App was created with 1 paper
 
 
 # ============================================================================
