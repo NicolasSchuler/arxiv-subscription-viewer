@@ -1415,6 +1415,10 @@ class PaperListItem(ListItem):
             self._highlight_terms.get("title", []),
             THEME_COLORS["accent"],
         )
+        # Dim title for read papers — unread titles stay bold/bright
+        is_read = self._metadata and self._metadata.is_read
+        if is_read:
+            title_text = f"[dim]{title_text}[/]"
         if prefix:
             return f"{prefix} {title_text}"
         return title_text
@@ -1542,42 +1546,46 @@ class PaperDetails(Static):
         safe_abstract = escape_rich_text(abstract_text)
         safe_url = escape_rich_text(paper.url)
 
+        # Section separator helper
+        sep_color = THEME_COLORS["muted"]
+
         # Title section (Monokai foreground)
         lines.append(f"[bold {THEME_COLORS['text']}]{safe_title}[/]")
         lines.append("")
 
         # Metadata section (Monokai blue for labels, purple for values)
         lines.append(
-            f"[bold {THEME_COLORS['accent']}]arXiv:[/] [{THEME_COLORS['purple']}]{paper.arxiv_id}[/]"
+            f"  [bold {THEME_COLORS['accent']}]arXiv:[/] [{THEME_COLORS['purple']}]{paper.arxiv_id}[/]"
         )
-        lines.append(f"[bold {THEME_COLORS['accent']}]Date:[/] {safe_date}")
+        lines.append(f"  [bold {THEME_COLORS['accent']}]Date:[/] {safe_date}")
         lines.append(
-            f"[bold {THEME_COLORS['accent']}]Categories:[/] {format_categories(paper.categories)}"
+            f"  [bold {THEME_COLORS['accent']}]Categories:[/] {format_categories(paper.categories)}"
         )
         if paper.comments:
             lines.append(
-                f"[bold {THEME_COLORS['accent']}]Comments:[/] [dim]{safe_comments}[/]"
+                f"  [bold {THEME_COLORS['accent']}]Comments:[/] [dim]{safe_comments}[/]"
             )
         lines.append("")
 
-        # Authors section (Monokai green)
-        lines.append(f"[bold {THEME_COLORS['green']}]Authors[/]")
-        lines.append(f"[{THEME_COLORS['text']}]{safe_authors}[/]")
+        # Authors section
+        lines.append(f"[{sep_color}]━━ [{THEME_COLORS['green']}]Authors[/] ━━━━━━━━━━━━━━━━━━━━━━━━━[/]")
+        lines.append(f"  [{THEME_COLORS['text']}]{safe_authors}[/]")
         lines.append("")
 
-        # Abstract section (Monokai orange)
-        lines.append(f"[bold {THEME_COLORS['orange']}]Abstract[/]")
+        # Abstract section
+        lines.append(f"[{sep_color}]━━ [{THEME_COLORS['orange']}]Abstract[/] ━━━━━━━━━━━━━━━━━━━━━━━━[/]")
         if loading:
-            lines.append("[dim italic]Loading abstract...[/]")
+            lines.append("  [dim italic]Loading abstract...[/]")
         elif abstract_text:
-            lines.append(f"[{THEME_COLORS['text']}]{safe_abstract}[/]")
+            lines.append(f"  [{THEME_COLORS['text']}]{safe_abstract}[/]")
         else:
-            lines.append("[dim italic]No abstract available[/]")
+            lines.append("  [dim italic]No abstract available[/]")
         lines.append("")
 
-        # URL section (Monokai pink/red for label, blue for URL)
+        # URL section
+        lines.append(f"[{sep_color}]━━ [{THEME_COLORS['pink']}]URL[/] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/]")
         lines.append(
-            f"[bold {THEME_COLORS['pink']}]URL:[/] [{THEME_COLORS['accent']}]{safe_url}[/]"
+            f"  [{THEME_COLORS['accent']}]{safe_url}[/]"
         )
 
         self.update("\n".join(lines))
@@ -1585,6 +1593,141 @@ class PaperDetails(Static):
     @property
     def paper(self) -> Paper | None:
         return self._paper
+
+
+# ============================================================================
+# Help Overlay
+# ============================================================================
+
+
+class HelpScreen(ModalScreen[None]):
+    """Full-screen help overlay showing all keyboard shortcuts by category."""
+
+    BINDINGS = [
+        Binding("question_mark", "dismiss", "Close", show=False),
+        Binding("escape", "dismiss", "Close"),
+        Binding("q", "dismiss", "Close", show=False),
+    ]
+
+    CSS = """
+    HelpScreen {
+        align: center middle;
+    }
+
+    #help-dialog {
+        width: 80%;
+        height: 85%;
+        min-width: 60;
+        min-height: 20;
+        background: #272822;
+        border: round #66d9ef;
+        padding: 1 2;
+        overflow-y: auto;
+    }
+
+    #help-title {
+        text-style: bold;
+        color: #e6db74;
+        text-align: center;
+        margin-bottom: 1;
+    }
+
+    .help-section {
+        margin-bottom: 1;
+    }
+
+    .help-section-title {
+        text-style: bold;
+        margin-bottom: 0;
+    }
+
+    .help-keys {
+        padding-left: 2;
+        color: #f8f8f2;
+    }
+
+    #help-footer {
+        text-align: center;
+        color: #75715e;
+        margin-top: 1;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="help-dialog"):
+            yield Label("Keyboard Shortcuts", id="help-title")
+
+            # Navigation
+            yield Label(f"[{THEME_COLORS['accent']}]Navigation[/]", classes="help-section-title")
+            yield Static(
+                f"  [{THEME_COLORS['green']}]j / k[/]        Navigate down / up\n"
+                f"  [{THEME_COLORS['green']}]bracketleft / bracketright[/]  Previous / next date  [dim](history mode)[/]\n"
+                f"  [{THEME_COLORS['green']}]1-9[/]          Jump to bookmark\n"
+                f"  [{THEME_COLORS['green']}]m[/] [dim]then[/] [{THEME_COLORS['green']}]a-z[/]  Set mark\n"
+                f"  [{THEME_COLORS['green']}]'[/] [dim]then[/] [{THEME_COLORS['green']}]a-z[/]  Jump to mark",
+                classes="help-keys",
+            )
+
+            # Search
+            yield Label(f"[{THEME_COLORS['accent']}]Search & Filter[/]", classes="help-section-title")
+            yield Static(
+                f"  [{THEME_COLORS['green']}]/[/]            Toggle search\n"
+                f"  [{THEME_COLORS['green']}]Escape[/]       Clear search\n"
+                f"  [{THEME_COLORS['green']}]w[/]            Toggle watch list filter\n"
+                f"  [{THEME_COLORS['green']}]s[/]            Cycle sort order  [dim](title / date / arxiv_id)[/]\n"
+                f"  [{THEME_COLORS['green']}]Ctrl+b[/]       Save search as bookmark\n"
+                f"  [dim]Filters:[/] cat: author: title: abstract: tag: unread starred",
+                classes="help-keys",
+            )
+
+            # Selection
+            yield Label(f"[{THEME_COLORS['accent']}]Selection[/]", classes="help-section-title")
+            yield Static(
+                f"  [{THEME_COLORS['green']}]Space[/]        Toggle selection\n"
+                f"  [{THEME_COLORS['green']}]a[/]            Select all visible\n"
+                f"  [{THEME_COLORS['green']}]u[/]            Clear selection",
+                classes="help-keys",
+            )
+
+            # Paper actions
+            yield Label(f"[{THEME_COLORS['accent']}]Paper Actions[/]", classes="help-section-title")
+            yield Static(
+                f"  [{THEME_COLORS['green']}]o[/]            Open in browser\n"
+                f"  [{THEME_COLORS['green']}]P[/]            Open as PDF\n"
+                f"  [{THEME_COLORS['green']}]r[/]            Toggle read\n"
+                f"  [{THEME_COLORS['green']}]x[/]            Toggle star\n"
+                f"  [{THEME_COLORS['green']}]n[/]            Edit notes\n"
+                f"  [{THEME_COLORS['green']}]t[/]            Edit tags\n"
+                f"  [{THEME_COLORS['green']}]R[/]            Show similar papers\n"
+                f"  [{THEME_COLORS['green']}]W[/]            Manage watch list",
+                classes="help-keys",
+            )
+
+            # Export
+            yield Label(f"[{THEME_COLORS['accent']}]Export & Copy[/]", classes="help-section-title")
+            yield Static(
+                f"  [{THEME_COLORS['green']}]c[/]            Copy to clipboard\n"
+                f"  [{THEME_COLORS['green']}]b[/]            Copy as BibTeX\n"
+                f"  [{THEME_COLORS['green']}]B[/]            Export BibTeX to file\n"
+                f"  [{THEME_COLORS['green']}]M[/]            Copy as Markdown\n"
+                f"  [{THEME_COLORS['green']}]d[/]            Download PDF",
+                classes="help-keys",
+            )
+
+            # View
+            yield Label(f"[{THEME_COLORS['accent']}]View[/]", classes="help-section-title")
+            yield Static(
+                f"  [{THEME_COLORS['green']}]p[/]            Toggle abstract preview\n"
+                f"  [{THEME_COLORS['green']}]?[/]            This help screen\n"
+                f"  [{THEME_COLORS['green']}]q[/]            Quit",
+                classes="help-keys",
+            )
+
+            yield Label("Press ? / Escape / q to close", id="help-footer")
+
+    def action_dismiss(self) -> None:
+        """Close the help screen."""
+        self.dismiss(None)
 
 
 # ============================================================================
@@ -2234,15 +2377,23 @@ class ArxivBrowser(App):
         min-width: 50;
         max-width: 100;
         height: 100%;
-        border: round #75715e;
+        border: round #49483e;
         background: #1e1e1e;
+    }
+
+    #left-pane:focus-within {
+        border: round #66d9ef;
     }
 
     #right-pane {
         width: 3fr;
         height: 100%;
-        border: round #75715e;
+        border: round #49483e;
         background: #1e1e1e;
+    }
+
+    #right-pane:focus-within {
+        border: round #66d9ef;
     }
 
     #list-header {
@@ -2293,7 +2444,7 @@ class ArxivBrowser(App):
     }
 
     PaperListItem {
-        padding: 1 1;
+        padding: 1 2;
         height: auto;
         border-bottom: dashed #3e3d32;
     }
@@ -2320,7 +2471,7 @@ class ArxivBrowser(App):
     }
 
     .paper-authors {
-        color: #75715e;
+        color: #a8a8a2;
     }
 
     .paper-meta {
@@ -2349,7 +2500,7 @@ class ArxivBrowser(App):
     VerticalScroll {
         scrollbar-background: #3e3d32;
         scrollbar-color: #75715e;
-        scrollbar-color-hover: #75715e;
+        scrollbar-color-hover: #a8a8a2;
         scrollbar-color-active: #66d9ef;
     }
 
@@ -2407,6 +2558,8 @@ class ArxivBrowser(App):
         # History mode: date navigation
         Binding("bracketleft", "prev_date", "Older", show=False),
         Binding("bracketright", "next_date", "Newer", show=False),
+        # Help overlay
+        Binding("question_mark", "show_help", "Help (?)"),
     ]
 
     def __init__(
@@ -2769,13 +2922,15 @@ class ArxivBrowser(App):
         self._search_timer = None
         self._apply_filter(self._pending_query)
 
-    def _format_header_text(self, query: str = "") -> str:
-        """Format the header text with paper count, date info, and selection info."""
-        selection_info = (
-            f" [{len(self.selected_ids)} selected]" if self.selected_ids else ""
-        )
-        sort_info = f" [dim]sorted by {SORT_OPTIONS[self._sort_index]}[/]"
+    def _get_active_query(self) -> str:
+        """Get the active search query, preferring the current input value."""
+        try:
+            return self.query_one("#search-input", Input).value.strip()
+        except NoMatches:
+            return self._pending_query.strip()
 
+    def _format_header_text(self, query: str = "") -> str:
+        """Format the header text with paper count, date info, and filter indicator."""
         # Date info for history mode
         date_info = ""
         if self._is_history_mode():
@@ -2783,11 +2938,11 @@ class ArxivBrowser(App):
             if current_date:
                 pos = self._current_date_index + 1
                 total = len(self._history_files)
-                date_info = f" · [#66d9ef]{current_date.strftime(HISTORY_DATE_FORMAT)}[/] [{pos}/{total}]"
+                date_info = f" · [{THEME_COLORS['accent']}]{current_date.strftime(HISTORY_DATE_FORMAT)}[/] [dim]({pos}/{total})[/]"
 
         if query:
-            return f" Papers ({len(self.filtered_papers)}/{len(self.all_papers)}){date_info}{selection_info}{sort_info}"
-        return f" Papers ({len(self.all_papers)} total){date_info}{selection_info}{sort_info}"
+            return f" [bold]Papers[/] ({len(self.filtered_papers)}/{len(self.all_papers)}){date_info}"
+        return f" [bold]Papers[/] ({len(self.all_papers)} total){date_info}"
 
     def _tokenize_query(self, query: str) -> list[QueryToken]:
         return tokenize_query(query)
@@ -2908,6 +3063,8 @@ class ArxivBrowser(App):
         - <text>          - Fuzzy search on title/author
         """
         query = query.strip()
+        # Keep status/empty-state context synchronized with the applied filter.
+        self._pending_query = query
 
         # Clear match scores by default (only fuzzy search populates them)
         self._match_scores.clear()
@@ -3019,6 +3176,15 @@ class ArxivBrowser(App):
             list_view.mount(*items)
             list_view.index = 0
         else:
+            # Show helpful empty state message
+            query = self._get_active_query()
+            if query:
+                empty_msg = "[dim italic]No papers match your search.[/]\n[dim]Try a different query or press [bold]Escape[/bold] to clear.[/]"
+            elif self._watch_filter_active:
+                empty_msg = "[dim italic]No watched papers found.[/]\n[dim]Press [bold]w[/bold] to show all papers or [bold]W[/bold] to manage watch list.[/]"
+            else:
+                empty_msg = "[dim italic]No papers available.[/]"
+            list_view.mount(ListItem(Static(empty_msg)))
             try:
                 details = self.query_one(PaperDetails)
                 details.update_paper(None)
@@ -3292,6 +3458,7 @@ class ArxivBrowser(App):
 
         # Refresh list to show/hide previews
         self._refresh_list_view()
+        self._update_status_bar()
 
     # ========================================================================
     # Phase 7: Vim-style Marks
@@ -3559,6 +3726,10 @@ class ArxivBrowser(App):
             RecommendationsScreen(target_paper, similar_papers), on_paper_selected
         )
 
+    def action_show_help(self) -> None:
+        """Show the help overlay with all keyboard shortcuts."""
+        self.push_screen(HelpScreen())
+
     # ========================================================================
     # History Mode: Date Navigation
     # ========================================================================
@@ -3652,14 +3823,42 @@ class ArxivBrowser(App):
         self._update_status_bar()
 
     def _update_status_bar(self) -> None:
-        """Update the status bar with total, filtered, and selected counts."""
+        """Update the status bar with semantic, context-aware information."""
         try:
             status = self.query_one("#status-bar", Label)
         except NoMatches:
             return
-        status.update(
-            f"[dim]Total: {len(self.all_papers)}  Filtered: {len(self.filtered_papers)}  Selected: {len(self.selected_ids)}[/]"
-        )
+
+        parts = []
+
+        # Paper count — accent if filtered, dim otherwise
+        total = len(self.all_papers)
+        filtered = len(self.filtered_papers)
+        query = self._get_active_query()
+        if query:
+            truncated_query = query if len(query) <= 30 else query[:27] + "..."
+            safe_query = escape_rich_text(truncated_query)
+            parts.append(
+                f"[{THEME_COLORS['accent']}]{filtered}[/][dim]/{total} matching [/][{THEME_COLORS['accent']}]\"{safe_query}\"[/]"
+            )
+        elif self._watch_filter_active:
+            parts.append(f"[{THEME_COLORS['orange']}]{filtered}[/][dim]/{total} watched[/]")
+        else:
+            parts.append(f"[dim]{total} papers[/]")
+
+        # Selection count — green when > 0
+        selected = len(self.selected_ids)
+        if selected > 0:
+            parts.append(f"[bold {THEME_COLORS['green']}]{selected} selected[/]")
+
+        # Sort order
+        parts.append(f"[dim]Sort: {SORT_OPTIONS[self._sort_index]}[/]")
+
+        # Mode badges
+        if self._show_abstract_preview:
+            parts.append(f"[{THEME_COLORS['purple']}]Preview[/]")
+
+        status.update(" [dim]│[/] ".join(parts))
 
     def _get_paper_by_id(self, arxiv_id: str) -> Paper | None:
         """Look up a paper by its arXiv ID. O(1) dict lookup."""

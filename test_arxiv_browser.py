@@ -1482,6 +1482,115 @@ class TestPdfDownloadConfig:
 
 
 # ============================================================================
+# Regression tests for status/filter/help UX behavior
+# ============================================================================
+
+
+class TestStatusFilterRegressions:
+    """Regression tests for status bar and filter query handling."""
+
+    @staticmethod
+    def _make_app() -> "ArxivBrowser":
+        from arxiv_browser import ArxivBrowser
+
+        paper = Paper(
+            arxiv_id="2401.12345",
+            date="Mon, 15 Jan 2024",
+            title="Attention Is All You Need",
+            authors="Jane Smith",
+            categories="cs.AI",
+            comments=None,
+            abstract="Test abstract",
+            url="https://arxiv.org/abs/2401.12345",
+        )
+        return ArxivBrowser([paper], restore_session=False)
+
+    @staticmethod
+    def _fake_input(value: str):
+        class _FakeInput:
+            def __init__(self, value: str) -> None:
+                self.value = value
+
+        return _FakeInput(value)
+
+    def test_update_status_bar_escapes_query_markup(self):
+        """Status bar should not crash when query contains Rich markup tokens."""
+        from textual.css.query import NoMatches
+        from textual.widgets import Label
+
+        app = self._make_app()
+        status_bar = Label("")
+        search_input = self._fake_input("[/]")
+
+        def fake_query_one(selector, _widget_type=None):
+            if selector == "#status-bar":
+                return status_bar
+            if selector == "#search-input":
+                return search_input
+            raise NoMatches(f"Unexpected selector: {selector}")
+
+        app.query_one = fake_query_one  # type: ignore[method-assign]
+
+        app._update_status_bar()  # Should not raise MarkupError
+        assert "matching" in status_bar._Static__content
+        assert r"\[/]" in status_bar._Static__content
+
+    def test_update_status_bar_uses_active_input_not_stale_pending_query(self):
+        """Status bar context should come from the active search input."""
+        from textual.css.query import NoMatches
+        from textual.widgets import Label
+
+        app = self._make_app()
+        app._pending_query = "stale-query"
+        status_bar = Label("")
+        search_input = self._fake_input("applied-query")
+
+        def fake_query_one(selector, _widget_type=None):
+            if selector == "#status-bar":
+                return status_bar
+            if selector == "#search-input":
+                return search_input
+            raise NoMatches(f"Unexpected selector: {selector}")
+
+        app.query_one = fake_query_one  # type: ignore[method-assign]
+
+        app._update_status_bar()
+        assert "applied-query" in status_bar._Static__content
+        assert "stale-query" not in status_bar._Static__content
+
+    def test_apply_filter_syncs_pending_query(self):
+        """Applying a filter should sync _pending_query to the applied value."""
+        from textual.css.query import NoMatches
+        from textual.widgets import Label
+
+        app = self._make_app()
+        app._pending_query = "old-query"
+        header = Label("")
+
+        def fake_query_one(selector, _widget_type=None):
+            if selector == "#list-header":
+                return header
+            raise NoMatches(f"Unexpected selector: {selector}")
+
+        app.query_one = fake_query_one  # type: ignore[method-assign]
+        app._sort_papers = lambda: None  # type: ignore[method-assign]
+        app._refresh_list_view = lambda: None  # type: ignore[method-assign]
+        app._update_status_bar = lambda: None  # type: ignore[method-assign]
+
+        app._apply_filter("   transformer   ")
+        assert app._pending_query == "transformer"
+
+    def test_help_screen_mentions_actual_history_keys(self):
+        """Help text should reference the actual history key names."""
+        import inspect
+
+        from arxiv_browser import HelpScreen
+
+        source = inspect.getsource(HelpScreen.compose)
+        assert "bracketleft / bracketright" in source
+
+
+# ============================================================================
 # Tests for __all__ exports
 # ============================================================================
 
