@@ -1306,15 +1306,18 @@ class PaperListItem(ListItem):
 
     def _update_display(self) -> None:
         """Update the visual display based on selection state."""
-        title_widget = self.query_one(".paper-title", Static)
-        authors_widget = self.query_one(".paper-authors", Static)
-        meta_widget = self.query_one(".paper-meta", Static)
-        title_widget.update(self._get_title_text())
-        authors_widget.update(self._get_authors_text())
-        meta_widget.update(self._get_meta_text())
-        if self._show_preview:
-            preview_widget = self.query_one(".paper-preview", Static)
-            preview_widget.update(self._get_preview_text())
+        try:
+            title_widget = self.query_one(".paper-title", Static)
+            authors_widget = self.query_one(".paper-authors", Static)
+            meta_widget = self.query_one(".paper-meta", Static)
+            title_widget.update(self._get_title_text())
+            authors_widget.update(self._get_authors_text())
+            meta_widget.update(self._get_meta_text())
+            if self._show_preview:
+                preview_widget = self.query_one(".paper-preview", Static)
+                preview_widget.update(self._get_preview_text())
+        except NoMatches:
+            return
 
     def compose(self) -> ComposeResult:
         yield Static(self._get_title_text(), classes="paper-title")
@@ -2383,6 +2386,7 @@ class ArxivBrowser(App):
         CATEGORY_COLORS.clear()
         CATEGORY_COLORS.update(DEFAULT_CATEGORY_COLORS)
         CATEGORY_COLORS.update(self._config.category_colors)
+        format_categories.cache_clear()
 
     def _apply_theme_overrides(self) -> None:
         """Apply theme overrides from config to markup colors (THEME_COLORS dict).
@@ -2457,12 +2461,15 @@ class ArxivBrowser(App):
             if details.paper and details.paper.arxiv_id == arxiv_id:
                 abstract_text = self._abstract_cache.get(arxiv_id, "")
                 details.update_paper(details.paper, abstract_text)
+        except NoMatches:
+            pass
+        try:
             list_view = self.query_one("#paper-list", ListView)
             for item in list_view.children:
                 if isinstance(item, PaperListItem) and item.paper.arxiv_id == arxiv_id:
                     item.set_abstract_text(self._abstract_cache.get(arxiv_id))
         except NoMatches:
-            return
+            pass
 
     def _save_session_state(self) -> None:
         """Save current session state to config.
@@ -3559,7 +3566,15 @@ class ArxivBrowser(App):
             return
 
         current_date, path = self._history_files[self._current_date_index]
-        self.all_papers = parse_arxiv_file(path)
+        try:
+            self.all_papers = parse_arxiv_file(path)
+        except OSError as e:
+            self.notify(
+                f"Failed to load {path.name}: {e}",
+                title="Load Error",
+                severity="error",
+            )
+            return
         self._papers_by_id = {p.arxiv_id: p for p in self.all_papers}
         self.filtered_papers = self.all_papers.copy()
 
@@ -3746,6 +3761,16 @@ class ArxivBrowser(App):
         self._download_total = 0
         self._update_status_bar()
 
+    def _safe_browser_open(self, url: str) -> bool:
+        """Open a URL in the browser with error handling. Returns True on success."""
+        try:
+            webbrowser.open(url)
+            return True
+        except Exception as e:
+            logger.debug(f"Failed to open browser for {url}: {e}")
+            self.notify("Failed to open browser", title="Error", severity="error")
+            return False
+
     def action_open_url(self) -> None:
         """Open selected papers' URLs in the default browser."""
         # If papers are selected, open all of them
@@ -3753,13 +3778,13 @@ class ArxivBrowser(App):
             for arxiv_id in self.selected_ids:
                 paper = self._get_paper_by_id(arxiv_id)
                 if paper:
-                    webbrowser.open(self._get_paper_url(paper))
+                    self._safe_browser_open(self._get_paper_url(paper))
             self.notify(f"Opening {len(self.selected_ids)} papers", title="Browser")
         else:
             # Otherwise, open the currently highlighted paper
             details = self.query_one(PaperDetails)
             if details.paper:
-                webbrowser.open(self._get_paper_url(details.paper))
+                self._safe_browser_open(self._get_paper_url(details.paper))
                 self.notify(f"Opening {details.paper.arxiv_id}", title="Browser")
 
     def action_open_pdf(self) -> None:
@@ -3768,12 +3793,12 @@ class ArxivBrowser(App):
             for arxiv_id in self.selected_ids:
                 paper = self._get_paper_by_id(arxiv_id)
                 if paper:
-                    webbrowser.open(self._get_pdf_url(paper))
+                    self._safe_browser_open(self._get_pdf_url(paper))
             self.notify(f"Opening {len(self.selected_ids)} PDFs", title="PDF")
         else:
             details = self.query_one(PaperDetails)
             if details.paper:
-                webbrowser.open(self._get_pdf_url(details.paper))
+                self._safe_browser_open(self._get_pdf_url(details.paper))
                 self.notify(f"Opening PDF for {details.paper.arxiv_id}", title="PDF")
 
     def action_download_pdf(self) -> None:
