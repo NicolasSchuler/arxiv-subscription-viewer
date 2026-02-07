@@ -1513,6 +1513,527 @@ class TestModuleExports:
 
 
 # ============================================================================
+# Tests for extracted pure functions
+# ============================================================================
+
+
+class TestHighlightText:
+    """Tests for highlight_text()."""
+
+    def test_empty_text_returns_empty(self):
+        from arxiv_browser import highlight_text
+
+        assert highlight_text("", ["foo"], "#ff0000") == ""
+
+    def test_empty_terms_returns_escaped(self):
+        from arxiv_browser import highlight_text
+
+        # Rich's escape only escapes recognized markup-like brackets
+        result = highlight_text("Hello [bold]text[/bold]", [], "#ff0000")
+        assert r"\[bold]" in result
+
+    def test_short_terms_filtered(self):
+        from arxiv_browser import highlight_text
+
+        result = highlight_text("a b c", ["a"], "#ff0000")
+        assert "[bold" not in result  # "a" is too short (< 2 chars)
+
+    def test_dedup_terms(self):
+        from arxiv_browser import highlight_text
+
+        result = highlight_text("hello world", ["hello", "HELLO"], "#ff0000")
+        assert result.count("[bold") == 1  # Deduped
+
+    def test_case_insensitive_highlight(self):
+        from arxiv_browser import highlight_text
+
+        result = highlight_text("Deep Learning", ["deep"], "#ff0000")
+        assert "[bold #ff0000]Deep[/]" in result
+
+    def test_rich_escaping_preserved(self):
+        from arxiv_browser import highlight_text
+
+        result = highlight_text("[bold]text[/bold]", ["text"], "#ff0000")
+        assert r"\[bold]" in result
+
+
+class TestEscapeRichText:
+    """Tests for escape_rich_text()."""
+
+    def test_empty_string(self):
+        from arxiv_browser import escape_rich_text
+
+        assert escape_rich_text("") == ""
+
+    def test_normal_text(self):
+        from arxiv_browser import escape_rich_text
+
+        assert escape_rich_text("Hello World") == "Hello World"
+
+    def test_brackets_escaped(self):
+        from arxiv_browser import escape_rich_text
+
+        assert escape_rich_text("[bold]text[/bold]") == r"\[bold]text\[/bold]"
+
+
+class TestFormatAuthorsBibtex:
+    """Tests for format_authors_bibtex()."""
+
+    def test_single_author(self):
+        from arxiv_browser import format_authors_bibtex
+
+        assert format_authors_bibtex("John Smith") == "John Smith"
+
+    def test_special_chars_escaped(self):
+        from arxiv_browser import format_authors_bibtex
+
+        assert format_authors_bibtex("A & B") == r"A \& B"
+
+
+class TestGetConfigPath:
+    """Tests for get_config_path()."""
+
+    def test_returns_path_with_config_json(self):
+        from arxiv_browser import get_config_path
+
+        path = get_config_path()
+        assert isinstance(path, Path)
+        assert path.name == "config.json"
+
+
+class TestComputePaperSimilarity:
+    """Tests for compute_paper_similarity()."""
+
+    def test_identity_similarity(self, make_paper):
+        from arxiv_browser import compute_paper_similarity
+
+        paper = make_paper()
+        assert compute_paper_similarity(paper, paper) == 1.0
+
+    def test_different_papers_less_than_one(self, make_paper):
+        from arxiv_browser import compute_paper_similarity
+
+        p1 = make_paper(arxiv_id="001", categories="cs.AI", authors="Smith")
+        p2 = make_paper(arxiv_id="002", categories="quant-ph", authors="Jones")
+        assert compute_paper_similarity(p1, p2) < 1.0
+
+    def test_category_weight_dominates(self, make_paper):
+        from arxiv_browser import compute_paper_similarity
+
+        # Same categories, different authors
+        p1 = make_paper(arxiv_id="001", categories="cs.AI cs.LG", authors="Smith")
+        p2 = make_paper(arxiv_id="002", categories="cs.AI cs.LG", authors="Jones")
+        # Different categories, same authors
+        p3 = make_paper(arxiv_id="003", categories="quant-ph", authors="Smith")
+
+        sim_same_cat = compute_paper_similarity(p1, p2)
+        sim_diff_cat = compute_paper_similarity(p1, p3)
+        assert sim_same_cat > sim_diff_cat
+
+
+class TestIsAdvancedQuery:
+    """Tests for is_advanced_query()."""
+
+    def test_plain_terms_not_advanced(self):
+        from arxiv_browser import is_advanced_query
+
+        tokens = [QueryToken(kind="term", value="attention")]
+        assert is_advanced_query(tokens) is False
+
+    def test_operator_is_advanced(self):
+        from arxiv_browser import is_advanced_query
+
+        tokens = [
+            QueryToken(kind="term", value="a"),
+            QueryToken(kind="op", value="AND"),
+            QueryToken(kind="term", value="b"),
+        ]
+        assert is_advanced_query(tokens) is True
+
+    def test_field_prefix_is_advanced(self):
+        from arxiv_browser import is_advanced_query
+
+        tokens = [QueryToken(kind="term", value="cs.AI", field="cat")]
+        assert is_advanced_query(tokens) is True
+
+    def test_quoted_phrase_is_advanced(self):
+        from arxiv_browser import is_advanced_query
+
+        tokens = [QueryToken(kind="term", value="deep learning", phrase=True)]
+        assert is_advanced_query(tokens) is True
+
+    def test_unread_virtual_term_is_advanced(self):
+        from arxiv_browser import is_advanced_query
+
+        tokens = [QueryToken(kind="term", value="unread")]
+        assert is_advanced_query(tokens) is True
+
+    def test_starred_virtual_term_is_advanced(self):
+        from arxiv_browser import is_advanced_query
+
+        tokens = [QueryToken(kind="term", value="starred")]
+        assert is_advanced_query(tokens) is True
+
+
+class TestMatchQueryTerm:
+    """Tests for match_query_term()."""
+
+    def test_empty_value_matches_all(self, make_paper):
+        from arxiv_browser import match_query_term
+
+        paper = make_paper()
+        token = QueryToken(kind="term", value="   ")
+        assert match_query_term(paper, token, None) is True
+
+    def test_cat_field_matches(self, make_paper):
+        from arxiv_browser import match_query_term
+
+        paper = make_paper(categories="cs.AI cs.LG")
+        token = QueryToken(kind="term", value="cs.AI", field="cat")
+        assert match_query_term(paper, token, None) is True
+
+    def test_cat_field_no_match(self, make_paper):
+        from arxiv_browser import match_query_term
+
+        paper = make_paper(categories="cs.AI")
+        token = QueryToken(kind="term", value="cs.CV", field="cat")
+        assert match_query_term(paper, token, None) is False
+
+    def test_tag_field_matches(self, make_paper):
+        from arxiv_browser import match_query_term
+
+        paper = make_paper()
+        meta = PaperMetadata(arxiv_id=paper.arxiv_id, tags=["important", "to-read"])
+        token = QueryToken(kind="term", value="important", field="tag")
+        assert match_query_term(paper, token, meta) is True
+
+    def test_tag_field_no_metadata(self, make_paper):
+        from arxiv_browser import match_query_term
+
+        paper = make_paper()
+        token = QueryToken(kind="term", value="important", field="tag")
+        assert match_query_term(paper, token, None) is False
+
+    def test_title_field_matches(self, make_paper):
+        from arxiv_browser import match_query_term
+
+        paper = make_paper(title="Deep Learning for NLP")
+        token = QueryToken(kind="term", value="Deep", field="title")
+        assert match_query_term(paper, token, None) is True
+
+    def test_author_field_matches(self, make_paper):
+        from arxiv_browser import match_query_term
+
+        paper = make_paper(authors="John Smith")
+        token = QueryToken(kind="term", value="smith", field="author")
+        assert match_query_term(paper, token, None) is True
+
+    def test_abstract_field_matches(self, make_paper):
+        from arxiv_browser import match_query_term
+
+        paper = make_paper()
+        token = QueryToken(kind="term", value="test abstract", field="abstract")
+        assert match_query_term(paper, token, None, abstract_text="Test abstract content.") is True
+
+    def test_unread_virtual_term(self, make_paper):
+        from arxiv_browser import match_query_term
+
+        paper = make_paper()
+        token = QueryToken(kind="term", value="unread")
+        # No metadata = unread
+        assert match_query_term(paper, token, None) is True
+        # Read = not unread
+        meta = PaperMetadata(arxiv_id=paper.arxiv_id, is_read=True)
+        assert match_query_term(paper, token, meta) is False
+
+    def test_starred_virtual_term(self, make_paper):
+        from arxiv_browser import match_query_term
+
+        paper = make_paper()
+        token = QueryToken(kind="term", value="starred")
+        # No metadata = not starred
+        assert match_query_term(paper, token, None) is False
+        # Starred = starred
+        meta = PaperMetadata(arxiv_id=paper.arxiv_id, starred=True)
+        assert match_query_term(paper, token, meta) is True
+
+    def test_fallback_search_title_and_authors(self, make_paper):
+        from arxiv_browser import match_query_term
+
+        paper = make_paper(title="Attention Mechanism", authors="Jane Doe")
+        token = QueryToken(kind="term", value="attention")
+        assert match_query_term(paper, token, None) is True
+
+
+class TestMatchesAdvancedQuery:
+    """Tests for matches_advanced_query()."""
+
+    def test_empty_rpn_matches_all(self, make_paper):
+        from arxiv_browser import matches_advanced_query
+
+        paper = make_paper()
+        assert matches_advanced_query(paper, [], None) is True
+
+    def test_single_term(self, make_paper):
+        from arxiv_browser import matches_advanced_query
+
+        paper = make_paper(categories="cs.AI")
+        rpn = [QueryToken(kind="term", value="cs.AI", field="cat")]
+        assert matches_advanced_query(paper, rpn, None) is True
+
+    def test_and_query(self, make_paper):
+        from arxiv_browser import matches_advanced_query
+
+        paper = make_paper(title="Deep Learning for NLP")
+        rpn = [
+            QueryToken(kind="term", value="deep"),
+            QueryToken(kind="term", value="nlp"),
+            QueryToken(kind="op", value="AND"),
+        ]
+        assert matches_advanced_query(paper, rpn, None) is True
+
+    def test_or_query(self, make_paper):
+        from arxiv_browser import matches_advanced_query
+
+        paper = make_paper(title="Deep Learning")
+        rpn = [
+            QueryToken(kind="term", value="quantum"),
+            QueryToken(kind="term", value="deep"),
+            QueryToken(kind="op", value="OR"),
+        ]
+        assert matches_advanced_query(paper, rpn, None) is True
+
+    def test_not_query(self, make_paper):
+        from arxiv_browser import matches_advanced_query
+
+        paper = make_paper(title="Deep Learning")
+        rpn = [
+            QueryToken(kind="term", value="quantum"),
+            QueryToken(kind="op", value="NOT"),
+        ]
+        assert matches_advanced_query(paper, rpn, None) is True
+
+
+class TestPaperMatchesWatchEntry:
+    """Tests for paper_matches_watch_entry()."""
+
+    def test_author_match(self, make_paper):
+        from arxiv_browser import paper_matches_watch_entry, WatchListEntry
+
+        paper = make_paper(authors="John Smith, Jane Doe")
+        entry = WatchListEntry(pattern="Smith", match_type="author")
+        assert paper_matches_watch_entry(paper, entry) is True
+
+    def test_author_no_match(self, make_paper):
+        from arxiv_browser import paper_matches_watch_entry, WatchListEntry
+
+        paper = make_paper(authors="John Smith")
+        entry = WatchListEntry(pattern="Wilson", match_type="author")
+        assert paper_matches_watch_entry(paper, entry) is False
+
+    def test_title_match(self, make_paper):
+        from arxiv_browser import paper_matches_watch_entry, WatchListEntry
+
+        paper = make_paper(title="Deep Learning for NLP")
+        entry = WatchListEntry(pattern="Deep Learning", match_type="title")
+        assert paper_matches_watch_entry(paper, entry) is True
+
+    def test_keyword_match_in_title(self, make_paper):
+        from arxiv_browser import paper_matches_watch_entry, WatchListEntry
+
+        paper = make_paper(title="Transformer Architecture", abstract_raw="Some abstract")
+        entry = WatchListEntry(pattern="transformer", match_type="keyword")
+        assert paper_matches_watch_entry(paper, entry) is True
+
+    def test_keyword_match_in_abstract(self, make_paper):
+        from arxiv_browser import paper_matches_watch_entry, WatchListEntry
+
+        paper = make_paper(title="Some Title", abstract_raw="attention mechanism")
+        entry = WatchListEntry(pattern="attention", match_type="keyword")
+        assert paper_matches_watch_entry(paper, entry) is True
+
+    def test_case_sensitive(self, make_paper):
+        from arxiv_browser import paper_matches_watch_entry, WatchListEntry
+
+        paper = make_paper(authors="john smith")
+        entry = WatchListEntry(pattern="John", match_type="author", case_sensitive=True)
+        assert paper_matches_watch_entry(paper, entry) is False
+
+    def test_unknown_match_type(self, make_paper):
+        from arxiv_browser import paper_matches_watch_entry, WatchListEntry
+
+        paper = make_paper()
+        entry = WatchListEntry(pattern="test", match_type="unknown")
+        assert paper_matches_watch_entry(paper, entry) is False
+
+
+class TestSortPapers:
+    """Tests for sort_papers()."""
+
+    def test_sort_by_title(self, make_paper):
+        from arxiv_browser import sort_papers
+
+        papers = [
+            make_paper(title="Zebra"),
+            make_paper(title="Apple"),
+            make_paper(title="Mango"),
+        ]
+        result = sort_papers(papers, "title")
+        assert [p.title for p in result] == ["Apple", "Mango", "Zebra"]
+
+    def test_sort_by_date_descending(self, make_paper):
+        from arxiv_browser import sort_papers
+
+        papers = [
+            make_paper(date="Mon, 1 Jan 2024"),
+            make_paper(date="Wed, 15 Jan 2024"),
+            make_paper(date="Tue, 10 Jan 2024"),
+        ]
+        result = sort_papers(papers, "date")
+        assert result[0].date == "Wed, 15 Jan 2024"
+        assert result[-1].date == "Mon, 1 Jan 2024"
+
+    def test_sort_by_arxiv_id_descending(self, make_paper):
+        from arxiv_browser import sort_papers
+
+        papers = [
+            make_paper(arxiv_id="2401.00001"),
+            make_paper(arxiv_id="2401.00003"),
+            make_paper(arxiv_id="2401.00002"),
+        ]
+        result = sort_papers(papers, "arxiv_id")
+        assert [p.arxiv_id for p in result] == ["2401.00003", "2401.00002", "2401.00001"]
+
+    def test_sort_does_not_mutate_original(self, make_paper):
+        from arxiv_browser import sort_papers
+
+        papers = [make_paper(title="B"), make_paper(title="A")]
+        original_order = [p.title for p in papers]
+        sort_papers(papers, "title")
+        assert [p.title for p in papers] == original_order
+
+
+class TestFormatPaperForClipboard:
+    """Tests for format_paper_for_clipboard()."""
+
+    def test_basic_format(self, make_paper):
+        from arxiv_browser import format_paper_for_clipboard
+
+        paper = make_paper(title="Test Paper", authors="Author", arxiv_id="2401.12345")
+        result = format_paper_for_clipboard(paper, abstract_text="Some abstract")
+        assert "Title: Test Paper" in result
+        assert "Authors: Author" in result
+        assert "Abstract: Some abstract" in result
+
+    def test_includes_comments(self, make_paper):
+        from arxiv_browser import format_paper_for_clipboard
+
+        paper = make_paper(comments="10 pages, 5 figures")
+        result = format_paper_for_clipboard(paper)
+        assert "Comments: 10 pages, 5 figures" in result
+
+    def test_omits_none_comments(self, make_paper):
+        from arxiv_browser import format_paper_for_clipboard
+
+        paper = make_paper(comments=None)
+        result = format_paper_for_clipboard(paper)
+        assert "Comments:" not in result
+
+
+class TestFormatPaperAsMarkdown:
+    """Tests for format_paper_as_markdown()."""
+
+    def test_headers_and_sections(self, make_paper):
+        from arxiv_browser import format_paper_as_markdown
+
+        paper = make_paper(title="Test Paper", authors="Author")
+        result = format_paper_as_markdown(paper, abstract_text="Some abstract")
+        assert "## Test Paper" in result
+        assert "### Abstract" in result
+        assert "**Authors:** Author" in result
+
+    def test_arxiv_link_format(self, make_paper):
+        from arxiv_browser import format_paper_as_markdown
+
+        paper = make_paper(arxiv_id="2401.12345")
+        result = format_paper_as_markdown(paper)
+        assert "[2401.12345](https://arxiv.org/abs/2401.12345)" in result
+
+
+class TestGetPdfUrl:
+    """Tests for get_pdf_url()."""
+
+    def test_standard_abs_url(self, make_paper):
+        from arxiv_browser import get_pdf_url
+
+        paper = make_paper(url="https://arxiv.org/abs/2401.12345", arxiv_id="2401.12345")
+        assert get_pdf_url(paper) == "https://arxiv.org/pdf/2401.12345.pdf"
+
+    def test_already_pdf_url(self, make_paper):
+        from arxiv_browser import get_pdf_url
+
+        paper = make_paper(url="https://arxiv.org/pdf/2401.12345.pdf")
+        assert get_pdf_url(paper) == "https://arxiv.org/pdf/2401.12345.pdf"
+
+    def test_pdf_url_without_extension(self, make_paper):
+        from arxiv_browser import get_pdf_url
+
+        paper = make_paper(url="https://arxiv.org/pdf/2401.12345")
+        assert get_pdf_url(paper) == "https://arxiv.org/pdf/2401.12345.pdf"
+
+
+class TestGetPaperUrl:
+    """Tests for get_paper_url()."""
+
+    def test_default_abs_url(self, make_paper):
+        from arxiv_browser import get_paper_url
+
+        paper = make_paper(url="https://arxiv.org/abs/2401.12345")
+        assert get_paper_url(paper) == "https://arxiv.org/abs/2401.12345"
+
+    def test_prefer_pdf(self, make_paper):
+        from arxiv_browser import get_paper_url
+
+        paper = make_paper(url="https://arxiv.org/abs/2401.12345", arxiv_id="2401.12345")
+        result = get_paper_url(paper, prefer_pdf=True)
+        assert "pdf" in result
+
+
+class TestBuildHighlightTerms:
+    """Tests for build_highlight_terms()."""
+
+    def test_title_field(self):
+        from arxiv_browser import build_highlight_terms
+
+        tokens = [QueryToken(kind="term", value="deep", field="title")]
+        result = build_highlight_terms(tokens)
+        assert "deep" in result["title"]
+        assert result["author"] == []
+
+    def test_unfielded_goes_to_title_and_author(self):
+        from arxiv_browser import build_highlight_terms
+
+        tokens = [QueryToken(kind="term", value="smith")]
+        result = build_highlight_terms(tokens)
+        assert "smith" in result["title"]
+        assert "smith" in result["author"]
+
+    def test_operators_skipped(self):
+        from arxiv_browser import build_highlight_terms
+
+        tokens = [QueryToken(kind="op", value="AND")]
+        result = build_highlight_terms(tokens)
+        assert all(v == [] for v in result.values())
+
+    def test_virtual_terms_skipped(self):
+        from arxiv_browser import build_highlight_terms
+
+        tokens = [QueryToken(kind="term", value="unread")]
+        result = build_highlight_terms(tokens)
+        assert all(v == [] for v in result.values())
+
+
+# ============================================================================
 # Run tests
 # ============================================================================
 
