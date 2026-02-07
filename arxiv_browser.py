@@ -615,6 +615,7 @@ def load_config() -> UserConfig:
     """Load configuration from disk.
 
     Returns default config if file doesn't exist or is corrupted.
+    Logs specific errors to help diagnose config issues.
     """
     config_path = get_config_path()
 
@@ -624,8 +625,14 @@ def load_config() -> UserConfig:
     try:
         data = json.loads(config_path.read_text(encoding="utf-8"))
         return _dict_to_config(data)
-    except (json.JSONDecodeError, KeyError, TypeError):
-        # Return default config on any parsing error
+    except json.JSONDecodeError as e:
+        logger.warning(f"Config file has invalid JSON, using defaults: {e}")
+        return UserConfig()
+    except (KeyError, TypeError) as e:
+        logger.warning(f"Config file has invalid structure, using defaults: {e}")
+        return UserConfig()
+    except OSError as e:
+        logger.warning(f"Could not read config file, using defaults: {e}")
         return UserConfig()
 
 
@@ -703,8 +710,8 @@ _LATEX_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 # Pre-compiled regex patterns for parsing arXiv entries
-# Matches: "arXiv:2301.12345" -> captures "2301.12345"
-_ARXIV_ID_PATTERN = re.compile(r"arXiv:(\S+)")
+# Matches: "arXiv:2301.12345" or "arXiv:2301.12345v2" -> captures ID with optional version
+_ARXIV_ID_PATTERN = re.compile(r"arXiv:(\d{4}\.\d{4,5}(?:v\d+)?)")
 # Matches: "Date: Mon, 15 Jan 2024 (v1)" -> captures "Mon, 15 Jan 2024"
 _DATE_PATTERN = re.compile(r"Date:\s*(.+?)(?:\s*\(|$)", re.MULTILINE)
 # Matches multi-line title up to "Authors:" label
@@ -878,18 +885,28 @@ def discover_history_files(
 def get_pdf_download_path(paper: Paper, config: UserConfig) -> Path:
     """Get the local file path for a downloaded PDF.
 
+    Validates that the resulting path stays within the download directory
+    to prevent path traversal attacks via crafted arXiv IDs.
+
     Args:
         paper: The paper to get the download path for.
         config: User configuration with optional custom download directory.
 
     Returns:
         Path where the PDF should be saved.
+
+    Raises:
+        ValueError: If the arXiv ID would escape the download directory.
     """
     if config.pdf_download_dir:
-        base_dir = Path(config.pdf_download_dir)
+        base_dir = Path(config.pdf_download_dir).resolve()
     else:
-        base_dir = Path.home() / DEFAULT_PDF_DOWNLOAD_DIR
-    return base_dir / f"{paper.arxiv_id}.pdf"
+        base_dir = (Path.home() / DEFAULT_PDF_DOWNLOAD_DIR).resolve()
+    result = (base_dir / f"{paper.arxiv_id}.pdf").resolve()
+    # Ensure the resolved path is still under the base directory
+    if not str(result).startswith(str(base_dir) + os.sep) and result.parent != base_dir:
+        raise ValueError(f"Invalid arXiv ID for path construction: {paper.arxiv_id!r}")
+    return result
 
 
 # Category color mapping (Monokai-inspired palette)
