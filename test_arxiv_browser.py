@@ -2034,6 +2034,125 @@ class TestBuildHighlightTerms:
 
 
 # ============================================================================
+# Tests for CLI main() function
+# ============================================================================
+
+
+class TestMainCLI:
+    """Tests for the main() CLI entry point."""
+
+    def test_list_dates_with_files(self, tmp_path, monkeypatch, capsys):
+        """--list-dates should print dates and return 0."""
+        from datetime import date as datemod
+        from arxiv_browser import main
+
+        history_dir = tmp_path / "history"
+        history_dir.mkdir()
+        (history_dir / "2024-01-15.txt").write_text("test content")
+
+        monkeypatch.setattr("sys.argv", ["arxiv_browser", "--list-dates"])
+        monkeypatch.setattr(
+            "arxiv_browser.discover_history_files",
+            lambda base_dir: [(datemod(2024, 1, 15), history_dir / "2024-01-15.txt")],
+        )
+        monkeypatch.setattr("arxiv_browser.load_config", lambda: UserConfig())
+
+        result = main()
+        captured = capsys.readouterr()
+        assert result == 0
+        assert "2024-01-15" in captured.out
+
+    def test_list_dates_empty_history(self, monkeypatch, capsys):
+        """--list-dates with no files should return 1."""
+        from arxiv_browser import main
+
+        monkeypatch.setattr("sys.argv", ["arxiv_browser", "--list-dates"])
+        monkeypatch.setattr("arxiv_browser.discover_history_files", lambda base_dir: [])
+        monkeypatch.setattr("arxiv_browser.load_config", lambda: UserConfig())
+
+        result = main()
+        captured = capsys.readouterr()
+        assert result == 1
+        assert "No history files" in captured.err
+
+    def test_input_file_not_found(self, tmp_path, monkeypatch, capsys):
+        """-i nonexistent.txt should return 1."""
+        from arxiv_browser import main
+
+        nonexistent = str(tmp_path / "nonexistent.txt")
+        monkeypatch.setattr("sys.argv", ["arxiv_browser", "-i", nonexistent])
+        monkeypatch.setattr("arxiv_browser.discover_history_files", lambda base_dir: [])
+        monkeypatch.setattr("arxiv_browser.load_config", lambda: UserConfig())
+
+        result = main()
+        captured = capsys.readouterr()
+        assert result == 1
+        assert "not found" in captured.err
+
+    def test_input_file_is_directory(self, tmp_path, monkeypatch, capsys):
+        """-i /some/dir should return 1."""
+        from arxiv_browser import main
+
+        monkeypatch.setattr("sys.argv", ["arxiv_browser", "-i", str(tmp_path)])
+        monkeypatch.setattr("arxiv_browser.discover_history_files", lambda base_dir: [])
+        monkeypatch.setattr("arxiv_browser.load_config", lambda: UserConfig())
+
+        result = main()
+        captured = capsys.readouterr()
+        assert result == 1
+        assert "directory" in captured.err
+
+    def test_no_papers_exits_with_error(self, tmp_path, monkeypatch, capsys):
+        """Empty file should return 1 with 'No papers'."""
+        from arxiv_browser import main
+
+        empty_file = tmp_path / "empty.txt"
+        empty_file.write_text("")
+        monkeypatch.setattr("sys.argv", ["arxiv_browser", "-i", str(empty_file)])
+        monkeypatch.setattr("arxiv_browser.discover_history_files", lambda base_dir: [])
+        monkeypatch.setattr("arxiv_browser.load_config", lambda: UserConfig())
+
+        result = main()
+        captured = capsys.readouterr()
+        assert result == 1
+        assert "No papers" in captured.err
+
+    def test_invalid_date_format(self, monkeypatch, capsys):
+        """--date Jan-15-2024 should return 1 with 'Invalid date'."""
+        from datetime import date as datemod
+        from arxiv_browser import main
+
+        monkeypatch.setattr("sys.argv", ["arxiv_browser", "--date", "Jan-15-2024"])
+        monkeypatch.setattr(
+            "arxiv_browser.discover_history_files",
+            lambda base_dir: [(datemod(2024, 1, 15), Path("/fake/2024-01-15.txt"))],
+        )
+        monkeypatch.setattr("arxiv_browser.load_config", lambda: UserConfig())
+
+        result = main()
+        captured = capsys.readouterr()
+        assert result == 1
+        assert "Invalid date" in captured.err
+
+    def test_date_not_found(self, monkeypatch, capsys):
+        """--date 2099-01-01 should return 1 with 'No file found'."""
+        from datetime import date as datemod
+        from arxiv_browser import main
+
+        monkeypatch.setattr("sys.argv", ["arxiv_browser", "--date", "2099-01-01"])
+        monkeypatch.setattr(
+            "arxiv_browser.discover_history_files",
+            lambda base_dir: [(datemod(2024, 1, 15), Path("/fake/2024-01-15.txt"))],
+        )
+        monkeypatch.setattr("arxiv_browser.load_config", lambda: UserConfig())
+
+        result = main()
+        captured = capsys.readouterr()
+        assert result == 1
+        assert "No file found" in captured.err
+
+
+# ============================================================================
 # Run tests
 # ============================================================================
 
