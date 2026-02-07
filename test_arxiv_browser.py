@@ -709,22 +709,385 @@ class TestBibTeXExport:
 
     def test_escape_bibtex_special_chars(self):
         """Special characters should be escaped for BibTeX."""
-        # This tests internal functionality that would be part of ArxivBrowser
-        # We test the concept by checking that the BibTeX output is valid
+        from arxiv_browser import escape_bibtex
+
+        assert escape_bibtex("A & B") == r"A \& B"
+        assert escape_bibtex("100%") == r"100\%"
+        assert escape_bibtex("a_b") == r"a\_b"
+        assert escape_bibtex("item #1") == r"item \#1"
+        assert escape_bibtex("{braces}") == r"\{braces\}"
+        # Multiple special chars
+        assert escape_bibtex("A & B: 100% of {items}") == r"A \& B: 100\% of \{items\}"
+        # No special chars
+        assert escape_bibtex("plain text") == "plain text"
+
+    def test_extract_year_from_date(self):
+        """extract_year should find 4-digit years in date strings."""
+        from arxiv_browser import extract_year
+
+        assert extract_year("Mon, 15 Jan 2024") == "2024"
+        assert extract_year("Tue, 3 Feb 2026") == "2026"
+
+    def test_extract_year_empty_string(self):
+        """extract_year should return current year for empty strings."""
+        from arxiv_browser import extract_year
+        from datetime import datetime
+
+        current_year = str(datetime.now().year)
+        assert extract_year("") == current_year
+        assert extract_year("   ") == current_year
+
+    def test_extract_year_no_year(self):
+        """extract_year should return current year when no year found."""
+        from arxiv_browser import extract_year
+        from datetime import datetime
+
+        current_year = str(datetime.now().year)
+        assert extract_year("no date here") == current_year
+
+    def test_generate_citation_key(self):
+        """generate_citation_key should create valid BibTeX keys."""
+        from arxiv_browser import generate_citation_key
+
         paper = Paper(
             arxiv_id="2401.12345",
             date="Mon, 15 Jan 2024",
-            title="Testing & Evaluation: A 100% Comprehensive Study",
-            authors="John Smith",
+            title="Attention Is All You Need",
+            authors="John Smith, Jane Doe",
             categories="cs.AI",
             comments=None,
-            abstract="Test abstract",
+            abstract=None,
             url="https://arxiv.org/abs/2401.12345",
         )
-        # The actual test would require instantiating ArxivBrowser
-        # For now, verify the paper object is valid
-        assert paper.title.count("&") == 1
-        assert paper.title.count("%") == 1
+        key = generate_citation_key(paper)
+        assert key == "smith2024attention"
+
+    def test_generate_citation_key_unknown_author(self):
+        """generate_citation_key should handle empty authors."""
+        from arxiv_browser import generate_citation_key
+
+        paper = Paper(
+            arxiv_id="2401.12345",
+            date="Mon, 15 Jan 2024",
+            title="Some Paper",
+            authors="",
+            categories="cs.AI",
+            comments=None,
+            abstract=None,
+            url="https://arxiv.org/abs/2401.12345",
+        )
+        key = generate_citation_key(paper)
+        assert key.startswith("unknown")
+
+    def test_format_paper_as_bibtex(self):
+        """format_paper_as_bibtex should produce valid BibTeX."""
+        from arxiv_browser import format_paper_as_bibtex
+
+        paper = Paper(
+            arxiv_id="2401.12345",
+            date="Mon, 15 Jan 2024",
+            title="Test Paper",
+            authors="John Smith",
+            categories="cs.AI cs.LG",
+            comments=None,
+            abstract=None,
+            url="https://arxiv.org/abs/2401.12345",
+        )
+        bibtex = format_paper_as_bibtex(paper)
+        assert bibtex.startswith("@misc{")
+        assert "title = {Test Paper}" in bibtex
+        assert "author = {John Smith}" in bibtex
+        assert "year = {2024}" in bibtex
+        assert "eprint = {2401.12345}" in bibtex
+        assert "primaryClass = {cs.AI}" in bibtex
+
+    def test_format_paper_as_bibtex_empty_categories(self):
+        """format_paper_as_bibtex should use 'misc' for empty categories."""
+        from arxiv_browser import format_paper_as_bibtex
+
+        paper = Paper(
+            arxiv_id="2401.12345",
+            date="Mon, 15 Jan 2024",
+            title="Test Paper",
+            authors="John Smith",
+            categories="",
+            comments=None,
+            abstract=None,
+            url="https://arxiv.org/abs/2401.12345",
+        )
+        bibtex = format_paper_as_bibtex(paper)
+        assert "primaryClass = {misc}" in bibtex
+
+
+# ============================================================================
+# Tests for query parser
+# ============================================================================
+
+
+class TestQueryParser:
+    """Tests for query tokenizer and parser functions."""
+
+    def test_tokenize_simple_term(self):
+        """Single word should produce one term token."""
+        from arxiv_browser import tokenize_query
+
+        tokens = tokenize_query("attention")
+        assert len(tokens) == 1
+        assert tokens[0].kind == "term"
+        assert tokens[0].value == "attention"
+
+    def test_tokenize_multiple_terms(self):
+        """Multiple words should produce multiple term tokens."""
+        from arxiv_browser import tokenize_query
+
+        tokens = tokenize_query("attention mechanism")
+        assert len(tokens) == 2
+        assert all(t.kind == "term" for t in tokens)
+
+    def test_tokenize_quoted_phrase(self):
+        """Quoted text should produce a single phrase token."""
+        from arxiv_browser import tokenize_query
+
+        tokens = tokenize_query('"attention mechanism"')
+        assert len(tokens) == 1
+        assert tokens[0].kind == "term"
+        assert tokens[0].value == "attention mechanism"
+        assert tokens[0].phrase is True
+
+    def test_tokenize_operators(self):
+        """AND, OR, NOT should be recognized as operators."""
+        from arxiv_browser import tokenize_query
+
+        tokens = tokenize_query("foo AND bar")
+        assert len(tokens) == 3
+        assert tokens[1].kind == "op"
+        assert tokens[1].value == "AND"
+
+    def test_tokenize_operators_case_insensitive(self):
+        """Operators should be case-insensitive."""
+        from arxiv_browser import tokenize_query
+
+        for op in ["and", "And", "AND"]:
+            tokens = tokenize_query(f"foo {op} bar")
+            assert tokens[1].kind == "op"
+            assert tokens[1].value == "AND"
+
+    def test_tokenize_field_prefix(self):
+        """Field:value should set the field attribute."""
+        from arxiv_browser import tokenize_query
+
+        tokens = tokenize_query("cat:cs.AI")
+        assert len(tokens) == 1
+        assert tokens[0].field == "cat"
+        assert tokens[0].value == "cs.AI"
+
+    def test_tokenize_field_with_quoted_value(self):
+        """Field:"quoted value" should work."""
+        from arxiv_browser import tokenize_query
+
+        tokens = tokenize_query('title:"deep learning"')
+        assert len(tokens) == 1
+        assert tokens[0].field == "title"
+        assert tokens[0].value == "deep learning"
+        assert tokens[0].phrase is True
+
+    def test_tokenize_empty_query(self):
+        """Empty string should produce no tokens."""
+        from arxiv_browser import tokenize_query
+
+        assert tokenize_query("") == []
+        assert tokenize_query("   ") == []
+
+    def test_tokenize_not_operator(self):
+        """NOT should be recognized as a unary operator."""
+        from arxiv_browser import tokenize_query
+
+        tokens = tokenize_query("NOT starred")
+        assert len(tokens) == 2
+        assert tokens[0].kind == "op"
+        assert tokens[0].value == "NOT"
+
+    def test_insert_implicit_and(self):
+        """Adjacent terms should get AND inserted between them."""
+        from arxiv_browser import tokenize_query, insert_implicit_and
+
+        tokens = tokenize_query("foo bar")
+        result = insert_implicit_and(tokens)
+        assert len(result) == 3
+        assert result[1].kind == "op"
+        assert result[1].value == "AND"
+
+    def test_insert_implicit_and_with_explicit_or(self):
+        """Explicit OR should not get extra AND inserted."""
+        from arxiv_browser import tokenize_query, insert_implicit_and
+
+        tokens = tokenize_query("foo OR bar")
+        result = insert_implicit_and(tokens)
+        assert len(result) == 3
+        assert result[1].value == "OR"
+
+    def test_to_rpn_simple(self):
+        """Simple AND expression should convert to RPN."""
+        from arxiv_browser import QueryToken, to_rpn
+
+        tokens = [
+            QueryToken(kind="term", value="a"),
+            QueryToken(kind="op", value="AND"),
+            QueryToken(kind="term", value="b"),
+        ]
+        rpn = to_rpn(tokens)
+        assert len(rpn) == 3
+        assert rpn[0].value == "a"
+        assert rpn[1].value == "b"
+        assert rpn[2].value == "AND"
+
+    def test_to_rpn_precedence(self):
+        """AND should bind tighter than OR."""
+        from arxiv_browser import QueryToken, to_rpn
+
+        # a OR b AND c  =>  a, b, c, AND, OR
+        tokens = [
+            QueryToken(kind="term", value="a"),
+            QueryToken(kind="op", value="OR"),
+            QueryToken(kind="term", value="b"),
+            QueryToken(kind="op", value="AND"),
+            QueryToken(kind="term", value="c"),
+        ]
+        rpn = to_rpn(tokens)
+        assert [t.value for t in rpn] == ["a", "b", "c", "AND", "OR"]
+
+    def test_to_rpn_not_highest_precedence(self):
+        """NOT should have highest precedence."""
+        from arxiv_browser import QueryToken, to_rpn
+
+        # NOT a AND b  =>  a, NOT, b, AND
+        tokens = [
+            QueryToken(kind="op", value="NOT"),
+            QueryToken(kind="term", value="a"),
+            QueryToken(kind="op", value="AND"),
+            QueryToken(kind="term", value="b"),
+        ]
+        rpn = to_rpn(tokens)
+        assert [t.value for t in rpn] == ["a", "NOT", "b", "AND"]
+
+    def test_all_field_types(self):
+        """All supported field prefixes should be recognized."""
+        from arxiv_browser import tokenize_query
+
+        for field in ["title", "author", "abstract", "cat", "tag"]:
+            tokens = tokenize_query(f"{field}:test")
+            assert tokens[0].field == field, f"Field {field} not recognized"
+
+
+# ============================================================================
+# Tests for config I/O
+# ============================================================================
+
+
+class TestConfigIO:
+    """Tests for configuration loading and saving."""
+
+    def test_save_and_load_roundtrip(self, tmp_path, monkeypatch):
+        """Config should survive save/load roundtrip."""
+        from arxiv_browser import UserConfig, save_config, load_config, get_config_path
+
+        config_file = tmp_path / "config.json"
+        monkeypatch.setattr("arxiv_browser.get_config_path", lambda: config_file)
+
+        config = UserConfig(bibtex_export_dir="/custom/path")
+        assert save_config(config) is True
+
+        loaded = load_config()
+        assert loaded.bibtex_export_dir == "/custom/path"
+
+    def test_load_missing_file(self, tmp_path, monkeypatch):
+        """Missing config file should return default UserConfig."""
+        from arxiv_browser import UserConfig, load_config
+
+        config_file = tmp_path / "nonexistent" / "config.json"
+        monkeypatch.setattr("arxiv_browser.get_config_path", lambda: config_file)
+
+        config = load_config()
+        assert config.bibtex_export_dir == ""  # default
+
+    def test_load_corrupted_json(self, tmp_path, monkeypatch):
+        """Corrupted JSON should return default UserConfig."""
+        from arxiv_browser import UserConfig, load_config
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text("not valid json {{{{", encoding="utf-8")
+        monkeypatch.setattr("arxiv_browser.get_config_path", lambda: config_file)
+
+        config = load_config()
+        assert isinstance(config, UserConfig)
+
+    def test_save_creates_directory(self, tmp_path, monkeypatch):
+        """save_config should create parent directories."""
+        from arxiv_browser import UserConfig, save_config
+
+        config_file = tmp_path / "deep" / "nested" / "config.json"
+        monkeypatch.setattr("arxiv_browser.get_config_path", lambda: config_file)
+
+        assert save_config(UserConfig()) is True
+        assert config_file.exists()
+
+    def test_atomic_write_produces_valid_json(self, tmp_path, monkeypatch):
+        """Atomic write should produce valid JSON that can be parsed."""
+        import json
+        from arxiv_browser import UserConfig, save_config
+
+        config_file = tmp_path / "config.json"
+        monkeypatch.setattr("arxiv_browser.get_config_path", lambda: config_file)
+
+        save_config(UserConfig(pdf_download_dir="/test/path"))
+        data = json.loads(config_file.read_text(encoding="utf-8"))
+        assert data["pdf_download_dir"] == "/test/path"
+
+
+# ============================================================================
+# Tests for PDF download path validation
+# ============================================================================
+
+
+class TestPdfDownloadPathValidation:
+    """Tests for path traversal validation in get_pdf_download_path."""
+
+    def test_valid_arxiv_id_produces_correct_path(self, tmp_path):
+        """Normal arXiv ID should produce correct path."""
+        from arxiv_browser import get_pdf_download_path, UserConfig
+
+        paper = Paper(
+            arxiv_id="2401.12345",
+            date="",
+            title="Test",
+            authors="Author",
+            categories="cs.AI",
+            comments=None,
+            abstract=None,
+            url="https://arxiv.org/abs/2401.12345",
+        )
+        config = UserConfig(pdf_download_dir=str(tmp_path))
+        path = get_pdf_download_path(paper, config)
+        assert path.name == "2401.12345.pdf"
+        assert str(path).startswith(str(tmp_path))
+
+    def test_path_traversal_rejected(self, tmp_path):
+        """arXiv ID with path traversal should raise ValueError."""
+        from arxiv_browser import get_pdf_download_path, UserConfig
+
+        paper = Paper(
+            arxiv_id="../../etc/passwd",
+            date="",
+            title="Test",
+            authors="Author",
+            categories="cs.AI",
+            comments=None,
+            abstract=None,
+            url="https://arxiv.org/abs/test",
+        )
+        config = UserConfig(pdf_download_dir=str(tmp_path))
+        with pytest.raises(ValueError, match="Invalid arXiv ID"):
+            get_pdf_download_path(paper, config)
 
 
 # ============================================================================
