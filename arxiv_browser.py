@@ -118,6 +118,17 @@ __all__ = [
     "find_similar_papers",
     "discover_history_files",
     "get_pdf_download_path",
+    # BibTeX formatting (extracted pure functions)
+    "escape_bibtex",
+    "format_authors_bibtex",
+    "extract_year",
+    "generate_citation_key",
+    "format_paper_as_bibtex",
+    # Query parser (extracted pure functions)
+    "QueryToken",
+    "tokenize_query",
+    "insert_implicit_and",
+    "to_rpn",
 ]
 
 # Module logger for debugging
@@ -907,6 +918,182 @@ def get_pdf_download_path(paper: Paper, config: UserConfig) -> Path:
     if not str(result).startswith(str(base_dir) + os.sep) and result.parent != base_dir:
         raise ValueError(f"Invalid arXiv ID for path construction: {paper.arxiv_id!r}")
     return result
+
+
+# ============================================================================
+# BibTeX Formatting Functions (extracted for testability)
+# ============================================================================
+
+
+def escape_bibtex(text: str) -> str:
+    """Escape special characters for BibTeX."""
+    replacements = [
+        ("&", r"\&"),
+        ("%", r"\%"),
+        ("_", r"\_"),
+        ("#", r"\#"),
+        ("{", r"\{"),
+        ("}", r"\}"),
+    ]
+    for old, new in replacements:
+        text = text.replace(old, new)
+    return text
+
+
+def format_authors_bibtex(authors: str) -> str:
+    """Format authors for BibTeX (Last, First and Last, First format)."""
+    return escape_bibtex(authors)
+
+
+def extract_year(date_str: str) -> str:
+    """Extract year from date string, with fallback to current year.
+
+    Args:
+        date_str: Date string like "Mon, 15 Jan 2024".
+
+    Returns:
+        4-digit year string, or current year if not found.
+    """
+    current_year = str(datetime.now().year)
+
+    if not date_str or not date_str.strip():
+        return current_year
+
+    year_match = _YEAR_PATTERN.search(date_str)
+    if year_match:
+        return year_match.group(1)
+
+    return current_year
+
+
+def generate_citation_key(paper: Paper) -> str:
+    """Generate a BibTeX citation key like 'smith2024attention'."""
+    authors = paper.authors.split(",")[0].strip()
+    parts = authors.split()
+    last_name = parts[-1].lower() if parts else "unknown"
+    last_name = "".join(c for c in last_name if c.isalnum())
+
+    year = extract_year(paper.date)
+
+    title_words = paper.title.lower().split()
+    first_word = "paper"
+    for word in title_words:
+        clean_word = "".join(c for c in word if c.isalnum())
+        if clean_word and clean_word not in STOPWORDS:
+            first_word = clean_word
+            break
+
+    return f"{last_name}{year}{first_word}"
+
+
+def format_paper_as_bibtex(paper: Paper) -> str:
+    """Format a paper as a BibTeX @misc entry."""
+    key = generate_citation_key(paper)
+    year = extract_year(paper.date)
+    categories_list = paper.categories.split()
+    primary_class = categories_list[0] if categories_list else "misc"
+    lines = [
+        f"@misc{{{key},",
+        f"  title = {{{escape_bibtex(paper.title)}}},",
+        f"  author = {{{format_authors_bibtex(paper.authors)}}},",
+        f"  year = {{{year}}},",
+        f"  eprint = {{{paper.arxiv_id}}},",
+        f"  archivePrefix = {{arXiv}},",
+        f"  primaryClass = {{{primary_class}}},",
+        f"  url = {{{paper.url}}},",
+        "}",
+    ]
+    return "\n".join(lines)
+
+
+# ============================================================================
+# Query Parser Functions (extracted for testability)
+# ============================================================================
+
+
+def tokenize_query(query: str) -> list[QueryToken]:
+    """Tokenize a query string into terms and operators."""
+    tokens: list[QueryToken] = []
+    i = 0
+    query_len = len(query)
+    while i < query_len:
+        if query[i].isspace():
+            i += 1
+            continue
+        if query[i] == '"':
+            i += 1
+            start = i
+            while i < query_len and query[i] != '"':
+                i += 1
+            value = query[start:i]
+            tokens.append(QueryToken(kind="term", value=value, phrase=True))
+            i += 1
+            continue
+        start = i
+        while i < query_len and not query[i].isspace() and query[i] != ":":
+            i += 1
+        if i < query_len and query[i] == ":":
+            field = query[start:i].lower()
+            if field in {"title", "author", "abstract", "cat", "tag"}:
+                i += 1
+                if i < query_len and query[i] == '"':
+                    i += 1
+                    value_start = i
+                    while i < query_len and query[i] != '"':
+                        i += 1
+                    value = query[value_start:i]
+                    tokens.append(
+                        QueryToken(
+                            kind="term", value=value, field=field, phrase=True
+                        )
+                    )
+                    i += 1
+                else:
+                    value_start = i
+                    while i < query_len and not query[i].isspace():
+                        i += 1
+                    value = query[value_start:i]
+                    tokens.append(QueryToken(kind="term", value=value, field=field))
+                continue
+        while i < query_len and not query[i].isspace():
+            i += 1
+        raw = query[start:i]
+        upper = raw.upper()
+        if upper in {"AND", "OR", "NOT"}:
+            tokens.append(QueryToken(kind="op", value=upper))
+        else:
+            tokens.append(QueryToken(kind="term", value=raw))
+    return tokens
+
+
+def insert_implicit_and(tokens: list[QueryToken]) -> list[QueryToken]:
+    """Insert implicit AND operators between adjacent terms."""
+    result: list[QueryToken] = []
+    prev_was_term = False
+    for token in tokens:
+        token_is_term_start = token.kind == "term" or token.value == "NOT"
+        if prev_was_term and token_is_term_start:
+            result.append(QueryToken(kind="op", value="AND"))
+        result.append(token)
+        prev_was_term = token.kind == "term"
+    return result
+
+
+def to_rpn(tokens: list[QueryToken]) -> list[QueryToken]:
+    """Convert tokens to reverse polish notation using operator precedence."""
+    output: list[QueryToken] = []
+    ops: list[QueryToken] = []
+    precedence = {"OR": 1, "AND": 2, "NOT": 3}
+    for token in tokens:
+        if token.kind == "term":
+            output.append(token)
+            continue
+        while ops and precedence[ops[-1].value] >= precedence[token.value]:
+            output.append(ops.pop())
+        ops.append(token)
+    while ops:
+        output.append(ops.pop())
+    return output
 
 
 # Category color mapping (Monokai-inspired palette)
@@ -2603,58 +2790,7 @@ class ArxivBrowser(App):
         return f" Papers ({len(self.all_papers)} total){date_info}{selection_info}{sort_info}"
 
     def _tokenize_query(self, query: str) -> list[QueryToken]:
-        """Tokenize a query string into terms and operators."""
-        tokens: list[QueryToken] = []
-        i = 0
-        query_len = len(query)
-        while i < query_len:
-            if query[i].isspace():
-                i += 1
-                continue
-            if query[i] == '"':
-                i += 1
-                start = i
-                while i < query_len and query[i] != '"':
-                    i += 1
-                value = query[start:i]
-                tokens.append(QueryToken(kind="term", value=value, phrase=True))
-                i += 1
-                continue
-            start = i
-            while i < query_len and not query[i].isspace() and query[i] != ":":
-                i += 1
-            if i < query_len and query[i] == ":":
-                field = query[start:i].lower()
-                if field in {"title", "author", "abstract", "cat", "tag"}:
-                    i += 1
-                    if i < query_len and query[i] == '"':
-                        i += 1
-                        value_start = i
-                        while i < query_len and query[i] != '"':
-                            i += 1
-                        value = query[value_start:i]
-                        tokens.append(
-                            QueryToken(
-                                kind="term", value=value, field=field, phrase=True
-                            )
-                        )
-                        i += 1
-                    else:
-                        value_start = i
-                        while i < query_len and not query[i].isspace():
-                            i += 1
-                        value = query[value_start:i]
-                        tokens.append(QueryToken(kind="term", value=value, field=field))
-                    continue
-            while i < query_len and not query[i].isspace():
-                i += 1
-            raw = query[start:i]
-            upper = raw.upper()
-            if upper in {"AND", "OR", "NOT"}:
-                tokens.append(QueryToken(kind="op", value=upper))
-            else:
-                tokens.append(QueryToken(kind="term", value=raw))
-        return tokens
+        return tokenize_query(query)
 
     def _is_advanced_query(self, tokens: list[QueryToken]) -> bool:
         return any(
@@ -2666,7 +2802,7 @@ class ArxivBrowser(App):
         )
 
     def _build_highlight_terms(self, tokens: list[QueryToken]) -> None:
-        highlight = {"title": [], "author": [], "abstract": []}
+        highlight: dict[str, list[str]] = {"title": [], "author": [], "abstract": []}
         for token in tokens:
             if token.kind != "term":
                 continue
@@ -2684,30 +2820,10 @@ class ArxivBrowser(App):
         self._highlight_terms = highlight
 
     def _insert_implicit_and(self, tokens: list[QueryToken]) -> list[QueryToken]:
-        result: list[QueryToken] = []
-        prev_was_term = False
-        for token in tokens:
-            token_is_term_start = token.kind == "term" or token.value == "NOT"
-            if prev_was_term and token_is_term_start:
-                result.append(QueryToken(kind="op", value="AND"))
-            result.append(token)
-            prev_was_term = token.kind == "term"
-        return result
+        return insert_implicit_and(tokens)
 
     def _to_rpn(self, tokens: list[QueryToken]) -> list[QueryToken]:
-        output: list[QueryToken] = []
-        ops: list[QueryToken] = []
-        precedence = {"OR": 1, "AND": 2, "NOT": 3}
-        for token in tokens:
-            if token.kind == "term":
-                output.append(token)
-                continue
-            while ops and precedence[ops[-1].value] >= precedence[token.value]:
-                output.append(ops.pop())
-            ops.append(token)
-        while ops:
-            output.append(ops.pop())
-        return output
+        return to_rpn(tokens)
 
     def _matches_advanced_query(self, paper: Paper, rpn: list[QueryToken]) -> bool:
         if not rpn:
@@ -2756,40 +2872,6 @@ class ArxivBrowser(App):
             return bool(metadata and metadata.starred)
         haystack = f"{paper.title} {paper.authors}".lower()
         return value_lower in haystack
-
-    def _filter_by_category(self, category: str) -> list[Paper]:
-        """Filter papers by category substring match."""
-        category_lower = category.lower()
-        return [p for p in self.all_papers if category_lower in p.categories.lower()]
-
-    def _filter_by_tag(self, tag: str) -> list[Paper]:
-        """Filter papers that have the specified tag."""
-        tag_lower = tag.lower()
-        return [
-            p
-            for p in self.all_papers
-            if p.arxiv_id in self._config.paper_metadata
-            and tag_lower
-            in [t.lower() for t in self._config.paper_metadata[p.arxiv_id].tags]
-        ]
-
-    def _filter_unread(self) -> list[Paper]:
-        """Filter to show only unread papers."""
-        return [
-            p
-            for p in self.all_papers
-            if p.arxiv_id not in self._config.paper_metadata
-            or not self._config.paper_metadata[p.arxiv_id].is_read
-        ]
-
-    def _filter_starred(self) -> list[Paper]:
-        """Filter to show only starred papers."""
-        return [
-            p
-            for p in self.all_papers
-            if p.arxiv_id in self._config.paper_metadata
-            and self._config.paper_metadata[p.arxiv_id].starred
-        ]
 
     def _fuzzy_search(self, query: str) -> list[Paper]:
         """Perform fuzzy search on title and authors.
@@ -3285,92 +3367,23 @@ class ArxivBrowser(App):
     # ========================================================================
 
     def _escape_bibtex(self, text: str) -> str:
-        """Escape special characters for BibTeX."""
-        replacements = [
-            ("&", r"\&"),
-            ("%", r"\%"),
-            ("_", r"\_"),
-            ("#", r"\#"),
-            ("{", r"\{"),
-            ("}", r"\}"),
-        ]
-        for old, new in replacements:
-            text = text.replace(old, new)
-        return text
+        return escape_bibtex(text)
 
     def _format_authors_bibtex(self, authors: str) -> str:
-        """Format authors for BibTeX (Last, First and Last, First format)."""
-        # Simple heuristic: split by comma or "and", keep as-is
-        # arXiv authors are typically in "First Last" format
-        return self._escape_bibtex(authors)
+        return format_authors_bibtex(authors)
 
     def _extract_year(self, date_str: str) -> str:
-        """Extract year from date string, with fallback to current year.
-
-        Args:
-            date_str: Date string like "Mon, 15 Jan 2024".
-
-        Returns:
-            4-digit year string, or current year if not found.
-        """
-        current_year = str(datetime.now().year)
-
-        if not date_str or not date_str.strip():
-            return current_year
-
-        # Try to find a 4-digit year (2000-2099) using pre-compiled pattern
-        year_match = _YEAR_PATTERN.search(date_str)
-        if year_match:
-            return year_match.group(1)
-
-        return current_year
+        return extract_year(date_str)
 
     def _generate_citation_key(self, paper: Paper) -> str:
-        """Generate a BibTeX citation key like 'smith2024attention'."""
-        # Extract first author's last name
-        authors = paper.authors.split(",")[0].strip()
-        parts = authors.split()
-        last_name = parts[-1].lower() if parts else "unknown"
-        # Remove non-alphanumeric characters
-        last_name = "".join(c for c in last_name if c.isalnum())
-
-        # Extract year from date
-        year = self._extract_year(paper.date)
-
-        # First significant word from title (uses module-level STOPWORDS)
-        title_words = paper.title.lower().split()
-        first_word = "paper"
-        for word in title_words:
-            clean_word = "".join(c for c in word if c.isalnum())
-            if clean_word and clean_word not in STOPWORDS:
-                first_word = clean_word
-                break
-
-        return f"{last_name}{year}{first_word}"
+        return generate_citation_key(paper)
 
     def _format_paper_as_bibtex(self, paper: Paper) -> str:
-        """Format a paper as a BibTeX @misc entry."""
-        key = self._generate_citation_key(paper)
-        year = self._extract_year(paper.date)
-        # Safely extract primary category (handles empty/whitespace-only strings)
-        categories_list = paper.categories.split()
-        primary_class = categories_list[0] if categories_list else "cs.AI"
-        lines = [
-            f"@misc{{{key},",
-            f"  title = {{{self._escape_bibtex(paper.title)}}},",
-            f"  author = {{{self._format_authors_bibtex(paper.authors)}}},",
-            f"  year = {{{year}}},",
-            f"  eprint = {{{paper.arxiv_id}}},",
-            f"  archivePrefix = {{arXiv}},",
-            f"  primaryClass = {{{primary_class}}},",
-            f"  url = {{{paper.url}}},",
-            "}",
-        ]
-        return "\n".join(lines)
+        return format_paper_as_bibtex(paper)
 
     def action_copy_bibtex(self) -> None:
         """Copy selected papers as BibTeX entries to clipboard."""
-        papers = self._get_papers_to_export()
+        papers = self._get_target_papers()
         if not papers:
             self.notify("No paper selected", title="BibTeX", severity="warning")
             return
@@ -3389,7 +3402,7 @@ class ArxivBrowser(App):
 
     def action_export_bibtex_file(self) -> None:
         """Export selected papers to a BibTeX file for Zotero import."""
-        papers = self._get_papers_to_export()
+        papers = self._get_target_papers()
         if not papers:
             self.notify("No paper selected", title="Export", severity="warning")
             return
@@ -3448,7 +3461,7 @@ class ArxivBrowser(App):
 
     def action_export_markdown(self) -> None:
         """Export selected papers as Markdown to clipboard."""
-        papers = self._get_papers_to_export()
+        papers = self._get_target_papers()
         if not papers:
             self.notify("No paper selected", title="Markdown", severity="warning")
             return
@@ -3474,7 +3487,7 @@ class ArxivBrowser(App):
                 "Failed to copy to clipboard", title="Markdown", severity="error"
             )
 
-    def _get_papers_to_export(self) -> list[Paper]:
+    def _get_target_papers(self) -> list[Paper]:
         """Get papers to export (selected or current)."""
         if self.selected_ids:
             list_view = self.query_one("#paper-list", ListView)
@@ -3773,49 +3786,27 @@ class ArxivBrowser(App):
 
     def action_open_url(self) -> None:
         """Open selected papers' URLs in the default browser."""
-        # If papers are selected, open all of them
-        if self.selected_ids:
-            for arxiv_id in self.selected_ids:
-                paper = self._get_paper_by_id(arxiv_id)
-                if paper:
-                    self._safe_browser_open(self._get_paper_url(paper))
-            self.notify(f"Opening {len(self.selected_ids)} papers", title="Browser")
-        else:
-            # Otherwise, open the currently highlighted paper
-            details = self.query_one(PaperDetails)
-            if details.paper:
-                self._safe_browser_open(self._get_paper_url(details.paper))
-                self.notify(f"Opening {details.paper.arxiv_id}", title="Browser")
+        papers = self._get_target_papers()
+        if not papers:
+            return
+        for paper in papers:
+            self._safe_browser_open(self._get_paper_url(paper))
+        count = len(papers)
+        self.notify(f"Opening {count} paper{'s' if count > 1 else ''}", title="Browser")
 
     def action_open_pdf(self) -> None:
         """Open selected papers' PDF URLs in the default browser."""
-        if self.selected_ids:
-            for arxiv_id in self.selected_ids:
-                paper = self._get_paper_by_id(arxiv_id)
-                if paper:
-                    self._safe_browser_open(self._get_pdf_url(paper))
-            self.notify(f"Opening {len(self.selected_ids)} PDFs", title="PDF")
-        else:
-            details = self.query_one(PaperDetails)
-            if details.paper:
-                self._safe_browser_open(self._get_pdf_url(details.paper))
-                self.notify(f"Opening PDF for {details.paper.arxiv_id}", title="PDF")
+        papers = self._get_target_papers()
+        if not papers:
+            return
+        for paper in papers:
+            self._safe_browser_open(self._get_pdf_url(paper))
+        count = len(papers)
+        self.notify(f"Opening {count} PDF{'s' if count > 1 else ''}", title="PDF")
 
     def action_download_pdf(self) -> None:
         """Download PDFs for selected papers (or current paper)."""
-        # Collect papers to download
-        papers_to_download: list[Paper] = []
-
-        if self.selected_ids:
-            for arxiv_id in self.selected_ids:
-                paper = self._get_paper_by_id(arxiv_id)
-                if paper:
-                    papers_to_download.append(paper)
-        else:
-            details = self.query_one(PaperDetails)
-            if details.paper:
-                papers_to_download.append(details.paper)
-
+        papers_to_download = self._get_target_papers()
         if not papers_to_download:
             self.notify("No papers to download", title="Download", severity="warning")
             return
@@ -3919,21 +3910,7 @@ class ArxivBrowser(App):
 
     def action_copy_selected(self) -> None:
         """Copy selected papers' metadata to clipboard."""
-        # Get papers to copy
-        if self.selected_ids:
-            papers_to_copy = [
-                self._get_paper_by_id(arxiv_id) for arxiv_id in self.selected_ids
-            ]
-            papers_to_copy = [p for p in papers_to_copy if p is not None]
-        else:
-            # Copy currently highlighted paper if none selected
-            details = self.query_one(PaperDetails)
-            if details.paper:
-                papers_to_copy = [details.paper]
-            else:
-                self.notify("No paper selected", title="Copy", severity="warning")
-                return
-
+        papers_to_copy = self._get_target_papers()
         if not papers_to_copy:
             self.notify("No papers to copy", title="Copy", severity="warning")
             return

@@ -1086,7 +1086,7 @@ class TestBibTeXFormattingEdgeCases:
 
         # Should not raise IndexError
         bibtex = app._format_paper_as_bibtex(paper)
-        assert "primaryClass = {cs.AI}" in bibtex  # Fallback to cs.AI
+        assert "primaryClass = {misc}" in bibtex  # Fallback to misc
 
     def test_format_bibtex_whitespace_categories(self):
         """BibTeX formatting should handle whitespace-only categories."""
@@ -1106,7 +1106,7 @@ class TestBibTeXFormattingEdgeCases:
 
         # Should not raise IndexError
         bibtex = app._format_paper_as_bibtex(paper)
-        assert "primaryClass = {cs.AI}" in bibtex  # Fallback to cs.AI
+        assert "primaryClass = {misc}" in bibtex  # Fallback to misc
 
 
 # ============================================================================
