@@ -40,53 +40,33 @@ from arxiv_browser import (
 class TestCleanLatex:
     """Tests for LaTeX cleaning functionality."""
 
-    def test_plain_text_unchanged(self):
-        """Plain text without LaTeX should be returned unchanged (whitespace normalized)."""
-        assert clean_latex("Hello World") == "Hello World"
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("Hello World", "Hello World"),
+            ("Hello    World", "Hello World"),
+            ("  leading and trailing  ", "leading and trailing"),
+            ("No LaTeX here at all", "No LaTeX here at all"),
+        ],
+        ids=["plain", "extra-whitespace", "leading-trailing", "short-circuit"],
+    )
+    def test_whitespace_and_plain_text(self, text, expected):
+        """Plain text and whitespace normalization."""
+        assert clean_latex(text) == expected
 
-    def test_extra_whitespace_normalized(self):
-        """Extra whitespace should be normalized to single spaces."""
-        assert clean_latex("Hello    World") == "Hello World"
-        assert clean_latex("  leading and trailing  ") == "leading and trailing"
-
-    def test_textbf_removed(self):
-        """\\textbf{} command should be removed, keeping content."""
-        assert clean_latex(r"\textbf{bold text}") == "bold text"
-
-    def test_textit_removed(self):
-        """\\textit{} command should be removed, keeping content."""
-        assert clean_latex(r"\textit{italic text}") == "italic text"
-
-    def test_emph_removed(self):
-        """\\emph{} command should be removed, keeping content."""
-        assert clean_latex(r"\emph{emphasized}") == "emphasized"
-
-    def test_math_mode_content_preserved(self):
-        """Math mode content should be preserved without dollar signs."""
-        assert clean_latex(r"$x^2$") == "x^2"
-        assert (
-            clean_latex(r"The formula $E=mc^2$ is famous")
-            == "The formula E=mc^2 is famous"
-        )
-
-    def test_escaped_dollar_sign(self):
-        """Escaped dollar signs should become literal dollar signs."""
-        assert clean_latex(r"Price is \$100") == "Price is $100"
-
-    def test_accented_characters(self):
-        """Common LaTeX accent commands should be converted."""
-        assert clean_latex(r"caf\'e") == "café"
-        # The umlaut pattern only handles braced form like \"{a}
-        assert clean_latex(r"M\"{u}ller") == "Müller"
-        assert clean_latex(r"\c{c}") == "ç"
-
-    def test_ampersand_escaped(self):
-        """Escaped ampersand should become literal ampersand."""
-        assert clean_latex(r"A \& B") == "A & B"
-
-    def test_generic_command_with_braces(self):
-        """Unknown commands with braces should keep brace content."""
-        assert clean_latex(r"\unknown{content}") == "content"
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            (r"\textbf{bold text}", "bold text"),
+            (r"\textit{italic text}", "italic text"),
+            (r"\emph{emphasized}", "emphasized"),
+            (r"\unknown{content}", "content"),
+        ],
+        ids=["textbf", "textit", "emph", "unknown-command"],
+    )
+    def test_command_removal(self, text, expected):
+        """LaTeX commands with braces should keep content."""
+        assert clean_latex(text) == expected
 
     def test_standalone_command_removed(self):
         """Standalone commands without braces should be removed."""
@@ -94,10 +74,22 @@ class TestCleanLatex:
         assert "noindent" not in result
         assert "Some text" in result
 
-    def test_short_circuit_no_latex(self):
-        """Text without backslash or dollar sign should short-circuit."""
-        # This tests the optimization path - should still work correctly
-        assert clean_latex("No LaTeX here at all") == "No LaTeX here at all"
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            (r"$x^2$", "x^2"),
+            (r"The formula $E=mc^2$ is famous", "The formula E=mc^2 is famous"),
+            (r"Price is \$100", "Price is $100"),
+            (r"A \& B", "A & B"),
+            (r"caf\'e", "café"),
+            (r'M\"{u}ller', "Müller"),
+            (r"\c{c}", "ç"),
+        ],
+        ids=["math", "inline-math", "escaped-dollar", "ampersand", "acute", "umlaut", "cedilla"],
+    )
+    def test_special_chars_and_math(self, text, expected):
+        """Math mode, escaped chars, and accent commands."""
+        assert clean_latex(text) == expected
 
     def test_complex_latex_mixed(self):
         """Complex text with multiple LaTeX commands should be cleaned."""
@@ -110,13 +102,7 @@ class TestCleanLatex:
         assert "$" not in result
 
     def test_nested_latex_commands(self):
-        """Nested LaTeX commands should be handled via iterative cleaning.
-
-        Note: Nested braces inside commands (e.g., \\textbf{$O(n^{2})$}) are
-        a known limitation. The regex [^}]* stops at the first closing brace.
-        This test verifies that basic nesting works and commands are stripped.
-        """
-        # Simple nesting without inner braces works well
+        """Nested LaTeX commands should be handled via iterative cleaning."""
         text = r"\textbf{$O(n)$}"
         result = clean_latex(text)
         assert "O(n)" in result
@@ -124,16 +110,9 @@ class TestCleanLatex:
         assert "$" not in result
 
     def test_nested_braces_limitation(self):
-        """Document known limitation: nested braces inside commands.
-
-        LaTeX like \\textbf{$O(n^{2})$} has inner braces in the math.
-        The regex [^}]* stops at the first }, causing partial extraction.
-        This is acceptable for arXiv abstracts where such nesting is rare.
-        """
+        """Document known limitation: nested braces inside commands."""
         text = r"\textbf{$O(n^{2})$}"
         result = clean_latex(text)
-        # The result may be imperfect due to nested brace limitation
-        # At minimum, verify no crash and some content preserved
         assert "O(n" in result
         assert "textbf" not in result.lower()
 
@@ -149,7 +128,6 @@ class TestCleanLatex:
         """Math mode with nested braces should preserve structure."""
         text = r"$\sum_{i=1}^{n}$"
         result = clean_latex(text)
-        # After cleaning, math content is preserved but commands removed
         assert "$" not in result
 
 
@@ -161,26 +139,20 @@ class TestCleanLatex:
 class TestParseArxivDate:
     """Tests for date parsing functionality."""
 
-    def test_valid_date_parsing(self):
+    @pytest.mark.parametrize(
+        "date_str, year, month, day",
+        [
+            ("Mon, 15 Jan 2024", 2024, 1, 15),
+            ("Mon, 15 Jan 2024 00:00:00 GMT", 2024, 1, 15),
+            ("Tue, 25 Dec 2023", 2023, 12, 25),
+            ("  Mon, 15 Jan 2024  ", 2024, 1, 15),
+        ],
+        ids=["basic", "with-timezone", "different-date", "whitespace-trimmed"],
+    )
+    def test_valid_dates(self, date_str, year, month, day):
         """Valid arXiv date strings should be parsed correctly."""
-        result = parse_arxiv_date("Mon, 15 Jan 2024")
-        assert result.year == 2024
-        assert result.month == 1
-        assert result.day == 15
-
-    def test_date_with_time_and_timezone(self):
-        """Dates with time and timezone should parse correctly."""
-        result = parse_arxiv_date("Mon, 15 Jan 2024 00:00:00 GMT")
-        assert result.year == 2024
-        assert result.month == 1
-        assert result.day == 15
-
-    def test_different_valid_dates(self):
-        """Various valid date formats should parse correctly."""
-        result = parse_arxiv_date("Tue, 25 Dec 2023")
-        assert result.year == 2023
-        assert result.month == 12
-        assert result.day == 25
+        result = parse_arxiv_date(date_str)
+        assert (result.year, result.month, result.day) == (year, month, day)
 
     def test_malformed_date_returns_min(self):
         """Malformed dates should return datetime.min."""
@@ -192,11 +164,6 @@ class TestParseArxivDate:
         result = parse_arxiv_date("")
         assert result == datetime.min
 
-    def test_whitespace_trimmed(self):
-        """Leading/trailing whitespace should be trimmed."""
-        result = parse_arxiv_date("  Mon, 15 Jan 2024  ")
-        assert result.year == 2024
-
     def test_date_sorting_order(self):
         """Dates should sort in correct chronological order."""
         dates = [
@@ -205,24 +172,17 @@ class TestParseArxivDate:
             "Tue, 2 Jan 2024",
         ]
         parsed = sorted(dates, key=parse_arxiv_date)
-        # Should be chronological: Jan 2, Jan 9, Jan 15
         assert parse_arxiv_date(parsed[0]).day == 2
         assert parse_arxiv_date(parsed[1]).day == 9
         assert parse_arxiv_date(parsed[2]).day == 15
 
     def test_date_sorting_with_string_would_fail(self):
         """Demonstrate that string sorting produces wrong results."""
-        # String comparison: "Mon, 9" > "Mon, 15" because "9" > "1"
-        # But chronologically: Jan 9 < Jan 15
         dates = ["Mon, 9 Jan 2024", "Mon, 15 Jan 2024"]
-
-        # String sort (WRONG)
         string_sorted = sorted(dates)
-        assert string_sorted[0] == "Mon, 15 Jan 2024"  # Wrong: 15 < 9 alphabetically
-
-        # Date sort (CORRECT)
+        assert string_sorted[0] == "Mon, 15 Jan 2024"
         date_sorted = sorted(dates, key=parse_arxiv_date)
-        assert parse_arxiv_date(date_sorted[0]).day == 9  # Correct: 9 < 15
+        assert parse_arxiv_date(date_sorted[0]).day == 9
 
 
 # ============================================================================
@@ -256,7 +216,6 @@ class TestFormatCategories:
         """Same input should return cached result."""
         result1 = format_categories("cs.AI cs.LG")
         result2 = format_categories("cs.AI cs.LG")
-        # Results should be identical (cached)
         assert result1 == result2
 
 
@@ -356,7 +315,6 @@ Categories: cs.CL
         """Parser should set comments to None when not present."""
         papers = parse_arxiv_file(temp_arxiv_file)
         paper = next(p for p in papers if p.arxiv_id == "2401.67890")
-        # Second paper has no Comments line, so comments should be None
         assert paper.comments is None
 
     def test_parse_extracts_url(self, temp_arxiv_file):
@@ -428,34 +386,45 @@ class TestPaperDataclass:
 
 
 # ============================================================================
-# Tests for constants
+# Tests for constants (consolidated from TestConstants, TestFuzzySearchConstants,
+# TestUIConstants — only keeping tests that enforce real invariants)
 # ============================================================================
 
 
 class TestConstants:
-    """Tests for module constants."""
+    """Tests for module constants with real invariants."""
 
     def test_sort_options_defined(self):
-        """SORT_OPTIONS should be defined with expected values."""
+        """SORT_OPTIONS should contain the three expected sort keys."""
         assert "title" in SORT_OPTIONS
         assert "date" in SORT_OPTIONS
         assert "arxiv_id" in SORT_OPTIONS
 
     def test_default_category_color_is_hex(self):
-        """DEFAULT_CATEGORY_COLOR should be a valid hex color."""
+        """DEFAULT_CATEGORY_COLOR should be a valid #RRGGBB hex color."""
         assert DEFAULT_CATEGORY_COLOR.startswith("#")
-        assert len(DEFAULT_CATEGORY_COLOR) == 7  # #RRGGBB format
-
-    def test_subprocess_timeout_is_positive(self):
-        """SUBPROCESS_TIMEOUT should be a positive number."""
-        assert SUBPROCESS_TIMEOUT > 0
+        assert len(DEFAULT_CATEGORY_COLOR) == 7
 
     def test_arxiv_date_format_valid(self):
         """ARXIV_DATE_FORMAT should be a valid strptime format."""
-        # Test that format works with a sample date
         sample_date = "Mon, 15 Jan 2024"
         parsed = datetime.strptime(sample_date, ARXIV_DATE_FORMAT)
         assert parsed.year == 2024
+
+    def test_fuzzy_score_cutoff_valid_range(self):
+        """FUZZY_SCORE_CUTOFF should be in 0-100 range."""
+        from arxiv_browser import FUZZY_SCORE_CUTOFF
+
+        assert 0 <= FUZZY_SCORE_CUTOFF <= 100
+
+    def test_stopwords_contains_common_words(self):
+        """STOPWORDS should contain common English stopwords."""
+        from arxiv_browser import STOPWORDS
+
+        assert "the" in STOPWORDS
+        assert "and" in STOPWORDS
+        assert "or" in STOPWORDS
+        assert "is" in STOPWORDS
 
 
 # ============================================================================
@@ -635,7 +604,6 @@ class TestPaperSimilarity:
         """Partial overlap should return correct similarity."""
         from arxiv_browser import _jaccard_similarity
 
-        # {a, b} ∩ {b, c} = {b}, |{b}| / |{a, b, c}| = 1/3
         result = _jaccard_similarity({"a", "b"}, {"b", "c"})
         assert abs(result - 1 / 3) < 0.01
 
@@ -680,7 +648,6 @@ class TestPaperSimilarity:
         text_paper = sample_papers[1]
         quantum_paper = sample_papers[2]
 
-        # NLP and text classification papers should be more similar
         nlp_text_sim = compute_paper_similarity(nlp_paper, text_paper)
         nlp_quantum_sim = compute_paper_similarity(nlp_paper, quantum_paper)
 
@@ -714,33 +681,41 @@ class TestPaperSimilarity:
 class TestBibTeXExport:
     """Tests for BibTeX formatting functions."""
 
-    def test_escape_bibtex_special_chars(self):
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("A & B", r"A \& B"),
+            ("100%", r"100\%"),
+            ("a_b", r"a\_b"),
+            ("item #1", r"item \#1"),
+            ("{braces}", r"\{braces\}"),
+            (r"A & B: 100% of {items}", r"A \& B: 100\% of \{items\}"),
+            ("plain text", "plain text"),
+        ],
+        ids=["ampersand", "percent", "underscore", "hash", "braces", "multiple", "none"],
+    )
+    def test_escape_bibtex_special_chars(self, text, expected):
         """Special characters should be escaped for BibTeX."""
-        assert escape_bibtex("A & B") == r"A \& B"
-        assert escape_bibtex("100%") == r"100\%"
-        assert escape_bibtex("a_b") == r"a\_b"
-        assert escape_bibtex("item #1") == r"item \#1"
-        assert escape_bibtex("{braces}") == r"\{braces\}"
-        # Multiple special chars
-        assert escape_bibtex("A & B: 100% of {items}") == r"A \& B: 100\% of \{items\}"
-        # No special chars
-        assert escape_bibtex("plain text") == "plain text"
+        assert escape_bibtex(text) == expected
 
-    def test_extract_year_from_date(self):
-        """extract_year should find 4-digit years in date strings."""
-        assert extract_year("Mon, 15 Jan 2024") == "2024"
-        assert extract_year("Tue, 3 Feb 2026") == "2026"
-
-    def test_extract_year_empty_string(self):
-        """extract_year should return current year for empty strings."""
-        current_year = str(datetime.now().year)
-        assert extract_year("") == current_year
-        assert extract_year("   ") == current_year
-
-    def test_extract_year_no_year(self):
-        """extract_year should return current year when no year found."""
-        current_year = str(datetime.now().year)
-        assert extract_year("no date here") == current_year
+    @pytest.mark.parametrize(
+        "date_str, expected_year",
+        [
+            ("Mon, 15 Jan 2024", "2024"),
+            ("Tue, 3 Feb 2026", "2026"),
+            ("", None),  # None = current year
+            ("   ", None),
+            ("no date here", None),
+        ],
+        ids=["2024", "2026", "empty", "whitespace", "no-year"],
+    )
+    def test_extract_year(self, date_str, expected_year):
+        """extract_year should find 4-digit years or fall back to current year."""
+        result = extract_year(date_str)
+        if expected_year is None:
+            assert result == str(datetime.now().year)
+        else:
+            assert result == expected_year
 
     def test_generate_citation_key(self):
         """generate_citation_key should create valid BibTeX keys."""
@@ -844,12 +819,12 @@ class TestQueryParser:
         assert tokens[1].kind == "op"
         assert tokens[1].value == "AND"
 
-    def test_tokenize_operators_case_insensitive(self):
+    @pytest.mark.parametrize("op", ["and", "And", "AND"], ids=["lower", "mixed", "upper"])
+    def test_tokenize_operators_case_insensitive(self, op):
         """Operators should be case-insensitive."""
-        for op in ["and", "And", "AND"]:
-            tokens = tokenize_query(f"foo {op} bar")
-            assert tokens[1].kind == "op"
-            assert tokens[1].value == "AND"
+        tokens = tokenize_query(f"foo {op} bar")
+        assert tokens[1].kind == "op"
+        assert tokens[1].value == "AND"
 
     def test_tokenize_field_prefix(self):
         """Field:value should set the field attribute."""
@@ -908,7 +883,6 @@ class TestQueryParser:
 
     def test_to_rpn_precedence(self):
         """AND should bind tighter than OR."""
-        # a OR b AND c  =>  a, b, c, AND, OR
         tokens = [
             QueryToken(kind="term", value="a"),
             QueryToken(kind="op", value="OR"),
@@ -921,7 +895,6 @@ class TestQueryParser:
 
     def test_to_rpn_not_highest_precedence(self):
         """NOT should have highest precedence."""
-        # NOT a AND b  =>  a, NOT, b, AND
         tokens = [
             QueryToken(kind="op", value="NOT"),
             QueryToken(kind="term", value="a"),
@@ -931,11 +904,11 @@ class TestQueryParser:
         rpn = to_rpn(tokens)
         assert [t.value for t in rpn] == ["a", "NOT", "b", "AND"]
 
-    def test_all_field_types(self):
+    @pytest.mark.parametrize("field", ["title", "author", "abstract", "cat", "tag"])
+    def test_all_field_types(self, field):
         """All supported field prefixes should be recognized."""
-        for field in ["title", "author", "abstract", "cat", "tag"]:
-            tokens = tokenize_query(f"{field}:test")
-            assert tokens[0].field == field, f"Field {field} not recognized"
+        tokens = tokenize_query(f"{field}:test")
+        assert tokens[0].field == field, f"Field {field} not recognized"
 
 
 # ============================================================================
@@ -948,8 +921,6 @@ class TestConfigIO:
 
     def test_save_and_load_roundtrip(self, tmp_path, monkeypatch):
         """Config should survive save/load roundtrip."""
-        from arxiv_browser import get_config_path
-
         config_file = tmp_path / "config.json"
         monkeypatch.setattr("arxiv_browser.get_config_path", lambda: config_file)
 
@@ -1039,42 +1010,6 @@ class TestPdfDownloadPathValidation:
 
 
 # ============================================================================
-# Tests for fuzzy search constants
-# ============================================================================
-
-
-class TestFuzzySearchConstants:
-    """Tests for fuzzy search configuration."""
-
-    def test_fuzzy_score_cutoff_valid_range(self):
-        """FUZZY_SCORE_CUTOFF should be in valid range."""
-        from arxiv_browser import FUZZY_SCORE_CUTOFF
-
-        assert 0 <= FUZZY_SCORE_CUTOFF <= 100
-
-    def test_fuzzy_limit_is_positive(self):
-        """FUZZY_LIMIT should be positive."""
-        from arxiv_browser import FUZZY_LIMIT
-
-        assert FUZZY_LIMIT > 0
-
-    def test_similarity_top_n_is_positive(self):
-        """SIMILARITY_TOP_N should be positive."""
-        from arxiv_browser import SIMILARITY_TOP_N
-
-        assert SIMILARITY_TOP_N > 0
-
-    def test_stopwords_contains_common_words(self):
-        """STOPWORDS should contain common English stopwords."""
-        from arxiv_browser import STOPWORDS
-
-        assert "the" in STOPWORDS
-        assert "and" in STOPWORDS
-        assert "or" in STOPWORDS
-        assert "is" in STOPWORDS
-
-
-# ============================================================================
 # Tests for truncate_text function
 # ============================================================================
 
@@ -1146,20 +1081,18 @@ class TestSafeGetAndTypeValidation:
         """_dict_to_config should handle invalid types gracefully."""
         from arxiv_browser import _dict_to_config
 
-        # Pass invalid types for various fields
         invalid_data = {
             "session": {
-                "scroll_index": "not_an_int",  # Should be int
-                "current_filter": 123,  # Should be str
-                "sort_index": None,  # Should be int
+                "scroll_index": "not_an_int",
+                "current_filter": 123,
+                "sort_index": None,
             },
-            "paper_metadata": "not_a_dict",  # Should be dict
-            "version": "1",  # Should be int
+            "paper_metadata": "not_a_dict",
+            "version": "1",
         }
 
         config = _dict_to_config(invalid_data)
 
-        # Should use defaults when types don't match
         assert config.session.scroll_index == 0
         assert config.session.current_filter == ""
         assert config.session.sort_index == 0
@@ -1177,7 +1110,6 @@ class TestPaperDeduplication:
 
     def test_duplicate_arxiv_ids_skipped(self, tmp_path):
         """Parser should skip papers with duplicate arXiv IDs."""
-        # Create a file with duplicate entries
         content = """\\
 arXiv:2401.00001
 Date: Mon, 15 Jan 2024
@@ -1216,42 +1148,13 @@ This is the second unique paper abstract.
 
         papers = parse_arxiv_file(file_path)
 
-        # Should have only 2 unique papers
         assert len(papers) == 2
         arxiv_ids = [p.arxiv_id for p in papers]
         assert "2401.00001" in arxiv_ids
         assert "2401.00002" in arxiv_ids
 
-        # First paper should be the one kept (first occurrence wins)
         first_paper = next(p for p in papers if p.arxiv_id == "2401.00001")
         assert first_paper.title == "First Paper"
-
-
-# ============================================================================
-# Tests for UI truncation constants
-# ============================================================================
-
-
-class TestUIConstants:
-    """Tests for UI-related constants."""
-
-    def test_recommendation_title_max_len_positive(self):
-        """RECOMMENDATION_TITLE_MAX_LEN should be positive."""
-        from arxiv_browser import RECOMMENDATION_TITLE_MAX_LEN
-
-        assert RECOMMENDATION_TITLE_MAX_LEN > 0
-
-    def test_preview_abstract_max_len_positive(self):
-        """PREVIEW_ABSTRACT_MAX_LEN should be positive."""
-        from arxiv_browser import PREVIEW_ABSTRACT_MAX_LEN
-
-        assert PREVIEW_ABSTRACT_MAX_LEN > 0
-
-    def test_bookmark_name_max_len_positive(self):
-        """BOOKMARK_NAME_MAX_LEN should be positive."""
-        from arxiv_browser import BOOKMARK_NAME_MAX_LEN
-
-        assert BOOKMARK_NAME_MAX_LEN > 0
 
 
 # ============================================================================
@@ -1283,15 +1186,12 @@ class TestHistoryFileDiscovery:
         history_dir = tmp_path / "history"
         history_dir.mkdir()
 
-        # Create 10 history files
         for i in range(10):
             (history_dir / f"2024-01-{i + 10:02d}.txt").write_text("test")
 
-        # Request only 5
         result = discover_history_files(tmp_path, limit=5)
         assert len(result) == 5
 
-        # Should be sorted newest first
         dates = [d for d, _ in result]
         assert dates == sorted(dates, reverse=True)
 
@@ -1308,7 +1208,6 @@ class TestHistoryFileDiscovery:
         history_dir = tmp_path / "history"
         history_dir.mkdir()
 
-        # Create valid and invalid files
         (history_dir / "2024-01-15.txt").write_text("valid")
         (history_dir / "invalid.txt").write_text("invalid")
         (history_dir / "2024-13-01.txt").write_text("invalid month")
@@ -1331,7 +1230,6 @@ class TestYearExtractionEdgeCases:
         """Year extraction should handle whitespace-only date."""
         from arxiv_browser import ArxivBrowser
 
-        # Create minimal app to test method
         paper = Paper(
             arxiv_id="test",
             date="   ",
@@ -1342,10 +1240,8 @@ class TestYearExtractionEdgeCases:
             abstract="Test",
             url="http://test",
         )
-        papers = [paper]
-        app = ArxivBrowser(papers)
+        app = ArxivBrowser([paper])
 
-        # Should return current year for whitespace
         result = app._extract_year("   ")
         assert len(result) == 4
         assert result.isdigit()
@@ -1388,16 +1284,15 @@ class TestBibTeXFormattingEdgeCases:
             date="Mon, 15 Jan 2024",
             title="Test Paper",
             authors="John Smith",
-            categories="",  # Empty categories
+            categories="",
             comments=None,
             abstract="Test abstract",
             url="https://arxiv.org/abs/2401.12345",
         )
         app = ArxivBrowser([paper])
 
-        # Should not raise IndexError
         bibtex = app._format_paper_as_bibtex(paper)
-        assert "primaryClass = {misc}" in bibtex  # Fallback to misc
+        assert "primaryClass = {misc}" in bibtex
 
     def test_format_bibtex_whitespace_categories(self):
         """BibTeX formatting should handle whitespace-only categories."""
@@ -1408,16 +1303,15 @@ class TestBibTeXFormattingEdgeCases:
             date="Mon, 15 Jan 2024",
             title="Test Paper",
             authors="John Smith",
-            categories="   ",  # Whitespace only
+            categories="   ",
             comments=None,
             abstract="Test abstract",
             url="https://arxiv.org/abs/2401.12345",
         )
         app = ArxivBrowser([paper])
 
-        # Should not raise IndexError
         bibtex = app._format_paper_as_bibtex(paper)
-        assert "primaryClass = {misc}" in bibtex  # Fallback to misc
+        assert "primaryClass = {misc}" in bibtex
 
 
 # ============================================================================
@@ -1614,7 +1508,6 @@ class TestModuleExports:
             main,
         )
 
-        # Just verify they're importable
         assert Paper is not None
         assert ArxivBrowser is not None
 
