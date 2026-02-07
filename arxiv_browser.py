@@ -56,6 +56,7 @@ import json
 import logging
 import os
 import platform
+import tempfile
 import re
 import subprocess
 import sys
@@ -629,7 +630,10 @@ def load_config() -> UserConfig:
 
 
 def save_config(config: UserConfig) -> bool:
-    """Save configuration to disk.
+    """Save configuration to disk atomically.
+
+    Uses write-to-tempfile + os.replace() to prevent partial writes
+    on crash/interrupt from corrupting the config file.
 
     Creates the config directory if it doesn't exist.
     Returns True on success, False on failure.
@@ -640,14 +644,29 @@ def save_config(config: UserConfig) -> bool:
         # Create directory if needed
         config_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Write config with pretty formatting
+        # Write to temp file in same directory, then atomically replace
         data = _config_to_dict(config)
-        config_path.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False),
-            encoding="utf-8",
+        json_str = json.dumps(data, indent=2, ensure_ascii=False)
+        fd, tmp_path = tempfile.mkstemp(
+            dir=config_path.parent, suffix=".tmp", prefix=".config-"
         )
+        closed = False
+        try:
+            os.write(fd, json_str.encode("utf-8"))
+            os.close(fd)
+            closed = True
+            os.replace(tmp_path, config_path)
+        except BaseException:
+            if not closed:
+                os.close(fd)
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
         return True
-    except OSError:
+    except OSError as e:
+        logger.error(f"Failed to save config: {e}")
         return False
 
 
@@ -2243,6 +2262,9 @@ class ArxivBrowser(App):
         # Vim-style marks state
         self._pending_mark_action: str | None = None  # "set" or "goto"
 
+        # Background task tracking (prevent GC of fire-and-forget tasks)
+        self._background_tasks: set[asyncio.Task[None]] = set()
+
         # PDF download state
         self._download_queue: deque[Paper] = deque()
         self._downloading: set[str] = set()  # arxiv_ids currently downloading
@@ -2332,6 +2354,13 @@ class ArxivBrowser(App):
         if timer is not None:
             timer.stop()
 
+    def _track_task(self, coro: Any) -> asyncio.Task[None]:
+        """Create an asyncio task and track it to prevent garbage collection."""
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
+
     def _apply_category_overrides(self) -> None:
         """Apply category color overrides from config."""
         CATEGORY_COLORS.clear()
@@ -2357,7 +2386,7 @@ class ArxivBrowser(App):
             return
         if len(self._abstract_loading) < MAX_ABSTRACT_LOADS:
             self._abstract_loading.add(paper.arxiv_id)
-            asyncio.create_task(self._load_abstract_async(paper))
+            self._track_task(self._load_abstract_async(paper))
             return
         self._abstract_queue.append(paper)
         self._abstract_pending_ids.add(paper.arxiv_id)
@@ -2372,7 +2401,7 @@ class ArxivBrowser(App):
             if paper.arxiv_id in self._abstract_cache:
                 continue
             self._abstract_loading.add(paper.arxiv_id)
-            asyncio.create_task(self._load_abstract_async(paper))
+            self._track_task(self._load_abstract_async(paper))
 
     def _get_abstract_text(self, paper: Paper, allow_async: bool) -> str | None:
         """Return cached abstract text, scheduling async load if needed."""
@@ -2392,14 +2421,18 @@ class ArxivBrowser(App):
         return None
 
     async def _load_abstract_async(self, paper: Paper) -> None:
-        cleaned = await asyncio.to_thread(clean_latex, paper.abstract_raw)
-        self._abstract_cache[paper.arxiv_id] = cleaned
-        # Only update if not already set (idempotent to avoid race conditions)
-        if paper.abstract is None:
-            paper.abstract = cleaned
-        self._abstract_loading.discard(paper.arxiv_id)
-        self._drain_abstract_queue()
-        self._update_abstract_display(paper.arxiv_id)
+        try:
+            cleaned = await asyncio.to_thread(clean_latex, paper.abstract_raw)
+            self._abstract_cache[paper.arxiv_id] = cleaned
+            # Only update if not already set (idempotent to avoid race conditions)
+            if paper.abstract is None:
+                paper.abstract = cleaned
+            self._update_abstract_display(paper.arxiv_id)
+        except Exception:
+            logger.debug(f"Abstract load failed for {paper.arxiv_id}", exc_info=True)
+        finally:
+            self._abstract_loading.discard(paper.arxiv_id)
+            self._drain_abstract_queue()
 
     def _update_abstract_display(self, arxiv_id: str) -> None:
         try:
@@ -2446,7 +2479,8 @@ class ArxivBrowser(App):
                 current_date=current_date_str,
             )
 
-        save_config(self._config)
+        if not save_config(self._config):
+            logger.warning("Failed to save session state to config file")
 
     @on(ListView.Selected)
     def on_list_selected(self, event: ListView.Selected) -> None:
@@ -3610,10 +3644,9 @@ class ArxivBrowser(App):
         url = self._get_pdf_url(paper)
         path = get_pdf_download_path(paper, self._config)
 
-        # Create directory if needed
-        path.parent.mkdir(parents=True, exist_ok=True)
-
         try:
+            # Create directory if needed (inside try for permission/disk errors)
+            path.parent.mkdir(parents=True, exist_ok=True)
             async with httpx.AsyncClient() as client:
                 response = await client.get(
                     url,
@@ -3635,25 +3668,30 @@ class ArxivBrowser(App):
             if paper.arxiv_id in self._downloading:
                 continue
             self._downloading.add(paper.arxiv_id)
-            asyncio.create_task(self._process_single_download(paper))
+            self._track_task(self._process_single_download(paper))
 
     async def _process_single_download(self, paper: Paper) -> None:
         """Process a single download and update state."""
-        success = await self._download_pdf_async(paper)
-        self._download_results[paper.arxiv_id] = success
-        self._downloading.discard(paper.arxiv_id)
+        try:
+            success = await self._download_pdf_async(paper)
+            self._download_results[paper.arxiv_id] = success
+        except Exception:
+            logger.debug(f"Download failed for {paper.arxiv_id}", exc_info=True)
+            self._download_results[paper.arxiv_id] = False
+        finally:
+            self._downloading.discard(paper.arxiv_id)
 
-        # Update progress
-        completed = len(self._download_results)
-        total = self._download_total
-        self._update_download_progress(completed, total)
+            # Update progress
+            completed = len(self._download_results)
+            total = self._download_total
+            self._update_download_progress(completed, total)
 
-        # Start more downloads if queue has items
-        self._start_downloads()
+            # Start more downloads if queue has items
+            self._start_downloads()
 
-        # Check if batch is complete
-        if completed == total:
-            self._finish_download_batch()
+            # Check if batch is complete
+            if completed == total:
+                self._finish_download_batch()
 
     def _update_download_progress(self, completed: int, total: int) -> None:
         """Update status bar with download progress."""
