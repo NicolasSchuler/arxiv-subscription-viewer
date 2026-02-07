@@ -129,6 +129,17 @@ __all__ = [
     "tokenize_query",
     "insert_implicit_and",
     "to_rpn",
+    # ArxivBrowser extracted pure functions
+    "is_advanced_query",
+    "build_highlight_terms",
+    "match_query_term",
+    "matches_advanced_query",
+    "paper_matches_watch_entry",
+    "sort_papers",
+    "get_pdf_url",
+    "get_paper_url",
+    "format_paper_for_clipboard",
+    "format_paper_as_markdown",
 ]
 
 # Module logger for debugging
@@ -2345,6 +2356,205 @@ class BookmarkTabBar(Horizontal):
         self.mount(Label("[+]", classes="bookmark-add", id="bookmark-add"))
 
 
+# ============================================================================
+# Extracted pure functions (for testability)
+# ============================================================================
+
+
+def is_advanced_query(tokens: list[QueryToken]) -> bool:
+    """Check if a query uses advanced features (operators, fields, phrases, virtual terms)."""
+    return any(
+        tok.kind == "op"
+        or tok.field
+        or tok.phrase
+        or tok.value.lower() in {"unread", "starred"}
+        for tok in tokens
+    )
+
+
+def build_highlight_terms(tokens: list[QueryToken]) -> dict[str, list[str]]:
+    """Build highlight term lists from query tokens by field."""
+    highlight: dict[str, list[str]] = {"title": [], "author": [], "abstract": []}
+    for token in tokens:
+        if token.kind != "term":
+            continue
+        if token.value.lower() in {"unread", "starred"}:
+            continue
+        if token.field == "title":
+            highlight["title"].append(token.value)
+        elif token.field == "author":
+            highlight["author"].append(token.value)
+        elif token.field == "abstract":
+            highlight["abstract"].append(token.value)
+        elif token.field is None:
+            highlight["title"].append(token.value)
+            highlight["author"].append(token.value)
+    return highlight
+
+
+def match_query_term(
+    paper: Paper,
+    token: QueryToken,
+    paper_metadata: PaperMetadata | None,
+    abstract_text: str = "",
+) -> bool:
+    """Check if a paper matches a single query term.
+
+    Args:
+        paper: The paper to match against.
+        token: The query token to match.
+        paper_metadata: The paper's user metadata (for tag/read/star lookups).
+        abstract_text: Pre-cleaned abstract text.
+    """
+    value = token.value.strip()
+    if not value:
+        return True
+    value_lower = value.lower()
+    if token.field == "cat":
+        return value_lower in paper.categories.lower()
+    if token.field == "tag":
+        if not paper_metadata:
+            return False
+        return any(value_lower in tag.lower() for tag in paper_metadata.tags)
+    if token.field == "title":
+        return value_lower in paper.title.lower()
+    if token.field == "author":
+        return value_lower in paper.authors.lower()
+    if token.field == "abstract":
+        return value_lower in abstract_text.lower()
+    if value_lower == "unread":
+        return not paper_metadata or not paper_metadata.is_read
+    if value_lower == "starred":
+        return bool(paper_metadata and paper_metadata.starred)
+    haystack = f"{paper.title} {paper.authors}".lower()
+    return value_lower in haystack
+
+
+def matches_advanced_query(
+    paper: Paper,
+    rpn: list[QueryToken],
+    paper_metadata: PaperMetadata | None,
+    abstract_text: str = "",
+) -> bool:
+    """Evaluate an RPN query expression against a paper.
+
+    Args:
+        paper: The paper to match against.
+        rpn: Query in Reverse Polish Notation.
+        paper_metadata: The paper's user metadata.
+        abstract_text: Pre-cleaned abstract text.
+    """
+    if not rpn:
+        return True
+    stack: list[bool] = []
+    for token in rpn:
+        if token.kind == "term":
+            stack.append(match_query_term(paper, token, paper_metadata, abstract_text))
+            continue
+        if token.value == "NOT":
+            value = stack.pop() if stack else False
+            stack.append(not value)
+        else:
+            right = stack.pop() if stack else False
+            left = stack.pop() if stack else False
+            if token.value == "AND":
+                stack.append(left and right)
+            else:
+                stack.append(left or right)
+    return stack[-1] if stack else True
+
+
+def paper_matches_watch_entry(paper: Paper, entry: WatchListEntry) -> bool:
+    """Check if a paper matches a watch list entry."""
+    pattern = entry.pattern if entry.case_sensitive else entry.pattern.lower()
+
+    if entry.match_type == "author":
+        text = paper.authors if entry.case_sensitive else paper.authors.lower()
+        return pattern in text
+    elif entry.match_type == "title":
+        text = paper.title if entry.case_sensitive else paper.title.lower()
+        return pattern in text
+    elif entry.match_type == "keyword":
+        if entry.case_sensitive:
+            return pattern in paper.title or pattern in paper.abstract_raw
+        else:
+            return (
+                pattern in paper.title.lower()
+                or pattern in paper.abstract_raw.lower()
+            )
+    return False
+
+
+def sort_papers(papers: list[Paper], sort_key: str) -> list[Paper]:
+    """Sort papers by the given key, returning a new sorted list.
+
+    Args:
+        papers: List of papers to sort.
+        sort_key: One of "title", "date", "arxiv_id".
+    """
+    if sort_key == "title":
+        return sorted(papers, key=lambda p: p.title.lower())
+    elif sort_key == "date":
+        return sorted(papers, key=lambda p: parse_arxiv_date(p.date), reverse=True)
+    elif sort_key == "arxiv_id":
+        return sorted(papers, key=lambda p: p.arxiv_id, reverse=True)
+    return list(papers)
+
+
+def get_pdf_url(paper: Paper) -> str:
+    """Get the PDF URL for a paper."""
+    if "arxiv.org/pdf/" in paper.url:
+        return paper.url if paper.url.endswith(".pdf") else f"{paper.url}.pdf"
+    return f"https://arxiv.org/pdf/{paper.arxiv_id}.pdf"
+
+
+def get_paper_url(paper: Paper, prefer_pdf: bool = False) -> str:
+    """Get the preferred URL for a paper (abs or PDF)."""
+    if prefer_pdf:
+        return get_pdf_url(paper)
+    return paper.url
+
+
+def format_paper_for_clipboard(paper: Paper, abstract_text: str = "") -> str:
+    """Format a paper's metadata for clipboard export."""
+    lines = [
+        f"Title: {paper.title}",
+        f"Authors: {paper.authors}",
+        f"arXiv: {paper.arxiv_id}",
+        f"Date: {paper.date}",
+        f"Categories: {paper.categories}",
+    ]
+    if paper.comments:
+        lines.append(f"Comments: {paper.comments}")
+    lines.append(f"URL: {paper.url}")
+    lines.append("")
+    lines.append(f"Abstract: {abstract_text}")
+    return "\n".join(lines)
+
+
+def format_paper_as_markdown(paper: Paper, abstract_text: str = "") -> str:
+    """Format a paper as Markdown."""
+    lines = [
+        f"## {paper.title}",
+        "",
+        f"**arXiv:** [{paper.arxiv_id}]({paper.url})",
+        f"**Date:** {paper.date}",
+        f"**Categories:** {paper.categories}",
+        f"**Authors:** {paper.authors}",
+    ]
+    if paper.comments:
+        lines.append(f"**Comments:** {paper.comments}")
+    lines.extend(
+        [
+            "",
+            "### Abstract",
+            "",
+            abstract_text,
+        ]
+    )
+    return "\n".join(lines)
+
+
 class ArxivBrowser(App):
     """A TUI application to browse arXiv papers."""
 
@@ -2948,31 +3158,10 @@ class ArxivBrowser(App):
         return tokenize_query(query)
 
     def _is_advanced_query(self, tokens: list[QueryToken]) -> bool:
-        return any(
-            tok.kind == "op"
-            or tok.field
-            or tok.phrase
-            or tok.value.lower() in {"unread", "starred"}
-            for tok in tokens
-        )
+        return is_advanced_query(tokens)
 
     def _build_highlight_terms(self, tokens: list[QueryToken]) -> None:
-        highlight: dict[str, list[str]] = {"title": [], "author": [], "abstract": []}
-        for token in tokens:
-            if token.kind != "term":
-                continue
-            if token.value.lower() in {"unread", "starred"}:
-                continue
-            if token.field == "title":
-                highlight["title"].append(token.value)
-            elif token.field == "author":
-                highlight["author"].append(token.value)
-            elif token.field == "abstract":
-                highlight["abstract"].append(token.value)
-            elif token.field is None:
-                highlight["title"].append(token.value)
-                highlight["author"].append(token.value)
-        self._highlight_terms = highlight
+        self._highlight_terms = build_highlight_terms(tokens)
 
     def _insert_implicit_and(self, tokens: list[QueryToken]) -> list[QueryToken]:
         return insert_implicit_and(tokens)
@@ -2981,52 +3170,14 @@ class ArxivBrowser(App):
         return to_rpn(tokens)
 
     def _matches_advanced_query(self, paper: Paper, rpn: list[QueryToken]) -> bool:
-        if not rpn:
-            return True
-        stack: list[bool] = []
-        for token in rpn:
-            if token.kind == "term":
-                stack.append(self._match_query_term(paper, token))
-                continue
-            if token.value == "NOT":
-                value = stack.pop() if stack else False
-                stack.append(not value)
-            else:
-                right = stack.pop() if stack else False
-                left = stack.pop() if stack else False
-                if token.value == "AND":
-                    stack.append(left and right)
-                else:
-                    stack.append(left or right)
-        return stack[-1] if stack else True
+        metadata = self._config.paper_metadata.get(paper.arxiv_id)
+        abstract_text = self._get_abstract_text(paper, allow_async=False) or ""
+        return matches_advanced_query(paper, rpn, metadata, abstract_text)
 
     def _match_query_term(self, paper: Paper, token: QueryToken) -> bool:
-        value = token.value.strip()
-        if not value:
-            return True
-        value_lower = value.lower()
-        if token.field == "cat":
-            return value_lower in paper.categories.lower()
-        if token.field == "tag":
-            metadata = self._config.paper_metadata.get(paper.arxiv_id)
-            if not metadata:
-                return False
-            return any(value_lower in tag.lower() for tag in metadata.tags)
-        if token.field == "title":
-            return value_lower in paper.title.lower()
-        if token.field == "author":
-            return value_lower in paper.authors.lower()
-        if token.field == "abstract":
-            abstract_text = self._get_abstract_text(paper, allow_async=False) or ""
-            return value_lower in abstract_text.lower()
-        if value_lower == "unread":
-            metadata = self._config.paper_metadata.get(paper.arxiv_id)
-            return not metadata or not metadata.is_read
-        if value_lower == "starred":
-            metadata = self._config.paper_metadata.get(paper.arxiv_id)
-            return bool(metadata and metadata.starred)
-        haystack = f"{paper.title} {paper.authors}".lower()
-        return value_lower in haystack
+        metadata = self._config.paper_metadata.get(paper.arxiv_id)
+        abstract_text = self._get_abstract_text(paper, allow_async=False) or ""
+        return match_query_term(paper, token, metadata, abstract_text)
 
     def _fuzzy_search(self, query: str) -> list[Paper]:
         """Perform fuzzy search on title and authors.
@@ -3136,16 +3287,7 @@ class ArxivBrowser(App):
     def _sort_papers(self) -> None:
         """Sort filtered_papers according to current sort order."""
         sort_key = SORT_OPTIONS[self._sort_index]
-        if sort_key == "title":
-            self.filtered_papers.sort(key=lambda p: p.title.lower())
-        elif sort_key == "date":
-            # Sort by date descending (newest first) using proper datetime parsing
-            self.filtered_papers.sort(
-                key=lambda p: parse_arxiv_date(p.date), reverse=True
-            )
-        elif sort_key == "arxiv_id":
-            # Sort by arxiv_id descending (newest first)
-            self.filtered_papers.sort(key=lambda p: p.arxiv_id, reverse=True)
+        self.filtered_papers = sort_papers(self.filtered_papers, sort_key)
 
     def _refresh_list_view(self) -> None:
         """Refresh the list view with current filtered papers.
@@ -3318,24 +3460,7 @@ class ArxivBrowser(App):
 
     def _paper_matches_watch_entry(self, paper: Paper, entry: WatchListEntry) -> bool:
         """Check if a paper matches a watch list entry."""
-        pattern = entry.pattern if entry.case_sensitive else entry.pattern.lower()
-
-        if entry.match_type == "author":
-            text = paper.authors if entry.case_sensitive else paper.authors.lower()
-            return pattern in text
-        elif entry.match_type == "title":
-            text = paper.title if entry.case_sensitive else paper.title.lower()
-            return pattern in text
-        elif entry.match_type == "keyword":
-            # Match against title and abstract
-            if entry.case_sensitive:
-                return pattern in paper.title or pattern in paper.abstract_raw
-            else:
-                return (
-                    pattern in paper.title.lower()
-                    or pattern in paper.abstract_raw.lower()
-                )
-        return False
+        return paper_matches_watch_entry(paper, entry)
 
     def is_paper_watched(self, arxiv_id: str) -> bool:
         """Check if a paper is on the watch list. O(1) lookup."""
@@ -3606,25 +3731,7 @@ class ArxivBrowser(App):
     def _format_paper_as_markdown(self, paper: Paper) -> str:
         """Format a paper as Markdown."""
         abstract_text = self._get_abstract_text(paper, allow_async=False) or ""
-        lines = [
-            f"## {paper.title}",
-            "",
-            f"**arXiv:** [{paper.arxiv_id}]({paper.url})",
-            f"**Date:** {paper.date}",
-            f"**Categories:** {paper.categories}",
-            f"**Authors:** {paper.authors}",
-        ]
-        if paper.comments:
-            lines.append(f"**Comments:** {paper.comments}")
-        lines.extend(
-            [
-                "",
-                "### Abstract",
-                "",
-                abstract_text,
-            ]
-        )
-        return "\n".join(lines)
+        return format_paper_as_markdown(paper, abstract_text)
 
     def action_export_markdown(self) -> None:
         """Export selected papers as Markdown to clipboard."""
@@ -3866,15 +3973,11 @@ class ArxivBrowser(App):
 
     def _get_pdf_url(self, paper: Paper) -> str:
         """Get the PDF URL for a paper."""
-        if "arxiv.org/pdf/" in paper.url:
-            return paper.url if paper.url.endswith(".pdf") else f"{paper.url}.pdf"
-        return f"https://arxiv.org/pdf/{paper.arxiv_id}.pdf"
+        return get_pdf_url(paper)
 
     def _get_paper_url(self, paper: Paper) -> str:
         """Get the preferred URL for a paper (abs or PDF)."""
-        if self._config.prefer_pdf_url:
-            return self._get_pdf_url(paper)
-        return paper.url
+        return get_paper_url(paper, prefer_pdf=self._config.prefer_pdf_url)
 
     async def _download_pdf_async(self, paper: Paper) -> bool:
         """Download a single PDF asynchronously.
@@ -4038,19 +4141,7 @@ class ArxivBrowser(App):
     def _format_paper_for_clipboard(self, paper: Paper) -> str:
         """Format a paper's metadata for clipboard export."""
         abstract_text = self._get_abstract_text(paper, allow_async=False) or ""
-        lines = [
-            f"Title: {paper.title}",
-            f"Authors: {paper.authors}",
-            f"arXiv: {paper.arxiv_id}",
-            f"Date: {paper.date}",
-            f"Categories: {paper.categories}",
-        ]
-        if paper.comments:
-            lines.append(f"Comments: {paper.comments}")
-        lines.append(f"URL: {paper.url}")
-        lines.append("")
-        lines.append(f"Abstract: {abstract_text}")
-        return "\n".join(lines)
+        return format_paper_for_clipboard(paper, abstract_text)
 
     def _copy_to_clipboard(self, text: str) -> bool:
         """Copy text to system clipboard. Returns True on success.
