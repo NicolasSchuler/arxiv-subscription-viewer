@@ -9,3 +9,6 @@ wheels/
 # Virtual environments
 .venv
 docs/
+history/**
+.DS_Store
+.playwright-mcp

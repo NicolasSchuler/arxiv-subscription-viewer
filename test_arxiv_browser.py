@@ -9,19 +9,24 @@ import pytest
 from arxiv_browser import (
     ARXIV_DATE_FORMAT,
     DEFAULT_CATEGORY_COLOR,
+    LLM_PRESETS,
     Paper,
     PaperMetadata,
     QueryToken,
     SORT_OPTIONS,
     SUBPROCESS_TIMEOUT,
     UserConfig,
+    build_llm_prompt,
     clean_latex,
     escape_bibtex,
+    extract_text_from_html,
     extract_year,
     format_categories,
+    format_summary_as_rich,
     format_paper_as_bibtex,
     generate_citation_key,
     get_pdf_download_path,
+    get_summary_db_path,
     insert_implicit_and,
     load_config,
     parse_arxiv_date,
@@ -2383,6 +2388,361 @@ class TestStatusFilterIntegration:
                     c for c in list_view.children if isinstance(c, PaperListItem)
                 ]
                 assert len(paper_items) == 1  # App was created with 1 paper
+
+
+# ============================================================================
+# Tests for LLM Summary Functions
+# ============================================================================
+
+
+class TestBuildLlmPrompt:
+    """Tests for build_llm_prompt template expansion."""
+
+    def _make_paper(self, **kwargs):
+        defaults = dict(
+            arxiv_id="2301.00001",
+            date="Mon, 2 Jan 2023",
+            title="Test Paper",
+            authors="Alice, Bob",
+            categories="cs.AI",
+            comments=None,
+            abstract="An abstract.",
+            url="https://arxiv.org/abs/2301.00001",
+        )
+        defaults.update(kwargs)
+        return Paper(**defaults)
+
+    def test_default_prompt(self):
+        paper = self._make_paper()
+        result = build_llm_prompt(paper)
+        assert "Test Paper" in result
+        assert "Alice, Bob" in result
+        assert "cs.AI" in result
+        assert "An abstract." in result
+
+    def test_custom_template(self):
+        paper = self._make_paper()
+        template = "Summarize: {title} by {authors}"
+        result = build_llm_prompt(paper, template)
+        assert result == "Summarize: Test Paper by Alice, Bob"
+
+    def test_all_placeholders(self):
+        paper = self._make_paper()
+        template = "{title}|{authors}|{categories}|{abstract}|{arxiv_id}|{paper_content}"
+        result = build_llm_prompt(paper, template)
+        assert result.startswith("Test Paper|Alice, Bob|cs.AI|An abstract.|2301.00001|")
+
+    def test_no_abstract_fallback(self):
+        paper = self._make_paper(abstract=None, abstract_raw="raw text")
+        result = build_llm_prompt(paper)
+        assert "raw text" in result
+
+    def test_no_abstract_at_all(self):
+        paper = self._make_paper(abstract=None, abstract_raw="")
+        result = build_llm_prompt(paper)
+        assert "(no abstract)" in result
+
+    def test_paper_content_placeholder(self):
+        paper = self._make_paper()
+        result = build_llm_prompt(paper, paper_content="Full paper text here.")
+        assert "Full paper text here." in result
+
+    def test_paper_content_fallback_to_abstract(self):
+        paper = self._make_paper()
+        result = build_llm_prompt(paper, paper_content="")
+        assert "An abstract." in result
+
+
+class TestExtractTextFromHtml:
+    """Tests for HTML text extraction from arXiv pages."""
+
+    def test_basic_paragraph(self):
+        html = "<p>Hello world</p>"
+        assert extract_text_from_html(html) == "Hello world"
+
+    def test_nested_tags(self):
+        html = "<div><p>First paragraph</p><p>Second paragraph</p></div>"
+        result = extract_text_from_html(html)
+        assert "First paragraph" in result
+        assert "Second paragraph" in result
+
+    def test_script_stripped(self):
+        html = "<p>Visible</p><script>var x = 1;</script><p>Also visible</p>"
+        result = extract_text_from_html(html)
+        assert "Visible" in result
+        assert "Also visible" in result
+        assert "var x" not in result
+
+    def test_math_stripped(self):
+        html = '<p>The value <math><mi>x</mi></math> is important</p>'
+        result = extract_text_from_html(html)
+        assert "The value" in result
+        assert "is important" in result
+        # Math internals should be skipped
+        assert "<mi>" not in result
+
+    def test_style_stripped(self):
+        html = "<style>.cls { color: red; }</style><p>Content</p>"
+        result = extract_text_from_html(html)
+        assert "Content" in result
+        assert "color" not in result
+
+    def test_whitespace_collapsed(self):
+        html = "<p>  Too   many   spaces  </p>"
+        assert extract_text_from_html(html) == "Too many spaces"
+
+    def test_empty_html(self):
+        assert extract_text_from_html("") == ""
+
+    def test_arxiv_like_structure(self):
+        html = (
+            '<article class="ltx_document">'
+            '<h1 class="ltx_title">My Paper Title</h1>'
+            '<div class="ltx_abstract"><h6>Abstract</h6>'
+            '<p class="ltx_p">This is the abstract.</p></div>'
+            '<section class="ltx_section">'
+            '<h2>Introduction</h2>'
+            '<p class="ltx_p">We introduce a method.</p>'
+            '</section></article>'
+        )
+        result = extract_text_from_html(html)
+        assert "My Paper Title" in result
+        assert "This is the abstract." in result
+        assert "We introduce a method." in result
+
+
+class TestFormatSummaryAsRich:
+    """Tests for markdown-to-Rich markup conversion of LLM summaries."""
+
+    def test_heading_h2(self):
+        result = format_summary_as_rich("## Core Idea")
+        assert "[bold" in result
+        assert "Core Idea" in result
+        assert "##" not in result
+
+    def test_heading_h3(self):
+        result = format_summary_as_rich("### Sub-heading")
+        assert "[bold]" in result
+        assert "Sub-heading" in result
+
+    def test_bold(self):
+        result = format_summary_as_rich("This is **important** text")
+        assert "[bold]important[/]" in result
+        assert "**" not in result
+
+    def test_inline_code(self):
+        result = format_summary_as_rich("Use `method_name` here")
+        assert "method_name" in result
+        assert "`" not in result
+
+    def test_bullets(self):
+        result = format_summary_as_rich("- First item\n- Second item")
+        assert "•" in result
+        assert "First item" in result
+        assert "Second item" in result
+
+    def test_combined(self):
+        md = "## Pros\n- **Strong results** on benchmark\n- Clean `API` design"
+        result = format_summary_as_rich(md)
+        assert "Pros" in result
+        assert "•" in result
+        assert "[bold]Strong results[/]" in result
+        assert "##" not in result
+        assert "**" not in result
+
+    def test_empty(self):
+        assert format_summary_as_rich("") == ""
+
+    def test_plain_text(self):
+        result = format_summary_as_rich("Just plain text.")
+        assert "plain text" in result
+
+    def test_rich_markup_escaped(self):
+        result = format_summary_as_rich("Text with [bold]fake markup[/bold]")
+        # The square brackets should be escaped, not interpreted as Rich tags
+        assert "\\[bold" in result or "[bold" not in result or "\\[" in result
+
+
+class TestLlmSummaryDb:
+    """Tests for SQLite summary persistence."""
+
+    def test_save_and_load(self, tmp_path):
+        from arxiv_browser import _init_summary_db, _load_summary, _save_summary
+
+        db_path = tmp_path / "test.db"
+        _init_summary_db(db_path)
+        _save_summary(db_path, "2301.00001", "A great summary", "hash123")
+        result = _load_summary(db_path, "2301.00001", "hash123")
+        assert result == "A great summary"
+
+    def test_load_missing(self, tmp_path):
+        from arxiv_browser import _init_summary_db, _load_summary
+
+        db_path = tmp_path / "test.db"
+        _init_summary_db(db_path)
+        result = _load_summary(db_path, "nonexistent", "hash123")
+        assert result is None
+
+    def test_load_wrong_hash(self, tmp_path):
+        from arxiv_browser import _init_summary_db, _load_summary, _save_summary
+
+        db_path = tmp_path / "test.db"
+        _init_summary_db(db_path)
+        _save_summary(db_path, "2301.00001", "A summary", "hash_old")
+        result = _load_summary(db_path, "2301.00001", "hash_new")
+        assert result is None
+
+    def test_load_nonexistent_db(self, tmp_path):
+        from arxiv_browser import _load_summary
+
+        db_path = tmp_path / "does_not_exist.db"
+        result = _load_summary(db_path, "2301.00001", "hash123")
+        assert result is None
+
+    def test_upsert_replaces(self, tmp_path):
+        from arxiv_browser import _init_summary_db, _load_summary, _save_summary
+
+        db_path = tmp_path / "test.db"
+        _init_summary_db(db_path)
+        _save_summary(db_path, "2301.00001", "Old summary", "hash_v2")
+        _save_summary(db_path, "2301.00001", "New summary", "hash_v2")
+        result = _load_summary(db_path, "2301.00001", "hash_v2")
+        assert result == "New summary"
+
+
+class TestLlmCommandResolution:
+    """Tests for LLM command template resolution."""
+
+    def test_custom_command(self):
+        from arxiv_browser import _resolve_llm_command
+
+        config = UserConfig(llm_command="my-tool {prompt}")
+        assert _resolve_llm_command(config) == "my-tool {prompt}"
+
+    def test_preset_claude(self):
+        from arxiv_browser import _resolve_llm_command
+
+        config = UserConfig(llm_preset="claude")
+        result = _resolve_llm_command(config)
+        assert "claude" in result
+        assert "{prompt}" in result
+
+    def test_preset_unknown(self):
+        from arxiv_browser import _resolve_llm_command
+
+        config = UserConfig(llm_preset="unknown_tool")
+        assert _resolve_llm_command(config) == ""
+
+    def test_no_config(self):
+        from arxiv_browser import _resolve_llm_command
+
+        config = UserConfig()
+        assert _resolve_llm_command(config) == ""
+
+    def test_custom_overrides_preset(self):
+        from arxiv_browser import _resolve_llm_command
+
+        config = UserConfig(llm_command="custom {prompt}", llm_preset="claude")
+        assert _resolve_llm_command(config) == "custom {prompt}"
+
+
+class TestBuildLlmShellCommand:
+    """Tests for shell command building with proper escaping."""
+
+    def test_basic(self):
+        from arxiv_browser import _build_llm_shell_command
+
+        result = _build_llm_shell_command("claude -p {prompt}", "hello world")
+        assert "claude -p" in result
+        assert "hello world" in result
+
+    def test_prompt_with_quotes(self):
+        from arxiv_browser import _build_llm_shell_command
+
+        result = _build_llm_shell_command(
+            "claude -p {prompt}", 'text with "quotes"'
+        )
+        # shlex.quote should handle the quoting
+        assert "claude -p" in result
+        assert "quotes" in result
+
+    def test_prompt_with_shell_chars(self):
+        from arxiv_browser import _build_llm_shell_command
+
+        result = _build_llm_shell_command("llm {prompt}", "text; rm -rf /")
+        # The dangerous command should be quoted/escaped
+        assert "rm -rf" in result
+
+
+class TestCommandHash:
+    """Tests for command hash computation."""
+
+    def test_same_input_same_hash(self):
+        from arxiv_browser import _compute_command_hash
+
+        h1 = _compute_command_hash("claude -p {prompt}", "Summarize: {title}")
+        h2 = _compute_command_hash("claude -p {prompt}", "Summarize: {title}")
+        assert h1 == h2
+
+    def test_different_command_different_hash(self):
+        from arxiv_browser import _compute_command_hash
+
+        h1 = _compute_command_hash("claude -p {prompt}", "Summarize: {title}")
+        h2 = _compute_command_hash("llm {prompt}", "Summarize: {title}")
+        assert h1 != h2
+
+    def test_different_prompt_different_hash(self):
+        from arxiv_browser import _compute_command_hash
+
+        h1 = _compute_command_hash("claude -p {prompt}", "Summarize: {title}")
+        h2 = _compute_command_hash("claude -p {prompt}", "Explain: {title}")
+        assert h1 != h2
+
+    def test_hash_length(self):
+        from arxiv_browser import _compute_command_hash
+
+        h = _compute_command_hash("cmd", "prompt")
+        assert len(h) == 16
+
+
+class TestLlmPresets:
+    """Tests for LLM preset definitions."""
+
+    def test_presets_exist(self):
+        assert "claude" in LLM_PRESETS
+        assert "codex" in LLM_PRESETS
+        assert "llm" in LLM_PRESETS
+        assert "copilot" in LLM_PRESETS
+
+    def test_presets_have_prompt_placeholder(self):
+        for name, cmd in LLM_PRESETS.items():
+            assert "{prompt}" in cmd, f"Preset {name!r} missing {{prompt}} placeholder"
+
+
+class TestLlmConfigSerialization:
+    """Tests for LLM config fields roundtrip."""
+
+    def test_roundtrip(self, tmp_path, monkeypatch):
+        from arxiv_browser import _config_to_dict, _dict_to_config
+
+        config = UserConfig(
+            llm_command="claude -p {prompt}",
+            llm_prompt_template="Summarize: {title}",
+            llm_preset="claude",
+        )
+        data = _config_to_dict(config)
+        restored = _dict_to_config(data)
+        assert restored.llm_command == "claude -p {prompt}"
+        assert restored.llm_prompt_template == "Summarize: {title}"
+        assert restored.llm_preset == "claude"
+
+    def test_missing_fields_default(self):
+        from arxiv_browser import _dict_to_config
+
+        config = _dict_to_config({})
+        assert config.llm_command == ""
+        assert config.llm_prompt_template == ""
+        assert config.llm_preset == ""
 
 
 # ============================================================================

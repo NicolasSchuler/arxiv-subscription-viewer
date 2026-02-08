@@ -124,6 +124,7 @@ uv run python arxiv_browser.py --no-restore
 | `m` | Set mark (then press a-z) |
 | `'` | Jump to mark (then press a-z) |
 | `R` | Show similar papers |
+| `Ctrl+s` | Generate AI summary |
 
 ### General
 | Key | Action |
@@ -210,6 +211,32 @@ Configuration includes:
 - Vim-style marks
 - Session state (scroll position, filters, sort order)
 - UI preferences (abstract preview toggle)
+- LLM summary settings (command, prompt template, preset)
+
+### AI Summary Setup
+
+Generate paper summaries using any LLM CLI tool. Press `Ctrl+s` on a paper to generate a structured analysis. The full paper content is automatically fetched from the arXiv HTML version and passed to the LLM.
+
+Add one of these to your `config.json`:
+
+```json
+{ "llm_preset": "copilot" }
+```
+
+Available presets: `claude` (`claude -p`), `codex` (`codex exec`), `llm` (`llm`), `copilot` (`copilot -p`).
+
+Or configure a custom command with `{prompt}` placeholder:
+
+```json
+{
+  "llm_command": "claude -p {prompt}",
+  "llm_prompt_template": "Summarize: {title}\n\n{paper_content}"
+}
+```
+
+Prompt placeholders: `{title}`, `{authors}`, `{categories}`, `{abstract}`, `{arxiv_id}`, `{paper_content}`.
+
+Summaries are cached in a local SQLite database and persist across sessions.
 
 ## Development
 

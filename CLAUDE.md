@@ -22,6 +22,8 @@ A Textual-based TUI application for browsing arXiv papers from email subscriptio
 - `discover_history_files()` - Find YYYY-MM-DD.txt files in history/
 - `load_config()` / `save_config()` - JSON persistence via platformdirs
 - `find_similar_papers()` - Jaccard similarity on categories/authors/keywords
+- `build_llm_prompt()` - Build LLM prompt from paper data and template
+- `get_summary_db_path()` - Path to SQLite summary cache
 
 **UI Components:**
 - `ArxivBrowser` - Main Textual App class
@@ -163,6 +165,33 @@ Config file location (via platformdirs):
 
 BibTeX exports default to `~/arxiv-exports/` (configurable).
 
+LLM summaries are cached in a SQLite database (`summaries.db`) in the same config directory. Summaries are invalidated when the LLM command or prompt template changes.
+
+## LLM Summary Configuration
+
+Generate AI-powered paper summaries using any CLI tool. The full paper content is automatically fetched from the arXiv HTML version and passed to the LLM.
+
+Add to `config.json`:
+
+```json
+{
+  "llm_preset": "copilot"
+}
+```
+
+Available presets: `claude`, `codex`, `llm`, `copilot`. Or use a custom command:
+
+```json
+{
+  "llm_command": "claude -p {prompt}",
+  "llm_prompt_template": "Summarize in 3 sentences: {title}\n\n{paper_content}"
+}
+```
+
+Prompt template placeholders: `{title}`, `{authors}`, `{categories}`, `{abstract}`, `{arxiv_id}`, `{paper_content}`.
+
+The `{paper_content}` placeholder is replaced with the full paper text (fetched from arXiv HTML), falling back to the abstract if unavailable.
+
 ## Key Bindings Reference
 
 ```
@@ -187,6 +216,7 @@ p       - Toggle abstract preview
 m       - Set mark (then press a-z)
 '       - Jump to mark (then press a-z)
 R       - Show similar papers
+Ctrl+s  - Generate AI summary (requires LLM CLI tool)
 1-9     - Jump to bookmark
 Ctrl+b  - Add current search as bookmark
 [       - Go to previous (older) date (history mode)

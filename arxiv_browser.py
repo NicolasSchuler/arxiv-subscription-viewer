@@ -52,10 +52,13 @@ Search filters:
 import argparse
 import asyncio
 import functools
+import hashlib
 import json
 import logging
 import os
 import platform
+import shlex
+import sqlite3
 import tempfile
 import re
 import subprocess
@@ -64,6 +67,7 @@ import webbrowser
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Callable
 
@@ -140,6 +144,12 @@ __all__ = [
     "get_paper_url",
     "format_paper_for_clipboard",
     "format_paper_as_markdown",
+    # LLM summary helpers
+    "build_llm_prompt",
+    "get_summary_db_path",
+    "extract_text_from_html",
+    "format_summary_as_rich",
+    "LLM_PRESETS",
 ]
 
 # Module logger for debugging
@@ -194,6 +204,41 @@ MAX_HISTORY_FILES = 365  # Limit to ~1 year of history to prevent memory issues
 DEFAULT_PDF_DOWNLOAD_DIR = "arxiv-pdfs"  # Relative to home directory
 PDF_DOWNLOAD_TIMEOUT = 60  # Seconds per download
 MAX_CONCURRENT_DOWNLOADS = 3  # Limit parallel downloads
+
+# LLM summary settings
+LLM_COMMAND_TIMEOUT = 120  # Seconds to wait for LLM CLI response
+SUMMARY_DB_FILENAME = "summaries.db"
+MAX_PAPER_CONTENT_LENGTH = 60_000  # ~15k tokens; truncate fetched paper content
+ARXIV_HTML_TIMEOUT = 30  # Seconds to wait for arXiv HTML fetch
+DEFAULT_LLM_PROMPT = (
+    "You are an expert academic reviewer. Analyze the following arXiv paper and "
+    "provide a structured summary. Keep the TOTAL response under 400 words.\n\n"
+    "## Core Idea\n"
+    "What is the main contribution of this paper? (2-3 sentences)\n\n"
+    "## Novelty\n"
+    "What is novel compared to existing work? (2-3 sentences)\n\n"
+    "## Method\n"
+    "Describe the methodology or approach. (3-5 sentences)\n\n"
+    "## Evaluation\n"
+    "How was the work evaluated? Key results and metrics. (2-3 sentences)\n\n"
+    "## Pros\n"
+    "List 2-3 strengths.\n\n"
+    "## Cons\n"
+    "List 2-3 weaknesses or limitations.\n\n"
+    "## Relation to Other Work\n"
+    "How does this relate to or improve upon existing methods? (2-3 sentences)\n\n"
+    "---\n"
+    "Paper: {title}\n"
+    "Authors: {authors}\n"
+    "Categories: {categories}\n\n"
+    "{paper_content}"
+)
+LLM_PRESETS: dict[str, str] = {
+    "claude": "claude -p {prompt}",
+    "codex": "codex exec {prompt}",
+    "llm": "llm {prompt}",
+    "copilot": "copilot --model gpt-5-mini -p {prompt}",
+}
 
 # Search debounce delay in seconds
 SEARCH_DEBOUNCE_DELAY = 0.3
@@ -342,6 +387,48 @@ def escape_rich_text(text: str) -> str:
     return escape_markup(text) if text else ""
 
 
+# Pre-compiled patterns for lightweight markdown → Rich markup conversion
+_MD_HEADING_RE = re.compile(r"^(#{1,3})\s+(.+)$", re.MULTILINE)
+_MD_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+_MD_INLINE_CODE_RE = re.compile(r"`([^`]+)`")
+_MD_BULLET_RE = re.compile(r"^(\s*)[-*]\s+", re.MULTILINE)
+
+
+def format_summary_as_rich(text: str) -> str:
+    """Convert a markdown-formatted LLM summary to Rich markup.
+
+    Handles headings, bold, inline code, and bullet lists — the typical
+    elements produced by the structured prompt.
+    """
+    if not text:
+        return ""
+    # Escape first so user content is safe, then layer Rich markup on top
+    out = escape_rich_text(text)
+    # Headings: ## Foo → colored bold
+    heading_color = THEME_COLORS.get("accent", "#66d9ef")
+
+    def _heading_repl(m: re.Match[str]) -> str:
+        level = len(m.group(1))
+        label = m.group(2).strip()
+        if level == 1:
+            return f"[bold {heading_color}]{label}[/]"
+        if level == 2:
+            return f"[bold {heading_color}]{label}[/]"
+        return f"[bold]{label}[/]"
+
+    out = _MD_HEADING_RE.sub(_heading_repl, out)
+    # Bold: **text** → [bold]text[/]
+    out = _MD_BOLD_RE.sub(r"[bold]\1[/]", out)
+    # Inline code: `code` → styled span
+    code_color = THEME_COLORS.get("green", "#a6e22e")
+    out = _MD_INLINE_CODE_RE.sub(rf"[{code_color}]\1[/]", out)
+    # Bullets: - item → • item
+    out = _MD_BULLET_RE.sub(r"\1  • ", out)
+    # Indent all lines for consistent padding inside the details pane
+    indented = "\n".join(f"  {line}" if line.strip() else "" for line in out.split("\n"))
+    return indented
+
+
 def highlight_text(text: str, terms: list[str], color: str) -> str:
     """Highlight terms inside text using Rich markup."""
     if not text:
@@ -454,6 +541,9 @@ class UserConfig:
     prefer_pdf_url: bool = False
     category_colors: dict[str, str] = field(default_factory=dict)
     theme: dict[str, str] = field(default_factory=dict)
+    llm_command: str = ""  # Shell command template, e.g. 'claude -p {prompt}'
+    llm_prompt_template: str = ""  # Empty = use DEFAULT_LLM_PROMPT
+    llm_preset: str = ""  # "claude" | "codex" | "llm" | "" (custom)
     version: int = 1
 
 
@@ -487,6 +577,9 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
         "prefer_pdf_url": config.prefer_pdf_url,
         "category_colors": config.category_colors,
         "theme": config.theme,
+        "llm_command": config.llm_command,
+        "llm_prompt_template": config.llm_prompt_template,
+        "llm_preset": config.llm_preset,
         "session": {
             "scroll_index": config.session.scroll_index,
             "current_filter": config.session.current_filter,
@@ -629,6 +722,9 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         prefer_pdf_url=_safe_get(data, "prefer_pdf_url", False, bool),
         category_colors=safe_category_colors,
         theme=safe_theme,
+        llm_command=_safe_get(data, "llm_command", "", str),
+        llm_prompt_template=_safe_get(data, "llm_prompt_template", "", str),
+        llm_preset=_safe_get(data, "llm_preset", "", str),
         version=_safe_get(data, "version", 1, int),
     )
 
@@ -697,6 +793,172 @@ def save_config(config: UserConfig) -> bool:
     except OSError as e:
         logger.error(f"Failed to save config: {e}")
         return False
+
+
+# ============================================================================
+# LLM Summary Persistence (SQLite)
+# ============================================================================
+
+
+def get_summary_db_path() -> Path:
+    """Get the path to the summary SQLite database."""
+    config_dir = Path(user_config_dir(CONFIG_APP_NAME))
+    return config_dir / SUMMARY_DB_FILENAME
+
+
+def _init_summary_db(db_path: Path) -> None:
+    """Create the summaries table if it doesn't exist."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS summaries ("
+            "  arxiv_id TEXT PRIMARY KEY,"
+            "  summary TEXT NOT NULL,"
+            "  command_hash TEXT NOT NULL,"
+            "  created_at TEXT NOT NULL"
+            ")"
+        )
+
+
+def _load_summary(db_path: Path, arxiv_id: str, command_hash: str) -> str | None:
+    """Load a cached summary if it exists and the command hash matches."""
+    if not db_path.exists():
+        return None
+    try:
+        with sqlite3.connect(str(db_path)) as conn:
+            row = conn.execute(
+                "SELECT summary FROM summaries WHERE arxiv_id = ? AND command_hash = ?",
+                (arxiv_id, command_hash),
+            ).fetchone()
+            return row[0] if row else None
+    except sqlite3.Error:
+        logger.debug(f"Failed to load summary for {arxiv_id}", exc_info=True)
+        return None
+
+
+def _save_summary(db_path: Path, arxiv_id: str, summary: str, command_hash: str) -> None:
+    """Persist a summary to the SQLite database."""
+    try:
+        _init_summary_db(db_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO summaries (arxiv_id, summary, command_hash, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (arxiv_id, summary, command_hash, datetime.now().isoformat()),
+            )
+    except sqlite3.Error:
+        logger.debug(f"Failed to save summary for {arxiv_id}", exc_info=True)
+
+
+def _compute_command_hash(command_template: str, prompt_template: str) -> str:
+    """Hash the command + prompt templates to detect config changes."""
+    key = f"{command_template}|{prompt_template}"
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
+class _HTMLTextExtractor(HTMLParser):
+    """Extract readable text from arXiv HTML papers (LaTeXML output)."""
+
+    _SKIP_TAGS = frozenset({"script", "style", "nav", "header", "footer", "math"})
+    _BLOCK_TAGS = frozenset({
+        "p", "div", "br", "h1", "h2", "h3", "h4", "h5", "h6",
+        "li", "section", "article", "blockquote", "figcaption",
+    })
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._pieces: list[str] = []
+        self._skip_depth: int = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in self._SKIP_TAGS:
+            self._skip_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self._SKIP_TAGS:
+            self._skip_depth = max(0, self._skip_depth - 1)
+        if tag in self._BLOCK_TAGS:
+            self._pieces.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth == 0:
+            self._pieces.append(data)
+
+    def get_text(self) -> str:
+        raw = "".join(self._pieces)
+        # Collapse whitespace within lines, preserve paragraph breaks
+        lines = raw.split("\n")
+        cleaned = [" ".join(line.split()) for line in lines]
+        return "\n".join(line for line in cleaned if line).strip()
+
+
+def extract_text_from_html(html: str) -> str:
+    """Extract readable text from an arXiv HTML paper page."""
+    parser = _HTMLTextExtractor()
+    parser.feed(html)
+    return parser.get_text()
+
+
+async def _fetch_paper_content_async(paper: Paper) -> str:
+    """Fetch the full paper content from the arXiv HTML version.
+
+    Falls back to the abstract if the HTML version is not available.
+    """
+    arxiv_id = paper.arxiv_id.rstrip("v0123456789") if "v" in paper.arxiv_id else paper.arxiv_id
+    html_url = f"https://arxiv.org/html/{paper.arxiv_id}"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                html_url, timeout=ARXIV_HTML_TIMEOUT, follow_redirects=True
+            )
+            if response.status_code == 200:
+                text = await asyncio.to_thread(extract_text_from_html, response.text)
+                if text:
+                    return text[:MAX_PAPER_CONTENT_LENGTH]
+    except (httpx.HTTPError, OSError):
+        logger.debug(f"Failed to fetch HTML for {paper.arxiv_id}", exc_info=True)
+    # Fallback to abstract
+    abstract = paper.abstract or paper.abstract_raw or ""
+    return f"Abstract:\n{abstract}" if abstract else ""
+
+
+def build_llm_prompt(
+    paper: Paper, prompt_template: str = "", paper_content: str = ""
+) -> str:
+    """Build the full prompt by substituting paper data into the template.
+
+    If paper_content is provided, it is included via the {paper_content}
+    placeholder.  When the template does not contain that placeholder the
+    content is appended automatically so that every prompt benefits from
+    full-paper context when available.
+    """
+    template = prompt_template or DEFAULT_LLM_PROMPT
+    abstract = paper.abstract or paper.abstract_raw or "(no abstract)"
+    content = paper_content or f"Abstract:\n{abstract}"
+    result = template.format(
+        title=paper.title,
+        authors=paper.authors,
+        categories=paper.categories,
+        abstract=abstract,
+        arxiv_id=paper.arxiv_id,
+        paper_content=content,
+    )
+    return result
+
+
+def _resolve_llm_command(config: UserConfig) -> str:
+    """Resolve the LLM command template from config (custom or preset)."""
+    if config.llm_command:
+        return config.llm_command
+    if config.llm_preset and config.llm_preset in LLM_PRESETS:
+        return LLM_PRESETS[config.llm_preset]
+    return ""
+
+
+def _build_llm_shell_command(command_template: str, prompt: str) -> str:
+    """Build the final shell command by substituting the prompt."""
+    escaped_prompt = shlex.quote(prompt)
+    return command_template.replace("{prompt}", escaped_prompt)
 
 
 # Pre-compiled regex patterns for LaTeX cleaning (performance optimization)
@@ -1537,7 +1799,11 @@ class PaperDetails(Static):
         self._paper: Paper | None = None
 
     def update_paper(
-        self, paper: Paper | None, abstract_text: str | None = None
+        self,
+        paper: Paper | None,
+        abstract_text: str | None = None,
+        summary: str | None = None,
+        summary_loading: bool = False,
     ) -> None:
         """Update the displayed paper details."""
         self._paper = paper
@@ -1592,6 +1858,17 @@ class PaperDetails(Static):
         else:
             lines.append("  [dim italic]No abstract available[/]")
         lines.append("")
+
+        # AI Summary section (shown when available or loading)
+        if summary_loading:
+            lines.append(f"[{sep_color}]━━ [{THEME_COLORS['purple']}]🤖 AI Summary[/] ━━━━━━━━━━━━━━━━━━━━[/]")
+            lines.append("  [dim italic]⏳ Generating summary...[/]")
+            lines.append("")
+        elif summary:
+            rendered_summary = format_summary_as_rich(summary)
+            lines.append(f"[{sep_color}]━━ [{THEME_COLORS['purple']}]🤖 AI Summary[/] ━━━━━━━━━━━━━━━━━━━━[/]")
+            lines.append(rendered_summary)
+            lines.append("")
 
         # URL section
         lines.append(f"[{sep_color}]━━ [{THEME_COLORS['pink']}]URL[/] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/]")
@@ -1710,7 +1987,8 @@ class HelpScreen(ModalScreen[None]):
                 f"  [{THEME_COLORS['green']}]n[/]            Edit notes\n"
                 f"  [{THEME_COLORS['green']}]t[/]            Edit tags\n"
                 f"  [{THEME_COLORS['green']}]R[/]            Show similar papers\n"
-                f"  [{THEME_COLORS['green']}]W[/]            Manage watch list",
+                f"  [{THEME_COLORS['green']}]W[/]            Manage watch list\n"
+                f"  [{THEME_COLORS['green']}]Ctrl+s[/]       Generate AI summary",
                 classes="help-keys",
             )
 
@@ -2765,6 +3043,8 @@ class ArxivBrowser(App):
         Binding("d", "download_pdf", "Download"),
         # Phase 9: Paper similarity
         Binding("R", "show_similar", "Similar"),
+        # LLM summary
+        Binding("ctrl+s", "generate_summary", "AI Summary", show=False),
         # History mode: date navigation
         Binding("bracketleft", "prev_date", "Older", show=False),
         Binding("bracketright", "next_date", "Newer", show=False),
@@ -2840,6 +3120,11 @@ class ArxivBrowser(App):
         self._downloading: set[str] = set()  # arxiv_ids currently downloading
         self._download_results: dict[str, bool] = {}  # arxiv_id -> success
         self._download_total: int = 0  # Total papers in current batch
+
+        # LLM summary state
+        self._paper_summaries: dict[str, str] = {}  # arxiv_id -> summary (in-memory cache)
+        self._summary_loading: set[str] = set()  # arxiv_ids with generation in progress
+        self._summary_db_path: Path = get_summary_db_path()
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -3010,7 +3295,12 @@ class ArxivBrowser(App):
             details = self.query_one(PaperDetails)
             if details.paper and details.paper.arxiv_id == arxiv_id:
                 abstract_text = self._abstract_cache.get(arxiv_id, "")
-                details.update_paper(details.paper, abstract_text)
+                details.update_paper(
+                    details.paper,
+                    abstract_text,
+                    summary=self._paper_summaries.get(arxiv_id),
+                    summary_loading=arxiv_id in self._summary_loading,
+                )
         except NoMatches:
             pass
         try:
@@ -3062,7 +3352,13 @@ class ArxivBrowser(App):
         if isinstance(event.item, PaperListItem):
             details = self.query_one(PaperDetails)
             abstract_text = self._get_abstract_text(event.item.paper, allow_async=True)
-            details.update_paper(event.item.paper, abstract_text)
+            aid = event.item.paper.arxiv_id
+            details.update_paper(
+                event.item.paper,
+                abstract_text,
+                summary=self._paper_summaries.get(aid),
+                summary_loading=aid in self._summary_loading,
+            )
 
     @on(ListView.Highlighted)
     def on_list_highlighted(self, event: ListView.Highlighted) -> None:
@@ -3070,7 +3366,13 @@ class ArxivBrowser(App):
         if isinstance(event.item, PaperListItem):
             details = self.query_one(PaperDetails)
             abstract_text = self._get_abstract_text(event.item.paper, allow_async=True)
-            details.update_paper(event.item.paper, abstract_text)
+            aid = event.item.paper.arxiv_id
+            details.update_paper(
+                event.item.paper,
+                abstract_text,
+                summary=self._paper_summaries.get(aid),
+                summary_loading=aid in self._summary_loading,
+            )
 
     def action_toggle_search(self) -> None:
         """Toggle search input visibility."""
@@ -3836,6 +4138,118 @@ class ArxivBrowser(App):
     def action_show_help(self) -> None:
         """Show the help overlay with all keyboard shortcuts."""
         self.push_screen(HelpScreen())
+
+    # ========================================================================
+    # LLM Summary Generation
+    # ========================================================================
+
+    def action_generate_summary(self) -> None:
+        """Generate an AI summary for the currently highlighted paper."""
+        command_template = _resolve_llm_command(self._config)
+        if not command_template:
+            self.notify(
+                "Set llm_command or llm_preset in config.json "
+                f"({get_config_path()})",
+                title="LLM not configured",
+                severity="warning",
+                timeout=8,
+            )
+            return
+
+        item = self._get_current_paper_item()
+        if not item:
+            self.notify("No paper selected", title="AI Summary", severity="warning")
+            return
+
+        arxiv_id = item.paper.arxiv_id
+        if arxiv_id in self._summary_loading:
+            self.notify("Summary already generating...", title="AI Summary")
+            return
+
+        # Check in-memory cache first
+        if arxiv_id in self._paper_summaries:
+            self.notify("Summary already available", title="AI Summary")
+            return
+
+        prompt_template = self._config.llm_prompt_template or DEFAULT_LLM_PROMPT
+        cmd_hash = _compute_command_hash(command_template, prompt_template)
+
+        # Check SQLite cache
+        cached = _load_summary(self._summary_db_path, arxiv_id, cmd_hash)
+        if cached:
+            self._paper_summaries[arxiv_id] = cached
+            self._update_abstract_display(arxiv_id)
+            self.notify("Summary loaded from cache", title="AI Summary")
+            return
+
+        # Start async generation
+        self._summary_loading.add(arxiv_id)
+        self._update_abstract_display(arxiv_id)
+        self._track_task(
+            self._generate_summary_async(item.paper, command_template, prompt_template, cmd_hash)
+        )
+
+    async def _generate_summary_async(
+        self, paper: Paper, command_template: str, prompt_template: str, cmd_hash: str
+    ) -> None:
+        """Run the LLM CLI tool asynchronously and update the UI."""
+        arxiv_id = paper.arxiv_id
+        try:
+            # Fetch full paper content from arXiv HTML (falls back to abstract)
+            self.notify("Fetching paper content...", title="AI Summary")
+            paper_content = await _fetch_paper_content_async(paper)
+
+            prompt = build_llm_prompt(paper, prompt_template, paper_content)
+            shell_command = _build_llm_shell_command(command_template, prompt)
+            logger.debug(f"Running LLM command for {arxiv_id}: {shell_command[:100]}...")
+
+            proc = await asyncio.create_subprocess_shell(
+                shell_command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=LLM_COMMAND_TIMEOUT
+                )
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                self.notify(
+                    f"LLM timed out after {LLM_COMMAND_TIMEOUT}s",
+                    title="AI Summary",
+                    severity="error",
+                )
+                return
+
+            if proc.returncode != 0:
+                err_msg = (stderr or b"").decode("utf-8", errors="replace").strip()
+                self.notify(
+                    f"LLM failed (exit {proc.returncode}): {err_msg[:200]}",
+                    title="AI Summary",
+                    severity="error",
+                    timeout=8,
+                )
+                return
+
+            summary = (stdout or b"").decode("utf-8", errors="replace").strip()
+            if not summary:
+                self.notify("LLM returned empty output", title="AI Summary", severity="warning")
+                return
+
+            # Cache in memory and persist to SQLite
+            self._paper_summaries[arxiv_id] = summary
+            await asyncio.to_thread(
+                _save_summary, self._summary_db_path, arxiv_id, summary, cmd_hash
+            )
+            self.notify("Summary generated", title="AI Summary")
+
+        except Exception as e:
+            logger.debug(f"Summary generation failed for {arxiv_id}", exc_info=True)
+            self.notify(f"Error: {e}", title="AI Summary", severity="error")
+        finally:
+            self._summary_loading.discard(arxiv_id)
+            self._update_abstract_display(arxiv_id)
 
     # ========================================================================
     # History Mode: Date Navigation
