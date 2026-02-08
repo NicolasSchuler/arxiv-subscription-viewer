@@ -2538,6 +2538,200 @@ class TestExtractTextFromHtml:
         assert "This is the abstract." in result
         assert "We introduce a method." in result
 
+    def test_nested_skip_tags_same_type(self):
+        """Nested skip tags of the same type using <nav>: depth 0→1→2→1→0."""
+        # HTMLParser treats <script>/<style> content as CDATA (no inner parsing),
+        # so we use <nav> which HTMLParser fully parses as nested tags.
+        html = "<nav><nav>inner</nav>between</nav><p>Visible</p>"
+        result = extract_text_from_html(html)
+        assert "Visible" in result
+        assert "inner" not in result
+        assert "between" not in result
+
+    def test_nested_different_skip_tags(self):
+        """Mixed nesting of different skip tags: <nav><style>...</style>...</nav>."""
+        html = "<nav><style>css</style>nav text</nav><p>Content</p>"
+        result = extract_text_from_html(html)
+        assert "Content" in result
+        assert "css" not in result
+        assert "nav text" not in result
+
+    def test_mismatched_close_tag_underflow(self):
+        """Orphan </script> must not drive depth negative and suppress text."""
+        html = "</script><p>Text</p>"
+        result = extract_text_from_html(html)
+        assert "Text" in result
+
+    def test_multiple_mismatched_close_tags(self):
+        """Triple orphan close tags still allow subsequent text through."""
+        html = "</style></nav></footer><p>Visible</p>"
+        result = extract_text_from_html(html)
+        assert "Visible" in result
+
+    def test_nav_tag_stripped(self):
+        html = "<nav>Home About</nav><p>Content</p>"
+        result = extract_text_from_html(html)
+        assert "Content" in result
+        assert "Home" not in result
+
+    def test_header_tag_stripped(self):
+        html = "<header><h1>Site Title</h1></header><p>Body</p>"
+        result = extract_text_from_html(html)
+        assert "Body" in result
+        assert "Site Title" not in result
+
+    def test_footer_tag_stripped(self):
+        html = "<footer>Copyright 2024</footer><p>Main</p>"
+        result = extract_text_from_html(html)
+        assert "Main" in result
+        assert "Copyright" not in result
+
+    def test_skip_tag_inside_block(self):
+        """Script inside a div: only non-script content survives."""
+        html = "<div><script>alert('x')</script><p>After</p></div>"
+        result = extract_text_from_html(html)
+        assert "After" in result
+        assert "alert" not in result
+
+    def test_block_tag_inside_skip_tag(self):
+        """Block elements inside a skip tag are still suppressed."""
+        html = "<nav><p>Nav text</p></nav><p>Visible</p>"
+        result = extract_text_from_html(html)
+        assert "Visible" in result
+        assert "Nav text" not in result
+
+    def test_deeply_nested_skip_tags(self):
+        """Three levels of nesting: depth goes 0→1→2→3→2→1→0."""
+        html = "<script><style><math>deep</math></style></script><p>OK</p>"
+        result = extract_text_from_html(html)
+        assert "OK" in result
+        assert "deep" not in result
+
+
+class TestFetchPaperContentAsync:
+    """Tests for async paper content fetching with httpx mocking."""
+
+    @pytest.fixture
+    def paper(self, make_paper):
+        return make_paper(arxiv_id="2401.12345", abstract="Test abstract.")
+
+    async def test_success_returns_extracted_text(self, paper):
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser import _fetch_paper_content_async
+
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_response.text = "<p>Introduction to transformers.</p>"
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.__aenter__.return_value = mock_client
+
+        with patch("arxiv_browser.httpx.AsyncClient", return_value=mock_client):
+            result = await _fetch_paper_content_async(paper)
+
+        assert "Introduction to transformers" in result
+
+    async def test_success_truncates_long_content(self, paper):
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser import MAX_PAPER_CONTENT_LENGTH, _fetch_paper_content_async
+
+        long_text = "x" * (MAX_PAPER_CONTENT_LENGTH + 1000)
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_response.text = f"<p>{long_text}</p>"
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.__aenter__.return_value = mock_client
+
+        with patch("arxiv_browser.httpx.AsyncClient", return_value=mock_client):
+            result = await _fetch_paper_content_async(paper)
+
+        assert len(result) == MAX_PAPER_CONTENT_LENGTH
+
+    async def test_empty_extraction_falls_back_to_abstract(self, paper):
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser import _fetch_paper_content_async
+
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_response.text = ""  # empty HTML → empty extraction
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.__aenter__.return_value = mock_client
+
+        with patch("arxiv_browser.httpx.AsyncClient", return_value=mock_client):
+            result = await _fetch_paper_content_async(paper)
+
+        assert result == "Abstract:\nTest abstract."
+
+    async def test_non_200_falls_back_to_abstract(self, paper):
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser import _fetch_paper_content_async
+
+        mock_response = AsyncMock()
+        mock_response.status_code = 404
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.__aenter__.return_value = mock_client
+
+        with patch("arxiv_browser.httpx.AsyncClient", return_value=mock_client):
+            result = await _fetch_paper_content_async(paper)
+
+        assert result == "Abstract:\nTest abstract."
+
+    async def test_http_error_falls_back(self, paper):
+        import httpx
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser import _fetch_paper_content_async
+
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = httpx.ConnectError("Connection refused")
+        mock_client.__aenter__.return_value = mock_client
+
+        with patch("arxiv_browser.httpx.AsyncClient", return_value=mock_client):
+            result = await _fetch_paper_content_async(paper)
+
+        assert result == "Abstract:\nTest abstract."
+
+    async def test_os_error_falls_back(self, paper):
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser import _fetch_paper_content_async
+
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = OSError("Network unreachable")
+        mock_client.__aenter__.return_value = mock_client
+
+        with patch("arxiv_browser.httpx.AsyncClient", return_value=mock_client):
+            result = await _fetch_paper_content_async(paper)
+
+        assert result == "Abstract:\nTest abstract."
+
+    async def test_no_abstract_returns_empty(self, make_paper):
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser import _fetch_paper_content_async
+
+        paper = make_paper(abstract="", abstract_raw="")
+
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = OSError("fail")
+        mock_client.__aenter__.return_value = mock_client
+
+        with patch("arxiv_browser.httpx.AsyncClient", return_value=mock_client):
+            result = await _fetch_paper_content_async(paper)
+
+        assert result == ""
+
 
 class TestFormatSummaryAsRich:
     """Tests for markdown-to-Rich markup conversion of LLM summaries."""
@@ -2591,6 +2785,225 @@ class TestFormatSummaryAsRich:
         assert "\\[bold\\]" in result or "\\[bold]" in result
         # The word should still appear in the output
         assert "fake markup" in result
+
+
+class TestTrackTaskExceptionSurfacing:
+    """Tests for _track_task done-callback exception logging."""
+
+    def test_unhandled_exception_is_logged(self):
+        """_on_task_done logs unhandled exceptions from completed tasks."""
+        import asyncio
+        from unittest.mock import MagicMock, patch
+
+        from arxiv_browser import ArxivBrowser
+
+        exc = RuntimeError("boom")
+        mock_task = MagicMock(spec=asyncio.Task)
+        mock_task.cancelled.return_value = False
+        mock_task.exception.return_value = exc
+
+        with patch("arxiv_browser.logger") as mock_logger:
+            ArxivBrowser._on_task_done(mock_task)
+
+        mock_logger.error.assert_called_once()
+        call_args = mock_logger.error.call_args
+        assert "Unhandled exception in background task" in call_args[0][0]
+        assert call_args[0][1] is exc
+        assert call_args[1]["exc_info"] is exc
+
+    def test_handled_exception_not_double_logged(self):
+        """_on_task_done does not log when task completes without exception."""
+        import asyncio
+        from unittest.mock import MagicMock, patch
+
+        from arxiv_browser import ArxivBrowser
+
+        mock_task = MagicMock(spec=asyncio.Task)
+        mock_task.cancelled.return_value = False
+        mock_task.exception.return_value = None
+
+        with patch("arxiv_browser.logger") as mock_logger:
+            ArxivBrowser._on_task_done(mock_task)
+
+        mock_logger.error.assert_not_called()
+
+    def test_cancelled_task_not_logged(self):
+        """_on_task_done does not log for cancelled tasks."""
+        import asyncio
+        from unittest.mock import MagicMock, patch
+
+        from arxiv_browser import ArxivBrowser
+
+        mock_task = MagicMock(spec=asyncio.Task)
+        mock_task.cancelled.return_value = True
+
+        with patch("arxiv_browser.logger") as mock_logger:
+            ArxivBrowser._on_task_done(mock_task)
+
+        mock_logger.error.assert_not_called()
+        # exception() should NOT be called when task is cancelled
+        mock_task.exception.assert_not_called()
+
+
+class TestGenerateSummaryAsync:
+    """Tests for the LLM summary generation async method."""
+
+    @pytest.fixture
+    def paper(self, make_paper):
+        return make_paper(arxiv_id="2401.12345", abstract="Test abstract.")
+
+    @pytest.fixture
+    def mock_app(self, tmp_path):
+        """Create a minimal mock of ArxivBrowser with required attributes."""
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import ArxivBrowser
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._paper_summaries = {}
+        app._summary_loading = set()
+        app._summary_db_path = tmp_path / "test_summaries.db"
+        app.notify = MagicMock()
+        app._update_abstract_display = MagicMock()
+        return app
+
+    def _make_proc_mock(self, stdout=b"", stderr=b"", returncode=0):
+        """Create an AsyncMock subprocess with controlled outputs."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        proc = AsyncMock()
+        proc.communicate.return_value = (stdout, stderr)
+        proc.returncode = returncode
+        proc.kill = MagicMock()  # kill() is synchronous
+        proc.wait = AsyncMock()
+        return proc
+
+    async def test_success_caches_and_notifies(self, paper, mock_app):
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser import ArxivBrowser
+
+        proc = self._make_proc_mock(stdout=b"Great paper about transformers.")
+
+        with (
+            patch("arxiv_browser._fetch_paper_content_async", new_callable=AsyncMock, return_value="Full paper text."),
+            patch("arxiv_browser.asyncio.create_subprocess_shell", new_callable=AsyncMock, return_value=proc),
+            patch("arxiv_browser.asyncio.wait_for", new_callable=AsyncMock, return_value=(b"Great paper about transformers.", b"")),
+            patch("arxiv_browser._save_summary") as mock_save,
+        ):
+            await ArxivBrowser._generate_summary_async(
+                mock_app, paper, "claude -p {prompt}", "", "hash123"
+            )
+
+        assert mock_app._paper_summaries["2401.12345"] == "Great paper about transformers."
+        # Verify notification
+        notify_calls = [c for c in mock_app.notify.call_args_list if "Summary generated" in str(c)]
+        assert len(notify_calls) == 1
+        # Verify loading state cleaned up
+        assert "2401.12345" not in mock_app._summary_loading
+        mock_app._update_abstract_display.assert_called()
+
+    async def test_timeout_kills_process(self, paper, mock_app):
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser import ArxivBrowser
+
+        proc = self._make_proc_mock()
+
+        with (
+            patch("arxiv_browser._fetch_paper_content_async", new_callable=AsyncMock, return_value="text"),
+            patch("arxiv_browser.asyncio.create_subprocess_shell", new_callable=AsyncMock, return_value=proc),
+            patch("arxiv_browser.asyncio.wait_for", new_callable=AsyncMock, side_effect=asyncio.TimeoutError()),
+        ):
+            await ArxivBrowser._generate_summary_async(
+                mock_app, paper, "claude -p {prompt}", "", "hash123"
+            )
+
+        proc.kill.assert_called_once()
+        proc.wait.assert_called_once()
+        assert "2401.12345" not in mock_app._paper_summaries
+        error_calls = [c for c in mock_app.notify.call_args_list if "timed out" in str(c)]
+        assert len(error_calls) == 1
+        # Verify loading state cleaned up
+        assert "2401.12345" not in mock_app._summary_loading
+
+    async def test_nonzero_exit_shows_stderr(self, paper, mock_app):
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser import ArxivBrowser
+
+        proc = self._make_proc_mock(stderr=b"Model not found", returncode=1)
+
+        with (
+            patch("arxiv_browser._fetch_paper_content_async", new_callable=AsyncMock, return_value="text"),
+            patch("arxiv_browser.asyncio.create_subprocess_shell", new_callable=AsyncMock, return_value=proc),
+            patch("arxiv_browser.asyncio.wait_for", new_callable=AsyncMock, return_value=(b"", b"Model not found")),
+        ):
+            await ArxivBrowser._generate_summary_async(
+                mock_app, paper, "claude -p {prompt}", "", "hash123"
+            )
+
+        assert "2401.12345" not in mock_app._paper_summaries
+        error_calls = [c for c in mock_app.notify.call_args_list if "Model not found" in str(c)]
+        assert len(error_calls) == 1
+
+    async def test_empty_stdout_warns(self, paper, mock_app):
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser import ArxivBrowser
+
+        proc = self._make_proc_mock(stdout=b"", returncode=0)
+
+        with (
+            patch("arxiv_browser._fetch_paper_content_async", new_callable=AsyncMock, return_value="text"),
+            patch("arxiv_browser.asyncio.create_subprocess_shell", new_callable=AsyncMock, return_value=proc),
+            patch("arxiv_browser.asyncio.wait_for", new_callable=AsyncMock, return_value=(b"", b"")),
+        ):
+            await ArxivBrowser._generate_summary_async(
+                mock_app, paper, "claude -p {prompt}", "", "hash123"
+            )
+
+        assert "2401.12345" not in mock_app._paper_summaries
+        warning_calls = [c for c in mock_app.notify.call_args_list if "empty output" in str(c)]
+        assert len(warning_calls) == 1
+
+    async def test_value_error_from_template(self, paper, mock_app):
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser import ArxivBrowser
+
+        with patch("arxiv_browser._fetch_paper_content_async", new_callable=AsyncMock, return_value="text"):
+            # Pass a template with an invalid placeholder to trigger ValueError
+            await ArxivBrowser._generate_summary_async(
+                mock_app, paper, "claude -p {prompt}", "Summarize: {invalid_field}", "hash123"
+            )
+
+        assert "2401.12345" not in mock_app._paper_summaries
+        error_calls = [c for c in mock_app.notify.call_args_list if "severity" in str(c) and "error" in str(c)]
+        assert len(error_calls) >= 1
+        # Verify loading state cleaned up
+        assert "2401.12345" not in mock_app._summary_loading
+
+    async def test_finally_cleans_up_loading_state(self, paper, mock_app):
+        """All code paths must clean up _summary_loading and call _update_abstract_display."""
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser import ArxivBrowser
+
+        # Pre-add to loading set to verify cleanup
+        mock_app._summary_loading.add("2401.12345")
+
+        with (
+            patch("arxiv_browser._fetch_paper_content_async", new_callable=AsyncMock, side_effect=Exception("unexpected")),
+        ):
+            await ArxivBrowser._generate_summary_async(
+                mock_app, paper, "claude -p {prompt}", "", "hash123"
+            )
+
+        # finally block must have cleaned up
+        assert "2401.12345" not in mock_app._summary_loading
+        mock_app._update_abstract_display.assert_called_with("2401.12345")
 
 
 class TestLlmSummaryDb:

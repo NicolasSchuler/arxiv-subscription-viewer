@@ -3244,7 +3244,17 @@ class ArxivBrowser(App):
         task = asyncio.create_task(coro)
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
+        task.add_done_callback(self._on_task_done)
         return task
+
+    @staticmethod
+    def _on_task_done(task: asyncio.Task[None]) -> None:
+        """Log unhandled exceptions from background tasks."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error("Unhandled exception in background task: %s", exc, exc_info=exc)
 
     def _apply_category_overrides(self) -> None:
         """Apply category color overrides from config."""
