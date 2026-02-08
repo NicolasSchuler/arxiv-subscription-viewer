@@ -2424,7 +2424,9 @@ class TestBuildLlmPrompt:
         paper = self._make_paper()
         template = "Summarize: {title} by {authors}"
         result = build_llm_prompt(paper, template)
-        assert result == "Summarize: Test Paper by Alice, Bob"
+        # Template lacks {paper_content}, so content is auto-appended
+        assert result.startswith("Summarize: Test Paper by Alice, Bob")
+        assert "An abstract." in result
 
     def test_all_placeholders(self):
         paper = self._make_paper()
@@ -2451,6 +2453,32 @@ class TestBuildLlmPrompt:
         paper = self._make_paper()
         result = build_llm_prompt(paper, paper_content="")
         assert "An abstract." in result
+
+    def test_auto_append_when_template_lacks_paper_content(self):
+        paper = self._make_paper()
+        result = build_llm_prompt(
+            paper, "Summarize: {title}", paper_content="Full paper text."
+        )
+        assert "Summarize: Test Paper" in result
+        assert "Full paper text." in result
+
+    def test_no_auto_append_when_template_has_paper_content(self):
+        paper = self._make_paper()
+        result = build_llm_prompt(
+            paper, "Context: {paper_content}\nQ: {title}?", paper_content="Full text."
+        )
+        # paper_content appears exactly once (substituted, not appended)
+        assert result.count("Full text.") == 1
+
+    def test_invalid_placeholder_raises_valueerror(self):
+        paper = self._make_paper()
+        with pytest.raises(ValueError, match="Invalid prompt template"):
+            build_llm_prompt(paper, "Summarize: {titl}")
+
+    def test_unescaped_braces_raise_valueerror(self):
+        paper = self._make_paper()
+        with pytest.raises(ValueError, match="Invalid prompt template"):
+            build_llm_prompt(paper, 'Output: {"key": "{title}"}')
 
 
 class TestExtractTextFromHtml:
@@ -2559,8 +2587,10 @@ class TestFormatSummaryAsRich:
 
     def test_rich_markup_escaped(self):
         result = format_summary_as_rich("Text with [bold]fake markup[/bold]")
-        # The square brackets should be escaped, not interpreted as Rich tags
-        assert "\\[bold" in result or "[bold" not in result or "\\[" in result
+        # Square brackets must be escaped so Rich doesn't interpret them as tags
+        assert "\\[bold\\]" in result or "\\[bold]" in result
+        # The word should still appear in the output
+        assert "fake markup" in result
 
 
 class TestLlmSummaryDb:
@@ -2627,11 +2657,16 @@ class TestLlmCommandResolution:
         assert "claude" in result
         assert "{prompt}" in result
 
-    def test_preset_unknown(self):
+    def test_preset_unknown_warns(self, caplog):
+        import logging
+
         from arxiv_browser import _resolve_llm_command
 
         config = UserConfig(llm_preset="unknown_tool")
-        assert _resolve_llm_command(config) == ""
+        with caplog.at_level(logging.WARNING, logger="arxiv_browser"):
+            assert _resolve_llm_command(config) == ""
+        assert "unknown_tool" in caplog.text
+        assert "Valid presets" in caplog.text
 
     def test_no_config(self):
         from arxiv_browser import _resolve_llm_command
@@ -2667,11 +2702,22 @@ class TestBuildLlmShellCommand:
         assert "quotes" in result
 
     def test_prompt_with_shell_chars(self):
+        import shlex
+
         from arxiv_browser import _build_llm_shell_command
 
-        result = _build_llm_shell_command("llm {prompt}", "text; rm -rf /")
-        # The dangerous command should be quoted/escaped
-        assert "rm -rf" in result
+        dangerous = "text; rm -rf /"
+        result = _build_llm_shell_command("llm {prompt}", dangerous)
+        # Verify the prompt is wrapped by shlex.quote (single-quoted)
+        assert shlex.quote(dangerous) in result
+        # The raw unquoted semicolon must NOT appear outside quotes
+        assert result == f"llm {shlex.quote(dangerous)}"
+
+    def test_missing_prompt_placeholder(self):
+        from arxiv_browser import _build_llm_shell_command
+
+        with pytest.raises(ValueError, match="must contain.*\\{prompt\\}"):
+            _build_llm_shell_command("claude", "hello")
 
 
 class TestCommandHash:

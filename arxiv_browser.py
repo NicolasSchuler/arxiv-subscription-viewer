@@ -57,12 +57,12 @@ import json
 import logging
 import os
 import platform
+import re
 import shlex
 import sqlite3
-import tempfile
-import re
 import subprocess
 import sys
+import tempfile
 import webbrowser
 from collections import deque
 from dataclasses import dataclass, field
@@ -410,9 +410,7 @@ def format_summary_as_rich(text: str) -> str:
     def _heading_repl(m: re.Match[str]) -> str:
         level = len(m.group(1))
         label = m.group(2).strip()
-        if level == 1:
-            return f"[bold {heading_color}]{label}[/]"
-        if level == 2:
+        if level <= 2:
             return f"[bold {heading_color}]{label}[/]"
         return f"[bold]{label}[/]"
 
@@ -832,7 +830,7 @@ def _load_summary(db_path: Path, arxiv_id: str, command_hash: str) -> str | None
             ).fetchone()
             return row[0] if row else None
     except sqlite3.Error:
-        logger.debug(f"Failed to load summary for {arxiv_id}", exc_info=True)
+        logger.warning("Failed to load summary for %s", arxiv_id, exc_info=True)
         return None
 
 
@@ -847,7 +845,7 @@ def _save_summary(db_path: Path, arxiv_id: str, summary: str, command_hash: str)
                 (arxiv_id, summary, command_hash, datetime.now().isoformat()),
             )
     except sqlite3.Error:
-        logger.debug(f"Failed to save summary for {arxiv_id}", exc_info=True)
+        logger.warning("Failed to save summary for %s", arxiv_id, exc_info=True)
 
 
 def _compute_command_hash(command_template: str, prompt_template: str) -> str:
@@ -904,7 +902,6 @@ async def _fetch_paper_content_async(paper: Paper) -> str:
 
     Falls back to the abstract if the HTML version is not available.
     """
-    arxiv_id = paper.arxiv_id.rstrip("v0123456789") if "v" in paper.arxiv_id else paper.arxiv_id
     html_url = f"https://arxiv.org/html/{paper.arxiv_id}"
     try:
         async with httpx.AsyncClient() as client:
@@ -915,11 +912,20 @@ async def _fetch_paper_content_async(paper: Paper) -> str:
                 text = await asyncio.to_thread(extract_text_from_html, response.text)
                 if text:
                     return text[:MAX_PAPER_CONTENT_LENGTH]
+            else:
+                logger.warning(
+                    "arXiv HTML fetch returned %d for %s", response.status_code, paper.arxiv_id
+                )
     except (httpx.HTTPError, OSError):
-        logger.debug(f"Failed to fetch HTML for {paper.arxiv_id}", exc_info=True)
+        logger.warning("Failed to fetch HTML for %s", paper.arxiv_id, exc_info=True)
     # Fallback to abstract
     abstract = paper.abstract or paper.abstract_raw or ""
     return f"Abstract:\n{abstract}" if abstract else ""
+
+
+_LLM_PROMPT_FIELDS = frozenset({
+    "title", "authors", "categories", "abstract", "arxiv_id", "paper_content",
+})
 
 
 def build_llm_prompt(
@@ -935,28 +941,52 @@ def build_llm_prompt(
     template = prompt_template or DEFAULT_LLM_PROMPT
     abstract = paper.abstract or paper.abstract_raw or "(no abstract)"
     content = paper_content or f"Abstract:\n{abstract}"
-    result = template.format(
-        title=paper.title,
-        authors=paper.authors,
-        categories=paper.categories,
-        abstract=abstract,
-        arxiv_id=paper.arxiv_id,
-        paper_content=content,
-    )
+    values = {
+        "title": paper.title,
+        "authors": paper.authors,
+        "categories": paper.categories,
+        "abstract": abstract,
+        "arxiv_id": paper.arxiv_id,
+        "paper_content": content,
+    }
+    try:
+        result = template.format(**values)
+    except (KeyError, ValueError, IndexError) as e:
+        raise ValueError(
+            f"Invalid prompt template: {e}. "
+            f"Valid placeholders: {', '.join(f'{{{k}}}' for k in sorted(_LLM_PROMPT_FIELDS))}"
+        ) from e
+    # Auto-append paper content if the template didn't include {paper_content}
+    if "{paper_content}" not in template and content:
+        result = result + "\n\n" + content
     return result
 
 
 def _resolve_llm_command(config: UserConfig) -> str:
-    """Resolve the LLM command template from config (custom or preset)."""
+    """Resolve the LLM command template from config (custom or preset).
+
+    Returns the command template string, or "" if not configured.
+    Logs a warning if the preset name is unrecognized.
+    """
     if config.llm_command:
         return config.llm_command
-    if config.llm_preset and config.llm_preset in LLM_PRESETS:
-        return LLM_PRESETS[config.llm_preset]
+    if config.llm_preset:
+        if config.llm_preset in LLM_PRESETS:
+            return LLM_PRESETS[config.llm_preset]
+        valid = ", ".join(sorted(LLM_PRESETS))
+        logger.warning("Unknown llm_preset %r. Valid presets: %s", config.llm_preset, valid)
     return ""
 
 
 def _build_llm_shell_command(command_template: str, prompt: str) -> str:
-    """Build the final shell command by substituting the prompt."""
+    """Build the final shell command by substituting the prompt.
+
+    Raises ValueError if the template does not contain {prompt}.
+    """
+    if "{prompt}" not in command_template:
+        raise ValueError(
+            f"LLM command template must contain {{prompt}} placeholder, got: {command_template!r}"
+        )
     escaped_prompt = shlex.quote(prompt)
     return command_template.replace("{prompt}", escaped_prompt)
 
@@ -3285,7 +3315,7 @@ class ArxivBrowser(App):
                 paper.abstract = cleaned
             self._update_abstract_display(paper.arxiv_id)
         except Exception:
-            logger.debug(f"Abstract load failed for {paper.arxiv_id}", exc_info=True)
+            logger.warning("Abstract load failed for %s", paper.arxiv_id, exc_info=True)
         finally:
             self._abstract_loading.discard(paper.arxiv_id)
             self._drain_abstract_queue()
@@ -3345,6 +3375,12 @@ class ArxivBrowser(App):
 
         if not save_config(self._config):
             logger.warning("Failed to save session state to config file")
+            self.notify(
+                "Failed to save session — changes may be lost",
+                title="Save Error",
+                severity="error",
+                timeout=8,
+            )
 
     @on(ListView.Selected)
     def on_list_selected(self, event: ListView.Selected) -> None:
@@ -4147,13 +4183,16 @@ class ArxivBrowser(App):
         """Generate an AI summary for the currently highlighted paper."""
         command_template = _resolve_llm_command(self._config)
         if not command_template:
-            self.notify(
-                "Set llm_command or llm_preset in config.json "
-                f"({get_config_path()})",
-                title="LLM not configured",
-                severity="warning",
-                timeout=8,
-            )
+            preset = self._config.llm_preset
+            if preset and preset not in LLM_PRESETS:
+                valid = ", ".join(sorted(LLM_PRESETS))
+                msg = f"Unknown preset '{preset}'. Valid: {valid}"
+            else:
+                msg = (
+                    "Set llm_command or llm_preset in config.json "
+                    f"({get_config_path()})"
+                )
+            self.notify(msg, title="LLM not configured", severity="warning", timeout=8)
             return
 
         item = self._get_current_paper_item()
@@ -4244,9 +4283,13 @@ class ArxivBrowser(App):
             )
             self.notify("Summary generated", title="AI Summary")
 
+        except ValueError as e:
+            # Config/template errors — show the descriptive message directly
+            logger.warning("Summary config error for %s: %s", arxiv_id, e)
+            self.notify(str(e), title="AI Summary", severity="error", timeout=10)
         except Exception as e:
-            logger.debug(f"Summary generation failed for {arxiv_id}", exc_info=True)
-            self.notify(f"Error: {e}", title="AI Summary", severity="error")
+            logger.warning("Summary generation failed for %s", arxiv_id, exc_info=True)
+            self.notify(f"Summary failed: {e}", title="AI Summary", severity="error")
         finally:
             self._summary_loading.discard(arxiv_id)
             self._update_abstract_display(arxiv_id)
@@ -4437,7 +4480,7 @@ class ArxivBrowser(App):
             success = await self._download_pdf_async(paper)
             self._download_results[paper.arxiv_id] = success
         except Exception:
-            logger.debug(f"Download failed for {paper.arxiv_id}", exc_info=True)
+            logger.warning("Download failed for %s", paper.arxiv_id, exc_info=True)
             self._download_results[paper.arxiv_id] = False
         finally:
             self._downloading.discard(paper.arxiv_id)
