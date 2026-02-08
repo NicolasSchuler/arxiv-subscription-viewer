@@ -169,7 +169,7 @@ LLM summaries are cached in a SQLite database (`summaries.db`) in the same confi
 
 ## LLM Summary Configuration
 
-Generate AI-powered paper summaries using any CLI tool. The full paper content is automatically fetched from the arXiv HTML version and passed to the LLM.
+Generate AI-powered paper summaries using any CLI tool. The default prompt produces accessible, explanatory summaries aimed at CS students (Problem / Approach / Results / Limitations / Key Takeaway). The full paper content is automatically fetched from the arXiv HTML version and passed to the LLM.
 
 Add to `config.json`:
 

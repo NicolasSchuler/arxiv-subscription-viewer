@@ -215,7 +215,7 @@ Configuration includes:
 
 ### AI Summary Setup
 
-Generate paper summaries using any LLM CLI tool. Press `Ctrl+s` on a paper to generate a structured analysis. The full paper content is automatically fetched from the arXiv HTML version and passed to the LLM.
+Generate paper summaries using any LLM CLI tool. Press `Ctrl+s` on a paper to generate an accessible, explanatory summary aimed at CS students. The full paper content is automatically fetched from the arXiv HTML version and passed to the LLM.
 
 Add one of these to your `config.json`:
 
