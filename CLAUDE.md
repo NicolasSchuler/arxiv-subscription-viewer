@@ -48,7 +48,7 @@ A Textual-based TUI application for browsing arXiv papers from email subscriptio
 - **`semantic_scholar.py`** (~630 lines): S2 API client, `SemanticScholarPaper` / `CitationEntry` dataclasses, SQLite cache for papers, recommendations, and citation graphs
 - **`huggingface.py`** (~300 lines): HuggingFace Daily Papers API client, `HuggingFacePaper` dataclass, SQLite cache
 
-### Test Suite (610 tests across 3 files)
+### Test Suite (~620 tests across 3 files)
 
 - **`test_arxiv_browser.py`** (~5800 lines): Core parsing, similarity, export, config, UI integration
 - **`test_semantic_scholar.py`** (~990 lines): S2 response parsing, serialization, cache CRUD, API fetch functions, citation graph
@@ -96,6 +96,15 @@ A Textual-based TUI application for browsing arXiv papers from email subscriptio
 
 **Development:**
 - **pytest** (>=9.0.2): Test framework
+- **pytest-cov**: Coverage measurement
+- **pyright**: Static type checking
+- **ruff**: Linting and formatting
+- **deptry**: Dependency hygiene (unused/missing/transitive deps)
+- **vulture**: Dead code detection
+- **bandit**: Security scanning
+- **radon/xenon**: Cyclomatic complexity analysis
+- **diff-cover**: Coverage enforcement on changed lines
+- **mutmut**: Mutation testing (targeted)
 
 ## Testing
 
@@ -106,6 +115,9 @@ uv run pytest
 # Run with verbose output
 uv run pytest -v
 
+# Run with coverage
+uv run pytest --cov --cov-report=term-missing
+
 # Run specific test class
 uv run pytest -v test_arxiv_browser.py::TestCleanLatex
 
@@ -114,6 +126,55 @@ uv run pytest -k "bibtex"
 ```
 
 All tests must pass before commits.
+
+## Code Quality Checks
+
+All tool configurations live in `pyproject.toml`. The vulture whitelist is in `vulture_whitelist.py`.
+
+### Quick check (before committing)
+
+```bash
+uv run ruff check . && uv run ruff format --check .
+uv run pyright
+uv run pytest --cov --cov-report=term-missing
+```
+
+### Full suite
+
+```bash
+# Lint + format
+uv run ruff check .
+uv run ruff format --check .
+
+# Type checking (basic mode — catches real errors without Textual framework noise)
+uv run pyright
+
+# Tests with coverage (fail_under=60, ratchet up over time)
+uv run pytest --cov --cov-report=term-missing --cov-report=html
+
+# Dependency hygiene — detects unused, missing, and transitive deps
+uv run deptry .
+
+# Dead code detection (vulture_whitelist.py suppresses Textual framework false positives)
+uv run vulture arxiv_browser.py semantic_scholar.py huggingface.py vulture_whitelist.py --min-confidence 80
+
+# Security scanning (B101/B311/B314/B404/B405 skipped in config)
+uv run bandit -c pyproject.toml -r arxiv_browser.py semantic_scholar.py huggingface.py
+
+# Complexity (show C+ rated functions, plus average)
+uv run radon cc arxiv_browser.py semantic_scholar.py huggingface.py -a -nc
+
+# Complexity gate (max-absolute E baseline — update_paper is E-ranked; ratchet down)
+uv run xenon arxiv_browser.py semantic_scholar.py huggingface.py --max-absolute E --max-modules D --max-average B
+
+# Coverage on changed lines only (80% threshold on diffs)
+uv run pytest --cov --cov-report=xml
+uv run diff-cover coverage.xml --compare-branch=main --fail-under=80
+
+# Mutation testing (targeted — full arxiv_browser.py would take hours)
+uv run mutmut run --paths-to-mutate=semantic_scholar.py
+uv run mutmut run --paths-to-mutate=huggingface.py
+```
 
 ## Running the Application
 

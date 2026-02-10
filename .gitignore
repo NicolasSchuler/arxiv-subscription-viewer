@@ -12,3 +12,11 @@ docs/
 history/**
 .DS_Store
 .playwright-mcp
+
+# Coverage
+htmlcov/
+coverage.xml
+.coverage
+
+# Mutation testing
+.mutmut-cache/

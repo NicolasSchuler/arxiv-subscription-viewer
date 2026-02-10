@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -22,7 +22,6 @@ from huggingface import (
     parse_hf_paper_response,
     save_hf_daily_cache,
 )
-
 
 # ============================================================================
 # Test Helpers
@@ -218,16 +217,16 @@ class TestIsFresh:
     """Tests for _is_fresh() hours-based TTL check."""
 
     def test_fresh_entry(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         assert _is_fresh(now.isoformat(), HF_DEFAULT_CACHE_TTL_HOURS) is True
 
     def test_stale_entry(self) -> None:
-        old = datetime.now(timezone.utc) - timedelta(hours=HF_DEFAULT_CACHE_TTL_HOURS + 1)
+        old = datetime.now(UTC) - timedelta(hours=HF_DEFAULT_CACHE_TTL_HOURS + 1)
         assert _is_fresh(old.isoformat(), HF_DEFAULT_CACHE_TTL_HOURS) is False
 
     def test_exactly_at_boundary(self) -> None:
         """Entry exactly at TTL boundary should be considered stale."""
-        old = datetime.now(timezone.utc) - timedelta(hours=HF_DEFAULT_CACHE_TTL_HOURS, seconds=1)
+        old = datetime.now(UTC) - timedelta(hours=HF_DEFAULT_CACHE_TTL_HOURS, seconds=1)
         assert _is_fresh(old.isoformat(), HF_DEFAULT_CACHE_TTL_HOURS) is False
 
     def test_invalid_date_returns_false(self) -> None:
@@ -238,7 +237,7 @@ class TestIsFresh:
 
     def test_naive_datetime_treated_as_utc(self) -> None:
         """Naive datetime string should be treated as UTC."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         # Remove timezone info to simulate naive datetime
         naive_str = now.strftime("%Y-%m-%dT%H:%M:%S")
         assert _is_fresh(naive_str, HF_DEFAULT_CACHE_TTL_HOURS) is True
@@ -258,10 +257,9 @@ class TestHfCache:
         assert db_path.exists()
 
         import sqlite3
+
         with sqlite3.connect(str(db_path)) as conn:
-            tables = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
+            tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
             table_names = [t[0] for t in tables]
             assert "hf_daily_papers" in table_names
 
@@ -286,13 +284,10 @@ class TestHfCache:
 
         # Manually set fetched_at to an old time
         import sqlite3
-        old_time = (
-            datetime.now(timezone.utc) - timedelta(hours=HF_DEFAULT_CACHE_TTL_HOURS + 1)
-        ).isoformat()
+
+        old_time = (datetime.now(UTC) - timedelta(hours=HF_DEFAULT_CACHE_TTL_HOURS + 1)).isoformat()
         with sqlite3.connect(str(db_path)) as conn:
-            conn.execute(
-                "UPDATE hf_daily_papers SET fetched_at = ?", (old_time,)
-            )
+            conn.execute("UPDATE hf_daily_papers SET fetched_at = ?", (old_time,))
 
         result = load_hf_daily_cache(db_path)
         assert result is None

@@ -9,13 +9,29 @@ get empty list on failure for graceful degradation.
 
 from __future__ import annotations
 
+__all__ = [
+    # Constants
+    "HF_DEFAULT_CACHE_TTL_HOURS",
+    # Data model
+    "HuggingFacePaper",
+    # API fetch
+    "fetch_hf_daily_papers",
+    # Cache / DB
+    "get_hf_db_path",
+    "init_hf_db",
+    "load_hf_daily_cache",
+    # Parsing
+    "parse_hf_paper_response",
+    "save_hf_daily_cache",
+]
+
 import asyncio
 import json
 import logging
 import random
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -27,14 +43,14 @@ logger = logging.getLogger(__name__)
 # Constants
 # ============================================================================
 
+CONFIG_APP_NAME = "arxiv-browser"
+
 HF_API_BASE = "https://huggingface.co/api/daily_papers"
 HF_DB_FILENAME = "huggingface.db"
 HF_DEFAULT_CACHE_TTL_HOURS = 6  # Trending data changes frequently
 HF_REQUEST_TIMEOUT = 15  # seconds
 HF_MAX_RETRIES = 3
 HF_INITIAL_BACKOFF = 1.0  # seconds, doubles each retry
-
-CONFIG_APP_NAME = "arxiv-browser"
 
 # ============================================================================
 # Data Model
@@ -141,19 +157,18 @@ async def fetch_hf_daily_papers(
             if response.status_code == 404:
                 logger.info("HF daily papers endpoint not found")
                 return []
-            if response.status_code in (429, 500, 502, 503, 504):
-                if attempt < HF_MAX_RETRIES - 1:
-                    jitter = random.uniform(0, backoff * 0.5)
-                    logger.info(
-                        "HF API %d, retrying in %.1fs (attempt %d/%d)",
-                        response.status_code,
-                        backoff + jitter,
-                        attempt + 1,
-                        HF_MAX_RETRIES,
-                    )
-                    await asyncio.sleep(backoff + jitter)
-                    backoff *= 2
-                    continue
+            if response.status_code in (429, 500, 502, 503, 504) and attempt < HF_MAX_RETRIES - 1:
+                jitter = random.uniform(0, backoff * 0.5)
+                logger.info(
+                    "HF API %d, retrying in %.1fs (attempt %d/%d)",
+                    response.status_code,
+                    backoff + jitter,
+                    attempt + 1,
+                    HF_MAX_RETRIES,
+                )
+                await asyncio.sleep(backoff + jitter)
+                backoff *= 2
+                continue
             logger.warning("HF API returned %d", response.status_code)
             return []
         except httpx.TimeoutException:
@@ -241,8 +256,8 @@ def _is_fresh(fetched_at_str: str, ttl_hours: int) -> bool:
     try:
         fetched_at = datetime.fromisoformat(fetched_at_str)
         if fetched_at.tzinfo is None:
-            fetched_at = fetched_at.replace(tzinfo=timezone.utc)
-        now = datetime.now(timezone.utc)
+            fetched_at = fetched_at.replace(tzinfo=UTC)
+        now = datetime.now(UTC)
         age_hours = (now - fetched_at).total_seconds() / 3600
         return age_hours < ttl_hours
     except (ValueError, TypeError):
@@ -262,9 +277,7 @@ def load_hf_daily_cache(
         return None
     try:
         with sqlite3.connect(str(db_path)) as conn:
-            rows = conn.execute(
-                "SELECT payload_json, fetched_at FROM hf_daily_papers"
-            ).fetchall()
+            rows = conn.execute("SELECT payload_json, fetched_at FROM hf_daily_papers").fetchall()
             if not rows:
                 return None
             # Check freshness of the first entry (all saved at same time)
@@ -276,22 +289,20 @@ def load_hf_daily_cache(
                 paper = _json_to_hf_paper(payload)
                 if paper is not None:
                     result[paper.arxiv_id] = paper
-            return result if result else None
+            return result or None
     except sqlite3.Error:
         logger.warning("Failed to load HF cache", exc_info=True)
         return None
 
 
-def save_hf_daily_cache(
-    db_path: Path, papers: list[HuggingFacePaper]
-) -> None:
+def save_hf_daily_cache(db_path: Path, papers: list[HuggingFacePaper]) -> None:
     """Persist HF daily papers to SQLite cache.
 
     Replaces all existing rows since this is a daily snapshot.
     """
     try:
         init_hf_db(db_path)
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         with sqlite3.connect(str(db_path)) as conn:
             conn.execute("DELETE FROM hf_daily_papers")
             for paper in papers:

@@ -8,11 +8,11 @@ from typing import Any
 import pytest
 
 from arxiv_browser import (
+    _HIGHLIGHT_PATTERN_CACHE,
     CATEGORY_COLORS,
     DEFAULT_CATEGORY_COLORS,
     DEFAULT_THEME,
     THEME_COLORS,
-    _HIGHLIGHT_PATTERN_CACHE,
     Paper,
     PaperMetadata,
     SearchBookmark,
@@ -21,7 +21,6 @@ from arxiv_browser import (
     WatchListEntry,
     format_categories,
 )
-
 
 # ── Module-level dict isolation ──────────────────────────────────────────────
 

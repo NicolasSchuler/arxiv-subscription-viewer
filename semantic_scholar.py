@@ -9,13 +9,40 @@ get None / empty list on failure for graceful degradation.
 
 from __future__ import annotations
 
+__all__ = [
+    # Constants
+    "S2_CITATION_GRAPH_CACHE_TTL_DAYS",
+    "S2_DEFAULT_CACHE_TTL_DAYS",
+    "S2_REC_CACHE_TTL_DAYS",
+    "CitationEntry",
+    # Data models
+    "SemanticScholarPaper",
+    "fetch_s2_citations",
+    # API fetch
+    "fetch_s2_paper",
+    "fetch_s2_recommendations",
+    "fetch_s2_references",
+    # Cache / DB
+    "get_s2_db_path",
+    "init_s2_db",
+    "load_s2_citation_graph",
+    "load_s2_paper",
+    "load_s2_recommendations",
+    "parse_citation_entry",
+    # Parsing
+    "parse_s2_paper_response",
+    "save_s2_citation_graph",
+    "save_s2_paper",
+    "save_s2_recommendations",
+]
+
 import asyncio
 import json
 import logging
 import random
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -27,29 +54,24 @@ logger = logging.getLogger(__name__)
 # Constants
 # ============================================================================
 
+CONFIG_APP_NAME = "arxiv-browser"
+
 S2_API_BASE = "https://api.semanticscholar.org/graph/v1"
 S2_REC_BASE = "https://api.semanticscholar.org/recommendations/v1"
-S2_PAPER_FIELDS = (
-    "paperId,citationCount,influentialCitationCount,tldr,fieldsOfStudy,year,url"
-)
+S2_PAPER_FIELDS = "paperId,citationCount,influentialCitationCount,tldr,fieldsOfStudy,year,url"
 S2_REC_FIELDS = (
-    "paperId,externalIds,title,citationCount,influentialCitationCount,"
-    "tldr,year,url,abstract"
+    "paperId,externalIds,title,citationCount,influentialCitationCount,tldr,year,url,abstract"
 )
 S2_DB_FILENAME = "semantic_scholar.db"
 S2_DEFAULT_CACHE_TTL_DAYS = 7
 S2_REC_CACHE_TTL_DAYS = 3
-S2_CITATION_FIELDS = (
-    "paperId,externalIds,title,authors,year,citationCount,url"
-)
+S2_CITATION_FIELDS = "paperId,externalIds,title,authors,year,citationCount,url"
 S2_CITATION_GRAPH_CACHE_TTL_DAYS = 3
 S2_MAX_REFERENCES = 100
 S2_MAX_CITATIONS = 50
 S2_REQUEST_TIMEOUT = 20  # seconds
 S2_MAX_RETRIES = 3
 S2_INITIAL_BACKOFF = 1.0  # seconds, doubles each retry
-
-CONFIG_APP_NAME = "arxiv-browser"
 
 # ============================================================================
 # Data Model
@@ -91,9 +113,7 @@ class CitationEntry:
 # ============================================================================
 
 
-def parse_s2_paper_response(
-    data: dict, arxiv_id: str = ""
-) -> SemanticScholarPaper | None:
+def parse_s2_paper_response(data: dict, arxiv_id: str = "") -> SemanticScholarPaper | None:
     """Parse S2 API JSON into dataclass. Returns None if essential fields missing."""
     paper_id = data.get("paperId")
     if not paper_id:
@@ -141,10 +161,7 @@ def parse_citation_entry(data: dict) -> CitationEntry | None:
     arxiv_id = external_ids.get("ArXiv", "")
     authors_raw = data.get("authors") or []
     authors = ", ".join(a.get("name", "") for a in authors_raw if a.get("name"))
-    url = (
-        f"https://arxiv.org/abs/{arxiv_id}" if arxiv_id
-        else data.get("url") or ""
-    )
+    url = f"https://arxiv.org/abs/{arxiv_id}" if arxiv_id else data.get("url") or ""
     return CitationEntry(
         s2_paper_id=paper_id,
         arxiv_id=arxiv_id,
@@ -181,28 +198,25 @@ async def _s2_get_with_retry(
     backoff = S2_INITIAL_BACKOFF
     for attempt in range(S2_MAX_RETRIES):
         try:
-            response = await client.get(
-                url, params=params, headers=headers, timeout=timeout
-            )
+            response = await client.get(url, params=params, headers=headers, timeout=timeout)
             if response.status_code == 200:
                 return response
             if response.status_code == 404:
                 logger.info("%s not found", label)
                 return None
-            if response.status_code in (429, 500, 502, 503, 504):
-                if attempt < S2_MAX_RETRIES - 1:
-                    jitter = random.uniform(0, backoff * 0.5)
-                    logger.info(
-                        "%s %d, retrying in %.1fs (attempt %d/%d)",
-                        label,
-                        response.status_code,
-                        backoff + jitter,
-                        attempt + 1,
-                        S2_MAX_RETRIES,
-                    )
-                    await asyncio.sleep(backoff + jitter)
-                    backoff *= 2
-                    continue
+            if response.status_code in (429, 500, 502, 503, 504) and attempt < S2_MAX_RETRIES - 1:
+                jitter = random.uniform(0, backoff * 0.5)
+                logger.info(
+                    "%s %d, retrying in %.1fs (attempt %d/%d)",
+                    label,
+                    response.status_code,
+                    backoff + jitter,
+                    attempt + 1,
+                    S2_MAX_RETRIES,
+                )
+                await asyncio.sleep(backoff + jitter)
+                backoff *= 2
+                continue
             logger.warning("%s returned %d", label, response.status_code)
             return None
         except httpx.TimeoutException:
@@ -413,8 +427,8 @@ def _is_fresh(fetched_at_str: str, ttl_days: int) -> bool:
         fetched_at = datetime.fromisoformat(fetched_at_str)
         # Ensure timezone-aware comparison
         if fetched_at.tzinfo is None:
-            fetched_at = fetched_at.replace(tzinfo=timezone.utc)
-        now = datetime.now(timezone.utc)
+            fetched_at = fetched_at.replace(tzinfo=UTC)
+        now = datetime.now(UTC)
         age_days = (now - fetched_at).total_seconds() / 86400
         return age_days < ttl_days
     except (ValueError, TypeError):
@@ -448,7 +462,7 @@ def save_s2_paper(db_path: Path, paper: SemanticScholarPaper) -> None:
     """Persist S2 paper data to the SQLite cache."""
     try:
         init_s2_db(db_path)
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         payload = _paper_to_json(paper)
         with sqlite3.connect(str(db_path)) as conn:
             conn.execute(
@@ -457,9 +471,7 @@ def save_s2_paper(db_path: Path, paper: SemanticScholarPaper) -> None:
                 (paper.arxiv_id, payload, now),
             )
     except sqlite3.Error:
-        logger.warning(
-            "Failed to save S2 cache for %s", paper.arxiv_id, exc_info=True
-        )
+        logger.warning("Failed to save S2 cache for %s", paper.arxiv_id, exc_info=True)
 
 
 def load_s2_recommendations(
@@ -490,9 +502,7 @@ def load_s2_recommendations(
                     results.append(paper)
             return results
     except sqlite3.Error:
-        logger.warning(
-            "Failed to load S2 recommendations for %s", arxiv_id, exc_info=True
-        )
+        logger.warning("Failed to load S2 recommendations for %s", arxiv_id, exc_info=True)
         return []
 
 
@@ -504,7 +514,7 @@ def save_s2_recommendations(
     """Persist S2 recommendations to the SQLite cache."""
     try:
         init_s2_db(db_path)
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         with sqlite3.connect(str(db_path)) as conn:
             # Clear old recommendations for this source
             conn.execute(
@@ -596,7 +606,9 @@ def load_s2_citation_graph(
             return results
     except sqlite3.Error:
         logger.warning(
-            "Failed to load citation graph for %s/%s", paper_id, direction,
+            "Failed to load citation graph for %s/%s",
+            paper_id,
+            direction,
             exc_info=True,
         )
         return []
@@ -611,11 +623,10 @@ def save_s2_citation_graph(
     """Persist citation graph entries to the SQLite cache."""
     try:
         init_s2_db(db_path)
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         with sqlite3.connect(str(db_path)) as conn:
             conn.execute(
-                "DELETE FROM s2_citation_graph "
-                "WHERE paper_id = ? AND direction = ?",
+                "DELETE FROM s2_citation_graph WHERE paper_id = ? AND direction = ?",
                 (paper_id, direction),
             )
             for rank, entry in enumerate(entries):
@@ -629,6 +640,7 @@ def save_s2_citation_graph(
     except sqlite3.Error:
         logger.warning(
             "Failed to save citation graph for %s/%s",
-            paper_id, direction,
+            paper_id,
+            direction,
             exc_info=True,
         )

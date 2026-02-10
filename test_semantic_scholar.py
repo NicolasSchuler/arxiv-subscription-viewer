@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 
 from semantic_scholar import (
-    CitationEntry,
     S2_CITATION_GRAPH_CACHE_TTL_DAYS,
     S2_DEFAULT_CACHE_TTL_DAYS,
     S2_REC_CACHE_TTL_DAYS,
+    CitationEntry,
     SemanticScholarPaper,
     _citation_entry_to_json,
     _is_fresh,
@@ -35,7 +35,6 @@ from semantic_scholar import (
     save_s2_paper,
     save_s2_recommendations,
 )
-
 
 # ============================================================================
 # Test Helpers
@@ -196,11 +195,11 @@ class TestIsFresh:
     """Tests for _is_fresh()."""
 
     def test_fresh_entry(self) -> None:
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         assert _is_fresh(now, ttl_days=7) is True
 
     def test_stale_entry(self) -> None:
-        old = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+        old = (datetime.now(UTC) - timedelta(days=10)).isoformat()
         assert _is_fresh(old, ttl_days=7) is False
 
     def test_invalid_date(self) -> None:
@@ -208,16 +207,12 @@ class TestIsFresh:
 
     def test_boundary_fresh(self) -> None:
         """Entry just under TTL should be fresh."""
-        almost_expired = (
-            datetime.now(timezone.utc) - timedelta(days=6, hours=23)
-        ).isoformat()
+        almost_expired = (datetime.now(UTC) - timedelta(days=6, hours=23)).isoformat()
         assert _is_fresh(almost_expired, ttl_days=7) is True
 
     def test_boundary_stale(self) -> None:
         """Entry just over TTL should be stale."""
-        just_expired = (
-            datetime.now(timezone.utc) - timedelta(days=7, hours=1)
-        ).isoformat()
+        just_expired = (datetime.now(UTC) - timedelta(days=7, hours=1)).isoformat()
         assert _is_fresh(just_expired, ttl_days=7) is False
 
 
@@ -236,9 +231,7 @@ class TestS2Cache:
         import sqlite3
 
         with sqlite3.connect(str(db_path)) as conn:
-            tables = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
+            tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
             table_names = {t[0] for t in tables}
             assert "s2_papers" in table_names
             assert "s2_recommendations" in table_names
@@ -729,9 +722,7 @@ class TestCitationGraphCache:
         import sqlite3
 
         with sqlite3.connect(str(db_path)) as conn:
-            tables = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
+            tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
             table_names = {t[0] for t in tables}
             assert "s2_citation_graph" in table_names
 
@@ -940,8 +931,7 @@ class TestFetchS2Citations:
         # Create 5 entries, request limit=2
         response_data = {
             "data": [
-                {"citingPaper": {"paperId": f"c{i}", "citationCount": i * 10}}
-                for i in range(5)
+                {"citingPaper": {"paperId": f"c{i}", "citationCount": i * 10}} for i in range(5)
             ]
         }
         mock_response = MagicMock(spec=httpx.Response)

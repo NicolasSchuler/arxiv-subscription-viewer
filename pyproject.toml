@@ -13,12 +13,23 @@ dependencies = [
     "textual>=7.3.0",
     "rapidfuzz>=3.0.0",
     "httpx>=0.27.0",
+    "platformdirs>=3.0",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=0.25.0",
+    "pytest-cov>=6.0",
+    "pyright>=1.1.390",
+    "ruff>=0.12.0",
+    "deptry>=0.22.0",
+    "vulture>=2.14",
+    "bandit>=1.8.0",
+    "radon>=6.0",
+    "xenon>=0.9.3",
+    "diff-cover>=9.2",
+    "mutmut>=3.2",
 ]
 
 [tool.pytest.ini_options]
@@ -28,3 +39,69 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks Textual integration tests requiring app.run_test()",
 ]
+
+# ── Ruff ──────────────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "C4", "RUF", "PERF", "FURB"]
+ignore = [
+    "RUF012",  # Textual BINDINGS / CSS are mutable class defaults by convention
+    "E501",    # line length handled by formatter
+    "SIM105",  # contextlib.suppress less readable than try/except pass
+]
+
+[tool.ruff.lint.per-file-ignores]
+"test_*.py" = ["S101", "F401"]
+"conftest.py" = ["F401"]
+"vulture_whitelist.py" = ["E402", "F401", "F811", "B018"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["arxiv_browser", "semantic_scholar", "huggingface"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ── Pyright ───────────────────────────────────────────────────────────
+[tool.pyright]
+typeCheckingMode = "basic"
+include = ["arxiv_browser.py", "semantic_scholar.py", "huggingface.py"]
+exclude = ["test_*.py", "conftest.py", ".venv"]
+reportMissingTypeStubs = false
+reportUnusedImport = false
+
+# ── Coverage ──────────────────────────────────────────────────────────
+[tool.coverage.run]
+source = ["arxiv_browser", "semantic_scholar", "huggingface"]
+
+[tool.coverage.report]
+fail_under = 60
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__",
+    "if TYPE_CHECKING",
+    "raise NotImplementedError",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+# ── Deptry ────────────────────────────────────────────────────────────
+[tool.deptry]
+extend_exclude = [".venv", "test_.*", "conftest\\.py"]
+
+[tool.deptry.per_rule_ignores]
+DEP003 = ["rich"]  # rich is a transitive dep of textual, intentionally used directly
+
+# ── Bandit ────────────────────────────────────────────────────────────
+[tool.bandit]
+skips = ["B101", "B311", "B314", "B404", "B405"]
+
+# ── Mutmut ────────────────────────────────────────────────────────────
+[tool.mutmut]
+paths_to_mutate = "semantic_scholar.py"
+tests_dir = "."
