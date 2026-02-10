@@ -3859,7 +3859,8 @@ class TestAtomicBibtexExport:
         with patch("arxiv_browser.save_config", return_value=True):
 
             async def run_test():
-                async with app.run_test():
+                async with app.run_test() as pilot:
+                    await pilot.pause(0.2)  # Let detail pane debounce fire
                     app.action_export_bibtex_file()
 
                     export_dir = tmp_path / "exports"
@@ -5714,8 +5715,8 @@ class TestTagNamespaceDisplay:
         paper = make_paper()
         details.update_paper(paper, abstract_text="test abstract", tags=None)
         content = details.content
-        # No Tags section header
-        assert "━━" not in content or "Tags" not in content
+        # No Tags section header — bold heading should be absent
+        assert "Tags[/]" not in content
 
     def test_tags_section_groups_by_namespace(self, make_paper):
         from arxiv_browser import PaperDetails

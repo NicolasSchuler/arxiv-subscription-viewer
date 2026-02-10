@@ -375,6 +375,8 @@ RELEVANCE_DB_FILENAME = "relevance.db"
 
 # Search debounce delay in seconds
 SEARCH_DEBOUNCE_DELAY = 0.3
+# Detail pane update debounce delay in seconds (shorter — must feel responsive)
+DETAIL_PANE_DEBOUNCE_DELAY = 0.1
 STOPWORDS = frozenset(
     {
         "a",
@@ -2725,9 +2727,6 @@ class PaperDetails(Static):
             safe_abstract = escape_rich_text(abstract_text)
         safe_url = escape_rich_text(paper.url)
 
-        # Section separator helper
-        sep_color = THEME_COLORS["muted"]
-
         # Title section (Monokai foreground)
         lines.append(f"[bold {THEME_COLORS['text']}]{safe_title}[/]")
         lines.append("")
@@ -2742,32 +2741,23 @@ class PaperDetails(Static):
         )
         if paper.comments:
             lines.append(f"  [bold {THEME_COLORS['accent']}]Comments:[/] [dim]{safe_comments}[/]")
-        lines.append("")
 
         # Authors section
-        lines.append(
-            f"[{sep_color}]━━ [{THEME_COLORS['green']}]Authors[/] ━━━━━━━━━━━━━━━━━━━━━━━━━[/]"
-        )
+        lines.append(f"\n[bold {THEME_COLORS['green']}]Authors[/]")
         lines.append(f"  [{THEME_COLORS['text']}]{safe_authors}[/]")
-        lines.append("")
 
         # Abstract section
-        lines.append(
-            f"[{sep_color}]━━ [{THEME_COLORS['orange']}]Abstract[/] ━━━━━━━━━━━━━━━━━━━━━━━━[/]"
-        )
+        lines.append(f"\n[bold {THEME_COLORS['orange']}]Abstract[/]")
         if loading:
             lines.append("  [dim italic]Loading abstract...[/]")
         elif abstract_text:
             lines.append(f"  [{THEME_COLORS['text']}]{safe_abstract}[/]")
         else:
             lines.append("  [dim italic]No abstract available[/]")
-        lines.append("")
 
         # Tags section (shown when tags present)
         if tags:
-            lines.append(
-                f"[{sep_color}]━━ [{THEME_COLORS['accent']}]Tags[/] ━━━━━━━━━━━━━━━━━━━━━━━━━━━[/]"
-            )
+            lines.append(f"\n[bold {THEME_COLORS['accent']}]Tags[/]")
             # Group tags by namespace
             namespaced: dict[str, list[str]] = {}
             unnamespaced: list[str] = []
@@ -2784,7 +2774,6 @@ class PaperDetails(Static):
             if unnamespaced:
                 color = get_tag_color("")
                 lines.append(f"  [{color}]{', '.join(unnamespaced)}[/]")
-            lines.append("")
 
         # Relevance section (shown when score present)
         if relevance is not None:
@@ -2795,46 +2784,32 @@ class PaperDetails(Static):
                 score_color = THEME_COLORS["yellow"]
             else:
                 score_color = THEME_COLORS["muted"]
-            lines.append(
-                f"[{sep_color}]━━ [{THEME_COLORS['accent']}]Relevance[/] ━━━━━━━━━━━━━━━━━━━━━━━[/]"
-            )
+            lines.append(f"\n[bold {THEME_COLORS['accent']}]Relevance[/]")
             lines.append(
                 f"  [bold {THEME_COLORS['accent']}]Score:[/] [{score_color}]{rel_score}/10[/]"
             )
             if rel_reason:
                 safe_reason = escape_rich_text(rel_reason)
                 lines.append(f"  [{THEME_COLORS['text']}]{safe_reason}[/]")
-            lines.append("")
 
         # AI Summary section (shown when available or loading)
         summary_header = "🤖 AI Summary"
         if summary_mode:
             summary_header += f" ({summary_mode})"
         if summary_loading:
-            lines.append(
-                f"[{sep_color}]━━ [{THEME_COLORS['purple']}]{summary_header}[/] ━━━━━━━━━━━━━━━━━━━━[/]"
-            )
+            lines.append(f"\n[bold {THEME_COLORS['purple']}]{summary_header}[/]")
             lines.append("  [dim italic]⏳ Generating summary...[/]")
-            lines.append("")
         elif summary:
             rendered_summary = format_summary_as_rich(summary)
-            lines.append(
-                f"[{sep_color}]━━ [{THEME_COLORS['purple']}]{summary_header}[/] ━━━━━━━━━━━━━━━━━━━━[/]"
-            )
+            lines.append(f"\n[bold {THEME_COLORS['purple']}]{summary_header}[/]")
             lines.append(rendered_summary)
-            lines.append("")
 
         # Semantic Scholar section (shown when available or loading)
         if s2_loading:
-            lines.append(
-                f"[{sep_color}]━━ [{THEME_COLORS['green']}]Semantic Scholar[/] ━━━━━━━━━━━━━[/]"
-            )
+            lines.append(f"\n[bold {THEME_COLORS['green']}]Semantic Scholar[/]")
             lines.append("  [dim italic]Fetching data...[/]")
-            lines.append("")
         elif s2_data:
-            lines.append(
-                f"[{sep_color}]━━ [{THEME_COLORS['green']}]Semantic Scholar[/] ━━━━━━━━━━━━━[/]"
-            )
+            lines.append(f"\n[bold {THEME_COLORS['green']}]Semantic Scholar[/]")
             lines.append(
                 f"  [bold {THEME_COLORS['accent']}]Citations:[/] {s2_data.citation_count}"
                 f"  [bold {THEME_COLORS['accent']}]Influential:[/] {s2_data.influential_citation_count}"
@@ -2847,13 +2822,10 @@ class PaperDetails(Static):
                 lines.append(
                     f"  [bold {THEME_COLORS['accent']}]TLDR:[/] [{THEME_COLORS['text']}]{safe_tldr}[/]"
                 )
-            lines.append("")
 
         # HuggingFace section (shown when data present)
         if hf_data:
-            lines.append(
-                f"[{sep_color}]━━ [{THEME_COLORS['orange']}]HuggingFace[/] ━━━━━━━━━━━━━━━━[/]"
-            )
+            lines.append(f"\n[bold {THEME_COLORS['orange']}]HuggingFace[/]")
             hf_parts = [f"  [bold {THEME_COLORS['accent']}]Upvotes:[/] {hf_data.upvotes}"]
             if hf_data.num_comments > 0:
                 hf_parts.append(
@@ -2872,26 +2844,20 @@ class PaperDetails(Static):
                 lines.append(
                     f"  [bold {THEME_COLORS['accent']}]AI Summary:[/] [{THEME_COLORS['text']}]{safe_summary}[/]"
                 )
-            lines.append("")
 
         # Version update section (shown when update detected)
         if version_update is not None:
             old_v, new_v = version_update
-            lines.append(
-                f"[{sep_color}]━━ [{THEME_COLORS['pink']}]Version Update[/] ━━━━━━━━━━━━━━[/]"
-            )
+            lines.append(f"\n[bold {THEME_COLORS['pink']}]Version Update[/]")
             lines.append(
                 f"  [bold {THEME_COLORS['accent']}]Updated:[/] [{THEME_COLORS['pink']}]v{old_v} \u2192 v{new_v}[/]"
             )
             lines.append(
                 f"  [bold {THEME_COLORS['accent']}]View diff:[/] [{THEME_COLORS['accent']}]https://arxivdiff.org/abs/{paper.arxiv_id}[/]"
             )
-            lines.append("")
 
         # URL section
-        lines.append(
-            f"[{sep_color}]━━ [{THEME_COLORS['pink']}]URL[/] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/]"
-        )
+        lines.append(f"\n[bold {THEME_COLORS['pink']}]URL[/]")
         lines.append(f"  [{THEME_COLORS['accent']}]{safe_url}[/]")
 
         self.update("\n".join(lines))
@@ -2926,7 +2892,7 @@ class HelpScreen(ModalScreen[None]):
         min-width: 60;
         min-height: 20;
         background: #272822;
-        border: round #66d9ef;
+        border: tall #66d9ef;
         padding: 1 2;
         overflow-y: auto;
     }
@@ -3077,7 +3043,7 @@ class NotesModal(ModalScreen[str]):
         min-width: 50;
         min-height: 15;
         background: #272822;
-        border: round #66d9ef;
+        border: tall #66d9ef;
         padding: 1 2;
     }
 
@@ -3090,11 +3056,11 @@ class NotesModal(ModalScreen[str]):
     #notes-textarea {
         height: 1fr;
         background: #1e1e1e;
-        border: round #75715e;
+        border: none;
     }
 
     #notes-textarea:focus {
-        border: round #66d9ef;
+        border: tall #66d9ef;
     }
 
     #notes-buttons {
@@ -3158,7 +3124,7 @@ class TagsModal(ModalScreen[list[str]]):
         height: auto;
         min-width: 40;
         background: #272822;
-        border: round #a6e22e;
+        border: tall #a6e22e;
         padding: 1 2;
     }
 
@@ -3176,11 +3142,11 @@ class TagsModal(ModalScreen[list[str]]):
     #tags-input {
         width: 100%;
         background: #1e1e1e;
-        border: round #75715e;
+        border: none;
     }
 
     #tags-input:focus {
-        border: round #a6e22e;
+        border: tall #a6e22e;
     }
 
     #tags-buttons {
@@ -3305,7 +3271,7 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
         min-width: 60;
         min-height: 20;
         background: #272822;
-        border: round #66d9ef;
+        border: tall #66d9ef;
         padding: 1 2;
     }
 
@@ -3323,7 +3289,7 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
         width: 2fr;
         height: 1fr;
         background: #1e1e1e;
-        border: round #75715e;
+        border: none;
         margin-right: 2;
     }
 
@@ -3341,12 +3307,12 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
     #watch-type {
         width: 100%;
         background: #1e1e1e;
-        border: round #75715e;
+        border: none;
     }
 
     #watch-pattern:focus,
     #watch-type:focus {
-        border: round #66d9ef;
+        border: tall #66d9ef;
     }
 
     #watch-case {
@@ -3514,7 +3480,7 @@ class ArxivSearchModal(ModalScreen[ArxivSearchRequest | None]):
         height: auto;
         min-width: 60;
         background: #272822;
-        border: round #66d9ef;
+        border: tall #66d9ef;
         padding: 1 2;
     }
 
@@ -3534,14 +3500,14 @@ class ArxivSearchModal(ModalScreen[ArxivSearchRequest | None]):
     #arxiv-search-category {
         width: 100%;
         background: #1e1e1e;
-        border: round #75715e;
+        border: none;
         margin-bottom: 1;
     }
 
     #arxiv-search-query:focus,
     #arxiv-search-field:focus,
     #arxiv-search-category:focus {
-        border: round #66d9ef;
+        border: tall #66d9ef;
     }
 
     #arxiv-search-buttons {
@@ -3651,7 +3617,7 @@ class RecommendationSourceModal(ModalScreen[str]):
         width: 50;
         height: auto;
         background: #272822;
-        border: round #fd971f;
+        border: tall #fd971f;
         padding: 1 2;
     }
 
@@ -3726,7 +3692,7 @@ class RecommendationsScreen(ModalScreen[str | None]):
         min-width: 60;
         min-height: 20;
         background: #272822;
-        border: round #fd971f;
+        border: tall #fd971f;
         padding: 1 2;
     }
 
@@ -3739,12 +3705,12 @@ class RecommendationsScreen(ModalScreen[str | None]):
     #recommendations-list {
         height: 1fr;
         background: #1e1e1e;
-        border: round #75715e;
+        border: none;
     }
 
     #recommendations-list > ListItem {
-        padding: 1;
-        border-bottom: dashed #3e3d32;
+        padding: 0 1;
+        border-bottom: solid #3e3d32;
     }
 
     #recommendations-list > ListItem.--highlight {
@@ -3880,7 +3846,7 @@ class CitationGraphScreen(ModalScreen[str | None]):
         min-width: 60;
         min-height: 20;
         background: #272822;
-        border: round #ae81ff;
+        border: tall #ae81ff;
         padding: 1 2;
     }
 
@@ -3909,16 +3875,16 @@ class CitationGraphScreen(ModalScreen[str | None]):
     .citation-list {
         height: 1fr;
         background: #1e1e1e;
-        border: round #75715e;
+        border: none;
     }
 
     .citation-list.active-panel {
-        border: round #ae81ff;
+        border-left: tall #ae81ff;
     }
 
     .citation-list > ListItem {
-        padding: 1;
-        border-bottom: dashed #3e3d32;
+        padding: 0 1;
+        border-bottom: solid #3e3d32;
     }
 
     .citation-list > ListItem.--highlight {
@@ -4191,7 +4157,7 @@ class ConfirmModal(ModalScreen[bool]):
         min-width: 40;
         height: auto;
         background: #272822;
-        border: round #fd971f;
+        border: tall #fd971f;
         padding: 1 2;
     }
 
@@ -4262,7 +4228,7 @@ class ExportMenuModal(ModalScreen[str]):
         width: 52;
         height: auto;
         background: #272822;
-        border: round #fd971f;
+        border: tall #fd971f;
         padding: 1 2;
     }
 
@@ -4366,7 +4332,7 @@ class SummaryModeModal(ModalScreen[str]):
         width: 52;
         height: auto;
         background: #272822;
-        border: round #ae81ff;
+        border: tall #ae81ff;
         padding: 1 2;
     }
 
@@ -4438,7 +4404,7 @@ class ResearchInterestsModal(ModalScreen[str]):
         min-width: 50;
         min-height: 15;
         background: #272822;
-        border: round #e6db74;
+        border: tall #e6db74;
         padding: 1 2;
     }
 
@@ -4456,11 +4422,11 @@ class ResearchInterestsModal(ModalScreen[str]):
     #interests-textarea {
         height: 1fr;
         background: #1e1e1e;
-        border: round #75715e;
+        border: none;
     }
 
     #interests-textarea:focus {
-        border: round #66d9ef;
+        border: tall #66d9ef;
     }
 
     #interests-buttons {
@@ -4830,39 +4796,37 @@ class ArxivBrowser(App):
         min-width: 50;
         max-width: 100;
         height: 100%;
-        border: round #49483e;
+        border: tall #49483e;
         background: #1e1e1e;
     }
 
     #left-pane:focus-within {
-        border: round #66d9ef;
+        border: tall #66d9ef;
     }
 
     #right-pane {
         width: 3fr;
         height: 100%;
-        border: round #49483e;
+        border: tall #49483e;
         background: #1e1e1e;
     }
 
     #right-pane:focus-within {
-        border: round #66d9ef;
+        border: tall #66d9ef;
     }
 
     #list-header {
-        padding: 1 2;
+        padding: 0 2;
         background: #3e3d32;
         color: #66d9ef;
         text-style: bold;
-        border-bottom: solid #75715e;
     }
 
     #details-header {
-        padding: 1 2;
+        padding: 0 2;
         background: #3e3d32;
         color: #e6db74;
         text-style: bold;
-        border-bottom: solid #75715e;
     }
 
     #paper-list {
@@ -4888,18 +4852,18 @@ class ArxivBrowser(App):
 
     #search-input {
         width: 100%;
-        border: round #66d9ef;
+        border: tall #66d9ef;
         background: #272822;
     }
 
     #search-input:focus {
-        border: round #e6db74;
+        border: tall #e6db74;
     }
 
     PaperListItem {
-        padding: 1 2;
+        padding: 0 2;
         height: auto;
-        border-bottom: dashed #3e3d32;
+        border-bottom: solid #3e3d32;
     }
 
     PaperListItem:hover {
@@ -5047,6 +5011,8 @@ class ArxivBrowser(App):
         self.selected_ids: set[str] = set()  # Track selected arxiv_ids
         self._search_timer: Timer | None = None
         self._pending_query: str = ""
+        self._detail_timer: Timer | None = None
+        self._pending_detail_item: PaperListItem | None = None
         self._sort_index: int = 0  # Index into SORT_OPTIONS
 
         # Configuration and persistence
@@ -5158,17 +5124,7 @@ class ArxivBrowser(App):
                         ),
                         id="search-input",
                     )
-                yield ListView(
-                    *[
-                        PaperListItem(
-                            p,
-                            abstract_text=self._get_abstract_text(p, allow_async=True),
-                            highlight_terms=self._highlight_terms,
-                        )
-                        for p in self.filtered_papers
-                    ],
-                    id="paper-list",
-                )
+                yield ListView(id="paper-list")
                 yield Label("", id="status-bar")
             with Vertical(id="right-pane"):
                 yield Label(" Paper Details", id="details-header")
@@ -5208,7 +5164,9 @@ class ArxivBrowser(App):
             if session.current_filter:
                 search_input = self.query_one("#search-input", Input)
                 search_input.value = session.current_filter
-                self._apply_filter(session.current_filter)
+                self._apply_filter(session.current_filter)  # calls _refresh_list_view
+            else:
+                self._refresh_list_view()  # populate without filter
 
             # Restore scroll position
             list_view = self.query_one("#paper-list", ListView)
@@ -5217,6 +5175,8 @@ class ArxivBrowser(App):
                 index = min(session.scroll_index, len(list_view.children) - 1)
                 list_view.index = max(0, index)
         else:
+            # Populate list (deferred from compose for faster first paint)
+            self._refresh_list_view()
             # Default: select first item if available
             list_view = self.query_one("#paper-list", ListView)
             if list_view.children:
@@ -5233,11 +5193,15 @@ class ArxivBrowser(App):
         # Save session state before exit
         self._save_session_state()
 
-        # Clean up timer
+        # Clean up timers
         timer = self._search_timer
         self._search_timer = None
         if timer is not None:
             timer.stop()
+        detail_timer = self._detail_timer
+        self._detail_timer = None
+        if detail_timer is not None:
+            detail_timer.stop()
 
         # Close shared HTTP client
         client = self._http_client
@@ -5447,12 +5411,36 @@ class ArxivBrowser(App):
 
     @on(ListView.Highlighted)
     def on_list_highlighted(self, event: ListView.Highlighted) -> None:
-        """Handle paper highlight (keyboard navigation)."""
+        """Handle paper highlight (keyboard navigation) with debouncing.
+
+        Uses atomic swap pattern to avoid redundant detail pane rebuilds
+        during rapid j/k navigation.
+        """
         if isinstance(event.item, PaperListItem):
+            self._pending_detail_item = event.item
+            # Atomic swap pattern (same as search debounce)
+            old_timer = self._detail_timer
+            self._detail_timer = None
+            if old_timer is not None:
+                old_timer.stop()
+            self._detail_timer = self.set_timer(
+                DETAIL_PANE_DEBOUNCE_DELAY,
+                self._debounced_detail_update,
+            )
+
+    def _debounced_detail_update(self) -> None:
+        """Apply detail pane update after debounce delay."""
+        self._detail_timer = None
+        item = self._pending_detail_item
+        if item is None:
+            return
+        try:
             details = self.query_one(PaperDetails)
-            aid = event.item.paper.arxiv_id
-            abstract_text = self._get_abstract_text(event.item.paper, allow_async=True)
-            details.update_paper(event.item.paper, abstract_text, **self._detail_kwargs(aid))
+        except NoMatches:
+            return  # Widget tree torn down during shutdown
+        aid = item.paper.arxiv_id
+        abstract_text = self._get_abstract_text(item.paper, allow_async=True)
+        details.update_paper(item.paper, abstract_text, **self._detail_kwargs(aid))
 
     def action_toggle_search(self) -> None:
         """Toggle search input visibility."""
