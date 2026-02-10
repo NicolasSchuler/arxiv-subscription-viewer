@@ -96,6 +96,12 @@ class TestParseHfPaperResponse:
         assert parse_hf_paper_response({}) is None
         assert parse_hf_paper_response({"paper": None}) is None
 
+    def test_non_dict_item_returns_none(self) -> None:
+        assert parse_hf_paper_response("not-a-dict") is None  # type: ignore[arg-type]
+
+    def test_non_dict_paper_returns_none(self) -> None:
+        assert parse_hf_paper_response({"paper": "bad"}) is None
+
     def test_null_ai_summary(self) -> None:
         item = _make_api_item()
         item["paper"]["ai_summary"] = None
@@ -204,6 +210,29 @@ class TestSerialization:
         assert restored is not None
         assert restored.ai_summary == ""
         assert restored.ai_keywords == ()
+        assert restored.github_repo == ""
+        assert restored.github_stars == 0
+
+    def test_coerces_bad_types(self) -> None:
+        payload = json.dumps(
+            {
+                "arxiv_id": "2602.08629",
+                "title": 123,
+                "upvotes": "42",
+                "num_comments": None,
+                "ai_summary": ["bad"],
+                "ai_keywords": ["ok", 123, None],
+                "github_repo": 9,
+                "github_stars": "77",
+            }
+        )
+        restored = _json_to_hf_paper(payload)
+        assert restored is not None
+        assert restored.title == ""
+        assert restored.upvotes == 0
+        assert restored.num_comments == 0
+        assert restored.ai_summary == ""
+        assert restored.ai_keywords == ("ok",)
         assert restored.github_repo == ""
         assert restored.github_stars == 0
 
@@ -373,6 +402,18 @@ class TestFetchHfDailyPapers:
         assert result == []
 
     @pytest.mark.asyncio
+    async def test_invalid_json_returns_empty(self) -> None:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.side_effect = ValueError("bad json")
+
+        client = AsyncMock(spec=httpx.AsyncClient)
+        client.get.return_value = mock_response
+
+        result = await fetch_hf_daily_papers(client)
+        assert result == []
+
+    @pytest.mark.asyncio
     async def test_404_returns_empty(self) -> None:
         mock_response = MagicMock()
         mock_response.status_code = 404
@@ -440,6 +481,25 @@ class TestFetchHfDailyPapers:
         items = [
             _make_api_item(),
             {"paper": {"id": ""}},  # Missing ID
+            _make_api_item(**{"paper.id": "2602.99999"}),
+        ]
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = items
+
+        client = AsyncMock(spec=httpx.AsyncClient)
+        client.get.return_value = mock_response
+
+        result = await fetch_hf_daily_papers(client)
+        assert len(result) == 2
+
+    @pytest.mark.asyncio
+    async def test_skips_non_dict_items(self) -> None:
+        items = [
+            _make_api_item(),
+            None,
+            "bad",
+            42,
             _make_api_item(**{"paper.id": "2602.99999"}),
         ]
         mock_response = MagicMock()

@@ -10,26 +10,24 @@ get None / empty list on failure for graceful degradation.
 from __future__ import annotations
 
 __all__ = [
-    # Constants
+    "S2_CITATIONS_PAGE_SIZE",
+    "S2_CITATIONS_SCAN_CAP",
     "S2_CITATION_GRAPH_CACHE_TTL_DAYS",
     "S2_DEFAULT_CACHE_TTL_DAYS",
     "S2_REC_CACHE_TTL_DAYS",
     "CitationEntry",
-    # Data models
     "SemanticScholarPaper",
     "fetch_s2_citations",
-    # API fetch
     "fetch_s2_paper",
     "fetch_s2_recommendations",
     "fetch_s2_references",
-    # Cache / DB
     "get_s2_db_path",
+    "has_s2_citation_graph_cache",
     "init_s2_db",
     "load_s2_citation_graph",
     "load_s2_paper",
     "load_s2_recommendations",
     "parse_citation_entry",
-    # Parsing
     "parse_s2_paper_response",
     "save_s2_citation_graph",
     "save_s2_paper",
@@ -44,6 +42,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import httpx
 from platformdirs import user_config_dir
@@ -69,6 +68,8 @@ S2_CITATION_FIELDS = "paperId,externalIds,title,authors,year,citationCount,url"
 S2_CITATION_GRAPH_CACHE_TTL_DAYS = 3
 S2_MAX_REFERENCES = 100
 S2_MAX_CITATIONS = 50
+S2_CITATIONS_PAGE_SIZE = 100
+S2_CITATIONS_SCAN_CAP = 1000
 S2_REQUEST_TIMEOUT = 20  # seconds
 S2_MAX_RETRIES = 3
 S2_INITIAL_BACKOFF = 1.0  # seconds, doubles each retry
@@ -157,10 +158,16 @@ def parse_citation_entry(data: dict) -> CitationEntry | None:
     paper_id = data.get("paperId")
     if not paper_id:
         return None
-    external_ids = data.get("externalIds") or {}
+    external_ids = data.get("externalIds")
+    if not isinstance(external_ids, dict):
+        external_ids = {}
     arxiv_id = external_ids.get("ArXiv", "")
     authors_raw = data.get("authors") or []
-    authors = ", ".join(a.get("name", "") for a in authors_raw if a.get("name"))
+    authors = ", ".join(
+        a.get("name", "")
+        for a in authors_raw
+        if isinstance(a, dict) and isinstance(a.get("name"), str) and a.get("name")
+    )
     url = f"https://arxiv.org/abs/{arxiv_id}" if arxiv_id else data.get("url") or ""
     return CitationEntry(
         s2_paper_id=paper_id,
@@ -240,6 +247,19 @@ async def _s2_get_with_retry(
     return None
 
 
+def _parse_json_object(response: httpx.Response, label: str) -> dict[str, Any] | None:
+    """Parse a response body as JSON object, returning None on malformed payloads."""
+    try:
+        payload = response.json()
+    except ValueError:
+        logger.warning("%s returned invalid JSON", label, exc_info=True)
+        return None
+    if not isinstance(payload, dict):
+        logger.warning("%s returned non-object JSON payload", label)
+        return None
+    return payload
+
+
 async def fetch_s2_paper(
     arxiv_id: str,
     client: httpx.AsyncClient,
@@ -257,7 +277,10 @@ async def fetch_s2_paper(
     )
     if response is None:
         return None
-    return parse_s2_paper_response(response.json(), arxiv_id=arxiv_id)
+    payload = _parse_json_object(response, f"S2 paper arXiv:{arxiv_id}")
+    if payload is None:
+        return None
+    return parse_s2_paper_response(payload, arxiv_id=arxiv_id)
 
 
 async def fetch_s2_recommendations(
@@ -278,8 +301,21 @@ async def fetch_s2_recommendations(
     )
     if response is None:
         return []
-    papers_data = response.json().get("recommendedPapers") or []
-    return [p for p in (parse_s2_paper_response(d) for d in papers_data) if p is not None]
+    payload = _parse_json_object(response, f"S2 recs arXiv:{arxiv_id}")
+    if payload is None:
+        return []
+    papers_data = payload.get("recommendedPapers")
+    if not isinstance(papers_data, list):
+        logger.warning("S2 recs arXiv:%s returned non-list recommendedPapers", arxiv_id)
+        return []
+    papers: list[SemanticScholarPaper] = []
+    for item in papers_data:
+        if not isinstance(item, dict):
+            continue
+        parsed = parse_s2_paper_response(item)
+        if parsed is not None:
+            papers.append(parsed)
+    return papers
 
 
 async def fetch_s2_references(
@@ -300,8 +336,17 @@ async def fetch_s2_references(
     )
     if response is None:
         return []
+    payload = _parse_json_object(response, f"S2 refs {paper_id}")
+    if payload is None:
+        return []
+    data = payload.get("data")
+    if not isinstance(data, list):
+        logger.warning("S2 refs %s returned non-list data", paper_id)
+        return []
     entries: list[CitationEntry] = []
-    for item in response.json().get("data") or []:
+    for item in data:
+        if not isinstance(item, dict):
+            continue
         entry = parse_citation_entry(item.get("citedPaper") or {})
         if entry:
             entries.append(entry)
@@ -317,23 +362,51 @@ async def fetch_s2_citations(
     timeout: int = S2_REQUEST_TIMEOUT,
 ) -> list[CitationEntry]:
     """Fetch papers citing the given paper. Top N by citation_count."""
-    # Fetch more than limit, then trim to top N by citation count
-    fetch_limit = min(limit * 2, 1000)
-    response = await _s2_get_with_retry(
-        client,
-        url=f"{S2_API_BASE}/paper/{paper_id}/citations",
-        params={"fields": S2_CITATION_FIELDS, "limit": str(fetch_limit)},
-        api_key=api_key,
-        timeout=timeout,
-        label=f"S2 cites {paper_id}",
-    )
-    if response is None:
+    if limit <= 0:
         return []
+
     entries: list[CitationEntry] = []
-    for item in response.json().get("data") or []:
-        entry = parse_citation_entry(item.get("citingPaper") or {})
-        if entry:
-            entries.append(entry)
+    offset = 0
+    while offset < S2_CITATIONS_SCAN_CAP:
+        page_limit = min(S2_CITATIONS_PAGE_SIZE, S2_CITATIONS_SCAN_CAP - offset)
+        label = f"S2 cites {paper_id}"
+        response = await _s2_get_with_retry(
+            client,
+            url=f"{S2_API_BASE}/paper/{paper_id}/citations",
+            params={
+                "fields": S2_CITATION_FIELDS,
+                "limit": str(page_limit),
+                "offset": str(offset),
+            },
+            api_key=api_key,
+            timeout=timeout,
+            label=label,
+        )
+        if response is None:
+            break
+
+        payload = _parse_json_object(response, label)
+        if payload is None:
+            break
+
+        data = payload.get("data")
+        if not isinstance(data, list):
+            logger.warning("S2 cites %s returned non-list data", paper_id)
+            break
+        if not data:
+            break
+
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            entry = parse_citation_entry(item.get("citingPaper") or {})
+            if entry:
+                entries.append(entry)
+
+        if len(data) < page_limit:
+            break
+        offset += page_limit
+
     entries.sort(key=lambda e: e.citation_count, reverse=True)
     return entries[:limit]
 
@@ -377,6 +450,12 @@ def init_s2_db(db_path: Path) -> None:
             "  payload_json TEXT NOT NULL,"
             "  fetched_at TEXT NOT NULL,"
             "  PRIMARY KEY (paper_id, direction, rank)"
+            ")"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS s2_citation_graph_fetches ("
+            "  paper_id TEXT PRIMARY KEY,"
+            "  fetched_at TEXT NOT NULL"
             ")"
         )
 
@@ -576,6 +655,26 @@ def _json_to_citation_entry(payload: str) -> CitationEntry | None:
         return None
 
 
+def has_s2_citation_graph_cache(
+    db_path: Path, paper_id: str, ttl_days: int = S2_CITATION_GRAPH_CACHE_TTL_DAYS
+) -> bool:
+    """Check whether citation graph data was fetched recently for this paper."""
+    if not db_path.exists():
+        return False
+    try:
+        with sqlite3.connect(str(db_path)) as conn:
+            row = conn.execute(
+                "SELECT fetched_at FROM s2_citation_graph_fetches WHERE paper_id = ?",
+                (paper_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            return _is_fresh(row[0], ttl_days)
+    except sqlite3.Error:
+        logger.warning("Failed to check citation graph cache marker for %s", paper_id, exc_info=True)
+        return False
+
+
 def load_s2_citation_graph(
     db_path: Path,
     paper_id: str,
@@ -637,6 +736,11 @@ def save_s2_citation_graph(
                     "VALUES (?, ?, ?, ?, ?)",
                     (paper_id, direction, rank, payload, now),
                 )
+            conn.execute(
+                "INSERT OR REPLACE INTO s2_citation_graph_fetches (paper_id, fetched_at) "
+                "VALUES (?, ?)",
+                (paper_id, now),
+            )
     except sqlite3.Error:
         logger.warning(
             "Failed to save citation graph for %s/%s",

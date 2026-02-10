@@ -4459,16 +4459,19 @@ class TestS2AppActions:
         app.notify = MagicMock()
         app._update_status_bar = MagicMock()
         app._refresh_detail_pane = MagicMock()
+        app._refresh_s2_badges = MagicMock()
 
         assert app._s2_active is False
         app.action_toggle_s2()
         assert app._s2_active is True
         app.notify.assert_called_once()
         assert "enabled" in app.notify.call_args[0][0]
+        app._refresh_s2_badges.assert_called_once()
 
         app.action_toggle_s2()
         assert app._s2_active is False
         assert "disabled" in app.notify.call_args[0][0]
+        assert app._refresh_s2_badges.call_count == 2
 
     def test_ctrl_e_dispatch_to_exit_api_mode(self):
         from unittest.mock import MagicMock
@@ -4493,6 +4496,138 @@ class TestS2AppActions:
         app.action_ctrl_e_dispatch()
         app.action_toggle_s2.assert_called_once()
         app.action_exit_arxiv_search_mode.assert_not_called()
+
+
+class TestDownloadBatchGuards:
+    """Tests for batch-overlap guards in PDF download flows."""
+
+    def test_action_download_pdf_rejects_when_batch_active(self):
+        from collections import deque
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import ArxivBrowser
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._download_queue = deque([object()])
+        app._downloading = set()
+        app._download_total = 1
+        app.notify = MagicMock()
+        app._get_target_papers = MagicMock(return_value=[])
+
+        app.action_download_pdf()
+
+        app._get_target_papers.assert_not_called()
+        app.notify.assert_called_once()
+        assert "already in progress" in app.notify.call_args[0][0]
+
+    def test_do_start_downloads_rejects_when_batch_active(self):
+        from collections import deque
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import ArxivBrowser
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._download_queue = deque()
+        app._downloading = {"2401.12345"}
+        app._download_total = 1
+        app._download_results = {}
+        app.notify = MagicMock()
+        app._start_downloads = MagicMock()
+
+        app._do_start_downloads([])
+
+        app._start_downloads.assert_not_called()
+        app.notify.assert_called_once()
+        assert "already in progress" in app.notify.call_args[0][0]
+
+
+class TestRelevanceScoringGuards:
+    """Tests for relevance-scoring race prevention."""
+
+    def test_start_relevance_sets_flag_before_task(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import ArxivBrowser
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._relevance_scoring_active = False
+        app.all_papers = []
+        app.notify = MagicMock()
+
+        def _track(coro):
+            assert app._relevance_scoring_active is True
+            coro.close()
+
+        app._track_task = MagicMock(side_effect=_track)
+
+        app._start_relevance_scoring("cmd {prompt}", "transformers")
+
+        assert app._relevance_scoring_active is True
+        assert app._track_task.call_count == 1
+
+    def test_start_relevance_rejects_when_already_active(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import ArxivBrowser
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._relevance_scoring_active = True
+        app.notify = MagicMock()
+        app._track_task = MagicMock()
+
+        app._start_relevance_scoring("cmd {prompt}", "transformers")
+
+        app._track_task.assert_not_called()
+        app.notify.assert_called_once()
+        assert "already in progress" in app.notify.call_args[0][0]
+
+    def test_modal_callback_rejects_when_active(self):
+        from unittest.mock import MagicMock, patch
+
+        from arxiv_browser import ArxivBrowser
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._relevance_scoring_active = True
+        app.notify = MagicMock()
+        app._start_relevance_scoring = MagicMock()
+        app._config = UserConfig()
+
+        with patch("arxiv_browser.save_config") as save:
+            app._on_interests_saved_then_score("NLP", "cmd {prompt}")
+
+        save.assert_not_called()
+        app._start_relevance_scoring.assert_not_called()
+        app.notify.assert_called_once()
+        assert "already in progress" in app.notify.call_args[0][0]
+
+
+class TestCitationGraphCaching:
+    """Tests for citation graph empty-cache handling."""
+
+    @pytest.mark.asyncio
+    async def test_fetch_uses_cache_marker_even_for_empty_results(self, tmp_path):
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser import ArxivBrowser
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._s2_db_path = tmp_path / "s2.db"
+        app._http_client = AsyncMock()
+        app._config = type("Config", (), {"s2_api_key": ""})()
+
+        with (
+            patch("arxiv_browser.has_s2_citation_graph_cache", return_value=True),
+            patch("arxiv_browser.load_s2_citation_graph", side_effect=[[], []]) as load_cache,
+            patch("arxiv_browser.fetch_s2_references", new_callable=AsyncMock) as fetch_refs,
+            patch("arxiv_browser.fetch_s2_citations", new_callable=AsyncMock) as fetch_cites,
+        ):
+            refs, cites = await app._fetch_citation_graph("paper1")
+
+        assert refs == []
+        assert cites == []
+        assert load_cache.call_count == 2
+        fetch_refs.assert_not_called()
+        fetch_cites.assert_not_called()
 
 
 # ============================================================================
@@ -4714,6 +4849,26 @@ class TestRefreshListBadges:
         update_fn.assert_any_call(item1, "data1")
         update_fn.assert_any_call(item2, None)
         assert update_fn.call_count == 2
+
+    def test_refresh_s2_badges_uses_toggle_and_cache(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import ArxivBrowser
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._s2_cache = {"2401.00001": "s2-data"}  # type: ignore[assignment]
+        app._s2_active = False
+        app._refresh_list_badges = MagicMock()
+
+        app._refresh_s2_badges()
+        lookup_fn, update_fn = app._refresh_list_badges.call_args[0]
+        assert lookup_fn("2401.00001") is None
+        assert callable(update_fn)
+
+        app._s2_active = True
+        app._refresh_s2_badges()
+        lookup_fn, _ = app._refresh_list_badges.call_args[0]
+        assert lookup_fn("2401.00001") == "s2-data"
 
 
 # ============================================================================

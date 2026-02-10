@@ -11,6 +11,7 @@ import pytest
 
 from semantic_scholar import (
     S2_CITATION_GRAPH_CACHE_TTL_DAYS,
+    S2_CITATIONS_PAGE_SIZE,
     S2_DEFAULT_CACHE_TTL_DAYS,
     S2_REC_CACHE_TTL_DAYS,
     CitationEntry,
@@ -25,6 +26,7 @@ from semantic_scholar import (
     fetch_s2_recommendations,
     fetch_s2_references,
     get_s2_db_path,
+    has_s2_citation_graph_cache,
     init_s2_db,
     load_s2_citation_graph,
     load_s2_paper,
@@ -419,6 +421,30 @@ class TestFetchS2Paper:
         assert result is None
 
     @pytest.mark.asyncio
+    async def test_invalid_json_returns_none(self) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.side_effect = ValueError("bad json")
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get.return_value = mock_response
+
+        result = await fetch_s2_paper("2401.12345", mock_client)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_non_object_json_returns_none(self) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = ["not", "an", "object"]
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get.return_value = mock_response
+
+        result = await fetch_s2_paper("2401.12345", mock_client)
+        assert result is None
+
+    @pytest.mark.asyncio
     async def test_api_key_header(self) -> None:
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
@@ -562,6 +588,42 @@ class TestFetchS2Recommendations:
         assert result == []
         assert mock_client.get.call_count == 2
 
+    @pytest.mark.asyncio
+    async def test_invalid_json_returns_empty(self) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.side_effect = ValueError("bad json")
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get.return_value = mock_response
+
+        result = await fetch_s2_recommendations("2401.12345", mock_client)
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_non_object_json_returns_empty(self) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = ["not", "object"]
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get.return_value = mock_response
+
+        result = await fetch_s2_recommendations("2401.12345", mock_client)
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_non_list_recommended_papers_returns_empty(self) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"recommendedPapers": "invalid"}
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get.return_value = mock_response
+
+        result = await fetch_s2_recommendations("2401.12345", mock_client)
+        assert result == []
+
 
 # ============================================================================
 # get_s2_db_path Test
@@ -658,6 +720,15 @@ class TestParseCitationEntry:
         result = parse_citation_entry(data)
         assert result is not None
         assert result.authors == ""
+
+    def test_malformed_authors_items_are_ignored(self) -> None:
+        data = {
+            "paperId": "s2id007",
+            "authors": [None, "Alice", {"name": "Bob"}, {"name": ""}],
+        }
+        result = parse_citation_entry(data)
+        assert result is not None
+        assert result.authors == "Bob"
 
     def test_null_fields_default(self) -> None:
         data = {"paperId": "s2id005"}
@@ -790,6 +861,18 @@ class TestCitationGraphCache:
         db_path = tmp_path / "nonexistent.db"
         assert load_s2_citation_graph(db_path, "paper1", "references") == []
 
+    def test_cache_marker_present_for_empty_graph(self, tmp_path) -> None:
+        db_path = tmp_path / "test.db"
+        save_s2_citation_graph(db_path, "paper-empty", "references", [])
+        save_s2_citation_graph(db_path, "paper-empty", "citations", [])
+        assert has_s2_citation_graph_cache(db_path, "paper-empty") is True
+
+    def test_cache_marker_stale_returns_false(self, tmp_path) -> None:
+        db_path = tmp_path / "test.db"
+        save_s2_citation_graph(db_path, "paper-stale", "references", [])
+        save_s2_citation_graph(db_path, "paper-stale", "citations", [])
+        assert has_s2_citation_graph_cache(db_path, "paper-stale", ttl_days=0) is False
+
 
 # ============================================================================
 # Citation Graph: API Fetch Tests
@@ -892,6 +975,42 @@ class TestFetchS2References:
         result = await fetch_s2_references("s2paper1", mock_client)
         assert len(result) == 2
 
+    @pytest.mark.asyncio
+    async def test_invalid_json_returns_empty(self) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.side_effect = ValueError("bad json")
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get.return_value = mock_response
+
+        result = await fetch_s2_references("s2paper1", mock_client)
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_non_object_json_returns_empty(self) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = ["not", "object"]
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get.return_value = mock_response
+
+        result = await fetch_s2_references("s2paper1", mock_client)
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_non_list_data_returns_empty(self) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"data": "not-a-list"}
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get.return_value = mock_response
+
+        result = await fetch_s2_references("s2paper1", mock_client)
+        assert result == []
+
 
 class TestFetchS2Citations:
     """Tests for fetch_s2_citations() with mocked HTTP."""
@@ -976,3 +1095,83 @@ class TestFetchS2Citations:
 
         result = await fetch_s2_citations("s2paper1", mock_client)
         assert result == []
+
+    @pytest.mark.asyncio
+    async def test_paginates_and_sorts_globally(self) -> None:
+        page1 = MagicMock(spec=httpx.Response)
+        page1.status_code = 200
+        page1.json.return_value = {
+            "data": [
+                {"citingPaper": {"paperId": f"p1-{i}", "citationCount": i}}
+                for i in range(S2_CITATIONS_PAGE_SIZE)
+            ]
+        }
+        page2 = MagicMock(spec=httpx.Response)
+        page2.status_code = 200
+        page2.json.return_value = {
+            "data": [
+                {"citingPaper": {"paperId": "p2-top", "citationCount": 10_000}},
+                *[
+                    {"citingPaper": {"paperId": f"p2-{i}", "citationCount": i + 1}}
+                    for i in range(S2_CITATIONS_PAGE_SIZE - 1)
+                ],
+            ]
+        }
+        page3 = MagicMock(spec=httpx.Response)
+        page3.status_code = 200
+        page3.json.return_value = {"data": []}
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get.side_effect = [page1, page2, page3]
+
+        result = await fetch_s2_citations("s2paper1", mock_client, limit=3)
+        assert len(result) == 3
+        assert result[0].citation_count == 10_000
+        assert mock_client.get.call_count == 3
+        assert mock_client.get.call_args_list[0].kwargs["params"]["offset"] == "0"
+        assert mock_client.get.call_args_list[1].kwargs["params"]["offset"] == str(
+            S2_CITATIONS_PAGE_SIZE
+        )
+
+    @pytest.mark.asyncio
+    async def test_invalid_json_returns_empty(self) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.side_effect = ValueError("bad json")
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get.return_value = mock_response
+
+        result = await fetch_s2_citations("s2paper1", mock_client)
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_non_object_json_returns_empty(self) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = ["not", "object"]
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get.return_value = mock_response
+
+        result = await fetch_s2_citations("s2paper1", mock_client)
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_non_list_data_returns_empty(self) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"data": "not-a-list"}
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get.return_value = mock_response
+
+        result = await fetch_s2_citations("s2paper1", mock_client)
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_non_positive_limit_returns_empty_without_calls(self) -> None:
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        result = await fetch_s2_citations("s2paper1", mock_client, limit=0)
+        assert result == []
+        mock_client.get.assert_not_called()

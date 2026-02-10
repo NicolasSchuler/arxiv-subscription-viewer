@@ -33,6 +33,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import httpx
 from platformdirs import user_config_dir
@@ -78,7 +79,11 @@ class HuggingFacePaper:
 
 def parse_hf_paper_response(item: dict) -> HuggingFacePaper | None:
     """Parse a single HF daily papers API item. Returns None if missing essential fields."""
+    if not isinstance(item, dict):
+        return None
     paper = item.get("paper") or {}
+    if not isinstance(paper, dict):
+        return None
     arxiv_id = paper.get("id", "")
     if not arxiv_id:
         return None
@@ -144,12 +149,18 @@ async def fetch_hf_daily_papers(
         try:
             response = await client.get(HF_API_BASE, timeout=timeout)
             if response.status_code == 200:
-                data = response.json()
+                try:
+                    data = response.json()
+                except ValueError:
+                    logger.warning("HF API returned invalid JSON", exc_info=True)
+                    return []
                 if not isinstance(data, list):
                     logger.warning("HF API returned non-list response")
                     return []
-                papers = []
+                papers: list[HuggingFacePaper] = []
                 for item in data:
+                    if not isinstance(item, dict):
+                        continue
                     parsed = parse_hf_paper_response(item)
                     if parsed is not None:
                         papers.append(parsed)
@@ -189,6 +200,20 @@ async def fetch_hf_daily_papers(
             return []
 
     return []
+
+
+def _coerce_int(value: Any, default: int = 0) -> int:
+    """Coerce untrusted values to int, excluding bool."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return default
+
+
+def _coerce_str(value: Any, default: str = "") -> str:
+    """Coerce untrusted values to str."""
+    if isinstance(value, str):
+        return value
+    return default
 
 
 # ============================================================================
@@ -236,17 +261,25 @@ def _json_to_hf_paper(payload: str) -> HuggingFacePaper | None:
     """Deserialize a JSON string to HuggingFacePaper."""
     try:
         d = json.loads(payload)
+        if not isinstance(d, dict):
+            return None
+        arxiv_id = _coerce_str(d.get("arxiv_id"))
+        if not arxiv_id:
+            return None
+        raw_keywords = d.get("ai_keywords", ())
+        if not isinstance(raw_keywords, (list, tuple)):
+            raw_keywords = ()
         return HuggingFacePaper(
-            arxiv_id=d["arxiv_id"],
-            title=d.get("title", ""),
-            upvotes=d.get("upvotes", 0),
-            num_comments=d.get("num_comments", 0),
-            ai_summary=d.get("ai_summary", ""),
-            ai_keywords=tuple(d.get("ai_keywords", ())),
-            github_repo=d.get("github_repo", ""),
-            github_stars=d.get("github_stars", 0),
+            arxiv_id=arxiv_id,
+            title=_coerce_str(d.get("title", "")),
+            upvotes=_coerce_int(d.get("upvotes", 0)),
+            num_comments=_coerce_int(d.get("num_comments", 0)),
+            ai_summary=_coerce_str(d.get("ai_summary", "")),
+            ai_keywords=tuple(kw for kw in raw_keywords if isinstance(kw, str)),
+            github_repo=_coerce_str(d.get("github_repo", "")),
+            github_stars=_coerce_int(d.get("github_stars", 0)),
         )
-    except (KeyError, TypeError, json.JSONDecodeError):
+    except (TypeError, json.JSONDecodeError):
         logger.warning("Failed to deserialize HF paper from cache", exc_info=True)
         return None
 

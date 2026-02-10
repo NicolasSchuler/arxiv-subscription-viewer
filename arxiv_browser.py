@@ -124,6 +124,7 @@ from semantic_scholar import (
     fetch_s2_recommendations,
     fetch_s2_references,
     get_s2_db_path,
+    has_s2_citation_graph_cache,
     load_s2_citation_graph,
     load_s2_paper,
     load_s2_recommendations,
@@ -5551,6 +5552,7 @@ class ArxivBrowser(App):
         self.notify(f"Semantic Scholar {state}", title="S2")
         self._update_status_bar()
         self._refresh_detail_pane()
+        self._refresh_s2_badges()
 
     async def action_fetch_s2(self) -> None:
         """Fetch Semantic Scholar data for the currently highlighted paper."""
@@ -5690,6 +5692,13 @@ class ArxivBrowser(App):
         self._refresh_list_badges(
             lambda aid: self._hf_cache.get(aid) if self._hf_active else None,
             PaperListItem.update_hf_data,
+        )
+
+    def _refresh_s2_badges(self) -> None:
+        """Update all visible list items with S2 data."""
+        self._refresh_list_badges(
+            lambda aid: self._s2_cache.get(aid) if self._s2_active else None,
+            PaperListItem.update_s2_data,
         )
 
     # ========================================================================
@@ -6984,29 +6993,28 @@ class ArxivBrowser(App):
     async def _fetch_citation_graph(
         self, paper_id: str
     ) -> tuple[list[CitationEntry], list[CitationEntry]]:
-        """Fetch references + citations with SQLite cache.
-
-        Both directions are saved/loaded as a unit.  Since
-        ``load_s2_citation_graph`` returns ``[]`` for both "not in cache"
-        and "cached but the paper has zero entries", we use a simple
-        heuristic: if either direction has entries, the cache was populated
-        and we trust both results.
-        """
-        cached_refs = await asyncio.to_thread(
-            load_s2_citation_graph,
+        """Fetch references + citations with SQLite cache."""
+        cache_hit = await asyncio.to_thread(
+            has_s2_citation_graph_cache,
             self._s2_db_path,
             paper_id,
-            "references",
             S2_CITATION_GRAPH_CACHE_TTL_DAYS,
         )
-        cached_cites = await asyncio.to_thread(
-            load_s2_citation_graph,
-            self._s2_db_path,
-            paper_id,
-            "citations",
-            S2_CITATION_GRAPH_CACHE_TTL_DAYS,
-        )
-        if cached_refs or cached_cites:
+        if cache_hit:
+            cached_refs = await asyncio.to_thread(
+                load_s2_citation_graph,
+                self._s2_db_path,
+                paper_id,
+                "references",
+                S2_CITATION_GRAPH_CACHE_TTL_DAYS,
+            )
+            cached_cites = await asyncio.to_thread(
+                load_s2_citation_graph,
+                self._s2_db_path,
+                paper_id,
+                "citations",
+                S2_CITATION_GRAPH_CACHE_TTL_DAYS,
+            )
             return cached_refs, cached_cites
 
         # Fetch from API
@@ -7212,6 +7220,9 @@ class ArxivBrowser(App):
         """Callback after ResearchInterestsModal: save interests then start scoring."""
         if not interests:
             return
+        if self._relevance_scoring_active:
+            self.notify("Relevance scoring already in progress", title="Relevance")
+            return
         self._config.research_interests = interests
         save_config(self._config)
         self.notify("Research interests saved", title="Relevance")
@@ -7219,6 +7230,10 @@ class ArxivBrowser(App):
 
     def _start_relevance_scoring(self, command_template: str, interests: str) -> None:
         """Begin batch relevance scoring for all loaded papers."""
+        if self._relevance_scoring_active:
+            self.notify("Relevance scoring already in progress", title="Relevance")
+            return
+        self._relevance_scoring_active = True
         papers = list(self.all_papers)
         self._track_task(self._score_relevance_batch_async(papers, command_template, interests))
 
@@ -7250,7 +7265,6 @@ class ArxivBrowser(App):
         interests: str,
     ) -> None:
         """Background task: batch-score papers for relevance."""
-        self._relevance_scoring_active = True
         try:
             interests_hash = _compute_command_hash(command_template, interests)
 
@@ -7623,6 +7637,10 @@ class ArxivBrowser(App):
             self._downloading.add(paper.arxiv_id)
             self._track_task(self._process_single_download(paper))
 
+    def _is_download_batch_active(self) -> bool:
+        """Return True when a download batch is active or pending."""
+        return bool(self._download_queue or self._downloading or self._download_total)
+
     async def _process_single_download(self, paper: Paper) -> None:
         """Process a single download and update state."""
         try:
@@ -7656,6 +7674,9 @@ class ArxivBrowser(App):
 
     def _finish_download_batch(self) -> None:
         """Handle completion of a download batch."""
+        if self._download_total <= 0:
+            return
+
         successes = sum(1 for v in self._download_results.values() if v)
         failures = len(self._download_results) - successes
 
@@ -7731,6 +7752,10 @@ class ArxivBrowser(App):
 
     def action_download_pdf(self) -> None:
         """Download PDFs for selected papers (or current paper)."""
+        if self._is_download_batch_active():
+            self.notify("Download already in progress", title="Download", severity="warning")
+            return
+
         papers_to_download = self._get_target_papers()
         if not papers_to_download:
             self.notify("No papers to download", title="Download", severity="warning")
@@ -7759,6 +7784,10 @@ class ArxivBrowser(App):
 
     def _do_start_downloads(self, to_download: list[Paper]) -> None:
         """Initialize and start batch PDF downloads."""
+        if self._is_download_batch_active():
+            self.notify("Download already in progress", title="Download", severity="warning")
+            return
+
         # Initialize download batch
         self._download_queue.extend(to_download)
         self._download_total = len(to_download)
