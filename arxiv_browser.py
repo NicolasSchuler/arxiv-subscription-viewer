@@ -204,6 +204,7 @@ MAX_HISTORY_FILES = 365  # Limit to ~1 year of history to prevent memory issues
 DEFAULT_PDF_DOWNLOAD_DIR = "arxiv-pdfs"  # Relative to home directory
 PDF_DOWNLOAD_TIMEOUT = 60  # Seconds per download
 MAX_CONCURRENT_DOWNLOADS = 3  # Limit parallel downloads
+BATCH_CONFIRM_THRESHOLD = 10  # Ask for confirmation when batch operating on more than this many papers
 
 # LLM summary settings
 LLM_COMMAND_TIMEOUT = 120  # Seconds to wait for LLM CLI response
@@ -240,6 +241,7 @@ LLM_PRESETS: dict[str, str] = {
     "codex": "codex exec {prompt}",
     "llm": "llm {prompt}",
     "copilot": "copilot --model gpt-5-mini -p {prompt}",
+    "opencode": "opencode run -m zai-coding-plan/glm-4.7 -- {prompt}",
 }
 
 # Search debounce delay in seconds
@@ -425,8 +427,13 @@ def format_summary_as_rich(text: str) -> str:
     # Bullets: - item → • item
     out = _MD_BULLET_RE.sub(r"\1  • ", out)
     # Indent all lines for consistent padding inside the details pane
-    indented = "\n".join(f"  {line}" if line.strip() else "" for line in out.split("\n"))
+    indented = "\n".join(
+        f"  {line}" if line.strip() else "" for line in out.split("\n")
+    )
     return indented
+
+
+_HIGHLIGHT_PATTERN_CACHE: dict[tuple[str, ...], re.Pattern[str]] = {}
 
 
 def highlight_text(text: str, terms: list[str], color: str) -> str:
@@ -450,10 +457,14 @@ def highlight_text(text: str, terms: list[str], color: str) -> str:
     if not normalized:
         return escaped_text
     normalized.sort(key=len, reverse=True)
-    escaped_terms = [escape_rich_text(term) for term in normalized]
-    pattern = re.compile(
-        "|".join(re.escape(term) for term in escaped_terms), re.IGNORECASE
-    )
+    cache_key = tuple(normalized)
+    pattern = _HIGHLIGHT_PATTERN_CACHE.get(cache_key)
+    if pattern is None:
+        escaped_terms = [escape_rich_text(term) for term in normalized]
+        pattern = re.compile(
+            "|".join(re.escape(term) for term in escaped_terms), re.IGNORECASE
+        )
+        _HIGHLIGHT_PATTERN_CACHE[cache_key] = pattern
     return pattern.sub(lambda match: f"[bold {color}]{match.group(0)}[/]", escaped_text)
 
 
@@ -665,10 +676,17 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         for entry in raw_watch_list:
             if not isinstance(entry, dict):
                 continue
+            match_type = _safe_get(entry, "match_type", "author", str)
+            if match_type not in WATCH_MATCH_TYPES:
+                logger.warning(
+                    "Invalid watch list match_type %r, defaulting to 'author'",
+                    match_type,
+                )
+                match_type = "author"
             watch_list.append(
                 WatchListEntry(
                     pattern=_safe_get(entry, "pattern", "", str),
-                    match_type=_safe_get(entry, "match_type", "author", str),
+                    match_type=match_type,
                     case_sensitive=_safe_get(entry, "case_sensitive", False, bool),
                 )
             )
@@ -693,8 +711,6 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         marks = {}
 
     category_colors = _safe_get(data, "category_colors", {}, dict)
-    if not isinstance(category_colors, dict):
-        category_colors = {}
     safe_category_colors = {
         str(key): str(value)
         for key, value in category_colors.items()
@@ -702,8 +718,6 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
     }
 
     theme = _safe_get(data, "theme", {}, dict)
-    if not isinstance(theme, dict):
-        theme = {}
     safe_theme = {
         str(key): str(value)
         for key, value in theme.items()
@@ -744,13 +758,13 @@ def load_config() -> UserConfig:
         data = json.loads(config_path.read_text(encoding="utf-8"))
         return _dict_to_config(data)
     except json.JSONDecodeError as e:
-        logger.warning(f"Config file has invalid JSON, using defaults: {e}")
+        logger.warning("Config file has invalid JSON, using defaults: %s", e)
         return UserConfig()
     except (KeyError, TypeError) as e:
-        logger.warning(f"Config file has invalid structure, using defaults: {e}")
+        logger.warning("Config file has invalid structure, using defaults: %s", e)
         return UserConfig()
     except OSError as e:
-        logger.warning(f"Could not read config file, using defaults: {e}")
+        logger.warning("Could not read config file, using defaults: %s", e)
         return UserConfig()
 
 
@@ -791,7 +805,7 @@ def save_config(config: UserConfig) -> bool:
             raise
         return True
     except OSError as e:
-        logger.error(f"Failed to save config: {e}")
+        logger.error("Failed to save config: %s", e)
         return False
 
 
@@ -836,7 +850,9 @@ def _load_summary(db_path: Path, arxiv_id: str, command_hash: str) -> str | None
         return None
 
 
-def _save_summary(db_path: Path, arxiv_id: str, summary: str, command_hash: str) -> None:
+def _save_summary(
+    db_path: Path, arxiv_id: str, summary: str, command_hash: str
+) -> None:
     """Persist a summary to the SQLite database."""
     try:
         _init_summary_db(db_path)
@@ -860,10 +876,24 @@ class _HTMLTextExtractor(HTMLParser):
     """Extract readable text from arXiv HTML papers (LaTeXML output)."""
 
     _SKIP_TAGS = frozenset({"script", "style", "nav", "header", "footer", "math"})
-    _BLOCK_TAGS = frozenset({
-        "p", "div", "br", "h1", "h2", "h3", "h4", "h5", "h6",
-        "li", "section", "article", "blockquote", "figcaption",
-    })
+    _BLOCK_TAGS = frozenset(
+        {
+            "p",
+            "div",
+            "br",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "li",
+            "section",
+            "article",
+            "blockquote",
+            "figcaption",
+        }
+    )
 
     def __init__(self) -> None:
         super().__init__()
@@ -899,25 +929,35 @@ def extract_text_from_html(html: str) -> str:
     return parser.get_text()
 
 
-async def _fetch_paper_content_async(paper: Paper) -> str:
+async def _fetch_paper_content_async(
+    paper: Paper, client: httpx.AsyncClient | None = None
+) -> str:
     """Fetch the full paper content from the arXiv HTML version.
 
     Falls back to the abstract if the HTML version is not available.
+    If *client* is None, a temporary AsyncClient is created for this request.
     """
     html_url = f"https://arxiv.org/html/{paper.arxiv_id}"
     try:
-        async with httpx.AsyncClient() as client:
+        if client is not None:
             response = await client.get(
                 html_url, timeout=ARXIV_HTML_TIMEOUT, follow_redirects=True
             )
-            if response.status_code == 200:
-                text = await asyncio.to_thread(extract_text_from_html, response.text)
-                if text:
-                    return text[:MAX_PAPER_CONTENT_LENGTH]
-            else:
-                logger.warning(
-                    "arXiv HTML fetch returned %d for %s", response.status_code, paper.arxiv_id
+        else:
+            async with httpx.AsyncClient() as tmp_client:
+                response = await tmp_client.get(
+                    html_url, timeout=ARXIV_HTML_TIMEOUT, follow_redirects=True
                 )
+        if response.status_code == 200:
+            text = await asyncio.to_thread(extract_text_from_html, response.text)
+            if text:
+                return text[:MAX_PAPER_CONTENT_LENGTH]
+        else:
+            logger.warning(
+                "arXiv HTML fetch returned %d for %s",
+                response.status_code,
+                paper.arxiv_id,
+            )
     except (httpx.HTTPError, OSError):
         logger.warning("Failed to fetch HTML for %s", paper.arxiv_id, exc_info=True)
     # Fallback to abstract
@@ -925,9 +965,16 @@ async def _fetch_paper_content_async(paper: Paper) -> str:
     return f"Abstract:\n{abstract}" if abstract else ""
 
 
-_LLM_PROMPT_FIELDS = frozenset({
-    "title", "authors", "categories", "abstract", "arxiv_id", "paper_content",
-})
+_LLM_PROMPT_FIELDS = frozenset(
+    {
+        "title",
+        "authors",
+        "categories",
+        "abstract",
+        "arxiv_id",
+        "paper_content",
+    }
+)
 
 
 def build_llm_prompt(
@@ -976,7 +1023,9 @@ def _resolve_llm_command(config: UserConfig) -> str:
         if config.llm_preset in LLM_PRESETS:
             return LLM_PRESETS[config.llm_preset]
         valid = ", ".join(sorted(LLM_PRESETS))
-        logger.warning("Unknown llm_preset %r. Valid presets: %s", config.llm_preset, valid)
+        logger.warning(
+            "Unknown llm_preset %r. Valid presets: %s", config.llm_preset, valid
+        )
     return ""
 
 
@@ -1246,7 +1295,7 @@ def escape_bibtex(text: str) -> str:
 
 
 def format_authors_bibtex(authors: str) -> str:
-    """Format authors for BibTeX (Last, First and Last, First format)."""
+    """Escape author string for BibTeX output."""
     return escape_bibtex(authors)
 
 
@@ -1348,9 +1397,7 @@ def tokenize_query(query: str) -> list[QueryToken]:
                         i += 1
                     value = query[value_start:i]
                     tokens.append(
-                        QueryToken(
-                            kind="term", value=value, field=field, phrase=True
-                        )
+                        QueryToken(kind="term", value=value, field=field, phrase=True)
                     )
                     i += 1
                 else:
@@ -1503,11 +1550,14 @@ def _extract_keywords(text: str | None, min_length: int = 4) -> set[str]:
     return words
 
 
+_AUTHOR_SPLIT_RE = re.compile(r",|(?:\s+and\s+)")
+
+
 def _extract_author_lastnames(authors: str) -> set[str]:
     """Extract last names from author string."""
     lastnames = set()
     # Split by common separators
-    for author in re.split(r",|(?:\s+and\s+)", authors):
+    for author in _AUTHOR_SPLIT_RE.split(authors):
         parts = author.strip().split()
         if parts:
             # Last word is typically the last name
@@ -1836,6 +1886,7 @@ class PaperDetails(Static):
         abstract_text: str | None = None,
         summary: str | None = None,
         summary_loading: bool = False,
+        highlight_terms: list[str] | None = None,
     ) -> None:
         """Update the displayed paper details."""
         self._paper = paper
@@ -1852,7 +1903,12 @@ class PaperDetails(Static):
         safe_authors = escape_rich_text(paper.authors)
         safe_date = escape_rich_text(paper.date)
         safe_comments = escape_rich_text(paper.comments or "")
-        safe_abstract = escape_rich_text(abstract_text)
+        if highlight_terms:
+            safe_abstract = highlight_text(
+                abstract_text, highlight_terms, THEME_COLORS["accent"]
+            )
+        else:
+            safe_abstract = escape_rich_text(abstract_text)
         safe_url = escape_rich_text(paper.url)
 
         # Section separator helper
@@ -1877,12 +1933,16 @@ class PaperDetails(Static):
         lines.append("")
 
         # Authors section
-        lines.append(f"[{sep_color}]━━ [{THEME_COLORS['green']}]Authors[/] ━━━━━━━━━━━━━━━━━━━━━━━━━[/]")
+        lines.append(
+            f"[{sep_color}]━━ [{THEME_COLORS['green']}]Authors[/] ━━━━━━━━━━━━━━━━━━━━━━━━━[/]"
+        )
         lines.append(f"  [{THEME_COLORS['text']}]{safe_authors}[/]")
         lines.append("")
 
         # Abstract section
-        lines.append(f"[{sep_color}]━━ [{THEME_COLORS['orange']}]Abstract[/] ━━━━━━━━━━━━━━━━━━━━━━━━[/]")
+        lines.append(
+            f"[{sep_color}]━━ [{THEME_COLORS['orange']}]Abstract[/] ━━━━━━━━━━━━━━━━━━━━━━━━[/]"
+        )
         if loading:
             lines.append("  [dim italic]Loading abstract...[/]")
         elif abstract_text:
@@ -1893,20 +1953,24 @@ class PaperDetails(Static):
 
         # AI Summary section (shown when available or loading)
         if summary_loading:
-            lines.append(f"[{sep_color}]━━ [{THEME_COLORS['purple']}]🤖 AI Summary[/] ━━━━━━━━━━━━━━━━━━━━[/]")
+            lines.append(
+                f"[{sep_color}]━━ [{THEME_COLORS['purple']}]🤖 AI Summary[/] ━━━━━━━━━━━━━━━━━━━━[/]"
+            )
             lines.append("  [dim italic]⏳ Generating summary...[/]")
             lines.append("")
         elif summary:
             rendered_summary = format_summary_as_rich(summary)
-            lines.append(f"[{sep_color}]━━ [{THEME_COLORS['purple']}]🤖 AI Summary[/] ━━━━━━━━━━━━━━━━━━━━[/]")
+            lines.append(
+                f"[{sep_color}]━━ [{THEME_COLORS['purple']}]🤖 AI Summary[/] ━━━━━━━━━━━━━━━━━━━━[/]"
+            )
             lines.append(rendered_summary)
             lines.append("")
 
         # URL section
-        lines.append(f"[{sep_color}]━━ [{THEME_COLORS['pink']}]URL[/] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/]")
         lines.append(
-            f"  [{THEME_COLORS['accent']}]{safe_url}[/]"
+            f"[{sep_color}]━━ [{THEME_COLORS['pink']}]URL[/] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/]"
         )
+        lines.append(f"  [{THEME_COLORS['accent']}]{safe_url}[/]")
 
         self.update("\n".join(lines))
 
@@ -1978,7 +2042,9 @@ class HelpScreen(ModalScreen[None]):
             yield Label("Keyboard Shortcuts", id="help-title")
 
             # Navigation
-            yield Label(f"[{THEME_COLORS['accent']}]Navigation[/]", classes="help-section-title")
+            yield Label(
+                f"[{THEME_COLORS['accent']}]Navigation[/]", classes="help-section-title"
+            )
             yield Static(
                 f"  [{THEME_COLORS['green']}]j / k[/]        Navigate down / up\n"
                 f"  [{THEME_COLORS['green']}]bracketleft / bracketright[/]  Previous / next date  [dim](history mode)[/]\n"
@@ -1989,7 +2055,10 @@ class HelpScreen(ModalScreen[None]):
             )
 
             # Search
-            yield Label(f"[{THEME_COLORS['accent']}]Search & Filter[/]", classes="help-section-title")
+            yield Label(
+                f"[{THEME_COLORS['accent']}]Search & Filter[/]",
+                classes="help-section-title",
+            )
             yield Static(
                 f"  [{THEME_COLORS['green']}]/[/]            Toggle search\n"
                 f"  [{THEME_COLORS['green']}]Escape[/]       Clear search\n"
@@ -2001,7 +2070,9 @@ class HelpScreen(ModalScreen[None]):
             )
 
             # Selection
-            yield Label(f"[{THEME_COLORS['accent']}]Selection[/]", classes="help-section-title")
+            yield Label(
+                f"[{THEME_COLORS['accent']}]Selection[/]", classes="help-section-title"
+            )
             yield Static(
                 f"  [{THEME_COLORS['green']}]Space[/]        Toggle selection\n"
                 f"  [{THEME_COLORS['green']}]a[/]            Select all visible\n"
@@ -2010,7 +2081,10 @@ class HelpScreen(ModalScreen[None]):
             )
 
             # Paper actions
-            yield Label(f"[{THEME_COLORS['accent']}]Paper Actions[/]", classes="help-section-title")
+            yield Label(
+                f"[{THEME_COLORS['accent']}]Paper Actions[/]",
+                classes="help-section-title",
+            )
             yield Static(
                 f"  [{THEME_COLORS['green']}]o[/]            Open in browser\n"
                 f"  [{THEME_COLORS['green']}]P[/]            Open as PDF\n"
@@ -2025,7 +2099,10 @@ class HelpScreen(ModalScreen[None]):
             )
 
             # Export
-            yield Label(f"[{THEME_COLORS['accent']}]Export & Copy[/]", classes="help-section-title")
+            yield Label(
+                f"[{THEME_COLORS['accent']}]Export & Copy[/]",
+                classes="help-section-title",
+            )
             yield Static(
                 f"  [{THEME_COLORS['green']}]c[/]            Copy to clipboard\n"
                 f"  [{THEME_COLORS['green']}]b[/]            Copy as BibTeX\n"
@@ -2036,7 +2113,9 @@ class HelpScreen(ModalScreen[None]):
             )
 
             # View
-            yield Label(f"[{THEME_COLORS['accent']}]View[/]", classes="help-section-title")
+            yield Label(
+                f"[{THEME_COLORS['accent']}]View[/]", classes="help-section-title"
+            )
             yield Static(
                 f"  [{THEME_COLORS['green']}]p[/]            Toggle abstract preview\n"
                 f"  [{THEME_COLORS['green']}]?[/]            This help screen\n"
@@ -2435,7 +2514,7 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
         entry = self._build_entry_from_form()
         if not entry:
             return
-        index = list_view.index or 0
+        index = list_view.index if list_view.index is not None else 0
         self._entries[index] = entry
         self._refresh_list()
 
@@ -2445,7 +2524,7 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
         if not isinstance(list_view.highlighted_child, WatchListItem):
             self.notify("Select a watch entry to delete", title="Watch")
             return
-        index = list_view.index or 0
+        index = list_view.index if list_view.index is not None else 0
         self._entries.pop(index)
         self._refresh_list()
 
@@ -2596,6 +2675,71 @@ class RecommendationsScreen(ModalScreen[str | None]):
     def on_list_selected(self, event: ListView.Selected) -> None:
         if isinstance(event.item, RecommendationListItem):
             self.dismiss(event.item.paper.arxiv_id)
+
+
+class ConfirmModal(ModalScreen[bool]):
+    """Modal dialog for confirming batch operations."""
+
+    BINDINGS = [
+        Binding("y", "confirm", "Yes"),
+        Binding("n", "cancel", "No"),
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    CSS = """
+    ConfirmModal {
+        align: center middle;
+    }
+
+    #confirm-dialog {
+        width: 50%;
+        min-width: 40;
+        height: auto;
+        background: #272822;
+        border: round #fd971f;
+        padding: 1 2;
+    }
+
+    #confirm-message {
+        text-style: bold;
+        color: #e6db74;
+        margin-bottom: 1;
+    }
+
+    #confirm-buttons {
+        height: auto;
+        align: right middle;
+    }
+
+    #confirm-buttons Button {
+        margin-left: 1;
+    }
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__()
+        self._message = message
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="confirm-dialog"):
+            yield Label(self._message, id="confirm-message")
+            with Horizontal(id="confirm-buttons"):
+                yield Button("Yes (y)", variant="warning", id="confirm-yes")
+                yield Button("No (n)", variant="default", id="confirm-no")
+
+    def action_confirm(self) -> None:
+        self.dismiss(True)
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+    @on(Button.Pressed, "#confirm-yes")
+    def on_yes(self) -> None:
+        self.dismiss(True)
+
+    @on(Button.Pressed, "#confirm-no")
+    def on_no(self) -> None:
+        self.dismiss(False)
 
 
 class BookmarkTabBar(Horizontal):
@@ -2789,8 +2933,7 @@ def paper_matches_watch_entry(paper: Paper, entry: WatchListEntry) -> bool:
             return pattern in paper.title or pattern in paper.abstract_raw
         else:
             return (
-                pattern in paper.title.lower()
-                or pattern in paper.abstract_raw.lower()
+                pattern in paper.title.lower() or pattern in paper.abstract_raw.lower()
             )
     return False
 
@@ -3154,9 +3297,14 @@ class ArxivBrowser(App):
         self._download_total: int = 0  # Total papers in current batch
 
         # LLM summary state
-        self._paper_summaries: dict[str, str] = {}  # arxiv_id -> summary (in-memory cache)
+        self._paper_summaries: dict[
+            str, str
+        ] = {}  # arxiv_id -> summary (in-memory cache)
         self._summary_loading: set[str] = set()  # arxiv_ids with generation in progress
         self._summary_db_path: Path = get_summary_db_path()
+
+        # Shared HTTP client for connection pooling (created in on_mount)
+        self._http_client: httpx.AsyncClient | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -3193,6 +3341,9 @@ class ArxivBrowser(App):
 
     def on_mount(self) -> None:
         """Called when app is mounted. Restores session state if enabled."""
+        # Create shared HTTP client for connection pooling
+        self._http_client = httpx.AsyncClient()
+
         # Set subtitle with date info if in history mode
         current_date = self._get_current_date()
         if current_date:
@@ -3241,6 +3392,15 @@ class ArxivBrowser(App):
         if timer is not None:
             timer.stop()
 
+        # Close shared HTTP client
+        client = self._http_client
+        self._http_client = None
+        if client is not None:
+            try:
+                asyncio.get_event_loop().create_task(client.aclose())
+            except RuntimeError:
+                pass  # Event loop already closed
+
     def _track_task(self, coro: Any) -> asyncio.Task[None]:
         """Create an asyncio task and track it to prevent garbage collection."""
         task = asyncio.create_task(coro)
@@ -3256,7 +3416,9 @@ class ArxivBrowser(App):
             return
         exc = task.exception()
         if exc is not None:
-            logger.error("Unhandled exception in background task: %s", exc, exc_info=exc)
+            logger.error(
+                "Unhandled exception in background task: %s", exc, exc_info=exc
+            )
 
     def _apply_category_overrides(self) -> None:
         """Apply category color overrides from config."""
@@ -3342,6 +3504,7 @@ class ArxivBrowser(App):
                     abstract_text,
                     summary=self._paper_summaries.get(arxiv_id),
                     summary_loading=arxiv_id in self._summary_loading,
+                    highlight_terms=self._highlight_terms.get("abstract"),
                 )
         except NoMatches:
             pass
@@ -3369,7 +3532,7 @@ class ArxivBrowser(App):
             search_input = self.query_one("#search-input", Input)
 
             self._config.session = SessionState(
-                scroll_index=list_view.index or 0,
+                scroll_index=list_view.index if list_view.index is not None else 0,
                 current_filter=search_input.value.strip(),
                 sort_index=self._sort_index,
                 selected_ids=list(self.selected_ids),
@@ -3406,6 +3569,7 @@ class ArxivBrowser(App):
                 abstract_text,
                 summary=self._paper_summaries.get(aid),
                 summary_loading=aid in self._summary_loading,
+                highlight_terms=self._highlight_terms.get("abstract"),
             )
 
     @on(ListView.Highlighted)
@@ -3420,6 +3584,7 @@ class ArxivBrowser(App):
                 abstract_text,
                 summary=self._paper_summaries.get(aid),
                 summary_loading=aid in self._summary_loading,
+                highlight_terms=self._highlight_terms.get("abstract"),
             )
 
     def action_toggle_search(self) -> None:
@@ -3569,6 +3734,7 @@ class ArxivBrowser(App):
 
         # Clear match scores by default (only fuzzy search populates them)
         self._match_scores.clear()
+        _HIGHLIGHT_PATTERN_CACHE.clear()
 
         if not query:
             self.filtered_papers = self.all_papers.copy()
@@ -3804,13 +3970,9 @@ class ArxivBrowser(App):
 
         for paper in self.all_papers:
             for entry in self._config.watch_list:
-                if self._paper_matches_watch_entry(paper, entry):
+                if paper_matches_watch_entry(paper, entry):
                     self._watched_paper_ids.add(paper.arxiv_id)
                     break  # Paper already matched, no need to check more entries
-
-    def _paper_matches_watch_entry(self, paper: Paper, entry: WatchListEntry) -> bool:
-        """Check if a paper matches a watch list entry."""
-        return paper_matches_watch_entry(paper, entry)
 
     def is_paper_watched(self, arxiv_id: str) -> bool:
         """Check if a paper is on the watch list. O(1) lookup."""
@@ -4008,21 +4170,6 @@ class ArxivBrowser(App):
     # Phase 8: Export Features
     # ========================================================================
 
-    def _escape_bibtex(self, text: str) -> str:
-        return escape_bibtex(text)
-
-    def _format_authors_bibtex(self, authors: str) -> str:
-        return format_authors_bibtex(authors)
-
-    def _extract_year(self, date_str: str) -> str:
-        return extract_year(date_str)
-
-    def _generate_citation_key(self, paper: Paper) -> str:
-        return generate_citation_key(paper)
-
-    def _format_paper_as_bibtex(self, paper: Paper) -> str:
-        return format_paper_as_bibtex(paper)
-
     def action_copy_bibtex(self) -> None:
         """Copy selected papers as BibTeX entries to clipboard."""
         papers = self._get_target_papers()
@@ -4030,7 +4177,7 @@ class ArxivBrowser(App):
             self.notify("No paper selected", title="BibTeX", severity="warning")
             return
 
-        bibtex_entries = [self._format_paper_as_bibtex(p) for p in papers]
+        bibtex_entries = [format_paper_as_bibtex(p) for p in papers]
         bibtex_text = "\n\n".join(bibtex_entries)
 
         if self._copy_to_clipboard(bibtex_text):
@@ -4059,12 +4206,29 @@ class ArxivBrowser(App):
         filepath = export_dir / filename
 
         # Format and write BibTeX
-        bibtex_entries = [self._format_paper_as_bibtex(p) for p in papers]
+        bibtex_entries = [format_paper_as_bibtex(p) for p in papers]
         content = "\n\n".join(bibtex_entries)
 
         try:
             export_dir.mkdir(parents=True, exist_ok=True)
-            filepath.write_text(content, encoding="utf-8")
+            # Atomic write: tempfile + os.replace to prevent partial writes
+            fd, tmp_path = tempfile.mkstemp(
+                dir=export_dir, suffix=".tmp", prefix=".bibtex-"
+            )
+            closed = False
+            try:
+                os.write(fd, content.encode("utf-8"))
+                os.close(fd)
+                closed = True
+                os.replace(tmp_path, filepath)
+            except BaseException:
+                if not closed:
+                    os.close(fd)
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
         except OSError as exc:
             self.notify(
                 f"Failed to export BibTeX: {exc}",
@@ -4237,7 +4401,9 @@ class ArxivBrowser(App):
         self._summary_loading.add(arxiv_id)
         self._update_abstract_display(arxiv_id)
         self._track_task(
-            self._generate_summary_async(item.paper, command_template, prompt_template, cmd_hash)
+            self._generate_summary_async(
+                item.paper, command_template, prompt_template, cmd_hash
+            )
         )
 
     async def _generate_summary_async(
@@ -4248,11 +4414,13 @@ class ArxivBrowser(App):
         try:
             # Fetch full paper content from arXiv HTML (falls back to abstract)
             self.notify("Fetching paper content...", title="AI Summary")
-            paper_content = await _fetch_paper_content_async(paper)
+            paper_content = await _fetch_paper_content_async(paper, self._http_client)
 
             prompt = build_llm_prompt(paper, prompt_template, paper_content)
             shell_command = _build_llm_shell_command(command_template, prompt)
-            logger.debug(f"Running LLM command for {arxiv_id}: {shell_command[:100]}...")
+            logger.debug(
+                f"Running LLM command for {arxiv_id}: {shell_command[:100]}..."
+            )
 
             proc = await asyncio.create_subprocess_shell(
                 shell_command,
@@ -4285,7 +4453,9 @@ class ArxivBrowser(App):
 
             summary = (stdout or b"").decode("utf-8", errors="replace").strip()
             if not summary:
-                self.notify("LLM returned empty output", title="AI Summary", severity="warning")
+                self.notify(
+                    "LLM returned empty output", title="AI Summary", severity="warning"
+                )
                 return
 
             # Cache in memory and persist to SQLite
@@ -4342,6 +4512,8 @@ class ArxivBrowser(App):
         self._abstract_loading.clear()
         self._abstract_queue.clear()
         self._abstract_pending_ids.clear()
+        self._paper_summaries.clear()
+        self._summary_loading.clear()
 
         # Clear selection when switching dates
         self.selected_ids.clear()
@@ -4415,10 +4587,12 @@ class ArxivBrowser(App):
             truncated_query = query if len(query) <= 30 else query[:27] + "..."
             safe_query = escape_rich_text(truncated_query)
             parts.append(
-                f"[{THEME_COLORS['accent']}]{filtered}[/][dim]/{total} matching [/][{THEME_COLORS['accent']}]\"{safe_query}\"[/]"
+                f'[{THEME_COLORS["accent"]}]{filtered}[/][dim]/{total} matching [/][{THEME_COLORS["accent"]}]"{safe_query}"[/]'
             )
         elif self._watch_filter_active:
-            parts.append(f"[{THEME_COLORS['orange']}]{filtered}[/][dim]/{total} watched[/]")
+            parts.append(
+                f"[{THEME_COLORS['orange']}]{filtered}[/][dim]/{total} watched[/]"
+            )
         else:
             parts.append(f"[dim]{total} papers[/]")
 
@@ -4440,46 +4614,46 @@ class ArxivBrowser(App):
         """Look up a paper by its arXiv ID. O(1) dict lookup."""
         return self._papers_by_id.get(arxiv_id)
 
-    def _get_pdf_url(self, paper: Paper) -> str:
-        """Get the PDF URL for a paper."""
-        return get_pdf_url(paper)
-
-    def _get_paper_url(self, paper: Paper) -> str:
-        """Get the preferred URL for a paper (abs or PDF)."""
-        return get_paper_url(paper, prefer_pdf=self._config.prefer_pdf_url)
-
-    async def _download_pdf_async(self, paper: Paper) -> bool:
+    async def _download_pdf_async(
+        self, paper: Paper, client: httpx.AsyncClient | None = None
+    ) -> bool:
         """Download a single PDF asynchronously.
 
         Args:
             paper: The paper to download.
+            client: Optional shared HTTP client. Creates a temporary one if None.
 
         Returns:
             True if download succeeded, False otherwise.
         """
-        url = self._get_pdf_url(paper)
+        url = get_pdf_url(paper)
         path = get_pdf_download_path(paper, self._config)
 
         try:
             # Create directory if needed (inside try for permission/disk errors)
             path.parent.mkdir(parents=True, exist_ok=True)
-            async with httpx.AsyncClient() as client:
+            if client is not None:
                 response = await client.get(
-                    url,
-                    timeout=PDF_DOWNLOAD_TIMEOUT,
-                    follow_redirects=True,
+                    url, timeout=PDF_DOWNLOAD_TIMEOUT, follow_redirects=True
                 )
-                response.raise_for_status()
-                path.write_bytes(response.content)
-            logger.debug(f"Downloaded PDF for {paper.arxiv_id} to {path}")
+            else:
+                async with httpx.AsyncClient() as tmp_client:
+                    response = await tmp_client.get(
+                        url, timeout=PDF_DOWNLOAD_TIMEOUT, follow_redirects=True
+                    )
+            response.raise_for_status()
+            path.write_bytes(response.content)
+            logger.debug("Downloaded PDF for %s to %s", paper.arxiv_id, path)
             return True
         except (httpx.HTTPError, OSError) as e:
-            logger.debug(f"Download failed for {paper.arxiv_id}: {e}")
+            logger.debug("Download failed for %s: %s", paper.arxiv_id, e)
             return False
 
     def _start_downloads(self) -> None:
         """Start download tasks up to the concurrency limit."""
-        while self._download_queue and len(self._downloading) < MAX_CONCURRENT_DOWNLOADS:
+        while (
+            self._download_queue and len(self._downloading) < MAX_CONCURRENT_DOWNLOADS
+        ):
             paper = self._download_queue.popleft()
             if paper.arxiv_id in self._downloading:
                 continue
@@ -4489,7 +4663,7 @@ class ArxivBrowser(App):
     async def _process_single_download(self, paper: Paper) -> None:
         """Process a single download and update state."""
         try:
-            success = await self._download_pdf_async(paper)
+            success = await self._download_pdf_async(paper, self._http_client)
             self._download_results[paper.arxiv_id] = success
         except Exception:
             logger.warning("Download failed for %s", paper.arxiv_id, exc_info=True)
@@ -4551,7 +4725,7 @@ class ArxivBrowser(App):
             webbrowser.open(url)
             return True
         except Exception as e:
-            logger.debug(f"Failed to open browser for {url}: {e}")
+            logger.debug("Failed to open browser for %s: %s", url, e)
             self.notify("Failed to open browser", title="Error", severity="error")
             return False
 
@@ -4560,8 +4734,18 @@ class ArxivBrowser(App):
         papers = self._get_target_papers()
         if not papers:
             return
+        if len(papers) > BATCH_CONFIRM_THRESHOLD:
+            self.push_screen(
+                ConfirmModal(f"Open {len(papers)} papers in browser?"),
+                lambda confirmed: self._do_open_urls(papers) if confirmed else None,
+            )
+        else:
+            self._do_open_urls(papers)
+
+    def _do_open_urls(self, papers: list[Paper]) -> None:
+        """Open the given papers' URLs in the browser."""
         for paper in papers:
-            self._safe_browser_open(self._get_paper_url(paper))
+            self._safe_browser_open(get_paper_url(paper, prefer_pdf=self._config.prefer_pdf_url))
         count = len(papers)
         self.notify(f"Opening {count} paper{'s' if count > 1 else ''}", title="Browser")
 
@@ -4570,8 +4754,18 @@ class ArxivBrowser(App):
         papers = self._get_target_papers()
         if not papers:
             return
+        if len(papers) > BATCH_CONFIRM_THRESHOLD:
+            self.push_screen(
+                ConfirmModal(f"Open {len(papers)} PDFs in browser?"),
+                lambda confirmed: self._do_open_pdfs(papers) if confirmed else None,
+            )
+        else:
+            self._do_open_pdfs(papers)
+
+    def _do_open_pdfs(self, papers: list[Paper]) -> None:
+        """Open the given papers' PDF URLs in the browser."""
         for paper in papers:
-            self._safe_browser_open(self._get_pdf_url(paper))
+            self._safe_browser_open(get_pdf_url(paper))
         count = len(papers)
         self.notify(f"Opening {count} PDF{'s' if count > 1 else ''}", title="PDF")
 
@@ -4587,7 +4781,7 @@ class ArxivBrowser(App):
         for paper in papers_to_download:
             path = get_pdf_download_path(paper, self._config)
             if path.exists() and path.stat().st_size > 0:
-                logger.debug(f"Skipping {paper.arxiv_id}: already downloaded")
+                logger.debug("Skipping %s: already downloaded", paper.arxiv_id)
             else:
                 to_download.append(paper)
 
@@ -4595,6 +4789,16 @@ class ArxivBrowser(App):
             self.notify("All PDFs already downloaded", title="Download")
             return
 
+        if len(to_download) > BATCH_CONFIRM_THRESHOLD:
+            self.push_screen(
+                ConfirmModal(f"Download {len(to_download)} PDFs?"),
+                lambda confirmed: self._do_start_downloads(to_download) if confirmed else None,
+            )
+        else:
+            self._do_start_downloads(to_download)
+
+    def _do_start_downloads(self, to_download: list[Paper]) -> None:
+        """Initialize and start batch PDF downloads."""
         # Initialize download batch
         self._download_queue.extend(to_download)
         self._download_total = len(to_download)
@@ -4790,15 +4994,18 @@ def main() -> int:
                 print(f"Error: No file found for date {args.date}", file=sys.stderr)
                 return 1
         elif not args.no_restore and config.session.current_date:
-            # Try to restore saved date
+            # Restore saved date only if no newer file has appeared;
+            # otherwise load the newest so the user sees new papers.
             try:
                 saved_date = datetime.strptime(
                     config.session.current_date, HISTORY_DATE_FORMAT
                 ).date()
-                for i, (d, _) in enumerate(history_files):
-                    if d == saved_date:
-                        current_date_index = i
-                        break
+                newest_date = history_files[0][0]
+                if saved_date >= newest_date:
+                    for i, (d, _) in enumerate(history_files):
+                        if d == saved_date:
+                            current_date_index = i
+                            break
             except ValueError:
                 pass  # Invalid saved date, use newest
 

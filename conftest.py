@@ -12,6 +12,7 @@ from arxiv_browser import (
     DEFAULT_CATEGORY_COLORS,
     DEFAULT_THEME,
     THEME_COLORS,
+    _HIGHLIGHT_PATTERN_CACHE,
     Paper,
     PaperMetadata,
     SearchBookmark,
@@ -40,6 +41,8 @@ def _reset_global_dicts():
     THEME_COLORS.update(DEFAULT_THEME)
     # Clear LRU cache that captured stale color values
     format_categories.cache_clear()
+    # Clear highlight pattern cache
+    _HIGHLIGHT_PATTERN_CACHE.clear()
 
 
 # ── Factories ────────────────────────────────────────────────────────────────

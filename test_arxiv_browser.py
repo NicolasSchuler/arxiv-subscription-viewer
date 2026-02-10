@@ -1233,41 +1233,13 @@ class TestYearExtractionEdgeCases:
 
     def test_extract_year_whitespace_only(self):
         """Year extraction should handle whitespace-only date."""
-        from arxiv_browser import ArxivBrowser
-
-        paper = Paper(
-            arxiv_id="test",
-            date="   ",
-            title="Test",
-            authors="Test",
-            categories="cs.AI",
-            comments=None,
-            abstract="Test",
-            url="http://test",
-        )
-        app = ArxivBrowser([paper])
-
-        result = app._extract_year("   ")
+        result = extract_year("   ")
         assert len(result) == 4
         assert result.isdigit()
 
     def test_extract_year_empty_string(self):
         """Year extraction should handle empty string."""
-        from arxiv_browser import ArxivBrowser
-
-        paper = Paper(
-            arxiv_id="test",
-            date="",
-            title="Test",
-            authors="Test",
-            categories="cs.AI",
-            comments=None,
-            abstract="Test",
-            url="http://test",
-        )
-        app = ArxivBrowser([paper])
-
-        result = app._extract_year("")
+        result = extract_year("")
         assert len(result) == 4
         assert result.isdigit()
 
@@ -1282,8 +1254,6 @@ class TestBibTeXFormattingEdgeCases:
 
     def test_format_bibtex_empty_categories(self):
         """BibTeX formatting should handle empty categories."""
-        from arxiv_browser import ArxivBrowser
-
         paper = Paper(
             arxiv_id="2401.12345",
             date="Mon, 15 Jan 2024",
@@ -1294,15 +1264,12 @@ class TestBibTeXFormattingEdgeCases:
             abstract="Test abstract",
             url="https://arxiv.org/abs/2401.12345",
         )
-        app = ArxivBrowser([paper])
 
-        bibtex = app._format_paper_as_bibtex(paper)
+        bibtex = format_paper_as_bibtex(paper)
         assert "primaryClass = {misc}" in bibtex
 
     def test_format_bibtex_whitespace_categories(self):
         """BibTeX formatting should handle whitespace-only categories."""
-        from arxiv_browser import ArxivBrowser
-
         paper = Paper(
             arxiv_id="2401.12345",
             date="Mon, 15 Jan 2024",
@@ -1313,9 +1280,8 @@ class TestBibTeXFormattingEdgeCases:
             abstract="Test abstract",
             url="https://arxiv.org/abs/2401.12345",
         )
-        app = ArxivBrowser([paper])
 
-        bibtex = app._format_paper_as_bibtex(paper)
+        bibtex = format_paper_as_bibtex(paper)
         assert "primaryClass = {misc}" in bibtex
 
 
@@ -2863,6 +2829,7 @@ class TestGenerateSummaryAsync:
         app._paper_summaries = {}
         app._summary_loading = set()
         app._summary_db_path = tmp_path / "test_summaries.db"
+        app._http_client = None
         app.notify = MagicMock()
         app._update_abstract_display = MagicMock()
         return app
@@ -3202,6 +3169,278 @@ class TestLlmConfigSerialization:
         assert config.llm_command == ""
         assert config.llm_prompt_template == ""
         assert config.llm_preset == ""
+
+
+# ============================================================================
+# Tests for Phase 1-5 new behavior
+# ============================================================================
+
+
+class TestSummaryStateClearOnDateSwitch:
+    """Verify summary caches are cleared when switching dates."""
+
+    def test_load_current_date_clears_summaries(self, make_paper, tmp_path):
+        """_load_current_date should clear _paper_summaries and _summary_loading."""
+        from datetime import date as dt_date
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser
+
+        # Create a history file
+        hdir = tmp_path / "history"
+        hdir.mkdir()
+        paper_file = hdir / "2024-01-15.txt"
+        paper_file.write_text(
+            "arXiv:2401.00001\n"
+            "Date: Mon, 15 Jan 2024\n"
+            "Title: Test Paper\n"
+            "Authors: Author\n"
+            "Categories: cs.AI\n"
+            "\\\\\n"
+            "Abstract text here.\n"
+            "(https://arxiv.org/abs/2401.00001)\n"
+            "------------------------------------------------------------------------------\n"
+        )
+        paper_file2 = hdir / "2024-01-16.txt"
+        paper_file2.write_text(
+            "arXiv:2401.00002\n"
+            "Date: Tue, 16 Jan 2024\n"
+            "Title: Test Paper 2\n"
+            "Authors: Author 2\n"
+            "Categories: cs.LG\n"
+            "\\\\\n"
+            "Abstract text here 2.\n"
+            "(https://arxiv.org/abs/2401.00002)\n"
+            "------------------------------------------------------------------------------\n"
+        )
+
+        history_files = [
+            (dt_date(2024, 1, 16), paper_file2),
+            (dt_date(2024, 1, 15), paper_file),
+        ]
+        papers = [make_paper(arxiv_id="2401.00002")]
+        app = ArxivBrowser(papers, history_files=history_files, current_date_index=0)
+
+        # Simulate having summaries cached
+        app._paper_summaries["2401.00002"] = "Some summary"
+        app._summary_loading.add("2401.00002")
+
+        with patch("arxiv_browser.save_config", return_value=True):
+            async def run_test():
+                async with app.run_test():
+                    # Switch to older date
+                    app._current_date_index = 1
+                    app._load_current_date()
+
+                    assert len(app._paper_summaries) == 0
+                    assert len(app._summary_loading) == 0
+
+            import asyncio
+            asyncio.get_event_loop().run_until_complete(run_test())
+
+
+class TestMatchTypeValidation:
+    """Verify WatchListEntry.match_type is validated during deserialization."""
+
+    def test_valid_match_types_preserved(self):
+        from arxiv_browser import WATCH_MATCH_TYPES, _dict_to_config
+
+        for mt in WATCH_MATCH_TYPES:
+            data = {"watch_list": [{"pattern": "test", "match_type": mt}]}
+            config = _dict_to_config(data)
+            assert config.watch_list[0].match_type == mt
+
+    def test_invalid_match_type_defaults_to_author(self, caplog):
+        import logging
+
+        from arxiv_browser import _dict_to_config
+
+        data = {"watch_list": [{"pattern": "test", "match_type": "category"}]}
+        with caplog.at_level(logging.WARNING, logger="arxiv_browser"):
+            config = _dict_to_config(data)
+        assert config.watch_list[0].match_type == "author"
+        assert "Invalid watch list match_type" in caplog.text
+
+
+class TestAtomicBibtexExport:
+    """Verify BibTeX file export uses atomic writes."""
+
+    def test_export_creates_valid_file(self, make_paper, tmp_path):
+        """BibTeX export should produce a valid file with no leftover temp files."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser
+
+        paper = make_paper(
+            arxiv_id="2401.12345",
+            date="Mon, 15 Jan 2024",
+            title="Test Paper",
+            authors="John Smith",
+            categories="cs.AI",
+        )
+        config_dict = {"bibtex_export_dir": str(tmp_path / "exports")}
+        from arxiv_browser import UserConfig
+
+        config = UserConfig(bibtex_export_dir=str(tmp_path / "exports"))
+        app = ArxivBrowser([paper], config=config, restore_session=False)
+
+        with patch("arxiv_browser.save_config", return_value=True):
+            async def run_test():
+                async with app.run_test():
+                    app.action_export_bibtex_file()
+
+                    export_dir = tmp_path / "exports"
+                    # Check that the export directory was created
+                    assert export_dir.exists()
+                    # Check that exactly one .bib file was created
+                    bib_files = list(export_dir.glob("*.bib"))
+                    assert len(bib_files) == 1
+                    # Check no leftover temp files
+                    tmp_files = list(export_dir.glob(".bibtex-*"))
+                    assert len(tmp_files) == 0
+                    # Check content is valid BibTeX
+                    content = bib_files[0].read_text()
+                    assert "@misc{" in content
+                    assert "Smith" in content
+
+            import asyncio
+            asyncio.get_event_loop().run_until_complete(run_test())
+
+
+class TestDetailPaneHighlighting:
+    """Verify search terms are highlighted in the detail pane abstract."""
+
+    def test_highlight_terms_applied(self, make_paper):
+        from arxiv_browser import PaperDetails, THEME_COLORS
+
+        details = PaperDetails()
+        paper = make_paper(abstract="Deep learning is transforming AI research.")
+
+        details.update_paper(
+            paper,
+            abstract_text="Deep learning is transforming AI research.",
+            highlight_terms=["learning"],
+        )
+
+        rendered = str(details.content)
+        assert f"[bold {THEME_COLORS['accent']}]learning[/]" in rendered
+
+    def test_no_highlight_without_terms(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(abstract="Deep learning is transforming AI research.")
+
+        details.update_paper(
+            paper,
+            abstract_text="Deep learning is transforming AI research.",
+        )
+
+        rendered = str(details.content)
+        # Without highlight terms, "learning" should NOT have bold markup around it
+        assert "learning[/]" not in rendered
+
+
+class TestHighlightPatternCache:
+    """Verify highlight_text caches compiled regex patterns."""
+
+    def test_cache_populated(self):
+        from arxiv_browser import _HIGHLIGHT_PATTERN_CACHE, highlight_text
+
+        _HIGHLIGHT_PATTERN_CACHE.clear()
+        highlight_text("Hello world", ["world"], "#ff0000")
+        assert ("world",) in _HIGHLIGHT_PATTERN_CACHE
+
+    def test_cache_reused(self):
+        from arxiv_browser import _HIGHLIGHT_PATTERN_CACHE, highlight_text
+
+        _HIGHLIGHT_PATTERN_CACHE.clear()
+        highlight_text("Hello world", ["world"], "#ff0000")
+        pattern1 = _HIGHLIGHT_PATTERN_CACHE[("world",)]
+        highlight_text("Goodbye world", ["world"], "#00ff00")
+        pattern2 = _HIGHLIGHT_PATTERN_CACHE[("world",)]
+        assert pattern1 is pattern2
+
+    def test_cache_different_terms(self):
+        from arxiv_browser import _HIGHLIGHT_PATTERN_CACHE, highlight_text
+
+        _HIGHLIGHT_PATTERN_CACHE.clear()
+        highlight_text("Hello world", ["world"], "#ff0000")
+        highlight_text("Hello earth", ["earth"], "#ff0000")
+        assert len(_HIGHLIGHT_PATTERN_CACHE) == 2
+
+
+class TestBatchConfirmationThreshold:
+    """Verify batch confirmation modal behavior."""
+
+    def test_threshold_constant_exists(self):
+        from arxiv_browser import BATCH_CONFIRM_THRESHOLD
+
+        assert BATCH_CONFIRM_THRESHOLD == 10
+
+    def test_confirm_modal_class_exists(self):
+        from arxiv_browser import ConfirmModal
+
+        modal = ConfirmModal("Test message?")
+        assert modal._message == "Test message?"
+
+
+@pytest.mark.integration
+class TestBatchConfirmationIntegration:
+    """Integration test for batch confirmation modal."""
+
+    async def test_no_modal_below_threshold(self, make_paper):
+        """Opening few papers should not show confirmation modal."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser, BATCH_CONFIRM_THRESHOLD
+
+        papers = [
+            make_paper(arxiv_id=f"2401.{i:05d}")
+            for i in range(BATCH_CONFIRM_THRESHOLD)
+        ]
+        app = ArxivBrowser(papers, restore_session=False)
+
+        with patch("arxiv_browser.save_config", return_value=True), \
+             patch("arxiv_browser.webbrowser.open"):
+            async with app.run_test() as pilot:
+                # Select all papers
+                await pilot.press("a")
+                await pilot.pause(0.1)
+                # Open URLs — should NOT show modal (at threshold, not above)
+                await pilot.press("o")
+                await pilot.pause(0.1)
+                # No modal should be on screen stack
+                assert len(app.screen_stack) == 1
+
+    async def test_modal_shown_above_threshold(self, make_paper):
+        """Opening many papers should show confirmation modal."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser, BATCH_CONFIRM_THRESHOLD, ConfirmModal
+
+        papers = [
+            make_paper(arxiv_id=f"2401.{i:05d}")
+            for i in range(BATCH_CONFIRM_THRESHOLD + 1)
+        ]
+        app = ArxivBrowser(papers, restore_session=False)
+
+        with patch("arxiv_browser.save_config", return_value=True), \
+             patch("arxiv_browser.webbrowser.open"):
+            async with app.run_test() as pilot:
+                # Select all papers
+                await pilot.press("a")
+                await pilot.pause(0.1)
+                # Open URLs — should show modal
+                await pilot.press("o")
+                await pilot.pause(0.1)
+                assert len(app.screen_stack) == 2
+                assert isinstance(app.screen_stack[-1], ConfirmModal)
+
+                # Dismiss with 'n' (cancel)
+                await pilot.press("n")
+                await pilot.pause(0.1)
+                assert len(app.screen_stack) == 1
 
 
 # ============================================================================
