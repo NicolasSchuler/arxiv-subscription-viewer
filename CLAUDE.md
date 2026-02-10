@@ -6,11 +6,11 @@ A Textual-based TUI application for browsing arXiv papers from email subscriptio
 
 ## Architecture
 
-### Main Application (`arxiv_browser.py` ~3860 lines)
+### Main Application (`arxiv_browser.py` ~8300 lines)
 
 **Data Models:**
 - `Paper` - Core paper data (arXiv ID, title, authors, etc.) with `__slots__`
-- `PaperMetadata` - User annotations (notes, tags, read/star status)
+- `PaperMetadata` - User annotations (notes, tags, read/star status, version tracking)
 - `WatchListEntry` - Author/keyword/title patterns to highlight
 - `SearchBookmark` - Saved search queries (max 9)
 - `SessionState` - Scroll position, filters, sort order, current date
@@ -21,7 +21,7 @@ A Textual-based TUI application for browsing arXiv papers from email subscriptio
 - `clean_latex()` - Remove LaTeX commands for readable display
 - `discover_history_files()` - Find YYYY-MM-DD.txt files in history/
 - `load_config()` / `save_config()` - JSON persistence via platformdirs
-- `find_similar_papers()` - Jaccard similarity on categories/authors/keywords
+- `find_similar_papers()` - Hybrid TF-IDF cosine + Jaccard similarity (text 50%, categories 30%, authors 20%)
 - `build_llm_prompt()` - Build LLM prompt from paper data and template
 - `get_summary_db_path()` - Path to SQLite summary cache
 
@@ -31,6 +31,7 @@ A Textual-based TUI application for browsing arXiv papers from email subscriptio
 - `PaperDetails` - Rich-formatted paper detail view
 - `NotesModal` / `TagsModal` - ModalScreen dialogs for editing
 - `RecommendationsScreen` - Similar papers modal
+- `CitationGraphScreen` - Citation graph drill-down modal
 - `BookmarkTabBar` - Horizontal bookmark tabs widget
 
 **Performance Optimizations:**
@@ -42,23 +43,16 @@ A Textual-based TUI application for browsing arXiv papers from email subscriptio
 - Batch DOM updates in `_refresh_list_view()`
 - History file discovery limited to 365 files
 
-### Test Suite (`test_arxiv_browser.py` ~1080 lines)
+### Supporting Modules
 
-93 tests covering:
-- LaTeX cleaning edge cases (nested commands, math mode, accents)
-- Date parsing and sorting
-- Category formatting and caching
-- File parsing (valid, empty, malformed inputs)
-- Paper dataclass behavior
-- Configuration serialization roundtrip
-- Paper similarity algorithm (Jaccard, keyword extraction)
-- Fuzzy search constants
-- Text truncation utility
-- Type-safe config parsing (`_safe_get`)
-- Paper deduplication
-- History file discovery and limits
-- BibTeX export edge cases
-- Module exports (`__all__`)
+- **`semantic_scholar.py`** (~630 lines): S2 API client, `SemanticScholarPaper` / `CitationEntry` dataclasses, SQLite cache for papers, recommendations, and citation graphs
+- **`huggingface.py`** (~300 lines): HuggingFace Daily Papers API client, `HuggingFacePaper` dataclass, SQLite cache
+
+### Test Suite (610 tests across 3 files)
+
+- **`test_arxiv_browser.py`** (~5800 lines): Core parsing, similarity, export, config, UI integration
+- **`test_semantic_scholar.py`** (~990 lines): S2 response parsing, serialization, cache CRUD, API fetch functions, citation graph
+- **`test_huggingface.py`** (~460 lines): HF response parsing, cache, API fetch functions
 
 ## Code Style
 
@@ -67,7 +61,7 @@ A Textual-based TUI application for browsing arXiv papers from email subscriptio
 - Pre-compile regex patterns at module level (not inside functions)
 - Use `@lru_cache` for expensive repeated operations
 - Constants in SCREAMING_SNAKE_CASE at module level
-- `__all__` defines public API (23 exports)
+- `__all__` defines public API (58 exports)
 - Module-level logger for debug output
 
 ## Key Patterns
@@ -192,31 +186,94 @@ Prompt template placeholders: `{title}`, `{authors}`, `{categories}`, `{abstract
 
 The `{paper_content}` placeholder is replaced with the full paper text (fetched from arXiv HTML), falling back to the abstract if unavailable.
 
+## Semantic Scholar Integration
+
+Optional enrichment with citation counts, fields of study, TLDRs, and S2-powered recommendations. Fully opt-in and on-demand.
+
+Add to `config.json`:
+
+```json
+{
+  "s2_enabled": true,
+  "s2_api_key": "",
+  "s2_cache_ttl_days": 7
+}
+```
+
+- `s2_enabled`: Enable S2 enrichment on startup (default: `false`)
+- `s2_api_key`: Optional API key for higher rate limits
+- `s2_cache_ttl_days`: Days to cache S2 data in SQLite (default: `7`)
+
+Usage: Press `Ctrl+e` to toggle S2 on/off, then `e` on any paper to fetch citation data. Press `R` for recommendations (local or S2-powered when enabled). Press `G` for citation graph exploration (drill-down through references and citations). Sort by citations with `s`.
+
+## HuggingFace Trending Integration
+
+Optional trending signal from HuggingFace Daily Papers — shows community upvotes, comments, GitHub info, AI summaries, and keywords. Fully opt-in with auto-fetch.
+
+Add to `config.json`:
+
+```json
+{
+  "hf_enabled": true,
+  "hf_cache_ttl_hours": 6
+}
+```
+
+- `hf_enabled`: Enable HF trending on startup (default: `false`)
+- `hf_cache_ttl_hours`: Hours to cache HF daily data in SQLite (default: `6`)
+
+Usage: Press `Ctrl+h` to toggle HF on/off. When enabled, the daily papers list is auto-fetched and cross-matched against loaded papers. Trending papers show upvote badges in the list and a HuggingFace section in the detail pane. Sort by trending with `s`.
+
+## Relevance Scoring
+
+LLM-powered relevance scoring lets you define research interests and have the configured LLM score each paper 1-10. Requires an LLM preset or command configured (same as AI summaries). Scores are cached in SQLite (`relevance.db`) keyed by `(arxiv_id, interests_hash)`.
+
+Add to `config.json`:
+
+```json
+{
+  "research_interests": "efficient LLM inference, quantization, speculative decoding"
+}
+```
+
+Usage: Press `L` to score all loaded papers (prompts for interests on first use). Press `Ctrl+l` to edit interests (clears cached scores). Sort by relevance with `s`. Papers show colored score badges: green (8-10), yellow (5-7), dim (1-4).
+
 ## Key Bindings Reference
 
 ```
 /       - Toggle search (fuzzy matching)
+A       - Search all arXiv (API mode)
 o       - Open selected paper(s) in browser
+P       - Open selected paper(s) as PDF
 c       - Copy selected paper(s) to clipboard
 b       - Copy as BibTeX
 B       - Export BibTeX to file (for Zotero import)
 d       - Download PDF(s) to local folder
 M       - Copy as Markdown
+E       - Export menu (RIS, CSV, Markdown table + more)
 space   - Toggle selection
 a       - Select all visible
 u       - Clear selection
-s       - Cycle sort order (title/date/arxiv_id)
+s       - Cycle sort order (title/date/arxiv_id/citations/trending/relevance)
 j/k     - Navigate down/up (vim-style)
 r       - Toggle read status
 x       - Toggle star
 n       - Edit notes
-t       - Edit tags
+t       - Edit tags (namespace:value supported, e.g., topic:ml, status:to-read)
 w       - Toggle watch list filter
+W       - Manage watch list
 p       - Toggle abstract preview
 m       - Set mark (then press a-z)
 '       - Jump to mark (then press a-z)
-R       - Show similar papers
-Ctrl+s  - Generate AI summary (requires LLM CLI tool)
+R       - Show similar papers (local or Semantic Scholar)
+G       - Citation graph (S2-powered, drill-down navigation)
+V       - Check starred papers for version updates
+e       - Fetch Semantic Scholar data for current paper
+Ctrl+e  - Toggle Semantic Scholar enrichment on/off
+Ctrl+h  - Toggle HuggingFace trending on/off
+Ctrl+s  - Generate AI summary (mode selector: default/TLDR/methods/results/comparison)
+L       - Score papers by relevance (LLM-powered)
+Ctrl+l  - Edit research interests
 1-9     - Jump to bookmark
 Ctrl+b  - Add current search as bookmark
 [       - Go to previous (older) date (history mode)

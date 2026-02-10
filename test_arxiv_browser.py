@@ -8,8 +8,12 @@ import pytest
 
 from arxiv_browser import (
     ARXIV_DATE_FORMAT,
+    ARXIV_API_DEFAULT_MAX_RESULTS,
     DEFAULT_CATEGORY_COLOR,
+    DEFAULT_LLM_PROMPT,
     LLM_PRESETS,
+    SUMMARY_MODES,
+    TAG_NAMESPACE_COLORS,
     Paper,
     PaperMetadata,
     QueryToken,
@@ -17,6 +21,7 @@ from arxiv_browser import (
     SUBPROCESS_TIMEOUT,
     UserConfig,
     build_llm_prompt,
+    build_arxiv_search_query,
     clean_latex,
     escape_bibtex,
     extract_text_from_html,
@@ -24,13 +29,21 @@ from arxiv_browser import (
     format_categories,
     format_summary_as_rich,
     format_paper_as_bibtex,
+    format_paper_as_ris,
+    format_papers_as_csv,
+    format_papers_as_markdown_table,
     generate_citation_key,
     get_pdf_download_path,
+    get_tag_color,
     get_summary_db_path,
     insert_implicit_and,
     load_config,
+    normalize_arxiv_id,
     parse_arxiv_date,
+    parse_arxiv_api_feed,
     parse_arxiv_file,
+    parse_arxiv_version_map,
+    parse_tag_namespace,
     save_config,
     to_rpn,
     tokenize_query,
@@ -349,6 +362,76 @@ This is also not valid
 
 
 # ============================================================================
+# Tests for arXiv API search helpers
+# ============================================================================
+
+
+class TestArxivApiSearchHelpers:
+    """Tests for arXiv API query and parsing helpers."""
+
+    def test_build_arxiv_search_query_with_field_and_category(self):
+        query = build_arxiv_search_query("diffusion model", "title", "cs.AI")
+        assert query == "ti:diffusion model AND cat:cs.AI"
+
+    def test_build_arxiv_search_query_category_only(self):
+        query = build_arxiv_search_query("", "all", "cs.LG")
+        assert query == "cat:cs.LG"
+
+    def test_build_arxiv_search_query_requires_input(self):
+        with pytest.raises(ValueError, match="must be provided"):
+            build_arxiv_search_query("", "all", "")
+
+    def test_build_arxiv_search_query_rejects_invalid_field(self):
+        with pytest.raises(ValueError, match="Unsupported arXiv search field"):
+            build_arxiv_search_query("test", "unknown", "")
+
+    @pytest.mark.parametrize(
+        "raw, expected",
+        [
+            ("https://arxiv.org/abs/2401.12345v2", "2401.12345"),
+            ("https://arxiv.org/pdf/2401.12345v2.pdf", "2401.12345"),
+            ("hep-th/9901001v1", "hep-th/9901001"),
+            ("2401.12345v3", "2401.12345"),
+        ],
+    )
+    def test_normalize_arxiv_id(self, raw, expected):
+        assert normalize_arxiv_id(raw) == expected
+
+    def test_parse_arxiv_api_feed(self):
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"
+      xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <entry>
+    <id>http://arxiv.org/abs/2401.12345v2</id>
+    <updated>2026-02-09T00:00:00Z</updated>
+    <published>2026-02-08T00:00:00Z</published>
+    <title>  A Test Paper Title  </title>
+    <summary>  This is an abstract.  </summary>
+    <author><name>Jane Doe</name></author>
+    <author><name>John Smith</name></author>
+    <arxiv:comment>12 pages</arxiv:comment>
+    <category term="cs.AI"/>
+    <category term="cs.LG"/>
+  </entry>
+</feed>"""
+        papers = parse_arxiv_api_feed(xml)
+        assert len(papers) == 1
+        paper = papers[0]
+        assert paper.arxiv_id == "2401.12345"
+        assert paper.title == "A Test Paper Title"
+        assert paper.authors == "Jane Doe, John Smith"
+        assert paper.categories == "cs.AI cs.LG"
+        assert paper.comments == "12 pages"
+        assert paper.abstract == "This is an abstract."
+        assert paper.url == "https://arxiv.org/abs/2401.12345"
+        assert paper.source == "api"
+
+    def test_parse_arxiv_api_feed_rejects_invalid_xml(self):
+        with pytest.raises(ValueError, match="Invalid arXiv API XML response"):
+            parse_arxiv_api_feed("<not xml")
+
+
+# ============================================================================
 # Tests for Paper dataclass
 # ============================================================================
 
@@ -384,6 +467,20 @@ class TestPaperDataclass:
             url="https://arxiv.org/abs/2401.12345",
         )
         assert paper.comments is None
+
+    def test_paper_source_defaults_to_local(self):
+        """Paper source should default to local entries."""
+        paper = Paper(
+            arxiv_id="2401.12345",
+            date="Mon, 15 Jan 2024",
+            title="Test Paper",
+            authors="Test Author",
+            categories="cs.AI",
+            comments=None,
+            abstract="Test abstract",
+            url="https://arxiv.org/abs/2401.12345",
+        )
+        assert paper.source == "local"
 
     def test_paper_uses_slots(self):
         """Paper should use __slots__ for memory efficiency."""
@@ -484,6 +581,7 @@ class TestNewDataclasses:
         assert config.bookmarks == []
         assert config.marks == {}
         assert config.show_abstract_preview is False
+        assert config.arxiv_api_max_results == ARXIV_API_DEFAULT_MAX_RESULTS
         assert config.version == 1
 
 
@@ -521,6 +619,7 @@ class TestConfigPersistence:
             session=SessionState(scroll_index=5, current_filter="test"),
             show_abstract_preview=True,
             bibtex_export_dir="custom-exports",
+            arxiv_api_max_results=75,
         )
 
         # Serialize and deserialize
@@ -537,6 +636,7 @@ class TestConfigPersistence:
         assert restored.marks["a"] == "2401.12345"
         assert restored.session.scroll_index == 5
         assert restored.bibtex_export_dir == "custom-exports"
+        assert restored.arxiv_api_max_results == 75
 
     def test_dict_to_config_handles_empty(self):
         """Loading empty dict should return default config."""
@@ -546,6 +646,13 @@ class TestConfigPersistence:
         default = UserConfig()
         assert config.show_abstract_preview == default.show_abstract_preview
         assert config.paper_metadata == default.paper_metadata
+
+    def test_arxiv_api_max_results_is_clamped(self):
+        """arxiv_api_max_results should be clamped to configured limits."""
+        from arxiv_browser import ARXIV_API_MAX_RESULTS_LIMIT, _dict_to_config
+
+        config = _dict_to_config({"arxiv_api_max_results": 9999})
+        assert config.arxiv_api_max_results == ARXIV_API_MAX_RESULTS_LIMIT
 
 
 # ============================================================================
@@ -1093,6 +1200,7 @@ class TestSafeGetAndTypeValidation:
                 "sort_index": None,
             },
             "paper_metadata": "not_a_dict",
+            "arxiv_api_max_results": "invalid",
             "version": "1",
         }
 
@@ -1102,6 +1210,7 @@ class TestSafeGetAndTypeValidation:
         assert config.session.current_filter == ""
         assert config.session.sort_index == 0
         assert config.paper_metadata == {}
+        assert config.arxiv_api_max_results == ARXIV_API_DEFAULT_MAX_RESULTS
         assert config.version == 1
 
 
@@ -1514,6 +1623,195 @@ class TestComputePaperSimilarity:
         sim_same_cat = compute_paper_similarity(p1, p2)
         sim_diff_cat = compute_paper_similarity(p1, p3)
         assert sim_same_cat > sim_diff_cat
+
+
+class TestTfidfIndex:
+    """Tests for TF-IDF tokenizer, TF computation, and TfidfIndex class."""
+
+    def test_tokenize_basic(self):
+        from arxiv_browser import _tokenize_for_tfidf
+
+        tokens = _tokenize_for_tfidf("Deep learning for natural language processing")
+        assert isinstance(tokens, list)
+        assert "deep" in tokens
+        assert "learning" in tokens
+        assert "natural" in tokens
+        assert "language" in tokens
+        assert "processing" in tokens
+
+    def test_tokenize_preserves_frequency(self):
+        from arxiv_browser import _tokenize_for_tfidf
+
+        tokens = _tokenize_for_tfidf("transformer transformer transformer")
+        assert tokens.count("transformer") == 3
+
+    def test_tokenize_empty(self):
+        from arxiv_browser import _tokenize_for_tfidf
+
+        assert _tokenize_for_tfidf(None) == []
+        assert _tokenize_for_tfidf("") == []
+
+    def test_tokenize_min_length(self):
+        from arxiv_browser import _tokenize_for_tfidf
+
+        tokens = _tokenize_for_tfidf("a bb ccc dddd")
+        # Only tokens with 3+ chars matching [a-z][a-z0-9]{2,}
+        assert "ccc" in tokens
+        assert "dddd" in tokens
+        assert "bb" not in tokens
+
+    def test_tokenize_stopwords(self):
+        from arxiv_browser import _tokenize_for_tfidf
+
+        tokens = _tokenize_for_tfidf("this paper presents the method")
+        assert "this" not in tokens
+        assert "paper" not in tokens  # "paper" is in STOPWORDS
+        assert "the" not in tokens
+        assert "method" not in tokens  # "method" is in STOPWORDS
+        assert "presents" in tokens
+
+    def test_compute_tf_sublinear(self):
+        import math
+
+        from arxiv_browser import _compute_tf
+
+        tf = _compute_tf(["transformer", "transformer", "transformer", "model"])
+        assert tf["transformer"] == pytest.approx(1.0 + math.log(3))
+        assert tf["model"] == pytest.approx(1.0 + math.log(1))
+
+    def test_build_empty_corpus(self):
+        from arxiv_browser import TfidfIndex
+
+        index = TfidfIndex.build([], text_fn=lambda p: p.title)
+        assert len(index) == 0
+
+    def test_build_single_paper(self, make_paper):
+        from arxiv_browser import TfidfIndex
+
+        papers = [make_paper(title="Attention mechanisms in deep learning")]
+        index = TfidfIndex.build(papers, text_fn=lambda p: p.title)
+        # n < 2 guard: single paper cannot compute meaningful IDF
+        assert len(index) == 0
+
+    def test_build_two_papers(self, make_paper):
+        from arxiv_browser import TfidfIndex
+
+        papers = [
+            make_paper(arxiv_id="001", title="Attention mechanisms in deep learning"),
+            make_paper(arxiv_id="002", title="Reinforcement learning for robotics"),
+        ]
+        index = TfidfIndex.build(papers, text_fn=lambda p: p.title)
+        assert len(index) == 2
+        assert "001" in index
+        assert "002" in index
+
+    def test_cosine_self_is_one(self, make_paper):
+        from arxiv_browser import TfidfIndex
+
+        papers = [
+            make_paper(arxiv_id="001", title="Attention mechanisms in deep learning"),
+            make_paper(arxiv_id="002", title="Reinforcement learning for robotics"),
+        ]
+        index = TfidfIndex.build(papers, text_fn=lambda p: p.title)
+        assert index.cosine_similarity("001", "001") == pytest.approx(1.0)
+
+    def test_similar_scores_higher(self, make_paper):
+        from arxiv_browser import TfidfIndex
+
+        papers = [
+            make_paper(arxiv_id="001", title="Deep learning for image classification"),
+            make_paper(arxiv_id="002", title="Deep learning for object detection"),
+            make_paper(arxiv_id="003", title="Quantum computing error correction codes"),
+        ]
+        index = TfidfIndex.build(papers, text_fn=lambda p: p.title)
+        sim_related = index.cosine_similarity("001", "002")
+        sim_unrelated = index.cosine_similarity("001", "003")
+        assert sim_related > sim_unrelated
+
+    def test_cosine_missing_returns_zero(self, make_paper):
+        from arxiv_browser import TfidfIndex
+
+        papers = [
+            make_paper(arxiv_id="001", title="Deep learning methods"),
+            make_paper(arxiv_id="002", title="Reinforcement learning"),
+        ]
+        index = TfidfIndex.build(papers, text_fn=lambda p: p.title)
+        assert index.cosine_similarity("001", "unknown") == 0.0
+        assert index.cosine_similarity("unknown", "001") == 0.0
+
+    def test_idf_downweights_common(self, make_paper):
+        from arxiv_browser import TfidfIndex
+
+        papers = [
+            make_paper(arxiv_id="001", title="Deep learning attention mechanisms"),
+            make_paper(arxiv_id="002", title="Deep learning reinforcement policy"),
+            make_paper(arxiv_id="003", title="Quantum attention entanglement"),
+        ]
+        index = TfidfIndex.build(papers, text_fn=lambda p: p.title)
+        # "deep" and "learning" appear in 2/3 docs; "quantum" in 1/3
+        # "quantum" should have higher IDF than "deep"
+        assert index._idf.get("quantum", 0) > index._idf.get("deep", 0)
+
+    def test_contains_protocol(self, make_paper):
+        from arxiv_browser import TfidfIndex
+
+        papers = [
+            make_paper(arxiv_id="001", title="Testing containment protocol"),
+            make_paper(arxiv_id="002", title="Another paper here"),
+        ]
+        index = TfidfIndex.build(papers, text_fn=lambda p: p.title)
+        assert "001" in index
+        assert "nonexistent" not in index
+
+    def test_compute_similarity_with_tfidf(self, make_paper):
+        from arxiv_browser import (
+            SIMILARITY_WEIGHT_AUTHOR,
+            SIMILARITY_WEIGHT_CATEGORY,
+            SIMILARITY_WEIGHT_TEXT,
+            TfidfIndex,
+            compute_paper_similarity,
+        )
+
+        papers = [
+            make_paper(
+                arxiv_id="001",
+                title="Deep learning for vision",
+                categories="cs.CV",
+                authors="Smith",
+            ),
+            make_paper(
+                arxiv_id="002",
+                title="Deep learning for vision tasks",
+                categories="cs.CV",
+                authors="Jones",
+            ),
+        ]
+        index = TfidfIndex.build(papers, text_fn=lambda p: p.title)
+        score = compute_paper_similarity(papers[0], papers[1], tfidf_index=index)
+        # Should use TF-IDF weights (category 30%, author 20%, text 50%)
+        assert 0.0 < score < 1.0
+        # Same categories → full category score
+        assert score >= SIMILARITY_WEIGHT_CATEGORY * 0.99
+
+    def test_compute_similarity_without_tfidf(self, make_paper):
+        from arxiv_browser import compute_paper_similarity
+
+        p1 = make_paper(
+            arxiv_id="001",
+            title="Deep learning",
+            categories="cs.AI",
+            authors="Smith",
+        )
+        p2 = make_paper(
+            arxiv_id="002",
+            title="Deep learning",
+            categories="cs.AI",
+            authors="Jones",
+        )
+        # Without index, uses legacy Jaccard: 0.4*cat + 0.3*author + 0.2*title + 0.1*abstract
+        score = compute_paper_similarity(p1, p2, tfidf_index=None)
+        # Same categories (1.0) * 0.4 = 0.4
+        assert score >= 0.4
 
 
 class TestIsAdvancedQuery:
@@ -2158,6 +2456,12 @@ class TestTextualIntegration:
                 assert app._sort_index == 1
                 await pilot.press("s")
                 assert app._sort_index == 2
+                await pilot.press("s")
+                assert app._sort_index == 3  # citations
+                await pilot.press("s")
+                assert app._sort_index == 4  # trending
+                await pilot.press("s")
+                assert app._sort_index == 5  # relevance
                 # Should cycle back to 0
                 await pilot.press("s")
                 assert app._sort_index == 0
@@ -2250,6 +2554,203 @@ class TestTextualIntegration:
                 # Move back up
                 await pilot.press("k")
                 assert list_view.index == 1
+
+
+@pytest.mark.integration
+class TestArxivApiModeIntegration:
+    """Integration tests for arXiv API mode transitions and pagination behavior."""
+
+    async def test_escape_exits_api_mode_when_search_box_is_visible(self, make_paper):
+        """A single Escape should exit API mode even if search input is open."""
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser import ArxivBrowser
+
+        local_papers = [make_paper(arxiv_id="2401.00001", title="Local paper")]
+        api_paper = make_paper(
+            arxiv_id="2602.00001",
+            title="API result",
+        )
+        api_paper.source = "api"
+        api_papers = [api_paper]
+
+        app = ArxivBrowser(local_papers, restore_session=False)
+        with (
+            patch("arxiv_browser.save_config", return_value=True),
+            patch.object(
+                ArxivBrowser,
+                "_fetch_arxiv_api_page",
+                new_callable=AsyncMock,
+                return_value=api_papers,
+            ),
+            patch.object(
+                ArxivBrowser,
+                "_apply_arxiv_rate_limit",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
+            async with app.run_test() as pilot:
+                await pilot.press("A")
+                await pilot.press("t", "e", "s", "t", "enter")
+                await pilot.pause(0.2)
+                assert app._in_arxiv_api_mode is True
+                assert app.all_papers[0].arxiv_id == "2602.00001"
+
+                await pilot.press("slash")
+                await pilot.pause(0.05)
+                await pilot.press("escape")
+                await pilot.pause(0.2)
+
+                assert app._in_arxiv_api_mode is False
+                assert app.all_papers[0].arxiv_id == "2401.00001"
+
+    async def test_watch_filter_persists_across_api_pages(self, make_paper):
+        """Watch filter state should survive paging within API mode."""
+        from unittest.mock import AsyncMock, patch
+
+        from textual.widgets import ListView
+
+        from arxiv_browser import ArxivBrowser, PaperListItem, UserConfig, WatchListEntry
+
+        local_papers = [make_paper(arxiv_id="2401.00001", title="Local paper")]
+        api_page_1 = [
+            make_paper(arxiv_id="2602.00001", title="Watch this result"),
+            make_paper(arxiv_id="2602.00002", title="Other result"),
+        ]
+        api_page_2 = [
+            make_paper(arxiv_id="2602.00003", title="Watch page two"),
+            make_paper(arxiv_id="2602.00004", title="Another other"),
+        ]
+        for paper in api_page_1 + api_page_2:
+            paper.source = "api"
+
+        async def fetch_page(_self, _request, start, _max_results):
+            return api_page_1 if start == 0 else api_page_2
+
+        config = UserConfig(
+            watch_list=[WatchListEntry(pattern="watch", match_type="title")]
+        )
+        app = ArxivBrowser(local_papers, config=config, restore_session=False)
+        with (
+            patch("arxiv_browser.save_config", return_value=True),
+            patch.object(ArxivBrowser, "_fetch_arxiv_api_page", new=fetch_page),
+            patch.object(
+                ArxivBrowser,
+                "_apply_arxiv_rate_limit",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
+            async with app.run_test() as pilot:
+                await pilot.press("A")
+                await pilot.press("t", "e", "s", "t", "enter")
+                await pilot.pause(0.2)
+                assert app._in_arxiv_api_mode is True
+
+                await pilot.press("w")
+                await pilot.pause(0.1)
+                assert app._watch_filter_active is True
+
+                list_view = app.query_one("#paper-list", ListView)
+                visible_items = [
+                    c for c in list_view.children if isinstance(c, PaperListItem)
+                ]
+                assert len(visible_items) == 1
+
+                await pilot.press("bracketright")
+                await pilot.pause(0.2)
+                assert app._watch_filter_active is True
+
+                list_view = app.query_one("#paper-list", ListView)
+                visible_items = [
+                    c for c in list_view.children if isinstance(c, PaperListItem)
+                ]
+                assert len(visible_items) == 1
+                assert visible_items[0].paper.arxiv_id == "2602.00003"
+
+    async def test_brackets_route_to_api_pagination_only_in_api_mode(self, make_paper):
+        """[`/`] should call API page change only when API mode is active."""
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser import ArxivBrowser, ArxivSearchModeState, ArxivSearchRequest
+
+        app = ArxivBrowser([make_paper(arxiv_id="2401.00001")], restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                change_mock = AsyncMock()
+                app._change_arxiv_page = change_mock
+
+                await pilot.press("bracketleft")
+                await pilot.press("bracketright")
+                await pilot.pause(0.1)
+                assert change_mock.await_count == 0
+
+                app._in_arxiv_api_mode = True
+                app._arxiv_search_state = ArxivSearchModeState(
+                    request=ArxivSearchRequest(query="test"),
+                    start=0,
+                    max_results=50,
+                )
+
+                await pilot.press("bracketleft")
+                await pilot.press("bracketright")
+                await pilot.pause(0.1)
+                assert change_mock.await_count == 2
+                assert change_mock.await_args_list[0].args == (-1,)
+                assert change_mock.await_args_list[1].args == (1,)
+
+    async def test_stale_api_response_is_ignored_after_exit(self, make_paper):
+        """In-flight API responses must not re-enter API mode after exit."""
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser import ArxivBrowser
+
+        local_papers = [make_paper(arxiv_id="2401.00001", title="Local")]
+        api_page_1 = [make_paper(arxiv_id="2602.00001", title="API page one")]
+        api_page_2 = [make_paper(arxiv_id="2602.00002", title="API page two")]
+        for paper in api_page_1 + api_page_2:
+            paper.source = "api"
+
+        release_second_page = asyncio.Event()
+
+        async def fetch_page(_self, _request, start, _max_results):
+            if start == 0:
+                return api_page_1
+            await release_second_page.wait()
+            return api_page_2
+
+        app = ArxivBrowser(local_papers, restore_session=False)
+        with (
+            patch("arxiv_browser.save_config", return_value=True),
+            patch.object(ArxivBrowser, "_fetch_arxiv_api_page", new=fetch_page),
+            patch.object(
+                ArxivBrowser,
+                "_apply_arxiv_rate_limit",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
+            async with app.run_test() as pilot:
+                await pilot.press("A")
+                await pilot.press("t", "e", "s", "t", "enter")
+                await pilot.pause(0.2)
+                assert app._in_arxiv_api_mode is True
+                assert app.all_papers[0].arxiv_id == "2602.00001"
+
+                await pilot.press("bracketright")
+                await pilot.pause(0.05)
+                assert app._arxiv_api_fetch_inflight is True
+
+                app.action_exit_arxiv_search_mode()
+                assert app._in_arxiv_api_mode is False
+
+                release_second_page.set()
+                await pilot.pause(0.25)
+
+                assert app._in_arxiv_api_mode is False
+                assert app.all_papers[0].arxiv_id == "2401.00001"
 
 
 # ============================================================================
@@ -3441,6 +3942,1888 @@ class TestBatchConfirmationIntegration:
                 await pilot.press("n")
                 await pilot.pause(0.1)
                 assert len(app.screen_stack) == 1
+
+
+# ============================================================================
+# Semantic Scholar Integration Tests
+# ============================================================================
+
+
+class TestS2ConfigSerialization:
+    """Tests for S2 config fields round-trip."""
+
+    def test_s2_fields_default(self):
+        from arxiv_browser import UserConfig
+
+        config = UserConfig()
+        assert config.s2_enabled is False
+        assert config.s2_api_key == ""
+        assert config.s2_cache_ttl_days == 7
+
+    def test_s2_fields_serialize_roundtrip(self):
+        from arxiv_browser import UserConfig, _config_to_dict, _dict_to_config
+
+        config = UserConfig(s2_enabled=True, s2_api_key="test-key", s2_cache_ttl_days=14)
+        data = _config_to_dict(config)
+        assert data["s2_enabled"] is True
+        assert data["s2_api_key"] == "test-key"
+        assert data["s2_cache_ttl_days"] == 14
+
+        restored = _dict_to_config(data)
+        assert restored.s2_enabled is True
+        assert restored.s2_api_key == "test-key"
+        assert restored.s2_cache_ttl_days == 14
+
+    def test_s2_fields_missing_in_data(self):
+        from arxiv_browser import _dict_to_config
+
+        data = {"version": 1}
+        config = _dict_to_config(data)
+        assert config.s2_enabled is False
+        assert config.s2_api_key == ""
+        assert config.s2_cache_ttl_days == 7
+
+    def test_s2_fields_wrong_type(self):
+        from arxiv_browser import _dict_to_config
+
+        data = {
+            "s2_enabled": "not-a-bool",
+            "s2_api_key": 12345,
+            "s2_cache_ttl_days": "seven",
+        }
+        config = _dict_to_config(data)
+        assert config.s2_enabled is False
+        assert config.s2_api_key == ""
+        assert config.s2_cache_ttl_days == 7
+
+
+class TestS2SortPapers:
+    """Tests for citation sort."""
+
+    def test_citation_sort_orders_by_count(self, make_paper):
+        from arxiv_browser import sort_papers
+        from semantic_scholar import SemanticScholarPaper
+
+        papers = [
+            make_paper(arxiv_id="a", title="A"),
+            make_paper(arxiv_id="b", title="B"),
+            make_paper(arxiv_id="c", title="C"),
+        ]
+        s2_cache = {
+            "a": SemanticScholarPaper(
+                arxiv_id="a", s2_paper_id="x", citation_count=10,
+                influential_citation_count=0, tldr="", fields_of_study=(),
+                year=None, url="",
+            ),
+            "b": SemanticScholarPaper(
+                arxiv_id="b", s2_paper_id="y", citation_count=100,
+                influential_citation_count=0, tldr="", fields_of_study=(),
+                year=None, url="",
+            ),
+            "c": SemanticScholarPaper(
+                arxiv_id="c", s2_paper_id="z", citation_count=50,
+                influential_citation_count=0, tldr="", fields_of_study=(),
+                year=None, url="",
+            ),
+        }
+        result = sort_papers(papers, "citations", s2_cache=s2_cache)
+        assert [p.arxiv_id for p in result] == ["b", "c", "a"]
+
+    def test_citation_sort_papers_without_s2_last(self, make_paper):
+        from arxiv_browser import sort_papers
+        from semantic_scholar import SemanticScholarPaper
+
+        papers = [
+            make_paper(arxiv_id="a", title="A"),
+            make_paper(arxiv_id="b", title="B"),
+        ]
+        s2_cache = {
+            "a": SemanticScholarPaper(
+                arxiv_id="a", s2_paper_id="x", citation_count=10,
+                influential_citation_count=0, tldr="", fields_of_study=(),
+                year=None, url="",
+            ),
+        }
+        result = sort_papers(papers, "citations", s2_cache=s2_cache)
+        assert result[0].arxiv_id == "a"
+        assert result[1].arxiv_id == "b"
+
+    def test_citation_sort_no_cache(self, make_paper):
+        from arxiv_browser import sort_papers
+
+        papers = [
+            make_paper(arxiv_id="a", title="A"),
+            make_paper(arxiv_id="b", title="B"),
+        ]
+        result = sort_papers(papers, "citations", s2_cache=None)
+        # All papers have no S2 data, order is stable
+        assert len(result) == 2
+
+
+class TestS2DetailPane:
+    """Tests for S2 section rendering in PaperDetails."""
+
+    def test_s2_section_rendered(self, make_paper):
+        from arxiv_browser import PaperDetails
+        from semantic_scholar import SemanticScholarPaper
+
+        details = PaperDetails()
+        paper = make_paper()
+        s2 = SemanticScholarPaper(
+            arxiv_id="2401.12345", s2_paper_id="abc", citation_count=42,
+            influential_citation_count=5, tldr="Does cool things.",
+            fields_of_study=("Computer Science",), year=2024,
+            url="https://example.com",
+        )
+        details.update_paper(paper, "Abstract text", s2_data=s2)
+        content = details.content
+        assert "Semantic Scholar" in content
+        assert "42" in content
+        assert "5" in content
+        assert "Does cool things." in content
+        assert "Computer Science" in content
+
+    def test_s2_loading_indicator(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper()
+        details.update_paper(paper, "Abstract text", s2_loading=True)
+        content = details.content
+        assert "Semantic Scholar" in content
+        assert "Fetching data" in content
+
+    def test_s2_section_hidden_when_no_data(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper()
+        details.update_paper(paper, "Abstract text")
+        content = details.content
+        assert "Semantic Scholar" not in content
+
+    def test_s2_section_with_empty_tldr(self, make_paper):
+        from arxiv_browser import PaperDetails
+        from semantic_scholar import SemanticScholarPaper
+
+        details = PaperDetails()
+        paper = make_paper()
+        s2 = SemanticScholarPaper(
+            arxiv_id="2401.12345", s2_paper_id="abc", citation_count=10,
+            influential_citation_count=0, tldr="",
+            fields_of_study=(), year=None, url="",
+        )
+        details.update_paper(paper, "Abstract text", s2_data=s2)
+        content = details.content
+        assert "Semantic Scholar" in content
+        assert "TLDR" not in content  # Should not show empty TLDR
+
+    def test_s2_section_with_empty_fields(self, make_paper):
+        from arxiv_browser import PaperDetails
+        from semantic_scholar import SemanticScholarPaper
+
+        details = PaperDetails()
+        paper = make_paper()
+        s2 = SemanticScholarPaper(
+            arxiv_id="2401.12345", s2_paper_id="abc", citation_count=10,
+            influential_citation_count=0, tldr="",
+            fields_of_study=(), year=None, url="",
+        )
+        details.update_paper(paper, "Abstract text", s2_data=s2)
+        content = details.content
+        assert "Fields" not in content  # Should not show empty fields
+
+
+class TestS2PaperListItem:
+    """Tests for S2 citation badge in PaperListItem."""
+
+    def test_citation_badge_shown(self, make_paper):
+        from arxiv_browser import PaperListItem
+        from semantic_scholar import SemanticScholarPaper
+
+        paper = make_paper()
+        item = PaperListItem(paper)
+        s2 = SemanticScholarPaper(
+            arxiv_id="2401.12345", s2_paper_id="abc", citation_count=42,
+            influential_citation_count=0, tldr="", fields_of_study=(),
+            year=None, url="",
+        )
+        item.update_s2_data(s2)
+        meta = item._get_meta_text()
+        assert "42 cites" in meta
+
+    def test_no_badge_without_s2(self, make_paper):
+        from arxiv_browser import PaperListItem
+
+        paper = make_paper()
+        item = PaperListItem(paper)
+        meta = item._get_meta_text()
+        assert "cites" not in meta
+
+
+class TestS2RecsConversion:
+    """Tests for _s2_recs_to_paper_tuples static method."""
+
+    def test_converts_recs_to_paper_tuples(self):
+        from arxiv_browser import ArxivBrowser
+        from semantic_scholar import SemanticScholarPaper
+
+        recs = [
+            SemanticScholarPaper(
+                arxiv_id="2401.00001", s2_paper_id="r1", citation_count=100,
+                influential_citation_count=10, tldr="Great paper.",
+                fields_of_study=("CS",), year=2024, url="https://example.com",
+                title="Rec Paper 1", abstract="Abstract 1",
+            ),
+            SemanticScholarPaper(
+                arxiv_id="2401.00002", s2_paper_id="r2", citation_count=50,
+                influential_citation_count=5, tldr="OK paper.",
+                fields_of_study=("Math",), year=2024, url="https://example.com/2",
+                title="Rec Paper 2", abstract="Abstract 2",
+            ),
+        ]
+        tuples = ArxivBrowser._s2_recs_to_paper_tuples(recs)
+        assert len(tuples) == 2
+        # First rec has 100/100 = 1.0 score
+        assert tuples[0][0].title == "Rec Paper 1"
+        assert tuples[0][1] == 1.0
+        # Second rec has 50/100 = 0.5 score
+        assert tuples[1][0].title == "Rec Paper 2"
+        assert tuples[1][1] == 0.5
+        # Papers should have source="s2"
+        assert tuples[0][0].source == "s2"
+
+    def test_zero_citations_handled(self):
+        from arxiv_browser import ArxivBrowser
+        from semantic_scholar import SemanticScholarPaper
+
+        recs = [
+            SemanticScholarPaper(
+                arxiv_id="2401.00001", s2_paper_id="r1", citation_count=0,
+                influential_citation_count=0, tldr="",
+                fields_of_study=(), year=None, url="",
+                title="Zero Cites", abstract="",
+            ),
+        ]
+        tuples = ArxivBrowser._s2_recs_to_paper_tuples(recs)
+        assert len(tuples) == 1
+        # Score should be 0/1 = 0.0 (max_cites fallback to 1)
+        assert tuples[0][1] == 0.0
+
+    def test_url_fallback_with_empty_arxiv_id_and_url(self):
+        """When both arxiv_id and url are empty, URL should be empty string."""
+        from arxiv_browser import ArxivBrowser
+        from semantic_scholar import SemanticScholarPaper
+
+        recs = [
+            SemanticScholarPaper(
+                arxiv_id="", s2_paper_id="s2only", citation_count=10,
+                influential_citation_count=0, tldr="",
+                fields_of_study=(), year=2024, url="",
+                title="S2 Only Paper", abstract="",
+            ),
+        ]
+        tuples = ArxivBrowser._s2_recs_to_paper_tuples(recs)
+        assert len(tuples) == 1
+        # arxiv_id is empty so paper.arxiv_id should fall back to s2_paper_id
+        assert tuples[0][0].arxiv_id == "s2only"
+        # URL should be empty (not r.url which is also empty)
+        assert tuples[0][0].url == ""
+
+    def test_url_uses_arxiv_id_when_url_empty(self):
+        """When url is empty but arxiv_id is present, URL should be constructed."""
+        from arxiv_browser import ArxivBrowser
+        from semantic_scholar import SemanticScholarPaper
+
+        recs = [
+            SemanticScholarPaper(
+                arxiv_id="2401.99999", s2_paper_id="r1", citation_count=10,
+                influential_citation_count=0, tldr="",
+                fields_of_study=(), year=2024, url="",
+                title="Has ArXiv ID", abstract="",
+            ),
+        ]
+        tuples = ArxivBrowser._s2_recs_to_paper_tuples(recs)
+        assert tuples[0][0].url == "https://arxiv.org/abs/2401.99999"
+
+
+class TestS2AppActions:
+    """Tests for S2 app action methods using mock self."""
+
+    def _make_mock_app(self):
+        from arxiv_browser import ArxivBrowser
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._http_client = None
+        app._s2_active = False
+        app._s2_cache = {}
+        app._s2_loading = set()
+        app._s2_db_path = None
+        app._config = type("Config", (), {
+            "s2_api_key": "",
+            "s2_cache_ttl_days": 7,
+            "s2_enabled": False,
+        })()
+        return app
+
+    def test_toggle_s2_flips_state(self):
+        from unittest.mock import MagicMock
+
+        app = self._make_mock_app()
+        app.notify = MagicMock()
+        app._update_status_bar = MagicMock()
+        app._refresh_detail_pane = MagicMock()
+
+        assert app._s2_active is False
+        app.action_toggle_s2()
+        assert app._s2_active is True
+        app.notify.assert_called_once()
+        assert "enabled" in app.notify.call_args[0][0]
+
+        app.action_toggle_s2()
+        assert app._s2_active is False
+        assert "disabled" in app.notify.call_args[0][0]
+
+    def test_ctrl_e_dispatch_to_exit_api_mode(self):
+        from unittest.mock import MagicMock
+
+        app = self._make_mock_app()
+        app._in_arxiv_api_mode = True
+        app.action_exit_arxiv_search_mode = MagicMock()
+        app.action_toggle_s2 = MagicMock()
+
+        app.action_ctrl_e_dispatch()
+        app.action_exit_arxiv_search_mode.assert_called_once()
+        app.action_toggle_s2.assert_not_called()
+
+    def test_ctrl_e_dispatch_to_toggle_s2(self):
+        from unittest.mock import MagicMock
+
+        app = self._make_mock_app()
+        app._in_arxiv_api_mode = False
+        app.action_exit_arxiv_search_mode = MagicMock()
+        app.action_toggle_s2 = MagicMock()
+
+        app.action_ctrl_e_dispatch()
+        app.action_toggle_s2.assert_called_once()
+        app.action_exit_arxiv_search_mode.assert_not_called()
+
+
+# ============================================================================
+# HuggingFace Integration Tests
+# ============================================================================
+
+
+class TestHfConfigSerialization:
+    """Tests for HuggingFace config fields in _config_to_dict / _dict_to_config."""
+
+    def test_roundtrip_with_hf_fields(self):
+        """HF config fields should survive serialization round-trip."""
+        from arxiv_browser import _config_to_dict, _dict_to_config
+
+        original = UserConfig(hf_enabled=True, hf_cache_ttl_hours=12)
+        data = _config_to_dict(original)
+        restored = _dict_to_config(data)
+        assert restored.hf_enabled is True
+        assert restored.hf_cache_ttl_hours == 12
+
+    def test_defaults_when_absent(self):
+        """HF config fields should use defaults when not present in data."""
+        from arxiv_browser import _dict_to_config
+
+        config = _dict_to_config({})
+        assert config.hf_enabled is False
+        assert config.hf_cache_ttl_hours == 6
+
+    def test_wrong_type_uses_default(self):
+        """Non-bool hf_enabled and non-int hf_cache_ttl_hours should use defaults."""
+        from arxiv_browser import _dict_to_config
+
+        config = _dict_to_config({"hf_enabled": "yes", "hf_cache_ttl_hours": "six"})
+        assert config.hf_enabled is False
+        assert config.hf_cache_ttl_hours == 6
+
+
+class TestHfSortPapers:
+    """Tests for trending sort via sort_papers()."""
+
+    def test_sort_by_trending(self, make_paper):
+        from arxiv_browser import sort_papers
+        from huggingface import HuggingFacePaper
+
+        papers = [
+            make_paper(arxiv_id="a", title="A"),
+            make_paper(arxiv_id="b", title="B"),
+            make_paper(arxiv_id="c", title="C"),
+        ]
+        hf_cache = {
+            "a": HuggingFacePaper("a", "A", 10, 0, "", (), "", 0),
+            "c": HuggingFacePaper("c", "C", 50, 0, "", (), "", 0),
+        }
+        result = sort_papers(papers, "trending", hf_cache=hf_cache)
+        # c (50 upvotes) should come first, then a (10), then b (no HF data)
+        assert [p.arxiv_id for p in result] == ["c", "a", "b"]
+
+    def test_sort_trending_without_cache(self, make_paper):
+        """Trending sort with no hf_cache should just keep original order."""
+        from arxiv_browser import sort_papers
+
+        papers = [
+            make_paper(arxiv_id="a", title="A"),
+            make_paper(arxiv_id="b", title="B"),
+        ]
+        result = sort_papers(papers, "trending")
+        # All papers have no HF data, so they should be stable-sorted
+        assert [p.arxiv_id for p in result] == ["a", "b"]
+
+    def test_papers_without_hf_sort_last(self, make_paper):
+        """Papers without HF data should sort after papers with HF data."""
+        from arxiv_browser import sort_papers
+        from huggingface import HuggingFacePaper
+
+        papers = [
+            make_paper(arxiv_id="x"),
+            make_paper(arxiv_id="y"),
+        ]
+        hf_cache = {
+            "y": HuggingFacePaper("y", "Y", 5, 0, "", (), "", 0),
+        }
+        result = sort_papers(papers, "trending", hf_cache=hf_cache)
+        assert result[0].arxiv_id == "y"
+        assert result[1].arxiv_id == "x"
+
+
+class TestHfDetailPane:
+    """Tests for HuggingFace section in PaperDetails.update_paper()."""
+
+    def test_hf_section_shown_when_data_present(self, make_paper):
+        from arxiv_browser import PaperDetails
+        from huggingface import HuggingFacePaper
+
+        details = PaperDetails()
+        paper = make_paper()
+        hf = HuggingFacePaper("2401.12345", "Test", 42, 5, "A summary.", ("ML",), "https://github.com/test/repo", 100)
+        details.update_paper(paper, "abstract text", hf_data=hf)
+        content = details.content
+        assert "HuggingFace" in content
+        assert "42" in content  # upvotes
+        assert "5" in content  # comments
+        assert "A summary." in content
+        assert "ML" in content  # keyword
+        assert "github.com/test/repo" in content
+        assert "100 stars" in content
+
+    def test_hf_section_hidden_when_no_data(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper()
+        details.update_paper(paper, "abstract text")
+        content = details.content
+        assert "HuggingFace" not in content
+
+    def test_hf_section_optional_fields(self, make_paper):
+        """HF section omits optional fields when empty."""
+        from arxiv_browser import PaperDetails
+        from huggingface import HuggingFacePaper
+
+        details = PaperDetails()
+        paper = make_paper()
+        hf = HuggingFacePaper("2401.12345", "Test", 10, 0, "", (), "", 0)
+        details.update_paper(paper, "abstract text", hf_data=hf)
+        content = details.content
+        assert "HuggingFace" in content
+        assert "10" in content  # upvotes
+        assert "GitHub" not in content  # No github repo
+        assert "Keywords" not in content  # No keywords
+        assert "AI Summary" not in content  # No ai_summary
+
+
+class TestHfPaperListItem:
+    """Tests for HuggingFace badge in PaperListItem."""
+
+    def test_hf_badge_present(self, make_paper):
+        from arxiv_browser import PaperListItem
+        from huggingface import HuggingFacePaper
+
+        paper = make_paper()
+        item = PaperListItem(paper)
+        hf = HuggingFacePaper("2401.12345", "Test", 42, 0, "", (), "", 0)
+        item.update_hf_data(hf)
+        meta = item._get_meta_text()
+        assert "42 upvotes" in meta
+
+    def test_hf_badge_absent_when_no_data(self, make_paper):
+        from arxiv_browser import PaperListItem
+
+        paper = make_paper()
+        item = PaperListItem(paper)
+        meta = item._get_meta_text()
+        assert "upvotes" not in meta
+
+
+class TestHfAppState:
+    """Tests for HF app state and helpers."""
+
+    def _make_mock_app(self):
+        """Create a minimal ArxivBrowser without running the full TUI."""
+        from unittest.mock import MagicMock
+        from arxiv_browser import ArxivBrowser
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._hf_active = False
+        app._hf_cache = {}
+        app._hf_loading = False
+        app._http_client = None
+        return app
+
+    def test_hf_state_for_inactive(self):
+        app = self._make_mock_app()
+        assert app._hf_state_for("2401.12345") is None
+
+    def test_hf_state_for_active_with_data(self):
+        from huggingface import HuggingFacePaper
+
+        app = self._make_mock_app()
+        app._hf_active = True
+        hf = HuggingFacePaper("2401.12345", "Test", 42, 0, "", (), "", 0)
+        app._hf_cache["2401.12345"] = hf
+        assert app._hf_state_for("2401.12345") is hf
+
+    def test_hf_state_for_active_no_data(self):
+        app = self._make_mock_app()
+        app._hf_active = True
+        assert app._hf_state_for("unknown") is None
+
+
+# ============================================================================
+# Tests for parse_arxiv_version_map
+# ============================================================================
+
+
+class TestParseArxivVersionMap:
+    """Tests for arXiv Atom feed version extraction."""
+
+    ATOM_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"
+      xmlns:arxiv="http://arxiv.org/schemas/atom">
+{entries}
+</feed>"""
+
+    ENTRY_TEMPLATE = """<entry>
+  <id>http://arxiv.org/abs/{id_with_version}</id>
+  <title>Test Paper</title>
+</entry>"""
+
+    def _make_feed(self, entries: list[str]) -> str:
+        entry_xml = "\n".join(
+            self.ENTRY_TEMPLATE.format(id_with_version=e) for e in entries
+        )
+        return self.ATOM_TEMPLATE.format(entries=entry_xml)
+
+    def test_single_entry_with_version(self):
+        xml = self._make_feed(["2401.12345v3"])
+        result = parse_arxiv_version_map(xml)
+        assert result == {"2401.12345": 3}
+
+    def test_multiple_entries(self):
+        xml = self._make_feed(["2401.12345v2", "2401.67890v5", "hep-th/9901001v1"])
+        result = parse_arxiv_version_map(xml)
+        assert result == {
+            "2401.12345": 2,
+            "2401.67890": 5,
+            "hep-th/9901001": 1,
+        }
+
+    def test_missing_version_suffix_defaults_to_1(self):
+        xml = self._make_feed(["2401.12345"])
+        result = parse_arxiv_version_map(xml)
+        assert result == {"2401.12345": 1}
+
+    def test_empty_feed(self):
+        xml = self.ATOM_TEMPLATE.format(entries="")
+        result = parse_arxiv_version_map(xml)
+        assert result == {}
+
+    def test_empty_string(self):
+        assert parse_arxiv_version_map("") == {}
+        assert parse_arxiv_version_map("   ") == {}
+
+    def test_invalid_xml(self):
+        result = parse_arxiv_version_map("<not valid xml")
+        assert result == {}
+
+    def test_duplicate_ids_last_wins(self):
+        """If the same ID appears twice, the last entry wins."""
+        entries = """
+<entry><id>http://arxiv.org/abs/2401.12345v2</id><title>A</title></entry>
+<entry><id>http://arxiv.org/abs/2401.12345v3</id><title>B</title></entry>
+"""
+        xml = self.ATOM_TEMPLATE.format(entries=entries)
+        result = parse_arxiv_version_map(xml)
+        assert result == {"2401.12345": 3}
+
+    def test_high_version_number(self):
+        xml = self._make_feed(["2401.12345v42"])
+        result = parse_arxiv_version_map(xml)
+        assert result == {"2401.12345": 42}
+
+
+# ============================================================================
+# Tests for version metadata serialization
+# ============================================================================
+
+
+class TestVersionMetadataSerialization:
+    """Tests for last_checked_version config round-trip."""
+
+    def test_round_trip_with_version(self, tmp_path, monkeypatch):
+        """last_checked_version survives save/load cycle."""
+        config_file = tmp_path / "config.json"
+        monkeypatch.setattr("arxiv_browser.get_config_path", lambda: config_file)
+
+        config = UserConfig()
+        config.paper_metadata["2401.12345"] = PaperMetadata(
+            arxiv_id="2401.12345",
+            starred=True,
+            last_checked_version=3,
+        )
+        assert save_config(config) is True
+        loaded = load_config()
+        meta = loaded.paper_metadata["2401.12345"]
+        assert meta.last_checked_version == 3
+        assert meta.starred is True
+
+    def test_defaults_when_absent(self, tmp_path, monkeypatch):
+        """Old configs without last_checked_version default to None."""
+        config_file = tmp_path / "config.json"
+        monkeypatch.setattr("arxiv_browser.get_config_path", lambda: config_file)
+
+        config = UserConfig()
+        config.paper_metadata["2401.12345"] = PaperMetadata(
+            arxiv_id="2401.12345",
+        )
+        assert save_config(config) is True
+        loaded = load_config()
+        meta = loaded.paper_metadata["2401.12345"]
+        assert meta.last_checked_version is None
+
+    def test_type_validation_rejects_string(self, tmp_path, monkeypatch):
+        """Non-int values for last_checked_version are treated as None."""
+        import json
+
+        config_file = tmp_path / "config.json"
+        monkeypatch.setattr("arxiv_browser.get_config_path", lambda: config_file)
+
+        config_data = {
+            "version": 1,
+            "paper_metadata": {
+                "2401.12345": {
+                    "notes": "",
+                    "tags": [],
+                    "is_read": False,
+                    "starred": True,
+                    "last_checked_version": "not_an_int",
+                }
+            },
+        }
+        config_file.write_text(json.dumps(config_data))
+        loaded = load_config()
+        assert loaded.paper_metadata["2401.12345"].last_checked_version is None
+
+
+# ============================================================================
+# Tests for version detail pane
+# ============================================================================
+
+
+class TestVersionDetailPane:
+    """Tests for version update rendering in PaperDetails."""
+
+    def _make_paper(self):
+        return Paper(
+            arxiv_id="2401.12345",
+            date="2024-01-01",
+            title="Test Paper",
+            authors="Author",
+            categories="cs.AI",
+            comments=None,
+            abstract="Abstract",
+            url="https://arxiv.org/abs/2401.12345",
+            abstract_raw="Abstract",
+        )
+
+    def test_version_section_shown_with_update(self):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = self._make_paper()
+        details.update_paper(paper, version_update=(1, 3))
+        content = details.content
+        assert "v1" in content
+        assert "v3" in content
+        assert "arxivdiff.org" in content
+        assert "2401.12345" in content
+
+    def test_version_section_hidden_without_update(self):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = self._make_paper()
+        details.update_paper(paper, version_update=None)
+        content = details.content
+        assert "Version Update" not in content
+        assert "arxivdiff" not in content
+
+    def test_version_section_absent_by_default(self):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = self._make_paper()
+        details.update_paper(paper)
+        content = details.content
+        assert "Version Update" not in content
+
+
+# ============================================================================
+# Tests for version list badge
+# ============================================================================
+
+
+class TestVersionListBadge:
+    """Tests for version update badge in PaperListItem."""
+
+    def _make_paper(self):
+        return Paper(
+            arxiv_id="2401.12345",
+            date="2024-01-01",
+            title="Test Paper",
+            authors="Author",
+            categories="cs.AI",
+            comments=None,
+            abstract="Abstract",
+            url="https://arxiv.org/abs/2401.12345",
+            abstract_raw="Abstract",
+        )
+
+    def test_badge_appears_with_update(self):
+        from arxiv_browser import PaperListItem
+
+        item = PaperListItem(self._make_paper())
+        item._version_update = (1, 3)
+        meta_text = item._get_meta_text()
+        assert "v1" in meta_text
+        assert "v3" in meta_text
+
+    def test_badge_absent_without_update(self):
+        from arxiv_browser import PaperListItem
+
+        item = PaperListItem(self._make_paper())
+        meta_text = item._get_meta_text()
+        # Should not contain version arrow
+        assert "\u2192" not in meta_text
+
+
+# ============================================================================
+# Tests for version app state
+# ============================================================================
+
+
+class TestVersionAppState:
+    """Tests for version tracking app state helpers."""
+
+    def _make_mock_app(self):
+        """Create a minimal ArxivBrowser without running the full TUI."""
+        from arxiv_browser import ArxivBrowser
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._http_client = None
+        app._version_updates = {}
+        app._version_checking = False
+        app._config = UserConfig()
+        return app
+
+    def test_version_update_for_returns_tuple(self):
+        app = self._make_mock_app()
+        app._version_updates["2401.12345"] = (1, 3)
+        assert app._version_update_for("2401.12345") == (1, 3)
+
+    def test_version_update_for_returns_none(self):
+        app = self._make_mock_app()
+        assert app._version_update_for("2401.12345") is None
+
+    def test_version_update_for_unknown_id(self):
+        app = self._make_mock_app()
+        app._version_updates["2401.99999"] = (2, 5)
+        assert app._version_update_for("2401.12345") is None
+
+
+# ============================================================================
+# Tests for RIS export format
+# ============================================================================
+
+
+class TestRISFormat:
+    """Tests for format_paper_as_ris function."""
+
+    def test_basic_output(self, make_paper):
+        paper = make_paper()
+        ris = format_paper_as_ris(paper)
+        assert ris.startswith("TY  - ELEC")
+        assert ris.endswith("ER  - ")
+        assert "TI  - Test Paper" in ris
+        assert "AU  - Test Author" in ris
+        assert f"UR  - {paper.url}" in ris
+        assert f"N1  - arXiv:{paper.arxiv_id}" in ris
+
+    def test_multiple_authors(self, make_paper):
+        paper = make_paper(authors="Alice Smith, Bob Jones, Carol Lee")
+        ris = format_paper_as_ris(paper)
+        assert ris.count("AU  - ") == 3
+        assert "AU  - Alice Smith" in ris
+        assert "AU  - Bob Jones" in ris
+        assert "AU  - Carol Lee" in ris
+
+    def test_multiple_categories(self, make_paper):
+        paper = make_paper(categories="cs.AI cs.LG stat.ML")
+        ris = format_paper_as_ris(paper)
+        assert ris.count("KW  - ") == 3
+        assert "KW  - cs.AI" in ris
+        assert "KW  - cs.LG" in ris
+        assert "KW  - stat.ML" in ris
+
+    def test_with_comments(self, make_paper):
+        paper = make_paper(comments="10 pages, 5 figures")
+        ris = format_paper_as_ris(paper)
+        assert "N2  - 10 pages, 5 figures" in ris
+
+    def test_without_comments(self, make_paper):
+        paper = make_paper(comments=None)
+        ris = format_paper_as_ris(paper)
+        assert "N2  - " not in ris
+
+    def test_with_abstract(self, make_paper):
+        paper = make_paper()
+        ris = format_paper_as_ris(paper, abstract_text="A detailed abstract.")
+        assert "AB  - A detailed abstract." in ris
+
+    def test_without_abstract(self, make_paper):
+        paper = make_paper()
+        ris = format_paper_as_ris(paper, abstract_text="")
+        assert "AB  - " not in ris
+
+    def test_year_extraction(self, make_paper):
+        paper = make_paper(date="Mon, 15 Jan 2024")
+        ris = format_paper_as_ris(paper)
+        assert "PY  - 2024" in ris
+
+
+# ============================================================================
+# Tests for CSV export format
+# ============================================================================
+
+
+class TestCSVFormat:
+    """Tests for format_papers_as_csv function."""
+
+    def test_header_without_metadata(self, make_paper):
+        papers = [make_paper()]
+        csv_text = format_papers_as_csv(papers)
+        header = csv_text.split("\n")[0]
+        assert "arxiv_id" in header
+        assert "title" in header
+        assert "starred" not in header
+        assert "read" not in header
+
+    def test_header_with_metadata(self, make_paper):
+        papers = [make_paper()]
+        csv_text = format_papers_as_csv(papers, metadata={})
+        header = csv_text.split("\n")[0]
+        assert "starred" in header
+        assert "read" in header
+        assert "tags" in header
+        assert "notes" in header
+
+    def test_single_paper(self, make_paper):
+        papers = [make_paper(title="My Paper", arxiv_id="2401.00001")]
+        csv_text = format_papers_as_csv(papers)
+        lines = csv_text.strip().split("\n")
+        assert len(lines) == 2  # header + 1 data row
+        assert "2401.00001" in lines[1]
+        assert "My Paper" in lines[1]
+
+    def test_multiple_papers(self, make_paper):
+        papers = [
+            make_paper(arxiv_id="2401.00001", title="Paper One"),
+            make_paper(arxiv_id="2401.00002", title="Paper Two"),
+        ]
+        csv_text = format_papers_as_csv(papers)
+        lines = csv_text.strip().split("\n")
+        assert len(lines) == 3  # header + 2 data rows
+
+    def test_quoting_with_commas(self, make_paper):
+        papers = [make_paper(title='Paper with, commas "and" quotes')]
+        csv_text = format_papers_as_csv(papers)
+        # csv.writer should properly quote the field
+        import csv as csv_mod
+        import io
+
+        reader = csv_mod.reader(io.StringIO(csv_text))
+        rows = list(reader)
+        assert rows[1][1] == 'Paper with, commas "and" quotes'
+
+    def test_metadata_present(self, make_paper):
+        papers = [make_paper(arxiv_id="2401.00001")]
+        meta = {
+            "2401.00001": PaperMetadata(
+                arxiv_id="2401.00001",
+                starred=True,
+                is_read=False,
+                tags=["to-read", "important"],
+                notes="Check later",
+            )
+        }
+        csv_text = format_papers_as_csv(papers, metadata=meta)
+        import csv as csv_mod
+        import io
+
+        reader = csv_mod.reader(io.StringIO(csv_text))
+        rows = list(reader)
+        data = rows[1]
+        # starred column
+        assert data[7] == "true"
+        # read column
+        assert data[8] == "false"
+        # tags column (semicolon-joined)
+        assert data[9] == "to-read;important"
+        # notes column
+        assert data[10] == "Check later"
+
+    def test_metadata_missing_paper(self, make_paper):
+        papers = [make_paper(arxiv_id="2401.99999")]
+        csv_text = format_papers_as_csv(papers, metadata={})
+        import csv as csv_mod
+        import io
+
+        reader = csv_mod.reader(io.StringIO(csv_text))
+        rows = list(reader)
+        data = rows[1]
+        assert data[7] == "false"
+        assert data[8] == "false"
+        assert data[9] == ""
+        assert data[10] == ""
+
+    def test_empty_list(self):
+        csv_text = format_papers_as_csv([])
+        lines = csv_text.strip().split("\n")
+        assert len(lines) == 1  # header only
+
+    def test_comments_none(self, make_paper):
+        papers = [make_paper(comments=None)]
+        csv_text = format_papers_as_csv(papers)
+        import csv as csv_mod
+        import io
+
+        reader = csv_mod.reader(io.StringIO(csv_text))
+        rows = list(reader)
+        # comments column (index 6)
+        assert rows[1][6] == ""
+
+
+# ============================================================================
+# Tests for Markdown table export format
+# ============================================================================
+
+
+class TestMarkdownTable:
+    """Tests for format_papers_as_markdown_table function."""
+
+    def test_header_and_separator(self, make_paper):
+        papers = [make_paper()]
+        table = format_papers_as_markdown_table(papers)
+        lines = table.split("\n")
+        assert lines[0].startswith("| arXiv ID |")
+        assert lines[1].startswith("|-------")
+        assert len(lines) == 3  # header + separator + 1 data row
+
+    def test_arxiv_link(self, make_paper):
+        paper = make_paper(arxiv_id="2401.12345")
+        table = format_papers_as_markdown_table([paper])
+        assert "[2401.12345](https://arxiv.org/abs/2401.12345)" in table
+
+    def test_pipe_escaping(self, make_paper):
+        paper = make_paper(title="A | B", categories="cs.AI | stat.ML")
+        table = format_papers_as_markdown_table([paper])
+        data_line = table.split("\n")[2]
+        assert "A \\| B" in data_line
+        assert "cs.AI \\| stat.ML" in data_line
+
+    def test_author_truncation_over_three(self, make_paper):
+        paper = make_paper(authors="Alice, Bob, Carol, Dave")
+        table = format_papers_as_markdown_table([paper])
+        data_line = table.split("\n")[2]
+        assert "Alice et al." in data_line
+        assert "Bob" not in data_line
+
+    def test_author_no_truncation_three_or_fewer(self, make_paper):
+        paper = make_paper(authors="Alice, Bob, Carol")
+        table = format_papers_as_markdown_table([paper])
+        data_line = table.split("\n")[2]
+        assert "Alice" in data_line
+        assert "Bob" in data_line
+        assert "Carol" in data_line
+        assert "et al." not in data_line
+
+    def test_empty_list(self):
+        table = format_papers_as_markdown_table([])
+        lines = table.split("\n")
+        assert len(lines) == 2  # header + separator, no data rows
+
+    def test_multiple_papers(self, make_paper):
+        papers = [
+            make_paper(arxiv_id="2401.00001", title="Paper One"),
+            make_paper(arxiv_id="2401.00002", title="Paper Two"),
+        ]
+        table = format_papers_as_markdown_table(papers)
+        lines = table.split("\n")
+        assert len(lines) == 4  # header + separator + 2 data rows
+        assert "Paper One" in lines[2]
+        assert "Paper Two" in lines[3]
+
+
+# ============================================================================
+# Structured Summary Modes (#2.3) Tests
+# ============================================================================
+
+
+class TestSummaryModes:
+    """Tests for SUMMARY_MODES constant and mode templates."""
+
+    def test_summary_modes_has_expected_keys(self):
+        expected = {"default", "tldr", "methods", "results", "comparison"}
+        assert set(SUMMARY_MODES.keys()) == expected
+
+    def test_each_mode_has_description_and_template(self):
+        for mode_name, (desc, template) in SUMMARY_MODES.items():
+            assert isinstance(desc, str) and len(desc) > 0, f"{mode_name} missing description"
+            assert isinstance(template, str) and len(template) > 0, f"{mode_name} missing template"
+
+    def test_all_templates_contain_paper_content_placeholder(self):
+        for mode_name, (_, template) in SUMMARY_MODES.items():
+            assert "{paper_content}" in template, (
+                f"Mode '{mode_name}' template missing {{paper_content}} placeholder"
+            )
+
+    def test_all_templates_contain_title_placeholder(self):
+        for mode_name, (_, template) in SUMMARY_MODES.items():
+            assert "{title}" in template, (
+                f"Mode '{mode_name}' template missing {{title}} placeholder"
+            )
+
+    def test_default_mode_uses_default_llm_prompt(self):
+        _, template = SUMMARY_MODES["default"]
+        assert template == DEFAULT_LLM_PROMPT
+
+
+class TestSummaryModeModal:
+    """Tests for the SummaryModeModal dismiss values."""
+
+    def test_modal_returns_mode_names(self):
+        from arxiv_browser import SummaryModeModal
+
+        modal = SummaryModeModal()
+        # Each action should produce the correct mode name
+        assert hasattr(modal, "action_mode_default")
+        assert hasattr(modal, "action_mode_tldr")
+        assert hasattr(modal, "action_mode_methods")
+        assert hasattr(modal, "action_mode_results")
+        assert hasattr(modal, "action_mode_comparison")
+        assert hasattr(modal, "action_cancel")
+
+    def test_modal_bindings(self):
+        from arxiv_browser import SummaryModeModal
+
+        modal = SummaryModeModal()
+        binding_keys = {b.key for b in modal.BINDINGS}
+        assert {"d", "t", "m", "r", "c", "escape"} <= binding_keys
+
+
+class TestSummaryDbMigration:
+    """Tests for the DB schema migration from single to composite PK."""
+
+    def test_creates_new_db_with_composite_pk(self, tmp_path):
+        from arxiv_browser import _init_summary_db
+        import sqlite3
+
+        db_path = tmp_path / "summaries.db"
+        _init_summary_db(db_path)
+
+        with sqlite3.connect(str(db_path)) as conn:
+            row = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='summaries'"
+            ).fetchone()
+            assert "PRIMARY KEY (arxiv_id, command_hash)" in row[0]
+
+    def test_migrates_old_single_pk_schema(self, tmp_path):
+        from arxiv_browser import _init_summary_db
+        import sqlite3
+
+        db_path = tmp_path / "summaries.db"
+        # Create old schema
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute(
+                "CREATE TABLE summaries ("
+                "  arxiv_id TEXT PRIMARY KEY,"
+                "  summary TEXT NOT NULL,"
+                "  command_hash TEXT NOT NULL,"
+                "  created_at TEXT NOT NULL"
+                ")"
+            )
+            conn.execute(
+                "INSERT INTO summaries VALUES ('2401.00001', 'old summary', 'abc', '2024-01-01')"
+            )
+
+        # Migrate
+        _init_summary_db(db_path)
+
+        with sqlite3.connect(str(db_path)) as conn:
+            row = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='summaries'"
+            ).fetchone()
+            assert "PRIMARY KEY (arxiv_id, command_hash)" in row[0]
+            # Old data is gone (cache table, safe to drop)
+            count = conn.execute("SELECT COUNT(*) FROM summaries").fetchone()[0]
+            assert count == 0
+
+    def test_composite_pk_allows_multiple_modes(self, tmp_path):
+        from arxiv_browser import _init_summary_db, _save_summary, _load_summary
+
+        db_path = tmp_path / "summaries.db"
+        _init_summary_db(db_path)
+
+        _save_summary(db_path, "2401.00001", "default summary", "hash_default")
+        _save_summary(db_path, "2401.00001", "tldr summary", "hash_tldr")
+
+        assert _load_summary(db_path, "2401.00001", "hash_default") == "default summary"
+        assert _load_summary(db_path, "2401.00001", "hash_tldr") == "tldr summary"
+
+
+class TestSummaryModeDisplay:
+    """Tests for mode label display in AI Summary header."""
+
+    def test_summary_header_includes_mode_label(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper()
+        details.update_paper(
+            paper,
+            abstract_text="test abstract",
+            summary="This is a summary",
+            summary_mode="TLDR",
+        )
+        content = details.content
+        assert "TLDR" in content
+        assert "AI Summary" in content
+
+    def test_summary_header_no_mode_for_default(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper()
+        details.update_paper(
+            paper,
+            abstract_text="test abstract",
+            summary="This is a summary",
+            summary_mode="",
+        )
+        content = details.content
+        assert "AI Summary" in content
+        # No mode label in parentheses when empty
+        assert "()" not in content
+
+    def test_summary_loading_header_includes_mode(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper()
+        details.update_paper(
+            paper,
+            abstract_text="test abstract",
+            summary_loading=True,
+            summary_mode="METHODS",
+        )
+        content = details.content
+        assert "METHODS" in content
+        assert "Generating summary" in content
+
+
+class TestSummaryModePromptResolution:
+    """Tests for prompt template resolution per mode."""
+
+    def test_compute_command_hash_varies_by_template(self):
+        from arxiv_browser import _compute_command_hash
+
+        hash1 = _compute_command_hash("cmd", SUMMARY_MODES["default"][1])
+        hash2 = _compute_command_hash("cmd", SUMMARY_MODES["tldr"][1])
+        assert hash1 != hash2
+
+    def test_each_mode_produces_unique_hash(self):
+        from arxiv_browser import _compute_command_hash
+
+        hashes = set()
+        for mode_name, (_, template) in SUMMARY_MODES.items():
+            h = _compute_command_hash("test_cmd", template)
+            assert h not in hashes, f"Mode '{mode_name}' has duplicate hash"
+            hashes.add(h)
+
+
+# ============================================================================
+# Hierarchical Tags with Namespaces (#3.1) Tests
+# ============================================================================
+
+
+class TestParseTagNamespace:
+    """Tests for parse_tag_namespace function."""
+
+    def test_simple_namespace(self):
+        assert parse_tag_namespace("topic:transformers") == ("topic", "transformers")
+
+    def test_no_namespace(self):
+        assert parse_tag_namespace("important") == ("", "important")
+
+    def test_multiple_colons(self):
+        ns, val = parse_tag_namespace("topic:sub:detail")
+        assert ns == "topic"
+        assert val == "sub:detail"
+
+    def test_empty_value_after_colon(self):
+        assert parse_tag_namespace("topic:") == ("topic", "")
+
+    def test_empty_string(self):
+        assert parse_tag_namespace("") == ("", "")
+
+    def test_colon_at_start(self):
+        assert parse_tag_namespace(":value") == ("", "value")
+
+    def test_status_namespace(self):
+        assert parse_tag_namespace("status:to-read") == ("status", "to-read")
+
+    def test_project_namespace(self):
+        assert parse_tag_namespace("project:my-project") == ("project", "my-project")
+
+
+class TestGetTagColor:
+    """Tests for get_tag_color function."""
+
+    def test_known_namespace_topic(self):
+        assert get_tag_color("topic:ml") == TAG_NAMESPACE_COLORS["topic"]
+
+    def test_known_namespace_status(self):
+        assert get_tag_color("status:to-read") == TAG_NAMESPACE_COLORS["status"]
+
+    def test_known_namespace_project(self):
+        assert get_tag_color("project:foo") == TAG_NAMESPACE_COLORS["project"]
+
+    def test_known_namespace_method(self):
+        assert get_tag_color("method:cnn") == TAG_NAMESPACE_COLORS["method"]
+
+    def test_known_namespace_priority(self):
+        assert get_tag_color("priority:high") == TAG_NAMESPACE_COLORS["priority"]
+
+    def test_unnamespaced_tag_gets_default_purple(self):
+        assert get_tag_color("important") == "#ae81ff"
+
+    def test_unknown_namespace_gets_deterministic_color(self):
+        color1 = get_tag_color("custom:foo")
+        color2 = get_tag_color("custom:bar")
+        # Same namespace → same color
+        assert color1 == color2
+
+    def test_different_unknown_namespaces_may_differ(self):
+        # Different namespaces get deterministic but potentially different colors
+        color1 = get_tag_color("ns1:foo")
+        color2 = get_tag_color("ns2:foo")
+        # Both should be valid hex colors
+        assert color1.startswith("#")
+        assert color2.startswith("#")
+
+    def test_empty_string_gets_default(self):
+        assert get_tag_color("") == "#ae81ff"
+
+
+class TestTagNamespaceDisplay:
+    """Tests for namespace-colored tag display."""
+
+    def test_tags_section_in_detail_pane(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper()
+        details.update_paper(
+            paper,
+            abstract_text="test abstract",
+            tags=["topic:ml", "status:to-read", "important"],
+        )
+        content = details.content
+        assert "Tags" in content
+        assert "topic" in content
+        assert "status" in content
+        assert "important" in content
+
+    def test_no_tags_section_when_empty(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper()
+        details.update_paper(paper, abstract_text="test abstract", tags=None)
+        content = details.content
+        # No Tags section header
+        assert "━━" not in content or "Tags" not in content
+
+    def test_tags_section_groups_by_namespace(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper()
+        details.update_paper(
+            paper,
+            abstract_text="test abstract",
+            tags=["topic:ml", "topic:nlp", "status:done"],
+        )
+        content = details.content
+        # Should contain grouped namespace labels
+        assert "topic:" in content
+        assert "status:" in content
+
+
+class TestTagSuggestionGrouping:
+    """Tests for the TagsModal suggestion label."""
+
+    def test_build_suggestions_empty(self):
+        from arxiv_browser import TagsModal
+
+        modal = TagsModal("2401.00001", all_tags=[])
+        assert modal._build_suggestions_markup() == ""
+
+    def test_build_suggestions_groups_by_namespace(self):
+        from arxiv_browser import TagsModal
+
+        modal = TagsModal(
+            "2401.00001",
+            all_tags=["topic:ml", "topic:nlp", "status:to-read", "important"],
+        )
+        markup = modal._build_suggestions_markup()
+        assert "status:" in markup
+        assert "topic:" in markup
+        assert "important" in markup
+
+    def test_build_suggestions_deduplicates(self):
+        from arxiv_browser import TagsModal
+
+        modal = TagsModal(
+            "2401.00001",
+            all_tags=["topic:ml", "topic:ml", "topic:ml"],
+        )
+        markup = modal._build_suggestions_markup()
+        # "ml" should appear only once
+        assert markup.count("ml") == 1
+
+    def test_modal_accepts_all_tags_param(self):
+        from arxiv_browser import TagsModal
+
+        modal = TagsModal(
+            "2401.00001",
+            current_tags=["existing"],
+            all_tags=["topic:ml", "status:done"],
+        )
+        assert modal._all_tags == ["topic:ml", "status:done"]
+
+
+class TestTagNamespaceConstants:
+    """Tests for TAG_NAMESPACE_COLORS constant."""
+
+    def test_has_expected_namespaces(self):
+        expected = {"topic", "status", "project", "method", "priority"}
+        assert set(TAG_NAMESPACE_COLORS.keys()) == expected
+
+    def test_all_colors_are_valid_hex(self):
+        for ns, color in TAG_NAMESPACE_COLORS.items():
+            assert color.startswith("#"), f"{ns} color {color} is not hex"
+            assert len(color) == 7, f"{ns} color {color} is not 7 chars"
+
+
+# ============================================================================
+# Tests for Relevance Scoring
+# ============================================================================
+
+
+class TestRelevancePrompt:
+    """Tests for RELEVANCE_PROMPT_TEMPLATE and build_relevance_prompt()."""
+
+    def test_template_has_required_placeholders(self):
+        from arxiv_browser import RELEVANCE_PROMPT_TEMPLATE
+
+        for field in ("title", "authors", "categories", "abstract", "interests"):
+            assert f"{{{field}}}" in RELEVANCE_PROMPT_TEMPLATE
+
+    def test_build_relevance_prompt_substitution(self, make_paper):
+        from arxiv_browser import build_relevance_prompt
+
+        paper = make_paper(
+            title="Efficient LLM Inference",
+            authors="Alice, Bob",
+            categories="cs.AI cs.CL",
+            abstract="We propose a new method.",
+        )
+        result = build_relevance_prompt(paper, "quantization and distillation")
+        assert "Efficient LLM Inference" in result
+        assert "Alice, Bob" in result
+        assert "cs.AI cs.CL" in result
+        assert "We propose a new method." in result
+        assert "quantization and distillation" in result
+
+    def test_build_relevance_prompt_missing_abstract(self):
+        from arxiv_browser import build_relevance_prompt
+
+        paper = Paper(
+            arxiv_id="2401.12345",
+            date="2024-01-01",
+            title="Test",
+            authors="Author",
+            categories="cs.AI",
+            comments=None,
+            abstract=None,
+            url="https://arxiv.org/abs/2401.12345",
+            abstract_raw=None,
+        )
+        result = build_relevance_prompt(paper, "test interests")
+        assert "(no abstract)" in result
+
+    def test_template_requests_json_output(self):
+        from arxiv_browser import RELEVANCE_PROMPT_TEMPLATE
+
+        assert "JSON" in RELEVANCE_PROMPT_TEMPLATE
+        assert '"score"' in RELEVANCE_PROMPT_TEMPLATE
+        assert '"reason"' in RELEVANCE_PROMPT_TEMPLATE
+
+
+class TestParseRelevanceResponse:
+    """Tests for _parse_relevance_response()."""
+
+    def test_valid_json(self):
+        from arxiv_browser import _parse_relevance_response
+
+        result = _parse_relevance_response('{"score": 8, "reason": "Highly relevant"}')
+        assert result == (8, "Highly relevant")
+
+    def test_markdown_wrapped_json(self):
+        from arxiv_browser import _parse_relevance_response
+
+        text = '```json\n{"score": 7, "reason": "Good match"}\n```'
+        result = _parse_relevance_response(text)
+        assert result == (7, "Good match")
+
+    def test_markdown_fence_without_json_label(self):
+        from arxiv_browser import _parse_relevance_response
+
+        text = '```\n{"score": 5, "reason": "Moderate"}\n```'
+        result = _parse_relevance_response(text)
+        assert result == (5, "Moderate")
+
+    def test_regex_fallback(self):
+        from arxiv_browser import _parse_relevance_response
+
+        text = 'Here is the result: "score": 9, "reason": "Very relevant paper"'
+        result = _parse_relevance_response(text)
+        assert result is not None
+        assert result[0] == 9
+        assert result[1] == "Very relevant paper"
+
+    def test_regex_fallback_score_only(self):
+        from arxiv_browser import _parse_relevance_response
+
+        text = 'The "score": 6 for this paper'
+        result = _parse_relevance_response(text)
+        assert result is not None
+        assert result[0] == 6
+        assert result[1] == ""
+
+    def test_invalid_input_returns_none(self):
+        from arxiv_browser import _parse_relevance_response
+
+        assert _parse_relevance_response("not valid at all") is None
+        assert _parse_relevance_response("") is None
+        assert _parse_relevance_response("just some text") is None
+
+    def test_score_clamped_high(self):
+        from arxiv_browser import _parse_relevance_response
+
+        result = _parse_relevance_response('{"score": 15, "reason": "Off scale"}')
+        assert result == (10, "Off scale")
+
+    def test_score_clamped_low(self):
+        from arxiv_browser import _parse_relevance_response
+
+        result = _parse_relevance_response('{"score": 0, "reason": "Below range"}')
+        assert result == (1, "Below range")
+
+    def test_score_clamped_negative(self):
+        from arxiv_browser import _parse_relevance_response
+
+        result = _parse_relevance_response('{"score": -3, "reason": "Negative"}')
+        assert result == (1, "Negative")
+
+    def test_json_with_extra_whitespace(self):
+        from arxiv_browser import _parse_relevance_response
+
+        text = '  \n  {"score": 4, "reason": "Some reason"}  \n  '
+        result = _parse_relevance_response(text)
+        assert result == (4, "Some reason")
+
+    def test_missing_reason_in_json(self):
+        from arxiv_browser import _parse_relevance_response
+
+        result = _parse_relevance_response('{"score": 5}')
+        assert result == (5, "")
+
+
+class TestRelevanceDb:
+    """Tests for relevance score SQLite persistence."""
+
+    def test_init_creates_table(self, tmp_path):
+        from arxiv_browser import _init_relevance_db
+
+        import sqlite3
+
+        db_path = tmp_path / "relevance.db"
+        _init_relevance_db(db_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            row = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='relevance_scores'"
+            ).fetchone()
+            assert row is not None
+            assert "PRIMARY KEY (arxiv_id, interests_hash)" in row[0]
+
+    def test_save_and_load_score(self, tmp_path):
+        from arxiv_browser import _init_relevance_db, _save_relevance_score, _load_relevance_score
+
+        db_path = tmp_path / "relevance.db"
+        _init_relevance_db(db_path)
+        _save_relevance_score(db_path, "2401.12345", "hash123", 8, "Good match")
+        result = _load_relevance_score(db_path, "2401.12345", "hash123")
+        assert result == (8, "Good match")
+
+    def test_load_missing_returns_none(self, tmp_path):
+        from arxiv_browser import _init_relevance_db, _load_relevance_score
+
+        db_path = tmp_path / "relevance.db"
+        _init_relevance_db(db_path)
+        result = _load_relevance_score(db_path, "nonexistent", "hash123")
+        assert result is None
+
+    def test_load_from_nonexistent_db(self, tmp_path):
+        from arxiv_browser import _load_relevance_score
+
+        db_path = tmp_path / "does_not_exist.db"
+        result = _load_relevance_score(db_path, "2401.12345", "hash123")
+        assert result is None
+
+    def test_bulk_load(self, tmp_path):
+        from arxiv_browser import _init_relevance_db, _save_relevance_score, _load_all_relevance_scores
+
+        db_path = tmp_path / "relevance.db"
+        _init_relevance_db(db_path)
+        _save_relevance_score(db_path, "2401.00001", "hash_a", 9, "Great")
+        _save_relevance_score(db_path, "2401.00002", "hash_a", 3, "Not relevant")
+        _save_relevance_score(db_path, "2401.00003", "hash_b", 7, "Different hash")
+
+        result = _load_all_relevance_scores(db_path, "hash_a")
+        assert len(result) == 2
+        assert result["2401.00001"] == (9, "Great")
+        assert result["2401.00002"] == (3, "Not relevant")
+        assert "2401.00003" not in result
+
+    def test_composite_pk_different_interests(self, tmp_path):
+        from arxiv_browser import _init_relevance_db, _save_relevance_score, _load_relevance_score
+
+        db_path = tmp_path / "relevance.db"
+        _init_relevance_db(db_path)
+        _save_relevance_score(db_path, "2401.12345", "hash_x", 9, "Very relevant")
+        _save_relevance_score(db_path, "2401.12345", "hash_y", 2, "Not relevant")
+        assert _load_relevance_score(db_path, "2401.12345", "hash_x") == (9, "Very relevant")
+        assert _load_relevance_score(db_path, "2401.12345", "hash_y") == (2, "Not relevant")
+
+    def test_save_replaces_existing(self, tmp_path):
+        from arxiv_browser import _init_relevance_db, _save_relevance_score, _load_relevance_score
+
+        db_path = tmp_path / "relevance.db"
+        _init_relevance_db(db_path)
+        _save_relevance_score(db_path, "2401.12345", "hash_a", 5, "Old reason")
+        _save_relevance_score(db_path, "2401.12345", "hash_a", 8, "New reason")
+        result = _load_relevance_score(db_path, "2401.12345", "hash_a")
+        assert result == (8, "New reason")
+
+    def test_bulk_load_nonexistent_db(self, tmp_path):
+        from arxiv_browser import _load_all_relevance_scores
+
+        db_path = tmp_path / "does_not_exist.db"
+        result = _load_all_relevance_scores(db_path, "any_hash")
+        assert result == {}
+
+
+class TestRelevanceConfigSerialization:
+    """Tests for research_interests config round-trip."""
+
+    def test_round_trip(self, tmp_path, monkeypatch):
+        config_file = tmp_path / "config.json"
+        monkeypatch.setattr("arxiv_browser.get_config_path", lambda: config_file)
+
+        config = UserConfig(research_interests="efficient LLM inference, quantization")
+        assert save_config(config) is True
+        loaded = load_config()
+        assert loaded.research_interests == "efficient LLM inference, quantization"
+
+    def test_defaults_when_absent(self, tmp_path, monkeypatch):
+        import json
+
+        config_file = tmp_path / "config.json"
+        monkeypatch.setattr("arxiv_browser.get_config_path", lambda: config_file)
+
+        config_file.write_text(json.dumps({"version": 1}))
+        loaded = load_config()
+        assert loaded.research_interests == ""
+
+    def test_type_validation_rejects_non_string(self, tmp_path, monkeypatch):
+        import json
+
+        config_file = tmp_path / "config.json"
+        monkeypatch.setattr("arxiv_browser.get_config_path", lambda: config_file)
+
+        config_file.write_text(json.dumps({"version": 1, "research_interests": 42}))
+        loaded = load_config()
+        assert loaded.research_interests == ""
+
+
+class TestRelevanceSortPapers:
+    """Tests for 'relevance' sort key in sort_papers()."""
+
+    def test_sort_by_relevance(self, make_paper):
+        from arxiv_browser import sort_papers
+
+        papers = [
+            make_paper(arxiv_id="low", title="Low"),
+            make_paper(arxiv_id="high", title="High"),
+            make_paper(arxiv_id="mid", title="Mid"),
+        ]
+        cache = {
+            "low": (2, "Low relevance"),
+            "high": (9, "High relevance"),
+            "mid": (5, "Mid relevance"),
+        }
+        result = sort_papers(papers, "relevance", relevance_cache=cache)
+        assert [p.arxiv_id for p in result] == ["high", "mid", "low"]
+
+    def test_sort_relevance_unscored_last(self, make_paper):
+        from arxiv_browser import sort_papers
+
+        papers = [
+            make_paper(arxiv_id="unscored", title="Unscored"),
+            make_paper(arxiv_id="scored", title="Scored"),
+        ]
+        cache = {"scored": (7, "Scored")}
+        result = sort_papers(papers, "relevance", relevance_cache=cache)
+        assert result[0].arxiv_id == "scored"
+        assert result[1].arxiv_id == "unscored"
+
+    def test_sort_relevance_empty_cache(self, make_paper):
+        from arxiv_browser import sort_papers
+
+        papers = [make_paper(arxiv_id="a"), make_paper(arxiv_id="b")]
+        result = sort_papers(papers, "relevance", relevance_cache={})
+        assert len(result) == 2
+
+    def test_sort_relevance_none_cache(self, make_paper):
+        from arxiv_browser import sort_papers
+
+        papers = [make_paper(arxiv_id="a"), make_paper(arxiv_id="b")]
+        result = sort_papers(papers, "relevance", relevance_cache=None)
+        assert len(result) == 2
+
+
+class TestRelevanceDetailPane:
+    """Tests for relevance section in PaperDetails."""
+
+    def _make_paper(self):
+        return Paper(
+            arxiv_id="2401.12345",
+            date="2024-01-01",
+            title="Test Paper",
+            authors="Author",
+            categories="cs.AI",
+            comments=None,
+            abstract="Abstract",
+            url="https://arxiv.org/abs/2401.12345",
+            abstract_raw="Abstract",
+        )
+
+    def test_relevance_section_shown_with_score(self):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = self._make_paper()
+        details.update_paper(paper, relevance=(9, "Highly relevant paper"))
+        content = details.content
+        assert "Relevance" in content
+        assert "9/10" in content
+        assert "Highly relevant paper" in content
+
+    def test_relevance_section_hidden_without_score(self):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = self._make_paper()
+        details.update_paper(paper, relevance=None)
+        content = details.content
+        assert "Relevance" not in content
+
+    def test_relevance_section_absent_by_default(self):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = self._make_paper()
+        details.update_paper(paper)
+        content = details.content
+        assert "Relevance" not in content
+
+    def test_relevance_low_score_shown(self):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = self._make_paper()
+        details.update_paper(paper, relevance=(2, "Not very relevant"))
+        content = details.content
+        assert "2/10" in content
+        assert "Not very relevant" in content
+
+    def test_relevance_empty_reason(self):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = self._make_paper()
+        details.update_paper(paper, relevance=(6, ""))
+        content = details.content
+        assert "6/10" in content
+
+
+class TestRelevanceListBadge:
+    """Tests for relevance score badge in PaperListItem."""
+
+    def _make_paper(self):
+        return Paper(
+            arxiv_id="2401.12345",
+            date="2024-01-01",
+            title="Test Paper",
+            authors="Author",
+            categories="cs.AI",
+            comments=None,
+            abstract="Abstract",
+            url="https://arxiv.org/abs/2401.12345",
+            abstract_raw="Abstract",
+        )
+
+    def test_badge_appears_with_high_score(self):
+        from arxiv_browser import PaperListItem, THEME_COLORS
+
+        item = PaperListItem(self._make_paper())
+        item._relevance_score = (9, "Great match")
+        meta_text = item._get_meta_text()
+        assert "9/10" in meta_text
+        assert THEME_COLORS["green"] in meta_text
+
+    def test_badge_appears_with_mid_score(self):
+        from arxiv_browser import PaperListItem, THEME_COLORS
+
+        item = PaperListItem(self._make_paper())
+        item._relevance_score = (6, "Moderate")
+        meta_text = item._get_meta_text()
+        assert "6/10" in meta_text
+        assert THEME_COLORS["yellow"] in meta_text
+
+    def test_badge_appears_with_low_score(self):
+        from arxiv_browser import PaperListItem, THEME_COLORS
+
+        item = PaperListItem(self._make_paper())
+        item._relevance_score = (2, "Low relevance")
+        meta_text = item._get_meta_text()
+        assert "2/10" in meta_text
+        assert THEME_COLORS["muted"] in meta_text
+
+    def test_badge_absent_without_score(self):
+        from arxiv_browser import PaperListItem
+
+        item = PaperListItem(self._make_paper())
+        meta_text = item._get_meta_text()
+        assert "/10" not in meta_text
+
+    def test_update_relevance_data_sets_score(self):
+        from arxiv_browser import PaperListItem
+
+        item = PaperListItem(self._make_paper())
+        assert item._relevance_score is None
+        item.update_relevance_data((8, "Relevant"))
+        assert item._relevance_score == (8, "Relevant")
+
+
+class TestResearchInterestsModal:
+    """Tests for ResearchInterestsModal structure."""
+
+    def test_modal_exists(self):
+        from arxiv_browser import ResearchInterestsModal
+
+        modal = ResearchInterestsModal("test interests")
+        assert modal._current_interests == "test interests"
+
+    def test_modal_empty_default(self):
+        from arxiv_browser import ResearchInterestsModal
+
+        modal = ResearchInterestsModal()
+        assert modal._current_interests == ""
+
+    def test_modal_has_bindings(self):
+        from arxiv_browser import ResearchInterestsModal
+
+        binding_keys = {b.key for b in ResearchInterestsModal.BINDINGS}
+        assert "ctrl+s" in binding_keys
+        assert "escape" in binding_keys
+
+
+class TestRelevanceDbPath:
+    """Tests for get_relevance_db_path()."""
+
+    def test_returns_path_object(self):
+        from arxiv_browser import get_relevance_db_path
+
+        result = get_relevance_db_path()
+        assert isinstance(result, Path)
+        assert result.name == "relevance.db"
+
+    def test_in_config_dir(self):
+        from arxiv_browser import get_relevance_db_path, get_summary_db_path
+
+        rel_path = get_relevance_db_path()
+        sum_path = get_summary_db_path()
+        assert rel_path.parent == sum_path.parent
+
+
+class TestRelevanceSortOptions:
+    """Tests for relevance in SORT_OPTIONS."""
+
+    def test_relevance_in_sort_options(self):
+        assert "relevance" in SORT_OPTIONS
+
+    def test_sort_options_count(self):
+        assert len(SORT_OPTIONS) == 6
 
 
 # ============================================================================

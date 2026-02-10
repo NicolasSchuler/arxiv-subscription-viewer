@@ -10,8 +10,9 @@ A terminal user interface (TUI) for browsing arXiv papers from email subscriptio
 - Interactive split-pane interface with paper list and detail view
 - Fuzzy search by title and author (powered by RapidFuzz)
 - Filter by category (`cat:cs.AI`), tag (`tag:important`), `unread`, or `starred`
+- Search all arXiv via API (field + optional category) with paginated results
 - Multi-select papers for batch operations
-- Sort cycling between title, date, and arXiv ID
+- Sort cycling between title, date, arXiv ID, citations, trending, and relevance
 - Vim-style navigation (j/k) plus standard arrow keys
 
 ### Paper Management
@@ -33,6 +34,10 @@ A terminal user interface (TUI) for browsing arXiv papers from email subscriptio
 - Search bookmarks (save up to 9 frequent searches, access via 1-9 keys)
 - Vim-style marks (set marks with `m` + letter, jump with `'` + letter)
 - Similar paper recommendations based on category, author, and content
+- Semantic Scholar integration: citation counts, TLDR summaries, S2-powered recommendations, and citation graph exploration
+- HuggingFace trending: community upvotes, AI summaries, keywords, and GitHub info from HF Daily Papers
+- Paper version tracking: check starred papers for arXiv revisions with diff links
+- LLM-powered relevance scoring: score papers 1-10 based on your research interests
 - Abstract preview toggle in list view
 
 ### History Mode
@@ -83,12 +88,14 @@ uv run python arxiv_browser.py --no-restore
 | Key | Action |
 |-----|--------|
 | `/` | Toggle search input |
-| `Escape` | Cancel search |
+| `Escape` | Cancel search / exit API mode |
+| `A` | Search all arXiv (API mode) |
+| `Ctrl+e` | Exit API mode |
 | `j`/`k` | Navigate down/up (vim-style) |
 | `1-9` | Jump to search bookmark |
 | `Ctrl+b` | Add current search as bookmark |
-| `[` | Go to previous (older) date (history mode) |
-| `]` | Go to next (newer) date (history mode) |
+| `[` | Previous date (history) / previous API page (API mode) |
+| `]` | Next date (history) / next API page (API mode) |
 
 ### Selection & Actions
 | Key | Action |
@@ -97,8 +104,9 @@ uv run python arxiv_browser.py --no-restore
 | `a` | Select all visible papers |
 | `u` | Clear all selections |
 | `o` | Open selected paper(s) in browser |
+| `P` | Open selected paper(s) as PDF |
 | `c` | Copy selected paper(s) to clipboard |
-| `s` | Cycle sort order (title/date/arxiv_id) |
+| `s` | Cycle sort order (title/date/arxiv_id/citations/trending/relevance) |
 
 ### Paper Status
 | Key | Action |
@@ -108,6 +116,7 @@ uv run python arxiv_browser.py --no-restore
 | `n` | Edit notes |
 | `t` | Edit tags |
 | `w` | Toggle watch list filter |
+| `W` | Manage watch list |
 | `p` | Toggle abstract preview |
 
 ### Export
@@ -117,14 +126,22 @@ uv run python arxiv_browser.py --no-restore
 | `B` | Export BibTeX to file (for Zotero) |
 | `d` | Download PDF(s) to local folder |
 | `M` | Copy as Markdown |
+| `E` | Export menu (RIS, CSV, Markdown table + more) |
 
-### Marks & Similar Papers
+### Marks, Enrichment & Similar Papers
 | Key | Action |
 |-----|--------|
 | `m` | Set mark (then press a-z) |
 | `'` | Jump to mark (then press a-z) |
 | `R` | Show similar papers |
+| `G` | Explore citation graph (S2-powered, drill-down) |
+| `V` | Check starred papers for version updates |
+| `e` | Fetch Semantic Scholar data for current paper |
+| `Ctrl+e` | Toggle Semantic Scholar enrichment on/off |
 | `Ctrl+s` | Generate AI summary |
+| `Ctrl+h` | Toggle HuggingFace trending |
+| `L` | Score papers by relevance (LLM-powered) |
+| `Ctrl+l` | Edit research interests |
 
 ### General
 | Key | Action |
@@ -211,7 +228,20 @@ Configuration includes:
 - Vim-style marks
 - Session state (scroll position, filters, sort order)
 - UI preferences (abstract preview toggle)
+- arXiv API search preferences (`arxiv_api_max_results`)
 - LLM summary settings (command, prompt template, preset)
+
+### arXiv API Search Settings
+
+Optional config key:
+
+```json
+{
+  "arxiv_api_max_results": 50
+}
+```
+
+Values are clamped to a safe range (`1..200`).
 
 ### AI Summary Setup
 
@@ -238,6 +268,52 @@ Prompt placeholders: `{title}`, `{authors}`, `{categories}`, `{abstract}`, `{arx
 
 Summaries are cached in a local SQLite database and persist across sessions.
 
+### HuggingFace Trending Setup
+
+Surface trending signals from HuggingFace Daily Papers — community upvotes, comments, GitHub info, AI summaries, and keywords. Press `Ctrl+h` to toggle on/off. Data is auto-fetched when enabled and cross-matched against loaded papers.
+
+```json
+{
+  "hf_enabled": true,
+  "hf_cache_ttl_hours": 6
+}
+```
+
+- `hf_enabled`: Enable HF trending on startup (default: `false`)
+- `hf_cache_ttl_hours`: Hours to cache HF data (default: `6`, trending data changes frequently)
+
+Trending papers show upvote badges in the list view and a HuggingFace section in the detail pane with upvotes, comments, GitHub repository, AI summary, and keywords.
+
+### Semantic Scholar Setup
+
+Enrich papers with citation counts, fields of study, TLDRs, S2-powered recommendations, and citation graph exploration. Press `Ctrl+e` to toggle on/off.
+
+```json
+{
+  "s2_enabled": true,
+  "s2_api_key": "",
+  "s2_cache_ttl_days": 7
+}
+```
+
+- `s2_enabled`: Enable S2 enrichment on startup (default: `false`)
+- `s2_api_key`: Optional API key for higher rate limits
+- `s2_cache_ttl_days`: Days to cache S2 data (default: `7`)
+
+Press `e` to fetch data for the current paper, `R` for S2-powered recommendations, and `G` to explore the citation graph with drill-down navigation.
+
+### Relevance Scoring Setup
+
+Score papers 1-10 based on your research interests using the configured LLM. Requires an LLM preset or command (same as AI summaries).
+
+```json
+{
+  "research_interests": "efficient LLM inference, quantization, speculative decoding"
+}
+```
+
+Press `L` to score all loaded papers, `Ctrl+l` to edit interests. Sort by relevance with `s`. Papers show colored score badges: green (8-10), yellow (5-7), dim (1-4).
+
 ## Development
 
 ```bash
@@ -255,6 +331,7 @@ uv run pytest -v test_arxiv_browser.py::TestCleanLatex
 
 - **textual** (>=7.3.0): TUI framework
 - **rapidfuzz** (>=3.0.0): Fuzzy string matching
+- **httpx** (>=0.27.0): Async HTTP client for API calls and PDF downloads
 - **platformdirs**: Cross-platform config directory (transitive via textual)
 - **pytest** (>=9.0.2): Testing (dev dependency)
 

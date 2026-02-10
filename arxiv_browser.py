@@ -8,6 +8,7 @@ Usage:
 
 Key bindings:
     /       - Toggle search (fuzzy matching)
+    A       - Search all arXiv (API mode)
     o       - Open selected paper(s) in browser
     P       - Open selected paper(s) as PDF
     c       - Copy selected paper(s) to clipboard
@@ -15,10 +16,11 @@ Key bindings:
     B       - Export BibTeX to file (for Zotero import)
     d       - Download PDF(s) to local folder
     M       - Copy as Markdown
+    E       - Export menu (RIS, CSV, Markdown table + more)
     space   - Toggle selection
     a       - Select all visible
     u       - Clear selection
-    s       - Cycle sort order (title/date/arxiv_id)
+    s       - Cycle sort order (title/date/arxiv_id/citations/trending/relevance)
     j/k     - Navigate down/up (vim-style)
     r       - Toggle read status
     x       - Toggle star
@@ -32,8 +34,11 @@ Key bindings:
     R       - Show similar papers
     1-9     - Jump to bookmark
     Ctrl+b  - Add current search as bookmark
-    [       - Go to previous (older) date (history mode)
-    ]       - Go to next (newer) date (history mode)
+    V       - Check starred papers for version updates
+    Ctrl+e  - Toggle S2 / Exit arXiv API mode
+    e       - Fetch Semantic Scholar data
+    [       - Previous date (history) / previous API page (API mode)
+    ]       - Next date (history) / next API page (API mode)
     q       - Quit
 
 Search filters:
@@ -51,10 +56,13 @@ Search filters:
 
 import argparse
 import asyncio
+import csv
 import functools
 import hashlib
+import io
 import json
 import logging
+import math
 import os
 import platform
 import re
@@ -64,6 +72,7 @@ import subprocess
 import sys
 import tempfile
 import webbrowser
+import xml.etree.ElementTree as ET
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -73,6 +82,32 @@ from typing import Any, Callable
 
 from platformdirs import user_config_dir
 import httpx
+
+from huggingface import (
+    HuggingFacePaper,
+    fetch_hf_daily_papers,
+    get_hf_db_path,
+    load_hf_daily_cache,
+    save_hf_daily_cache,
+)
+from semantic_scholar import (
+    CitationEntry,
+    SemanticScholarPaper,
+    S2_CITATION_GRAPH_CACHE_TTL_DAYS,
+    S2_REC_CACHE_TTL_DAYS,
+    fetch_s2_citations,
+    fetch_s2_paper,
+    fetch_s2_recommendations,
+    fetch_s2_references,
+    get_s2_db_path,
+    init_s2_db,
+    load_s2_citation_graph,
+    load_s2_paper,
+    load_s2_recommendations,
+    save_s2_citation_graph,
+    save_s2_paper,
+    save_s2_recommendations,
+)
 from rapidfuzz import fuzz
 from rich.markup import escape as escape_markup
 from textual import on
@@ -108,6 +143,10 @@ __all__ = [
     "WatchListEntry",
     # Parsing functions
     "parse_arxiv_file",
+    "parse_arxiv_api_feed",
+    "parse_arxiv_version_map",
+    "build_arxiv_search_query",
+    "normalize_arxiv_id",
     "clean_latex",
     "parse_arxiv_date",
     # Configuration
@@ -120,6 +159,7 @@ __all__ = [
     # Utility functions
     "format_categories",
     "find_similar_papers",
+    "TfidfIndex",
     "discover_history_files",
     "get_pdf_download_path",
     # BibTeX formatting (extracted pure functions)
@@ -128,6 +168,10 @@ __all__ = [
     "extract_year",
     "generate_citation_key",
     "format_paper_as_bibtex",
+    # Additional export formats
+    "format_paper_as_ris",
+    "format_papers_as_csv",
+    "format_papers_as_markdown_table",
     # Query parser (extracted pure functions)
     "QueryToken",
     "tokenize_query",
@@ -150,6 +194,17 @@ __all__ = [
     "extract_text_from_html",
     "format_summary_as_rich",
     "LLM_PRESETS",
+    "SUMMARY_MODES",
+    # Relevance scoring helpers
+    "RELEVANCE_PROMPT_TEMPLATE",
+    "get_relevance_db_path",
+    "build_relevance_prompt",
+    # Recommendation source modal
+    "RecommendationSourceModal",
+    # Tag namespace helpers
+    "TAG_NAMESPACE_COLORS",
+    "parse_tag_namespace",
+    "get_tag_color",
 ]
 
 # Module logger for debugging
@@ -168,7 +223,7 @@ MAX_LIST_WIDTH = 100
 CLIPBOARD_SEPARATOR = "=" * 80
 
 # Sort order options
-SORT_OPTIONS = ["title", "date", "arxiv_id"]
+SORT_OPTIONS = ["title", "date", "arxiv_id", "citations", "trending", "relevance"]
 
 # Default color for unknown categories (Monokai gray)
 DEFAULT_CATEGORY_COLOR = "#888888"
@@ -187,6 +242,9 @@ SIMILARITY_STARRED_BOOST = 0.05
 SIMILARITY_UNREAD_BOOST = 0.03
 SIMILARITY_READ_PENALTY = 0.02
 SIMILARITY_RECENCY_DAYS = 365
+SIMILARITY_WEIGHT_CATEGORY = 0.30
+SIMILARITY_WEIGHT_AUTHOR = 0.20
+SIMILARITY_WEIGHT_TEXT = 0.50
 
 # UI truncation limits
 RECOMMENDATION_TITLE_MAX_LEN = 60  # Max title length in recommendations modal
@@ -199,6 +257,13 @@ DEFAULT_BIBTEX_EXPORT_DIR = "arxiv-exports"  # Default subdirectory in home fold
 
 # History file discovery limit
 MAX_HISTORY_FILES = 365  # Limit to ~1 year of history to prevent memory issues
+
+# arXiv API search settings
+ARXIV_API_URL = "https://export.arxiv.org/api/query"
+ARXIV_API_MIN_INTERVAL_SECONDS = 3.0  # arXiv guidance: max 1 request / 3 seconds
+ARXIV_API_DEFAULT_MAX_RESULTS = 50
+ARXIV_API_MAX_RESULTS_LIMIT = 200
+ARXIV_API_TIMEOUT = 30  # Seconds to wait for arXiv API responses
 
 # PDF download settings
 DEFAULT_PDF_DOWNLOAD_DIR = "arxiv-pdfs"  # Relative to home directory
@@ -243,6 +308,67 @@ LLM_PRESETS: dict[str, str] = {
     "copilot": "copilot --model gpt-5-mini -p {prompt}",
     "opencode": "opencode run -m zai-coding-plan/glm-4.7 -- {prompt}",
 }
+
+# Structured summary mode templates
+SUMMARY_MODES: dict[str, tuple[str, str]] = {
+    "default": (
+        "Full summary (Problem / Approach / Results)",
+        DEFAULT_LLM_PROMPT,
+    ),
+    "tldr": (
+        "1-2 sentence TLDR",
+        "Provide a 1-2 sentence TLDR summary of this paper. Be concise and capture "
+        "the key contribution.\n\n"
+        "Paper: {title}\nAuthors: {authors}\nCategories: {categories}\n\n"
+        "{paper_content}",
+    ),
+    "methods": (
+        "Technical methodology deep-dive",
+        "Analyze the technical methodology of this paper in detail (~500 words). "
+        "Focus on:\n"
+        "1. The core algorithm or technique\n"
+        "2. Key mathematical formulations or architectural choices\n"
+        "3. Training/optimization details\n"
+        "4. How it differs from prior approaches\n\n"
+        "Paper: {title}\nAuthors: {authors}\nCategories: {categories}\n\n"
+        "{paper_content}",
+    ),
+    "results": (
+        "Key experimental results with numbers",
+        "Summarize the key experimental results of this paper. Focus on:\n"
+        "1. Main benchmarks and datasets used\n"
+        "2. Quantitative results (accuracy, speedup, etc.) with specific numbers\n"
+        "3. Comparisons with baselines and state-of-the-art\n"
+        "4. Ablation study findings\n\n"
+        "Paper: {title}\nAuthors: {authors}\nCategories: {categories}\n\n"
+        "{paper_content}",
+    ),
+    "comparison": (
+        "Comparison with related work",
+        "Compare this paper with related work in the field. Focus on:\n"
+        "1. What prior approaches exist for this problem\n"
+        "2. How this paper's method differs from each\n"
+        "3. Advantages and disadvantages vs alternatives\n"
+        "4. Where this work fits in the broader research landscape\n\n"
+        "Paper: {title}\nAuthors: {authors}\nCategories: {categories}\n\n"
+        "{paper_content}",
+    ),
+}
+
+# Relevance scoring settings
+RELEVANCE_PROMPT_TEMPLATE = (
+    "Rate this paper's relevance to the research interests below.\n"
+    'Return ONLY valid JSON: {{"score": N, "reason": "..."}}\n'
+    "- score: integer 1-10 (10 = highly relevant)\n"
+    "- reason: 1 sentence explaining the rating\n\n"
+    "Research interests: {interests}\n\n"
+    "Title: {title}\n"
+    "Authors: {authors}\n"
+    "Categories: {categories}\n"
+    "Abstract: {abstract}\n"
+)
+RELEVANCE_SCORE_TIMEOUT = 30  # Seconds to wait for relevance scoring LLM response
+RELEVANCE_DB_FILENAME = "relevance.db"
 
 # Search debounce delay in seconds
 SEARCH_DEBOUNCE_DELAY = 0.3
@@ -359,6 +485,47 @@ STOPWORDS = frozenset(
         "models",
     }
 )
+
+# Tag namespace colors (Monokai palette)
+TAG_NAMESPACE_COLORS: dict[str, str] = {
+    "topic": "#66d9ef",     # blue
+    "status": "#a6e22e",    # green
+    "project": "#fd971f",   # orange
+    "method": "#ae81ff",    # purple
+    "priority": "#f92672",  # pink
+}
+# Fallback palette for unknown namespaces (deterministic via hash)
+_TAG_FALLBACK_COLORS = ["#66d9ef", "#a6e22e", "#fd971f", "#ae81ff", "#f92672", "#e6db74"]
+
+
+def parse_tag_namespace(tag: str) -> tuple[str, str]:
+    """Split a tag into (namespace, value).
+
+    >>> parse_tag_namespace("topic:transformers")
+    ('topic', 'transformers')
+    >>> parse_tag_namespace("important")
+    ('', 'important')
+    """
+    if ":" in tag:
+        ns, _, val = tag.partition(":")
+        return (ns, val)
+    return ("", tag)
+
+
+def get_tag_color(tag: str) -> str:
+    """Return a display color for a tag based on its namespace.
+
+    Known namespaces get their assigned color. Unknown namespaces get a
+    deterministic color via hash. Tags without a namespace get default purple.
+    """
+    ns, _ = parse_tag_namespace(tag)
+    if not ns:
+        return "#ae81ff"  # default purple for unnamespaced tags
+    if ns in TAG_NAMESPACE_COLORS:
+        return TAG_NAMESPACE_COLORS[ns]
+    # Deterministic color for unknown namespaces
+    return _TAG_FALLBACK_COLORS[hash(ns) % len(_TAG_FALLBACK_COLORS)]
+
 
 WATCH_MATCH_TYPES = ("author", "title", "keyword")
 
@@ -481,6 +648,7 @@ class Paper:
     abstract: str | None
     url: str
     abstract_raw: str = ""
+    source: str = "local"  # "local" | "api"
 
 
 # ============================================================================
@@ -497,6 +665,7 @@ class PaperMetadata:
     tags: list[str] = field(default_factory=list)
     is_read: bool = False
     starred: bool = False
+    last_checked_version: int | None = None
 
 
 @dataclass(slots=True)
@@ -555,7 +724,50 @@ class UserConfig:
     llm_command: str = ""  # Shell command template, e.g. 'claude -p {prompt}'
     llm_prompt_template: str = ""  # Empty = use DEFAULT_LLM_PROMPT
     llm_preset: str = ""  # "claude" | "codex" | "llm" | "" (custom)
+    arxiv_api_max_results: int = ARXIV_API_DEFAULT_MAX_RESULTS
+    s2_enabled: bool = False  # Semantic Scholar enrichment (opt-in)
+    s2_api_key: str = ""  # Optional S2 API key for higher rate limits
+    s2_cache_ttl_days: int = 7  # Days to cache S2 data
+    hf_enabled: bool = False  # HuggingFace trending (opt-in)
+    hf_cache_ttl_hours: int = 6  # Hours to cache HF daily data
+    research_interests: str = ""  # Free-text research interest description for relevance scoring
     version: int = 1
+
+
+@dataclass(slots=True)
+class ArxivSearchRequest:
+    """User-entered parameters for an arXiv API search."""
+
+    query: str
+    field: str = "all"
+    category: str = ""
+
+
+@dataclass(slots=True)
+class ArxivSearchModeState:
+    """Current state for arXiv API search mode."""
+
+    request: ArxivSearchRequest
+    start: int = 0
+    max_results: int = ARXIV_API_DEFAULT_MAX_RESULTS
+
+
+@dataclass(slots=True)
+class LocalBrowseSnapshot:
+    """Snapshot of local browsing state to restore after API search mode."""
+
+    all_papers: list[Paper]
+    papers_by_id: dict[str, Paper]
+    selected_ids: set[str]
+    sort_index: int
+    search_query: str
+    pending_query: str
+    watch_filter_active: bool
+    active_bookmark_index: int
+    list_index: int
+    sub_title: str
+    highlight_terms: dict[str, list[str]]
+    match_scores: dict[str, float]
 
 
 # ============================================================================
@@ -580,6 +792,7 @@ def get_config_path() -> Path:
 
 def _config_to_dict(config: UserConfig) -> dict[str, Any]:
     """Serialize UserConfig to a JSON-compatible dictionary."""
+    max_results = max(1, min(config.arxiv_api_max_results, ARXIV_API_MAX_RESULTS_LIMIT))
     return {
         "version": config.version,
         "show_abstract_preview": config.show_abstract_preview,
@@ -591,6 +804,13 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
         "llm_command": config.llm_command,
         "llm_prompt_template": config.llm_prompt_template,
         "llm_preset": config.llm_preset,
+        "arxiv_api_max_results": max_results,
+        "s2_enabled": config.s2_enabled,
+        "s2_api_key": config.s2_api_key,
+        "s2_cache_ttl_days": config.s2_cache_ttl_days,
+        "hf_enabled": config.hf_enabled,
+        "hf_cache_ttl_hours": config.hf_cache_ttl_hours,
+        "research_interests": config.research_interests,
         "session": {
             "scroll_index": config.session.scroll_index,
             "current_filter": config.session.current_filter,
@@ -604,6 +824,7 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
                 "tags": meta.tags,
                 "is_read": meta.is_read,
                 "starred": meta.starred,
+                "last_checked_version": meta.last_checked_version,
             }
             for arxiv_id, meta in config.paper_metadata.items()
         },
@@ -629,6 +850,13 @@ def _safe_get(data: dict, key: str, default: Any, expected_type: type) -> Any:
     if not isinstance(value, expected_type):
         return default
     return value
+
+
+def _coerce_arxiv_api_max_results(value: Any) -> int:
+    """Validate and clamp the configured max_results for arXiv API queries."""
+    if not isinstance(value, int):
+        return ARXIV_API_DEFAULT_MAX_RESULTS
+    return max(1, min(value, ARXIV_API_MAX_RESULTS_LIMIT))
 
 
 def _dict_to_config(data: dict[str, Any]) -> UserConfig:
@@ -661,12 +889,17 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         for arxiv_id, meta_data in raw_metadata.items():
             if not isinstance(meta_data, dict):
                 continue
+            # last_checked_version can be int or None
+            lcv_raw = meta_data.get("last_checked_version")
+            lcv = lcv_raw if isinstance(lcv_raw, int) else None
+
             paper_metadata[arxiv_id] = PaperMetadata(
                 arxiv_id=arxiv_id,
                 notes=_safe_get(meta_data, "notes", "", str),
                 tags=_safe_get(meta_data, "tags", [], list),
                 is_read=_safe_get(meta_data, "is_read", False, bool),
                 starred=_safe_get(meta_data, "starred", False, bool),
+                last_checked_version=lcv,
             )
 
     # Parse watch list with type validation
@@ -739,6 +972,15 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         llm_command=_safe_get(data, "llm_command", "", str),
         llm_prompt_template=_safe_get(data, "llm_prompt_template", "", str),
         llm_preset=_safe_get(data, "llm_preset", "", str),
+        arxiv_api_max_results=_coerce_arxiv_api_max_results(
+            data.get("arxiv_api_max_results", ARXIV_API_DEFAULT_MAX_RESULTS)
+        ),
+        s2_enabled=_safe_get(data, "s2_enabled", False, bool),
+        s2_api_key=_safe_get(data, "s2_api_key", "", str),
+        s2_cache_ttl_days=_safe_get(data, "s2_cache_ttl_days", 7, int),
+        hf_enabled=_safe_get(data, "hf_enabled", False, bool),
+        hf_cache_ttl_hours=_safe_get(data, "hf_cache_ttl_hours", 6, int),
+        research_interests=_safe_get(data, "research_interests", "", str),
         version=_safe_get(data, "version", 1, int),
     )
 
@@ -821,15 +1063,26 @@ def get_summary_db_path() -> Path:
 
 
 def _init_summary_db(db_path: Path) -> None:
-    """Create the summaries table if it doesn't exist."""
+    """Create the summaries table with composite PK if it doesn't exist.
+
+    Migrates from old single-PK schema (arxiv_id only) to composite PK
+    (arxiv_id, command_hash) to support multiple summary modes per paper.
+    """
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(str(db_path)) as conn:
+        # Check if table exists with old schema (single PK on arxiv_id)
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='summaries'"
+        ).fetchone()
+        if row and "PRIMARY KEY (arxiv_id, command_hash)" not in row[0]:
+            conn.execute("DROP TABLE summaries")
         conn.execute(
             "CREATE TABLE IF NOT EXISTS summaries ("
-            "  arxiv_id TEXT PRIMARY KEY,"
-            "  summary TEXT NOT NULL,"
+            "  arxiv_id TEXT NOT NULL,"
             "  command_hash TEXT NOT NULL,"
-            "  created_at TEXT NOT NULL"
+            "  summary TEXT NOT NULL,"
+            "  created_at TEXT NOT NULL,"
+            "  PRIMARY KEY (arxiv_id, command_hash)"
             ")"
         )
 
@@ -870,6 +1123,159 @@ def _compute_command_hash(command_template: str, prompt_template: str) -> str:
     """Hash the command + prompt templates to detect config changes."""
     key = f"{command_template}|{prompt_template}"
     return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
+# ============================================================================
+# Relevance Scoring Persistence (SQLite)
+# ============================================================================
+
+
+def get_relevance_db_path() -> Path:
+    """Get the path to the relevance scoring SQLite database."""
+    config_dir = Path(user_config_dir(CONFIG_APP_NAME))
+    return config_dir / RELEVANCE_DB_FILENAME
+
+
+def _init_relevance_db(db_path: Path) -> None:
+    """Create the relevance_scores table if it doesn't exist."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS relevance_scores ("
+            "  arxiv_id TEXT NOT NULL,"
+            "  interests_hash TEXT NOT NULL,"
+            "  score INTEGER NOT NULL,"
+            "  reason TEXT NOT NULL,"
+            "  created_at TEXT NOT NULL,"
+            "  PRIMARY KEY (arxiv_id, interests_hash)"
+            ")"
+        )
+
+
+def _load_relevance_score(
+    db_path: Path, arxiv_id: str, interests_hash: str
+) -> tuple[int, str] | None:
+    """Load a cached relevance score if it exists."""
+    if not db_path.exists():
+        return None
+    try:
+        with sqlite3.connect(str(db_path)) as conn:
+            row = conn.execute(
+                "SELECT score, reason FROM relevance_scores "
+                "WHERE arxiv_id = ? AND interests_hash = ?",
+                (arxiv_id, interests_hash),
+            ).fetchone()
+            return (row[0], row[1]) if row else None
+    except sqlite3.Error:
+        logger.warning("Failed to load relevance score for %s", arxiv_id, exc_info=True)
+        return None
+
+
+def _save_relevance_score(
+    db_path: Path, arxiv_id: str, interests_hash: str, score: int, reason: str
+) -> None:
+    """Persist a relevance score to the SQLite database."""
+    try:
+        _init_relevance_db(db_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO relevance_scores "
+                "(arxiv_id, interests_hash, score, reason, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (arxiv_id, interests_hash, score, reason, datetime.now().isoformat()),
+            )
+    except sqlite3.Error:
+        logger.warning("Failed to save relevance score for %s", arxiv_id, exc_info=True)
+
+
+def _load_all_relevance_scores(
+    db_path: Path, interests_hash: str
+) -> dict[str, tuple[int, str]]:
+    """Bulk-load all relevance scores for a given interests hash."""
+    if not db_path.exists():
+        return {}
+    try:
+        with sqlite3.connect(str(db_path)) as conn:
+            rows = conn.execute(
+                "SELECT arxiv_id, score, reason FROM relevance_scores "
+                "WHERE interests_hash = ?",
+                (interests_hash,),
+            ).fetchall()
+            return {row[0]: (row[1], row[2]) for row in rows}
+    except sqlite3.Error:
+        logger.warning("Failed to bulk-load relevance scores", exc_info=True)
+        return {}
+
+
+# ============================================================================
+# Relevance Scoring Prompt & Response Parsing
+# ============================================================================
+
+# Pre-compiled patterns for parsing LLM relevance JSON responses
+_RELEVANCE_SCORE_RE = re.compile(r'"score"\s*:\s*(\d+)')
+_RELEVANCE_REASON_RE = re.compile(r'"reason"\s*:\s*"([^"]+)"')
+_MARKDOWN_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
+
+
+def build_relevance_prompt(paper: Paper, interests: str) -> str:
+    """Build a relevance scoring prompt for a paper.
+
+    Uses the RELEVANCE_PROMPT_TEMPLATE, substituting paper fields and interests.
+    """
+    abstract = paper.abstract or paper.abstract_raw or "(no abstract)"
+    return RELEVANCE_PROMPT_TEMPLATE.format(
+        title=paper.title,
+        authors=paper.authors,
+        categories=paper.categories,
+        abstract=abstract,
+        interests=interests,
+    )
+
+
+def _parse_relevance_response(text: str) -> tuple[int, str] | None:
+    """Parse the LLM's relevance scoring response.
+
+    Tries multiple strategies:
+    1. Direct JSON parse
+    2. Strip markdown fences then JSON parse
+    3. Regex fallback for score and reason fields
+
+    Returns (score, reason) tuple or None if parsing fails.
+    Score is clamped to 1-10 range.
+    """
+    stripped = text.strip()
+
+    # Strategy 1: direct JSON parse
+    try:
+        data = json.loads(stripped)
+        if isinstance(data, dict) and "score" in data:
+            score = max(1, min(10, int(data["score"])))
+            reason = str(data.get("reason", ""))
+            return (score, reason)
+    except (json.JSONDecodeError, ValueError, TypeError):
+        pass
+
+    # Strategy 2: strip markdown fences
+    fence_match = _MARKDOWN_FENCE_RE.search(stripped)
+    if fence_match:
+        try:
+            data = json.loads(fence_match.group(1))
+            if isinstance(data, dict) and "score" in data:
+                score = max(1, min(10, int(data["score"])))
+                reason = str(data.get("reason", ""))
+                return (score, reason)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            pass
+
+    # Strategy 3: regex fallback
+    score_match = _RELEVANCE_SCORE_RE.search(stripped)
+    reason_match = _RELEVANCE_REASON_RE.search(stripped)
+    if score_match:
+        score = max(1, min(10, int(score_match.group(1))))
+        reason = reason_match.group(1) if reason_match else ""
+        return (score, reason)
+
+    return None
 
 
 class _HTMLTextExtractor(HTMLParser):
@@ -1098,6 +1504,17 @@ _URL_PATTERN = re.compile(r"\(\s*(https://arxiv\.org/abs/\S+)")
 _ENTRY_SEPARATOR = re.compile(r"-{70,}")
 # Matches 4-digit years (2000-2099) for BibTeX export
 _YEAR_PATTERN = re.compile(r"\b(20\d{2})\b")
+# Strip trailing version suffix from IDs (e.g., 2401.12345v2 -> 2401.12345)
+_ARXIV_VERSION_SUFFIX = re.compile(r"v\d+$", re.IGNORECASE)
+
+# arXiv API / Atom parsing constants
+ATOM_NS = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
+ARXIV_QUERY_FIELDS = {
+    "all": "all",
+    "title": "ti",
+    "author": "au",
+    "abstract": "abs",
+}
 
 
 def clean_latex(text: str) -> str:
@@ -1208,6 +1625,179 @@ def parse_arxiv_file(filepath: Path) -> list[Paper]:
         )
 
     return papers
+
+
+def normalize_arxiv_id(raw: str) -> str:
+    """Normalize arXiv IDs from raw IDs or URLs.
+
+    Examples:
+    - https://arxiv.org/abs/2401.12345v2 -> 2401.12345
+    - https://arxiv.org/pdf/2401.12345v2.pdf -> 2401.12345
+    - hep-th/9901001v1 -> hep-th/9901001
+    """
+    text = raw.strip()
+    if not text:
+        return ""
+
+    if "arxiv.org" in text:
+        for marker in ("/abs/", "/pdf/"):
+            idx = text.find(marker)
+            if idx >= 0:
+                text = text[idx + len(marker) :]
+                break
+
+    text = text.split("?", 1)[0].split("#", 1)[0].strip().strip("/")
+    if text.endswith(".pdf"):
+        text = text[:-4]
+    return _ARXIV_VERSION_SUFFIX.sub("", text)
+
+
+def _format_arxiv_api_date(raw_date: str) -> str:
+    """Convert Atom timestamp to the app's date format."""
+    cleaned = raw_date.strip()
+    if not cleaned:
+        return ""
+
+    normalized = cleaned
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+
+    try:
+        parsed = datetime.fromisoformat(normalized)
+        return parsed.strftime(ARXIV_DATE_FORMAT)
+    except ValueError:
+        return cleaned
+
+
+def _atom_text(node: ET.Element, path: str) -> str:
+    """Extract normalized text from an Atom XML node path."""
+    found = node.find(path, ATOM_NS)
+    if found is None or found.text is None:
+        return ""
+    return " ".join(found.text.split())
+
+
+def build_arxiv_search_query(query: str, field: str = "all", category: str = "") -> str:
+    """Build an arXiv API search query string.
+
+    Args:
+        query: User search text (can be empty if category is provided).
+        field: One of: all, title, author, abstract.
+        category: Optional category filter like "cs.AI".
+    """
+    field_key = field.strip().lower()
+    if field_key not in ARXIV_QUERY_FIELDS:
+        raise ValueError(
+            f"Unsupported arXiv search field: {field!r}. "
+            f"Expected one of: {', '.join(sorted(ARXIV_QUERY_FIELDS))}"
+        )
+
+    query_clean = " ".join(query.strip().split()).replace('"', "")
+    category_clean = " ".join(category.strip().split()).replace('"', "")
+    if not query_clean and not category_clean:
+        raise ValueError("Search query or category must be provided")
+
+    parts: list[str] = []
+    if query_clean:
+        parts.append(f"{ARXIV_QUERY_FIELDS[field_key]}:{query_clean}")
+    if category_clean:
+        parts.append(f"cat:{category_clean}")
+
+    return " AND ".join(parts)
+
+
+def parse_arxiv_api_feed(xml_text: str) -> list[Paper]:
+    """Parse an arXiv Atom feed into Paper objects."""
+    if not xml_text.strip():
+        return []
+
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError as exc:
+        raise ValueError("Invalid arXiv API XML response") from exc
+
+    papers: list[Paper] = []
+    seen_ids: set[str] = set()
+
+    for entry in root.findall("atom:entry", ATOM_NS):
+        raw_id = _atom_text(entry, "atom:id")
+        arxiv_id = normalize_arxiv_id(raw_id)
+        if not arxiv_id or arxiv_id in seen_ids:
+            continue
+        seen_ids.add(arxiv_id)
+
+        raw_title = _atom_text(entry, "atom:title")
+        raw_summary = _atom_text(entry, "atom:summary")
+        raw_published = _atom_text(entry, "atom:published")
+        raw_updated = _atom_text(entry, "atom:updated")
+
+        author_names = []
+        for author in entry.findall("atom:author/atom:name", ATOM_NS):
+            if author.text:
+                author_names.append(" ".join(author.text.split()))
+
+        categories: list[str] = []
+        for category in entry.findall("atom:category", ATOM_NS):
+            term = (category.get("term") or "").strip()
+            if term and term not in categories:
+                categories.append(term)
+
+        comments_node = entry.find("arxiv:comment", ATOM_NS)
+        comments_text = ""
+        if comments_node is not None and comments_node.text:
+            comments_text = " ".join(comments_node.text.split())
+
+        cleaned_summary = clean_latex(raw_summary) if raw_summary else ""
+        papers.append(
+            Paper(
+                arxiv_id=arxiv_id,
+                date=_format_arxiv_api_date(raw_published or raw_updated),
+                title=clean_latex(raw_title),
+                authors=clean_latex(", ".join(author_names)),
+                categories=" ".join(categories),
+                comments=clean_latex(comments_text) if comments_text else None,
+                abstract=cleaned_summary,
+                abstract_raw=raw_summary,
+                url=f"https://arxiv.org/abs/{arxiv_id}",
+                source="api",
+            )
+        )
+
+    return papers
+
+
+def parse_arxiv_version_map(xml_text: str) -> dict[str, int]:
+    """Parse arXiv Atom feed to extract {bare_arxiv_id: version_number} mapping.
+
+    The <id> element contains URLs like ``http://arxiv.org/abs/2401.12345v3``.
+    We extract the version suffix with a regex and normalize the bare ID.
+
+    Returns:
+        Mapping from bare arXiv ID to integer version number.
+        Entries without a version suffix default to version 1.
+    """
+    if not xml_text.strip():
+        return {}
+
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        logger.warning("Failed to parse arXiv version check response")
+        return {}
+
+    result: dict[str, int] = {}
+    for entry in root.findall("atom:entry", ATOM_NS):
+        raw_id = _atom_text(entry, "atom:id")
+        if not raw_id:
+            continue
+        # Extract version from the raw ID URL (e.g. http://arxiv.org/abs/2401.12345v3)
+        match = _ARXIV_VERSION_SUFFIX.search(raw_id)
+        version = int(match.group(0)[1:]) if match else 1
+        bare_id = normalize_arxiv_id(raw_id)
+        if bare_id:
+            result[bare_id] = version
+
+    return result
 
 
 # History file date format (ISO 8601)
@@ -1357,6 +1947,114 @@ def format_paper_as_bibtex(paper: Paper) -> str:
         f"  url = {{{paper.url}}},",
         "}",
     ]
+    return "\n".join(lines)
+
+
+def format_paper_as_ris(paper: Paper, abstract_text: str = "") -> str:
+    """Format a paper as a RIS (Research Information Systems) entry.
+
+    RIS is a standard interchange format supported by reference managers
+    such as EndNote, Mendeley, and Zotero.
+    """
+    lines = [
+        "TY  - ELEC",
+        f"TI  - {paper.title}",
+    ]
+    for author in paper.authors.split(","):
+        author = author.strip()
+        if author:
+            lines.append(f"AU  - {author}")
+    year = extract_year(paper.date)
+    lines.append(f"PY  - {year}")
+    lines.append(f"UR  - {paper.url}")
+    for cat in paper.categories.split():
+        if cat:
+            lines.append(f"KW  - {cat}")
+    if abstract_text:
+        lines.append(f"AB  - {abstract_text}")
+    if paper.comments:
+        lines.append(f"N2  - {paper.comments}")
+    lines.append(f"N1  - arXiv:{paper.arxiv_id}")
+    lines.append("ER  - ")
+    return "\n".join(lines)
+
+
+def format_papers_as_csv(
+    papers: list[Paper],
+    metadata: dict[str, PaperMetadata] | None = None,
+) -> str:
+    """Format papers as CSV with optional metadata columns.
+
+    Uses csv.writer for proper quoting and escaping. Tags are joined
+    with semicolons within a single cell.
+    """
+    output = io.StringIO()
+    writer = csv.writer(output)
+    header = [
+        "arxiv_id",
+        "title",
+        "authors",
+        "categories",
+        "date",
+        "url",
+        "comments",
+    ]
+    if metadata is not None:
+        header.extend(["starred", "read", "tags", "notes"])
+    writer.writerow(header)
+    for paper in papers:
+        row: list[str] = [
+            paper.arxiv_id,
+            paper.title,
+            paper.authors,
+            paper.categories,
+            paper.date,
+            paper.url,
+            paper.comments or "",
+        ]
+        if metadata is not None:
+            meta = metadata.get(paper.arxiv_id)
+            if meta:
+                row.extend([
+                    str(meta.starred).lower(),
+                    str(meta.is_read).lower(),
+                    ";".join(meta.tags),
+                    meta.notes,
+                ])
+            else:
+                row.extend(["false", "false", "", ""])
+        writer.writerow(row)
+    return output.getvalue()
+
+
+def format_papers_as_markdown_table(papers: list[Paper]) -> str:
+    """Format papers as a compact Markdown table.
+
+    Pipe characters in fields are escaped. Authors are truncated to the
+    first author + 'et al.' if there are more than 3 authors.
+    """
+    lines = [
+        "| arXiv ID | Title | Authors | Categories | Date |",
+        "|----------|-------|---------|------------|------|",
+    ]
+    for paper in papers:
+        # Escape pipe characters in fields
+        title = paper.title.replace("|", "\\|")
+        categories = paper.categories.replace("|", "\\|")
+        date = paper.date.replace("|", "\\|")
+
+        # Truncate authors to first + et al. if >3
+        author_list = [a.strip() for a in paper.authors.split(",") if a.strip()]
+        if len(author_list) > 3:
+            authors_str = f"{author_list[0]} et al."
+        else:
+            authors_str = ", ".join(author_list)
+        authors_str = authors_str.replace("|", "\\|")
+
+        arxiv_link = f"[{paper.arxiv_id}]({paper.url})"
+        lines.append(
+            f"| {arxiv_link} | {title} | {authors_str} | {categories} | {date} |"
+        )
     return "\n".join(lines)
 
 
@@ -1537,6 +2235,87 @@ def format_categories(categories: str) -> str:
 # ============================================================================
 
 
+_TFIDF_TOKEN_RE = re.compile(r"[a-z][a-z0-9]{2,}")
+
+
+def _tokenize_for_tfidf(text: str | None) -> list[str]:
+    """Tokenize text for TF-IDF, preserving term frequency."""
+    if not text:
+        return []
+    return [tok for tok in _TFIDF_TOKEN_RE.findall(text.lower()) if tok not in STOPWORDS]
+
+
+def _compute_tf(tokens: list[str]) -> dict[str, float]:
+    """Compute sublinear term frequency: 1 + log(count)."""
+    counts: dict[str, int] = {}
+    for tok in tokens:
+        counts[tok] = counts.get(tok, 0) + 1
+    return {term: 1.0 + math.log(count) for term, count in counts.items()}
+
+
+class TfidfIndex:
+    """Sparse TF-IDF index for cosine similarity over a paper corpus."""
+
+    __slots__ = ("_idf", "_tfidf_vectors", "_norms")
+
+    def __init__(self) -> None:
+        self._idf: dict[str, float] = {}
+        self._tfidf_vectors: dict[str, dict[str, float]] = {}
+        self._norms: dict[str, float] = {}
+
+    @staticmethod
+    def build(papers: list[Paper], text_fn: Callable[[Paper], str]) -> "TfidfIndex":
+        """Build index from papers. text_fn extracts text per paper."""
+        index = TfidfIndex()
+        doc_tfs: dict[str, dict[str, float]] = {}
+        df: dict[str, int] = {}
+        for paper in papers:
+            tokens = _tokenize_for_tfidf(text_fn(paper))
+            if not tokens:
+                continue
+            tf = _compute_tf(tokens)
+            doc_tfs[paper.arxiv_id] = tf
+            for term in tf:
+                df[term] = df.get(term, 0) + 1
+        n = len(doc_tfs)
+        if n < 2:
+            return index
+        index._idf = {term: math.log(1 + n / (1 + freq)) for term, freq in df.items()}
+        for arxiv_id, tf in doc_tfs.items():
+            vec: dict[str, float] = {}
+            norm_sq = 0.0
+            for term, tf_val in tf.items():
+                tfidf = tf_val * index._idf.get(term, 0.0)
+                if tfidf > 0.0:
+                    vec[term] = tfidf
+                    norm_sq += tfidf * tfidf
+            index._tfidf_vectors[arxiv_id] = vec
+            index._norms[arxiv_id] = math.sqrt(norm_sq) if norm_sq > 0.0 else 0.0
+        return index
+
+    def cosine_similarity(self, id_a: str, id_b: str) -> float:
+        """Cosine similarity between two papers by arxiv_id."""
+        vec_a = self._tfidf_vectors.get(id_a)
+        vec_b = self._tfidf_vectors.get(id_b)
+        if not vec_a or not vec_b:
+            return 0.0
+        norm_a = self._norms.get(id_a, 0.0)
+        norm_b = self._norms.get(id_b, 0.0)
+        if norm_a == 0.0 or norm_b == 0.0:
+            return 0.0
+        # Iterate over smaller vector for efficiency
+        if len(vec_a) > len(vec_b):
+            vec_a, vec_b = vec_b, vec_a
+        dot = sum(w * vec_b.get(t, 0.0) for t, w in vec_a.items())
+        return dot / (norm_a * norm_b)
+
+    def __contains__(self, arxiv_id: str) -> bool:
+        return arxiv_id in self._tfidf_vectors
+
+    def __len__(self) -> int:
+        return len(self._tfidf_vectors)
+
+
 def _extract_keywords(text: str | None, min_length: int = 4) -> set[str]:
     """Extract significant keywords from text, filtering stopwords."""
     if not text:
@@ -1583,14 +2362,15 @@ def compute_paper_similarity(
     paper_b: Paper,
     abstract_a: str | None = None,
     abstract_b: str | None = None,
+    tfidf_index: TfidfIndex | None = None,
 ) -> float:
     """Compute weighted similarity score between two papers.
 
-    Weights:
-    - Category overlap: 40%
-    - Author overlap: 30%
-    - Title keywords: 20%
-    - Abstract keywords: 10%
+    When tfidf_index is provided, uses TF-IDF cosine similarity for text (50%)
+    with category Jaccard (30%) and author Jaccard (20%).
+
+    Without tfidf_index, falls back to legacy Jaccard weights:
+    categories 40%, authors 30%, title keywords 20%, abstract keywords 10%.
 
     Returns:
         Similarity score between 0.0 and 1.0
@@ -1598,22 +2378,32 @@ def compute_paper_similarity(
     if paper_a.arxiv_id == paper_b.arxiv_id:
         return 1.0
 
-    # Category similarity (40%)
+    # Category similarity
     cats_a = set(paper_a.categories.split())
     cats_b = set(paper_b.categories.split())
     cat_sim = _jaccard_similarity(cats_a, cats_b)
 
-    # Author similarity (30%)
+    # Author similarity
     authors_a = _extract_author_lastnames(paper_a.authors)
     authors_b = _extract_author_lastnames(paper_b.authors)
     author_sim = _jaccard_similarity(authors_a, authors_b)
 
-    # Title keyword similarity (20%)
+    if tfidf_index is not None:
+        # TF-IDF branch: text similarity from pre-built index
+        text_sim = tfidf_index.cosine_similarity(
+            paper_a.arxiv_id, paper_b.arxiv_id
+        )
+        return (
+            SIMILARITY_WEIGHT_CATEGORY * cat_sim
+            + SIMILARITY_WEIGHT_AUTHOR * author_sim
+            + SIMILARITY_WEIGHT_TEXT * text_sim
+        )
+
+    # Legacy Jaccard branch
     title_kw_a = _extract_keywords(paper_a.title)
     title_kw_b = _extract_keywords(paper_b.title)
     title_sim = _jaccard_similarity(title_kw_a, title_kw_b)
 
-    # Abstract keyword similarity (10%)
     if abstract_a is None:
         abstract_a = paper_a.abstract or ""
     if abstract_b is None:
@@ -1622,7 +2412,6 @@ def compute_paper_similarity(
     abstract_kw_b = _extract_keywords(abstract_b)
     abstract_sim = _jaccard_similarity(abstract_kw_a, abstract_kw_b)
 
-    # Weighted sum
     return 0.4 * cat_sim + 0.3 * author_sim + 0.2 * title_sim + 0.1 * abstract_sim
 
 
@@ -1632,6 +2421,7 @@ def find_similar_papers(
     top_n: int = SIMILARITY_TOP_N,
     metadata: dict[str, PaperMetadata] | None = None,
     abstract_lookup: Callable[[Paper], str] | None = None,
+    tfidf_index: TfidfIndex | None = None,
 ) -> list[tuple[Paper, float]]:
     """Find the top N most similar papers to the target.
 
@@ -1685,6 +2475,7 @@ def find_similar_papers(
             paper,
             abstract_lookup(target),
             abstract_lookup(paper),
+            tfidf_index=tfidf_index,
         )
         score += SIMILARITY_RECENCY_WEIGHT * recency_score(paper)
         score += metadata_boost(paper.arxiv_id)
@@ -1722,6 +2513,10 @@ class PaperListItem(ListItem):
             "author": [],
             "abstract": [],
         }
+        self._s2_data: SemanticScholarPaper | None = None
+        self._hf_data: HuggingFacePaper | None = None
+        self._version_update: tuple[int, int] | None = None
+        self._relevance_score: tuple[int, str] | None = None
         if selected:
             self.add_class("selected")
 
@@ -1743,6 +2538,26 @@ class PaperListItem(ListItem):
         self._abstract_text = text
         if self._show_preview:
             self._update_display()
+
+    def update_s2_data(self, s2_data: SemanticScholarPaper | None) -> None:
+        """Update Semantic Scholar data and refresh display."""
+        self._s2_data = s2_data
+        self._update_display()
+
+    def update_hf_data(self, hf_data: HuggingFacePaper | None) -> None:
+        """Update HuggingFace data and refresh display."""
+        self._hf_data = hf_data
+        self._update_display()
+
+    def update_version_data(self, version_update: tuple[int, int] | None) -> None:
+        """Update version tracking data and refresh display."""
+        self._version_update = version_update
+        self._update_display()
+
+    def update_relevance_data(self, relevance: tuple[int, str] | None) -> None:
+        """Update relevance score data and refresh display."""
+        self._relevance_score = relevance
+        self._update_display()
 
     def _get_title_text(self) -> str:
         """Get the formatted title text based on selection and metadata state."""
@@ -1788,18 +2603,51 @@ class PaperListItem(ListItem):
 
     def _get_meta_text(self) -> str:
         """Get the formatted metadata text."""
-        parts = [
-            f"[dim]{self.paper.arxiv_id}[/]",
-            format_categories(self.paper.categories),
-        ]
+        parts = []
+        if self.paper.source == "api":
+            parts.append(f"[{THEME_COLORS['orange']}]API[/]")
+        parts.extend(
+            [
+                f"[dim]{self.paper.arxiv_id}[/]",
+                format_categories(self.paper.categories),
+            ]
+        )
 
-        # Show tags if present
+        # Show tags if present (namespace-colored)
         if self._metadata and self._metadata.tags:
             tag_str = " ".join(
-                f"[{THEME_COLORS['purple']}]#{escape_rich_text(tag)}[/]"
+                f"[{get_tag_color(tag)}]#{escape_rich_text(tag)}[/]"
                 for tag in self._metadata.tags
             )
             parts.append(tag_str)
+
+        # S2 citation badge
+        if self._s2_data is not None:
+            parts.append(
+                f"[{THEME_COLORS['green']}]{self._s2_data.citation_count} cites[/]"
+            )
+
+        # HF trending badge
+        if self._hf_data is not None:
+            parts.append(
+                f"[{THEME_COLORS['orange']}]{self._hf_data.upvotes} upvotes[/]"
+            )
+
+        # Version update badge
+        if self._version_update is not None:
+            old_v, new_v = self._version_update
+            parts.append(f"[{THEME_COLORS['pink']}]v{old_v}\u2192v{new_v}[/]")
+
+        # Relevance score badge
+        if self._relevance_score is not None:
+            score, _ = self._relevance_score
+            if score >= 8:
+                color = THEME_COLORS["green"]
+            elif score >= 5:
+                color = THEME_COLORS["yellow"]
+            else:
+                color = THEME_COLORS["muted"]
+            parts.append(f"[{color}]{score}/10[/]")
 
         return "  ".join(parts)
 
@@ -1887,6 +2735,13 @@ class PaperDetails(Static):
         summary: str | None = None,
         summary_loading: bool = False,
         highlight_terms: list[str] | None = None,
+        s2_data: SemanticScholarPaper | None = None,
+        s2_loading: bool = False,
+        hf_data: HuggingFacePaper | None = None,
+        version_update: tuple[int, int] | None = None,
+        summary_mode: str = "",
+        tags: list[str] | None = None,
+        relevance: tuple[int, str] | None = None,
     ) -> None:
         """Update the displayed paper details."""
         self._paper = paper
@@ -1951,19 +2806,127 @@ class PaperDetails(Static):
             lines.append("  [dim italic]No abstract available[/]")
         lines.append("")
 
+        # Tags section (shown when tags present)
+        if tags:
+            lines.append(
+                f"[{sep_color}]━━ [{THEME_COLORS['accent']}]Tags[/] ━━━━━━━━━━━━━━━━━━━━━━━━━━━[/]"
+            )
+            # Group tags by namespace
+            namespaced: dict[str, list[str]] = {}
+            unnamespaced: list[str] = []
+            for tag in tags:
+                ns, val = parse_tag_namespace(tag)
+                if ns:
+                    namespaced.setdefault(ns, []).append(val)
+                else:
+                    unnamespaced.append(val)
+            for ns in sorted(namespaced):
+                color = get_tag_color(f"{ns}:")
+                vals = ", ".join(namespaced[ns])
+                lines.append(f"  [{color}]{ns}:[/] {vals}")
+            if unnamespaced:
+                color = get_tag_color("")
+                lines.append(f"  [{color}]{', '.join(unnamespaced)}[/]")
+            lines.append("")
+
+        # Relevance section (shown when score present)
+        if relevance is not None:
+            rel_score, rel_reason = relevance
+            if rel_score >= 8:
+                score_color = THEME_COLORS["green"]
+            elif rel_score >= 5:
+                score_color = THEME_COLORS["yellow"]
+            else:
+                score_color = THEME_COLORS["muted"]
+            lines.append(
+                f"[{sep_color}]━━ [{THEME_COLORS['accent']}]Relevance[/] ━━━━━━━━━━━━━━━━━━━━━━━[/]"
+            )
+            lines.append(
+                f"  [bold {THEME_COLORS['accent']}]Score:[/] [{score_color}]{rel_score}/10[/]"
+            )
+            if rel_reason:
+                safe_reason = escape_rich_text(rel_reason)
+                lines.append(f"  [{THEME_COLORS['text']}]{safe_reason}[/]")
+            lines.append("")
+
         # AI Summary section (shown when available or loading)
+        summary_header = "🤖 AI Summary"
+        if summary_mode:
+            summary_header += f" ({summary_mode})"
         if summary_loading:
             lines.append(
-                f"[{sep_color}]━━ [{THEME_COLORS['purple']}]🤖 AI Summary[/] ━━━━━━━━━━━━━━━━━━━━[/]"
+                f"[{sep_color}]━━ [{THEME_COLORS['purple']}]{summary_header}[/] ━━━━━━━━━━━━━━━━━━━━[/]"
             )
             lines.append("  [dim italic]⏳ Generating summary...[/]")
             lines.append("")
         elif summary:
             rendered_summary = format_summary_as_rich(summary)
             lines.append(
-                f"[{sep_color}]━━ [{THEME_COLORS['purple']}]🤖 AI Summary[/] ━━━━━━━━━━━━━━━━━━━━[/]"
+                f"[{sep_color}]━━ [{THEME_COLORS['purple']}]{summary_header}[/] ━━━━━━━━━━━━━━━━━━━━[/]"
             )
             lines.append(rendered_summary)
+            lines.append("")
+
+        # Semantic Scholar section (shown when available or loading)
+        if s2_loading:
+            lines.append(
+                f"[{sep_color}]━━ [{THEME_COLORS['green']}]Semantic Scholar[/] ━━━━━━━━━━━━━[/]"
+            )
+            lines.append("  [dim italic]Fetching data...[/]")
+            lines.append("")
+        elif s2_data:
+            lines.append(
+                f"[{sep_color}]━━ [{THEME_COLORS['green']}]Semantic Scholar[/] ━━━━━━━━━━━━━[/]"
+            )
+            lines.append(
+                f"  [bold {THEME_COLORS['accent']}]Citations:[/] {s2_data.citation_count}"
+                f"  [bold {THEME_COLORS['accent']}]Influential:[/] {s2_data.influential_citation_count}"
+            )
+            if s2_data.fields_of_study:
+                fos = ", ".join(s2_data.fields_of_study)
+                lines.append(
+                    f"  [bold {THEME_COLORS['accent']}]Fields:[/] {fos}"
+                )
+            if s2_data.tldr:
+                safe_tldr = escape_rich_text(s2_data.tldr)
+                lines.append(
+                    f"  [bold {THEME_COLORS['accent']}]TLDR:[/] [{THEME_COLORS['text']}]{safe_tldr}[/]"
+                )
+            lines.append("")
+
+        # HuggingFace section (shown when data present)
+        if hf_data:
+            lines.append(
+                f"[{sep_color}]━━ [{THEME_COLORS['orange']}]HuggingFace[/] ━━━━━━━━━━━━━━━━[/]"
+            )
+            hf_parts = [f"  [bold {THEME_COLORS['accent']}]Upvotes:[/] {hf_data.upvotes}"]
+            if hf_data.num_comments > 0:
+                hf_parts.append(f"  [bold {THEME_COLORS['accent']}]Comments:[/] {hf_data.num_comments}")
+            lines.append("".join(hf_parts))
+            if hf_data.github_repo:
+                stars_str = f" ({hf_data.github_stars} stars)" if hf_data.github_stars else ""
+                safe_repo = escape_rich_text(hf_data.github_repo)
+                lines.append(f"  [bold {THEME_COLORS['accent']}]GitHub:[/] {safe_repo}{stars_str}")
+            if hf_data.ai_keywords:
+                kw = ", ".join(hf_data.ai_keywords)
+                lines.append(f"  [bold {THEME_COLORS['accent']}]Keywords:[/] {kw}")
+            if hf_data.ai_summary:
+                safe_summary = escape_rich_text(hf_data.ai_summary)
+                lines.append(f"  [bold {THEME_COLORS['accent']}]AI Summary:[/] [{THEME_COLORS['text']}]{safe_summary}[/]")
+            lines.append("")
+
+        # Version update section (shown when update detected)
+        if version_update is not None:
+            old_v, new_v = version_update
+            lines.append(
+                f"[{sep_color}]━━ [{THEME_COLORS['pink']}]Version Update[/] ━━━━━━━━━━━━━━[/]"
+            )
+            lines.append(
+                f"  [bold {THEME_COLORS['accent']}]Updated:[/] [{THEME_COLORS['pink']}]v{old_v} \u2192 v{new_v}[/]"
+            )
+            lines.append(
+                f"  [bold {THEME_COLORS['accent']}]View diff:[/] [{THEME_COLORS['accent']}]https://arxivdiff.org/abs/{paper.arxiv_id}[/]"
+            )
             lines.append("")
 
         # URL section
@@ -2062,8 +3025,11 @@ class HelpScreen(ModalScreen[None]):
             yield Static(
                 f"  [{THEME_COLORS['green']}]/[/]            Toggle search\n"
                 f"  [{THEME_COLORS['green']}]Escape[/]       Clear search\n"
+                f"  [{THEME_COLORS['green']}]A[/]            Search all arXiv (API mode)\n"
+                f"  [{THEME_COLORS['green']}]Ctrl+e[/]       Exit API mode\n"
+                f"  [{THEME_COLORS['green']}]bracketleft / bracketright[/]  API page - / + [dim](API mode)[/]\n"
                 f"  [{THEME_COLORS['green']}]w[/]            Toggle watch list filter\n"
-                f"  [{THEME_COLORS['green']}]s[/]            Cycle sort order  [dim](title / date / arxiv_id)[/]\n"
+                f"  [{THEME_COLORS['green']}]s[/]            Cycle sort order  [dim](title / date / id / cites / trending / relevance)[/]\n"
                 f"  [{THEME_COLORS['green']}]Ctrl+b[/]       Save search as bookmark\n"
                 f"  [dim]Filters:[/] cat: author: title: abstract: tag: unread starred",
                 classes="help-keys",
@@ -2091,10 +3057,13 @@ class HelpScreen(ModalScreen[None]):
                 f"  [{THEME_COLORS['green']}]r[/]            Toggle read\n"
                 f"  [{THEME_COLORS['green']}]x[/]            Toggle star\n"
                 f"  [{THEME_COLORS['green']}]n[/]            Edit notes\n"
-                f"  [{THEME_COLORS['green']}]t[/]            Edit tags\n"
+                f"  [{THEME_COLORS['green']}]t[/]            Edit tags  [dim](namespace:value supported)[/]\n"
                 f"  [{THEME_COLORS['green']}]R[/]            Show similar papers\n"
+                f"  [{THEME_COLORS['green']}]G[/]            Citation graph  [dim](S2-powered, drill-down)[/]\n"
                 f"  [{THEME_COLORS['green']}]W[/]            Manage watch list\n"
-                f"  [{THEME_COLORS['green']}]Ctrl+s[/]       Generate AI summary",
+                f"  [{THEME_COLORS['green']}]Ctrl+s[/]       Generate AI summary  [dim](mode selector)[/]\n"
+                f"  [{THEME_COLORS['green']}]L[/]            Score papers by relevance  [dim](LLM-powered)[/]\n"
+                f"  [{THEME_COLORS['green']}]Ctrl+l[/]       Edit research interests",
                 classes="help-keys",
             )
 
@@ -2108,6 +3077,7 @@ class HelpScreen(ModalScreen[None]):
                 f"  [{THEME_COLORS['green']}]b[/]            Copy as BibTeX\n"
                 f"  [{THEME_COLORS['green']}]B[/]            Export BibTeX to file\n"
                 f"  [{THEME_COLORS['green']}]M[/]            Copy as Markdown\n"
+                f"  [{THEME_COLORS['green']}]E[/]            Export menu  [dim](RIS, CSV, Md table + more)[/]\n"
                 f"  [{THEME_COLORS['green']}]d[/]            Download PDF",
                 classes="help-keys",
             )
@@ -2269,20 +3239,56 @@ class TagsModal(ModalScreen[list[str]]):
     #tags-buttons Button {
         margin-left: 1;
     }
+
+    #tags-suggestions {
+        color: #75715e;
+        margin-bottom: 1;
+    }
     """
 
-    def __init__(self, arxiv_id: str, current_tags: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        arxiv_id: str,
+        current_tags: list[str] | None = None,
+        all_tags: list[str] | None = None,
+    ) -> None:
         super().__init__()
         self._arxiv_id = arxiv_id
         self._current_tags = current_tags or []
+        self._all_tags = all_tags or []
+
+    def _build_suggestions_markup(self) -> str:
+        """Build Rich markup for tag suggestions grouped by namespace."""
+        if not self._all_tags:
+            return ""
+        # Group unique tags by namespace
+        namespaced: dict[str, list[str]] = {}
+        unnamespaced: list[str] = []
+        for tag in sorted(set(self._all_tags)):
+            ns, val = parse_tag_namespace(tag)
+            if ns:
+                namespaced.setdefault(ns, []).append(val)
+            else:
+                unnamespaced.append(val)
+        parts = []
+        for ns in sorted(namespaced):
+            color = get_tag_color(f"{ns}:")
+            vals = ", ".join(namespaced[ns])
+            parts.append(f"[{color}]{ns}:[/] {vals}")
+        if unnamespaced:
+            parts.append(", ".join(unnamespaced))
+        return " | ".join(parts)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="tags-dialog"):
             yield Label(f"Tags for {self._arxiv_id}", id="tags-title")
             yield Label(
-                "Separate tags with commas (e.g., to-read, llm, important)",
+                "Use namespace:tag format (e.g., topic:ml, status:to-read)",
                 id="tags-help",
             )
+            suggestions = self._build_suggestions_markup()
+            if suggestions:
+                yield Label(suggestions, id="tags-suggestions")
             yield Input(
                 value=", ".join(self._current_tags),
                 placeholder="Enter tags...",
@@ -2537,6 +3543,209 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
         self.action_cancel()
 
 
+class ArxivSearchModal(ModalScreen[ArxivSearchRequest | None]):
+    """Modal dialog for searching the full arXiv API."""
+
+    BINDINGS = [
+        Binding("enter", "search", "Search"),
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    CSS = """
+    ArxivSearchModal {
+        align: center middle;
+    }
+
+    #arxiv-search-dialog {
+        width: 70%;
+        height: auto;
+        min-width: 60;
+        background: #272822;
+        border: round #66d9ef;
+        padding: 1 2;
+    }
+
+    #arxiv-search-title {
+        text-style: bold;
+        color: #66d9ef;
+        margin-bottom: 1;
+    }
+
+    #arxiv-search-help {
+        color: #75715e;
+        margin-bottom: 1;
+    }
+
+    #arxiv-search-query,
+    #arxiv-search-field,
+    #arxiv-search-category {
+        width: 100%;
+        background: #1e1e1e;
+        border: round #75715e;
+        margin-bottom: 1;
+    }
+
+    #arxiv-search-query:focus,
+    #arxiv-search-field:focus,
+    #arxiv-search-category:focus {
+        border: round #66d9ef;
+    }
+
+    #arxiv-search-buttons {
+        height: auto;
+        align: right middle;
+    }
+
+    #arxiv-search-buttons Button {
+        margin-left: 1;
+    }
+    """
+
+    def __init__(
+        self,
+        initial_query: str = "",
+        initial_field: str = "all",
+        initial_category: str = "",
+    ) -> None:
+        super().__init__()
+        self._initial_query = initial_query
+        self._initial_field = (
+            initial_field if initial_field in ARXIV_QUERY_FIELDS else "all"
+        )
+        self._initial_category = initial_category
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="arxiv-search-dialog"):
+            yield Label("Search All arXiv", id="arxiv-search-title")
+            yield Label(
+                "Query all arXiv by field, with optional category filter.",
+                id="arxiv-search-help",
+            )
+            yield Input(
+                value=self._initial_query,
+                placeholder="Search query (e.g., diffusion transformers)",
+                id="arxiv-search-query",
+            )
+            yield Select(
+                [
+                    ("All fields", "all"),
+                    ("Title", "title"),
+                    ("Author", "author"),
+                    ("Abstract", "abstract"),
+                ],
+                id="arxiv-search-field",
+            )
+            yield Input(
+                value=self._initial_category,
+                placeholder="Optional category (e.g., cs.AI)",
+                id="arxiv-search-category",
+            )
+            with Horizontal(id="arxiv-search-buttons"):
+                yield Button("Cancel (Esc)", variant="default", id="arxiv-cancel")
+                yield Button("Search (Enter)", variant="primary", id="arxiv-search")
+
+    def on_mount(self) -> None:
+        self.query_one("#arxiv-search-field", Select).value = self._initial_field
+        self.query_one("#arxiv-search-query", Input).focus()
+
+    def action_search(self) -> None:
+        query = self.query_one("#arxiv-search-query", Input).value.strip()
+        category = self.query_one("#arxiv-search-category", Input).value.strip()
+        field_value = self.query_one("#arxiv-search-field", Select).value
+        field = field_value if isinstance(field_value, str) else "all"
+
+        try:
+            build_arxiv_search_query(query, field, category)
+        except ValueError as exc:
+            self.notify(str(exc), title="arXiv Search", severity="warning")
+            return
+
+        self.dismiss(ArxivSearchRequest(query=query, field=field, category=category))
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    @on(Button.Pressed, "#arxiv-search")
+    def on_search_pressed(self) -> None:
+        self.action_search()
+
+    @on(Button.Pressed, "#arxiv-cancel")
+    def on_cancel_pressed(self) -> None:
+        self.action_cancel()
+
+    @on(Input.Submitted, "#arxiv-search-query")
+    def on_query_submitted(self) -> None:
+        self.action_search()
+
+    @on(Input.Submitted, "#arxiv-search-category")
+    def on_category_submitted(self) -> None:
+        self.action_search()
+
+
+class RecommendationSourceModal(ModalScreen[str]):
+    """Simple choice dialog: local or Semantic Scholar recommendations."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("l", "local", "Local", show=False),
+        Binding("s", "s2", "S2", show=False),
+    ]
+
+    CSS = """
+    RecommendationSourceModal {
+        align: center middle;
+    }
+
+    #rec-source-dialog {
+        width: 50;
+        height: auto;
+        background: #272822;
+        border: round #fd971f;
+        padding: 1 2;
+    }
+
+    #rec-source-title {
+        text-style: bold;
+        color: #fd971f;
+        margin-bottom: 1;
+    }
+
+    #rec-source-buttons {
+        height: auto;
+        margin-top: 1;
+        align: center middle;
+    }
+
+    #rec-source-buttons Button {
+        margin: 0 1;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="rec-source-dialog"):
+            yield Label("Recommendation Source", id="rec-source-title")
+            with Horizontal(id="rec-source-buttons"):
+                yield Button("Local (TF-IDF)", variant="default", id="local-btn")
+                yield Button("Semantic Scholar", variant="primary", id="s2-btn")
+
+    def action_cancel(self) -> None:
+        self.dismiss("")
+
+    def action_local(self) -> None:
+        self.dismiss("local")
+
+    def action_s2(self) -> None:
+        self.dismiss("s2")
+
+    @on(Button.Pressed, "#local-btn")
+    def on_local_pressed(self) -> None:
+        self.action_local()
+
+    @on(Button.Pressed, "#s2-btn")
+    def on_s2_pressed(self) -> None:
+        self.action_s2()
+
+
 class RecommendationListItem(ListItem):
     """A list item for the recommendations screen that stores a paper reference."""
 
@@ -2677,6 +3886,348 @@ class RecommendationsScreen(ModalScreen[str | None]):
             self.dismiss(event.item.paper.arxiv_id)
 
 
+# ============================================================================
+# Citation Graph Modal
+# ============================================================================
+
+
+class CitationGraphListItem(ListItem):
+    """A list item in the citation graph modal storing a CitationEntry."""
+
+    def __init__(
+        self,
+        entry: "CitationEntry",
+        *children,
+        is_local: bool = False,
+        **kwargs,
+    ) -> None:
+        super().__init__(*children, **kwargs)
+        self.entry = entry
+        self.is_local = is_local
+
+
+class CitationGraphScreen(ModalScreen[str | None]):
+    """Modal screen for exploring citation graphs with drill-down navigation.
+
+    Returns the arxiv_id of a local paper to jump to, or None.
+    """
+
+    BINDINGS = [
+        Binding("escape", "back_or_close", "Back / Close"),
+        Binding("enter", "drill_down", "Drill down"),
+        Binding("o", "open_url", "Open in browser", show=False),
+        Binding("j", "cursor_down", "Down", show=False),
+        Binding("k", "cursor_up", "Up", show=False),
+        Binding("tab", "switch_panel", "Switch panel", show=False),
+        Binding("g", "go_to_local", "Go to paper", show=False),
+    ]
+
+    CSS = """
+    CitationGraphScreen {
+        align: center middle;
+    }
+
+    #citation-graph-dialog {
+        width: 85%;
+        height: 85%;
+        min-width: 60;
+        min-height: 20;
+        background: #272822;
+        border: round #ae81ff;
+        padding: 1 2;
+    }
+
+    #citation-graph-breadcrumb {
+        text-style: bold;
+        color: #ae81ff;
+        margin-bottom: 1;
+        height: auto;
+    }
+
+    #citation-graph-panels {
+        height: 1fr;
+    }
+
+    .citation-panel {
+        width: 1fr;
+        height: 1fr;
+    }
+
+    .citation-panel-title {
+        text-style: bold;
+        color: #66d9ef;
+        height: auto;
+    }
+
+    .citation-list {
+        height: 1fr;
+        background: #1e1e1e;
+        border: round #75715e;
+    }
+
+    .citation-list.active-panel {
+        border: round #ae81ff;
+    }
+
+    .citation-list > ListItem {
+        padding: 1;
+        border-bottom: dashed #3e3d32;
+    }
+
+    .citation-list > ListItem.--highlight {
+        background: #49483e;
+    }
+
+    .cite-title {
+        color: #f8f8f2;
+    }
+
+    .cite-meta {
+        color: #75715e;
+    }
+
+    #citation-graph-buttons {
+        height: auto;
+        margin-top: 1;
+        align: right middle;
+    }
+
+    #citation-graph-status {
+        color: #75715e;
+        height: auto;
+    }
+    """
+
+    def __init__(
+        self,
+        root_title: str,
+        root_paper_id: str,
+        references: list["CitationEntry"],
+        citations: list["CitationEntry"],
+        fetch_callback: Callable,
+        local_arxiv_ids: frozenset[str],
+    ) -> None:
+        super().__init__()
+        self._root_title = root_title
+        self._root_paper_id = root_paper_id
+        self._fetch_callback = fetch_callback
+        self._local_arxiv_ids = local_arxiv_ids
+        # Stack: list of (paper_id, title, refs, cites)
+        self._stack: list[tuple[str, str, list, list]] = []
+        # Current state
+        self._current_refs = references
+        self._current_cites = citations
+        self._current_title = root_title
+        self._current_paper_id = root_paper_id
+        self._active_panel: str = "refs"  # "refs" or "cites"
+        self._loading = False
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="citation-graph-dialog"):
+            yield Static("", id="citation-graph-breadcrumb")
+            with Horizontal(id="citation-graph-panels"):
+                with Vertical(classes="citation-panel"):
+                    yield Static("", id="refs-title", classes="citation-panel-title")
+                    yield ListView(id="refs-list", classes="citation-list active-panel")
+                with Vertical(classes="citation-panel"):
+                    yield Static("", id="cites-title", classes="citation-panel-title")
+                    yield ListView(id="cites-list", classes="citation-list")
+            yield Static("", id="citation-graph-status")
+            with Horizontal(id="citation-graph-buttons"):
+                yield Button("Close (Esc)", variant="default", id="cg-close-btn")
+                yield Button("Drill Down (Enter)", variant="primary", id="cg-drill-btn")
+
+    def on_mount(self) -> None:
+        self._populate_lists()
+        self._update_breadcrumb()
+        refs_list = self.query_one("#refs-list", ListView)
+        refs_list.focus()
+
+    def _build_citation_item(self, entry: "CitationEntry") -> CitationGraphListItem:
+        """Build a list item widget for a single citation graph entry."""
+        is_local = entry.arxiv_id != "" and entry.arxiv_id in self._local_arxiv_ids
+        safe_title = escape_rich_text(entry.title)
+        local_badge = f" [{THEME_COLORS['green']}]\\[LOCAL][/]" if is_local else ""
+        year_str = str(entry.year) if entry.year else "?"
+        authors_short = truncate_text(entry.authors, 50) if entry.authors else ""
+        return CitationGraphListItem(
+            entry,
+            Static(
+                f"[bold]{safe_title}[/]{local_badge}",
+                classes="cite-title",
+            ),
+            Static(
+                f"[dim]{year_str}[/] · {escape_rich_text(authors_short)}"
+                f" · [{THEME_COLORS['accent']}]{entry.citation_count} cites[/]",
+                classes="cite-meta",
+            ),
+            is_local=is_local,
+        )
+
+    def _populate_lists(self) -> None:
+        """Fill both list views with current references and citations."""
+        refs_list = self.query_one("#refs-list", ListView)
+        cites_list = self.query_one("#cites-list", ListView)
+        refs_list.clear()
+        cites_list.clear()
+
+        for entry in self._current_refs:
+            refs_list.mount(self._build_citation_item(entry))
+        for entry in self._current_cites:
+            cites_list.mount(self._build_citation_item(entry))
+
+        if refs_list.children:
+            refs_list.index = 0
+        if cites_list.children:
+            cites_list.index = 0
+
+        # Update panel titles
+        self.query_one("#refs-title", Static).update(
+            f"References ({len(self._current_refs)})"
+        )
+        self.query_one("#cites-title", Static).update(
+            f"Cited By ({len(self._current_cites)})"
+        )
+
+        # Update status
+        self._update_status()
+
+    def _update_breadcrumb(self) -> None:
+        """Update the breadcrumb trail."""
+        parts = [truncate_text(t, 40) for _, t, _, _ in self._stack]
+        parts.append(truncate_text(self._current_title, 40))
+        breadcrumb = " → ".join(
+            f"[{THEME_COLORS['purple']}]{escape_rich_text(p)}[/]" for p in parts
+        )
+        self.query_one("#citation-graph-breadcrumb", Static).update(
+            f"Citation Graph: {breadcrumb}"
+        )
+
+    def _update_status(self) -> None:
+        """Update status bar with navigation hints."""
+        if self._loading:
+            self.query_one("#citation-graph-status", Static).update(
+                "[dim]Loading citation graph...[/]"
+            )
+            return
+        active = self._active_panel
+        panel_name = "references" if active == "refs" else "cited by"
+        depth = len(self._stack)
+        depth_str = f" [dim](depth {depth})[/]" if depth > 0 else ""
+        self.query_one("#citation-graph-status", Static).update(
+            f"[dim]Tab: switch panel · Enter: drill down · "
+            f"o: open · g: go to local · Esc: back[/]"
+            f"  Active: [{THEME_COLORS['purple']}]{panel_name}[/]{depth_str}"
+        )
+
+    def _get_active_list(self) -> ListView:
+        """Return the currently active list view."""
+        list_id = "#refs-list" if self._active_panel == "refs" else "#cites-list"
+        return self.query_one(list_id, ListView)
+
+    def _get_highlighted_entry(self) -> CitationGraphListItem | None:
+        """Get the highlighted item from the active list."""
+        lv = self._get_active_list()
+        child = lv.highlighted_child
+        if isinstance(child, CitationGraphListItem):
+            return child
+        return None
+
+    def action_back_or_close(self) -> None:
+        """Pop one level or close the modal."""
+        if self._stack:
+            paper_id, title, refs, cites = self._stack.pop()
+            self._current_paper_id = paper_id
+            self._current_title = title
+            self._current_refs = refs
+            self._current_cites = cites
+            self._populate_lists()
+            self._update_breadcrumb()
+            self._get_active_list().focus()
+        else:
+            self.dismiss(None)
+
+    async def action_drill_down(self) -> None:
+        """Drill into the highlighted entry's citation graph."""
+        if self._loading:
+            return
+        item = self._get_highlighted_entry()
+        if not item:
+            return
+        entry = item.entry
+        # Push current state
+        self._stack.append((
+            self._current_paper_id,
+            self._current_title,
+            self._current_refs,
+            self._current_cites,
+        ))
+        self._loading = True
+        self._update_status()
+        try:
+            refs, cites = await self._fetch_callback(entry.s2_paper_id)
+            self._current_paper_id = entry.s2_paper_id
+            self._current_title = entry.title
+            self._current_refs = refs
+            self._current_cites = cites
+            self._populate_lists()
+            self._update_breadcrumb()
+        except Exception:
+            logger.warning(
+                "Citation graph fetch failed for %s", entry.s2_paper_id,
+                exc_info=True,
+            )
+            # Undo the push
+            self._stack.pop()
+        finally:
+            self._loading = False
+            self._update_status()
+            self._get_active_list().focus()
+
+    def action_switch_panel(self) -> None:
+        """Toggle between references and citations panels."""
+        refs_list = self.query_one("#refs-list", ListView)
+        cites_list = self.query_one("#cites-list", ListView)
+        if self._active_panel == "refs":
+            self._active_panel = "cites"
+            refs_list.remove_class("active-panel")
+            cites_list.add_class("active-panel")
+            cites_list.focus()
+        else:
+            self._active_panel = "refs"
+            cites_list.remove_class("active-panel")
+            refs_list.add_class("active-panel")
+            refs_list.focus()
+        self._update_status()
+
+    def action_open_url(self) -> None:
+        """Open the highlighted entry's URL in the browser."""
+        item = self._get_highlighted_entry()
+        if item and item.entry.url:
+            webbrowser.open(item.entry.url)
+
+    def action_go_to_local(self) -> None:
+        """If highlighted entry is local, dismiss with its arxiv_id to jump to it."""
+        item = self._get_highlighted_entry()
+        if item and item.is_local and item.entry.arxiv_id:
+            self.dismiss(item.entry.arxiv_id)
+
+    def action_cursor_down(self) -> None:
+        self._get_active_list().action_cursor_down()
+
+    def action_cursor_up(self) -> None:
+        self._get_active_list().action_cursor_up()
+
+    @on(Button.Pressed, "#cg-close-btn")
+    def on_close_pressed(self) -> None:
+        self.action_back_or_close()
+
+    @on(Button.Pressed, "#cg-drill-btn")
+    def on_drill_pressed(self) -> None:
+        # Button click needs to invoke the async action; use app's tracked task
+        self.app._track_task(self.action_drill_down())
+
+
 class ConfirmModal(ModalScreen[bool]):
     """Modal dialog for confirming batch operations."""
 
@@ -2740,6 +4291,278 @@ class ConfirmModal(ModalScreen[bool]):
     @on(Button.Pressed, "#confirm-no")
     def on_no(self) -> None:
         self.dismiss(False)
+
+
+class ExportMenuModal(ModalScreen[str]):
+    """Unified export menu offering all clipboard and file export formats."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("c", "do_clipboard_plain", "Plain text", show=False),
+        Binding("b", "do_clipboard_bibtex", "BibTeX", show=False),
+        Binding("m", "do_clipboard_markdown", "Markdown", show=False),
+        Binding("r", "do_clipboard_ris", "RIS", show=False),
+        Binding("v", "do_clipboard_csv", "CSV", show=False),
+        Binding("t", "do_clipboard_mdtable", "Md table", show=False),
+        Binding("B", "do_file_bibtex", "BibTeX file", show=False),
+        Binding("R", "do_file_ris", "RIS file", show=False),
+        Binding("C", "do_file_csv", "CSV file", show=False),
+    ]
+
+    CSS = """
+    ExportMenuModal {
+        align: center middle;
+    }
+
+    #export-dialog {
+        width: 52;
+        height: auto;
+        background: #272822;
+        border: round #fd971f;
+        padding: 1 2;
+    }
+
+    #export-title {
+        text-style: bold;
+        color: #fd971f;
+        margin-bottom: 1;
+    }
+
+    .export-section {
+        color: #75715e;
+        margin-top: 1;
+    }
+
+    .export-keys {
+        padding-left: 2;
+        color: #f8f8f2;
+    }
+
+    #export-footer {
+        color: #75715e;
+        margin-top: 1;
+    }
+    """
+
+    def __init__(self, paper_count: int) -> None:
+        super().__init__()
+        self._paper_count = paper_count
+
+    def compose(self) -> ComposeResult:
+        s = "s" if self._paper_count != 1 else ""
+        with Vertical(id="export-dialog"):
+            yield Label(
+                f"Export Papers ({self._paper_count} selected{s})",
+                id="export-title",
+            )
+            yield Label("[bold]── Clipboard ──[/bold]", classes="export-section")
+            yield Static(
+                "  [#a6e22e]c[/]  Plain text     [#a6e22e]b[/]  BibTeX\n"
+                "  [#a6e22e]m[/]  Markdown       [#a6e22e]r[/]  RIS\n"
+                "  [#a6e22e]v[/]  CSV            [#a6e22e]t[/]  Md table",
+                classes="export-keys",
+            )
+            yield Label("[bold]── File ──[/bold]", classes="export-section")
+            yield Static(
+                "  [#a6e22e]B[/]  BibTeX (.bib)  [#a6e22e]R[/]  RIS (.ris)\n"
+                "  [#a6e22e]C[/]  CSV (.csv)",
+                classes="export-keys",
+            )
+            yield Static("[dim]Esc to cancel[/dim]", id="export-footer")
+
+    def action_cancel(self) -> None:
+        self.dismiss("")
+
+    def action_do_clipboard_plain(self) -> None:
+        self.dismiss("clipboard-plain")
+
+    def action_do_clipboard_bibtex(self) -> None:
+        self.dismiss("clipboard-bibtex")
+
+    def action_do_clipboard_markdown(self) -> None:
+        self.dismiss("clipboard-markdown")
+
+    def action_do_clipboard_ris(self) -> None:
+        self.dismiss("clipboard-ris")
+
+    def action_do_clipboard_csv(self) -> None:
+        self.dismiss("clipboard-csv")
+
+    def action_do_clipboard_mdtable(self) -> None:
+        self.dismiss("clipboard-mdtable")
+
+    def action_do_file_bibtex(self) -> None:
+        self.dismiss("file-bibtex")
+
+    def action_do_file_ris(self) -> None:
+        self.dismiss("file-ris")
+
+    def action_do_file_csv(self) -> None:
+        self.dismiss("file-csv")
+
+
+class SummaryModeModal(ModalScreen[str]):
+    """Modal for selecting AI summary mode (TLDR, methods, results, etc.)."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("d", "mode_default", "Default", show=False),
+        Binding("t", "mode_tldr", "TLDR", show=False),
+        Binding("m", "mode_methods", "Methods", show=False),
+        Binding("r", "mode_results", "Results", show=False),
+        Binding("c", "mode_comparison", "Comparison", show=False),
+    ]
+
+    CSS = """
+    SummaryModeModal {
+        align: center middle;
+    }
+
+    #summary-mode-dialog {
+        width: 52;
+        height: auto;
+        background: #272822;
+        border: round #ae81ff;
+        padding: 1 2;
+    }
+
+    #summary-mode-title {
+        text-style: bold;
+        color: #ae81ff;
+        margin-bottom: 1;
+    }
+
+    .summary-mode-keys {
+        padding-left: 2;
+        color: #f8f8f2;
+    }
+
+    #summary-mode-footer {
+        color: #75715e;
+        margin-top: 1;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="summary-mode-dialog"):
+            yield Label("AI Summary Mode", id="summary-mode-title")
+            yield Static(
+                "  [#a6e22e]d[/]  Default  [dim]— Full summary (Problem / Approach / Results)[/]\n"
+                "  [#a6e22e]t[/]  TLDR     [dim]— 1-2 sentence summary[/]\n"
+                "  [#a6e22e]m[/]  Methods  [dim]— Technical methodology deep-dive[/]\n"
+                "  [#a6e22e]r[/]  Results  [dim]— Key experimental results with numbers[/]\n"
+                "  [#a6e22e]c[/]  Compare  [dim]— Comparison with related work[/]",
+                classes="summary-mode-keys",
+            )
+            yield Static("[dim]Esc to cancel[/dim]", id="summary-mode-footer")
+
+    def action_cancel(self) -> None:
+        self.dismiss("")
+
+    def action_mode_default(self) -> None:
+        self.dismiss("default")
+
+    def action_mode_tldr(self) -> None:
+        self.dismiss("tldr")
+
+    def action_mode_methods(self) -> None:
+        self.dismiss("methods")
+
+    def action_mode_results(self) -> None:
+        self.dismiss("results")
+
+    def action_mode_comparison(self) -> None:
+        self.dismiss("comparison")
+
+
+class ResearchInterestsModal(ModalScreen[str]):
+    """Modal dialog for editing research interests used for relevance scoring."""
+
+    BINDINGS = [
+        Binding("ctrl+s", "save", "Save"),
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    CSS = """
+    ResearchInterestsModal {
+        align: center middle;
+    }
+
+    #interests-dialog {
+        width: 60%;
+        height: 60%;
+        min-width: 50;
+        min-height: 15;
+        background: #272822;
+        border: round #e6db74;
+        padding: 1 2;
+    }
+
+    #interests-title {
+        text-style: bold;
+        color: #e6db74;
+        margin-bottom: 1;
+    }
+
+    #interests-help {
+        color: #75715e;
+        margin-bottom: 1;
+    }
+
+    #interests-textarea {
+        height: 1fr;
+        background: #1e1e1e;
+        border: round #75715e;
+    }
+
+    #interests-textarea:focus {
+        border: round #66d9ef;
+    }
+
+    #interests-buttons {
+        height: auto;
+        margin-top: 1;
+        align: right middle;
+    }
+
+    #interests-buttons Button {
+        margin-left: 1;
+    }
+    """
+
+    def __init__(self, current_interests: str = "") -> None:
+        super().__init__()
+        self._current_interests = current_interests
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="interests-dialog"):
+            yield Label("Research Interests", id="interests-title")
+            yield Static(
+                "[dim]Describe your research focus. The LLM will score papers based on this.[/]",
+                id="interests-help",
+            )
+            yield TextArea(self._current_interests, id="interests-textarea")
+            with Horizontal(id="interests-buttons"):
+                yield Button("Cancel", variant="default", id="cancel-btn")
+                yield Button("Save (Ctrl+S)", variant="primary", id="save-btn")
+
+    def on_mount(self) -> None:
+        self.query_one("#interests-textarea", TextArea).focus()
+
+    def action_save(self) -> None:
+        text = self.query_one("#interests-textarea", TextArea).text.strip()
+        self.dismiss(text)
+
+    def action_cancel(self) -> None:
+        self.dismiss("")
+
+    @on(Button.Pressed, "#save-btn")
+    def on_save_pressed(self) -> None:
+        self.action_save()
+
+    @on(Button.Pressed, "#cancel-btn")
+    def on_cancel_pressed(self) -> None:
+        self.action_cancel()
 
 
 class BookmarkTabBar(Horizontal):
@@ -2938,12 +4761,21 @@ def paper_matches_watch_entry(paper: Paper, entry: WatchListEntry) -> bool:
     return False
 
 
-def sort_papers(papers: list[Paper], sort_key: str) -> list[Paper]:
+def sort_papers(
+    papers: list[Paper],
+    sort_key: str,
+    s2_cache: dict[str, SemanticScholarPaper] | None = None,
+    hf_cache: dict[str, HuggingFacePaper] | None = None,
+    relevance_cache: dict[str, tuple[int, str]] | None = None,
+) -> list[Paper]:
     """Sort papers by the given key, returning a new sorted list.
 
     Args:
         papers: List of papers to sort.
-        sort_key: One of "title", "date", "arxiv_id".
+        sort_key: One of "title", "date", "arxiv_id", "citations", "trending", "relevance".
+        s2_cache: Optional S2 cache dict, required for "citations" sort.
+        hf_cache: Optional HF cache dict, required for "trending" sort.
+        relevance_cache: Optional relevance cache dict, required for "relevance" sort.
     """
     if sort_key == "title":
         return sorted(papers, key=lambda p: p.title.lower())
@@ -2951,6 +4783,33 @@ def sort_papers(papers: list[Paper], sort_key: str) -> list[Paper]:
         return sorted(papers, key=lambda p: parse_arxiv_date(p.date), reverse=True)
     elif sort_key == "arxiv_id":
         return sorted(papers, key=lambda p: p.arxiv_id, reverse=True)
+    elif sort_key == "citations":
+
+        def _citation_key(p: Paper) -> tuple[int, int]:
+            s2 = s2_cache.get(p.arxiv_id) if s2_cache else None
+            if s2 is not None:
+                return (0, -s2.citation_count)
+            return (1, 0)
+
+        return sorted(papers, key=_citation_key)
+    elif sort_key == "trending":
+
+        def _trending_key(p: Paper) -> tuple[int, int]:
+            hf = hf_cache.get(p.arxiv_id) if hf_cache else None
+            if hf is not None:
+                return (0, -hf.upvotes)
+            return (1, 0)
+
+        return sorted(papers, key=_trending_key)
+    elif sort_key == "relevance":
+
+        def _relevance_key(p: Paper) -> tuple[int, int]:
+            rel = relevance_cache.get(p.arxiv_id) if relevance_cache else None
+            if rel is not None:
+                return (0, -rel[0])
+            return (1, 0)
+
+        return sorted(papers, key=_relevance_key)
     return list(papers)
 
 
@@ -3176,6 +5035,8 @@ class ArxivBrowser(App):
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("slash", "toggle_search", "Search"),
+        Binding("A", "arxiv_search", "arXiv Search", show=False),
+        Binding("ctrl+e", "ctrl_e_dispatch", "S2 / Exit API", show=False),
         Binding("escape", "cancel_search", "Cancel", show=False),
         Binding("o", "open_url", "Open Selected"),
         Binding("P", "open_pdf", "Open PDF", show=False),
@@ -3215,11 +5076,23 @@ class ArxivBrowser(App):
         Binding("b", "copy_bibtex", "BibTeX"),
         Binding("B", "export_bibtex_file", "Export BibTeX", show=False),
         Binding("M", "export_markdown", "Markdown", show=False),
+        Binding("E", "export_menu", "Export...", show=False),
         Binding("d", "download_pdf", "Download"),
         # Phase 9: Paper similarity
         Binding("R", "show_similar", "Similar"),
         # LLM summary
         Binding("ctrl+s", "generate_summary", "AI Summary", show=False),
+        # Semantic Scholar enrichment
+        Binding("e", "fetch_s2", "Enrich (S2)", show=False),
+        # HuggingFace trending
+        Binding("ctrl+h", "toggle_hf", "Toggle HF", show=False),
+        # Version tracking
+        Binding("V", "check_versions", "Check Versions", show=False),
+        # Citation graph
+        Binding("G", "citation_graph", "Citation Graph", show=False),
+        # Relevance scoring
+        Binding("L", "score_relevance", "Score Relevance", show=False),
+        Binding("ctrl+l", "edit_interests", "Edit Interests", show=False),
         # History mode: date navigation
         Binding("bracketleft", "prev_date", "Older", show=False),
         Binding("bracketright", "next_date", "Newer", show=False),
@@ -3247,6 +5120,9 @@ class ArxivBrowser(App):
 
         # Configuration and persistence
         self._config = config or UserConfig()
+        self._config.arxiv_api_max_results = _coerce_arxiv_api_max_results(
+            self._config.arxiv_api_max_results
+        )
         self._restore_session = restore_session
 
         # Theme and category overrides
@@ -3302,9 +5178,43 @@ class ArxivBrowser(App):
         ] = {}  # arxiv_id -> summary (in-memory cache)
         self._summary_loading: set[str] = set()  # arxiv_ids with generation in progress
         self._summary_db_path: Path = get_summary_db_path()
+        self._summary_mode_label: dict[str, str] = {}  # arxiv_id -> mode display name
+
+        # arXiv API mode state
+        self._in_arxiv_api_mode: bool = False
+        self._arxiv_search_state: ArxivSearchModeState | None = None
+        self._local_browse_snapshot: LocalBrowseSnapshot | None = None
+        self._arxiv_api_fetch_inflight: bool = False
+        self._arxiv_api_loading: bool = False
+        self._last_arxiv_api_request_at: float = 0.0
+        self._arxiv_api_request_token: int = 0
 
         # Shared HTTP client for connection pooling (created in on_mount)
         self._http_client: httpx.AsyncClient | None = None
+
+        # Semantic Scholar enrichment state
+        self._s2_active: bool = False  # Runtime toggle (set from config in on_mount)
+        self._s2_cache: dict[str, SemanticScholarPaper] = {}  # In-memory cache
+        self._s2_loading: set[str] = set()  # In-flight dedup
+        self._s2_db_path: Path = get_s2_db_path()
+
+        # HuggingFace trending state
+        self._hf_active: bool = False  # Runtime toggle (set from config in on_mount)
+        self._hf_cache: dict[str, HuggingFacePaper] = {}  # In-memory cache
+        self._hf_loading: bool = False  # Single bool (bulk fetch)
+        self._hf_db_path: Path = get_hf_db_path()
+
+        # Version tracking state (ephemeral per-session)
+        self._version_updates: dict[str, tuple[int, int]] = {}  # arxiv_id -> (old, new)
+        self._version_checking: bool = False
+
+        # Relevance scoring state
+        self._relevance_scores: dict[str, tuple[int, str]] = {}  # arxiv_id -> (score, reason)
+        self._relevance_scoring_active: bool = False
+        self._relevance_db_path: Path = get_relevance_db_path()
+
+        # TF-IDF index for similarity (lazy-built on first use)
+        self._tfidf_index: TfidfIndex | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -3343,6 +5253,14 @@ class ArxivBrowser(App):
         """Called when app is mounted. Restores session state if enabled."""
         # Create shared HTTP client for connection pooling
         self._http_client = httpx.AsyncClient()
+
+        # Initialize S2 runtime state from config
+        self._s2_active = self._config.s2_enabled
+
+        # Initialize HF runtime state from config
+        self._hf_active = self._config.hf_enabled
+        if self._hf_active:
+            self._track_task(self._fetch_hf_daily())
 
         # Set subtitle with date info if in history mode
         current_date = self._get_current_date()
@@ -3468,6 +5386,9 @@ class ArxivBrowser(App):
         cached = self._abstract_cache.get(paper.arxiv_id)
         if cached is not None:
             return cached
+        if paper.abstract is not None:
+            self._abstract_cache[paper.arxiv_id] = paper.abstract
+            return paper.abstract
         if not paper.abstract_raw:
             self._abstract_cache[paper.arxiv_id] = ""
             paper.abstract = ""
@@ -3494,17 +5415,30 @@ class ArxivBrowser(App):
             self._abstract_loading.discard(paper.arxiv_id)
             self._drain_abstract_queue()
 
+    def _tags_for(self, arxiv_id: str) -> list[str] | None:
+        """Return tags for a paper, or None if none set."""
+        meta = self._config.paper_metadata.get(arxiv_id)
+        return meta.tags if meta and meta.tags else None
+
     def _update_abstract_display(self, arxiv_id: str) -> None:
         try:
             details = self.query_one(PaperDetails)
             if details.paper and details.paper.arxiv_id == arxiv_id:
                 abstract_text = self._abstract_cache.get(arxiv_id, "")
+                s2_data, s2_loading = self._s2_state_for(arxiv_id)
                 details.update_paper(
                     details.paper,
                     abstract_text,
                     summary=self._paper_summaries.get(arxiv_id),
                     summary_loading=arxiv_id in self._summary_loading,
                     highlight_terms=self._highlight_terms.get("abstract"),
+                    s2_data=s2_data,
+                    s2_loading=s2_loading,
+                    hf_data=self._hf_state_for(arxiv_id),
+                    version_update=self._version_update_for(arxiv_id),
+                    summary_mode=self._summary_mode_label.get(arxiv_id, ""),
+                    tags=self._tags_for(arxiv_id),
+                    relevance=self._relevance_scores.get(arxiv_id),
                 )
         except NoMatches:
             pass
@@ -3521,11 +5455,32 @@ class ArxivBrowser(App):
 
         Handles the case where DOM widgets may already be destroyed during unmount.
         """
+        # API mode is intentionally session-ephemeral; persist the underlying local state.
+        snapshot = self._local_browse_snapshot if self._in_arxiv_api_mode else None
+
         # Get current date for history mode
         current_date = self._get_current_date()
         current_date_str = (
             current_date.strftime(HISTORY_DATE_FORMAT) if current_date else None
         )
+
+        if snapshot is not None:
+            self._config.session = SessionState(
+                scroll_index=snapshot.list_index,
+                current_filter=snapshot.search_query.strip(),
+                sort_index=snapshot.sort_index,
+                selected_ids=list(snapshot.selected_ids),
+                current_date=current_date_str,
+            )
+            if not save_config(self._config):
+                logger.warning("Failed to save session state to config file")
+                self.notify(
+                    "Failed to save session — changes may be lost",
+                    title="Save Error",
+                    severity="error",
+                    timeout=8,
+                )
+            return
 
         try:
             list_view = self.query_one("#paper-list", ListView)
@@ -3564,12 +5519,20 @@ class ArxivBrowser(App):
             details = self.query_one(PaperDetails)
             abstract_text = self._get_abstract_text(event.item.paper, allow_async=True)
             aid = event.item.paper.arxiv_id
+            s2_data, s2_loading = self._s2_state_for(aid)
             details.update_paper(
                 event.item.paper,
                 abstract_text,
                 summary=self._paper_summaries.get(aid),
                 summary_loading=aid in self._summary_loading,
                 highlight_terms=self._highlight_terms.get("abstract"),
+                s2_data=s2_data,
+                s2_loading=s2_loading,
+                hf_data=self._hf_state_for(aid),
+                version_update=self._version_update_for(aid),
+                summary_mode=self._summary_mode_label.get(aid, ""),
+                tags=self._tags_for(aid),
+                relevance=self._relevance_scores.get(aid),
             )
 
     @on(ListView.Highlighted)
@@ -3579,12 +5542,20 @@ class ArxivBrowser(App):
             details = self.query_one(PaperDetails)
             abstract_text = self._get_abstract_text(event.item.paper, allow_async=True)
             aid = event.item.paper.arxiv_id
+            s2_data, s2_loading = self._s2_state_for(aid)
             details.update_paper(
                 event.item.paper,
                 abstract_text,
                 summary=self._paper_summaries.get(aid),
                 summary_loading=aid in self._summary_loading,
                 highlight_terms=self._highlight_terms.get("abstract"),
+                s2_data=s2_data,
+                s2_loading=s2_loading,
+                hf_data=self._hf_state_for(aid),
+                version_update=self._version_update_for(aid),
+                summary_mode=self._summary_mode_label.get(aid, ""),
+                tags=self._tags_for(aid),
+                relevance=self._relevance_scores.get(aid),
             )
 
     def action_toggle_search(self) -> None:
@@ -3604,6 +5575,604 @@ class ArxivBrowser(App):
             search_input = self.query_one("#search-input", Input)
             search_input.value = ""
             self._apply_filter("")
+        if self._in_arxiv_api_mode:
+            self.action_exit_arxiv_search_mode()
+
+    def _capture_local_browse_snapshot(self) -> LocalBrowseSnapshot | None:
+        """Capture local browsing state before entering API search mode."""
+        try:
+            list_view = self.query_one("#paper-list", ListView)
+            search_input = self.query_one("#search-input", Input)
+        except NoMatches:
+            return None
+
+        return LocalBrowseSnapshot(
+            all_papers=self.all_papers,
+            papers_by_id=self._papers_by_id,
+            selected_ids=set(self.selected_ids),
+            sort_index=self._sort_index,
+            search_query=search_input.value.strip(),
+            pending_query=self._pending_query,
+            watch_filter_active=self._watch_filter_active,
+            active_bookmark_index=self._active_bookmark_index,
+            list_index=list_view.index if list_view.index is not None else 0,
+            sub_title=self.sub_title,
+            highlight_terms={
+                key: terms.copy() for key, terms in self._highlight_terms.items()
+            },
+            match_scores=dict(self._match_scores),
+        )
+
+    def _restore_local_browse_snapshot(self) -> None:
+        """Restore the browsing state saved before API search mode."""
+        snapshot = self._local_browse_snapshot
+        if snapshot is None:
+            return
+
+        self.all_papers = snapshot.all_papers
+        self._papers_by_id = snapshot.papers_by_id
+        self.selected_ids = set(snapshot.selected_ids)
+        self._sort_index = snapshot.sort_index
+        self._pending_query = snapshot.pending_query
+        self._watch_filter_active = snapshot.watch_filter_active
+        self._active_bookmark_index = snapshot.active_bookmark_index
+        self._highlight_terms = {
+            key: terms.copy() for key, terms in snapshot.highlight_terms.items()
+        }
+        self._match_scores = dict(snapshot.match_scores)
+        self.sub_title = snapshot.sub_title
+
+        # Recompute watch matches for the restored local dataset
+        self._compute_watched_papers()
+
+        try:
+            self.query_one("#search-input", Input).value = snapshot.search_query
+        except NoMatches:
+            pass
+
+        self._apply_filter(snapshot.search_query)
+
+        try:
+            list_view = self.query_one("#paper-list", ListView)
+            if list_view.children:
+                max_index = max(0, len(list_view.children) - 1)
+                list_view.index = min(max(0, snapshot.list_index), max_index)
+                list_view.focus()
+        except NoMatches:
+            pass
+
+        if self._config.bookmarks:
+            self._track_task(self._update_bookmark_bar())
+
+    def action_ctrl_e_dispatch(self) -> None:
+        """Context-sensitive Ctrl+e: exit API mode if active, else toggle S2."""
+        if self._in_arxiv_api_mode:
+            self.action_exit_arxiv_search_mode()
+        else:
+            self.action_toggle_s2()
+
+    def action_toggle_s2(self) -> None:
+        """Toggle Semantic Scholar enrichment on/off for this session."""
+        self._s2_active = not self._s2_active
+        state = "enabled" if self._s2_active else "disabled"
+        self.notify(f"Semantic Scholar {state}", title="S2")
+        self._update_status_bar()
+        self._refresh_detail_pane()
+
+    async def action_fetch_s2(self) -> None:
+        """Fetch Semantic Scholar data for the currently highlighted paper."""
+        if not self._s2_active:
+            self.notify(
+                "S2 is disabled (Ctrl+e to enable)", title="S2", severity="warning"
+            )
+            return
+        item = self._get_current_paper_item()
+        if not item:
+            return
+        aid = item.paper.arxiv_id
+        if aid in self._s2_loading:
+            return  # Already fetching
+        if aid in self._s2_cache:
+            self.notify("S2 data already loaded", title="S2")
+            return
+        # Try SQLite cache first (off main thread)
+        cached = await asyncio.to_thread(
+            load_s2_paper, self._s2_db_path, aid, self._config.s2_cache_ttl_days
+        )
+        if cached:
+            self._s2_cache[aid] = cached
+            self._refresh_detail_pane()
+            self._refresh_current_list_item()
+            return
+        # Fetch from API
+        self._s2_loading.add(aid)
+        self._refresh_detail_pane()  # Show loading indicator
+        self._track_task(self._fetch_s2_paper_async(aid))
+
+    async def _fetch_s2_paper_async(self, arxiv_id: str) -> None:
+        """Fetch S2 paper data and update UI on completion."""
+        try:
+            client = self._http_client
+            if client is None:
+                return
+            result = await fetch_s2_paper(
+                arxiv_id, client, api_key=self._config.s2_api_key
+            )
+            if result is None:
+                self.notify("No S2 data found", title="S2", severity="warning")
+                return
+            # Cache in memory + SQLite
+            self._s2_cache[arxiv_id] = result
+            await asyncio.to_thread(save_s2_paper, self._s2_db_path, result)
+            # Update UI if still relevant
+            self._refresh_detail_pane()
+            self._refresh_current_list_item()
+        except Exception:
+            logger.warning("S2 fetch failed for %s", arxiv_id, exc_info=True)
+            self.notify("S2 fetch failed", title="S2", severity="error")
+        finally:
+            self._s2_loading.discard(arxiv_id)
+
+    def _s2_state_for(
+        self, arxiv_id: str
+    ) -> tuple[SemanticScholarPaper | None, bool]:
+        """Return (s2_data, s2_loading) for a paper, respecting the active toggle."""
+        if not self._s2_active:
+            return None, False
+        return self._s2_cache.get(arxiv_id), arxiv_id in self._s2_loading
+
+    # ========================================================================
+    # HuggingFace trending
+    # ========================================================================
+
+    async def action_toggle_hf(self) -> None:
+        """Toggle HuggingFace trending on/off. Auto-fetches on enable."""
+        self._hf_active = not self._hf_active
+        if self._hf_active:
+            self.notify("HuggingFace trending enabled", title="HF")
+            if not self._hf_cache:
+                await self._fetch_hf_daily()
+        else:
+            self.notify("HuggingFace trending disabled", title="HF")
+        self._update_status_bar()
+        self._refresh_detail_pane()
+        self._refresh_hf_badges()
+
+    async def _fetch_hf_daily(self) -> None:
+        """Fetch HF daily papers list and update caches."""
+        if self._hf_loading:
+            return
+        # Try SQLite cache first
+        cached = await asyncio.to_thread(
+            load_hf_daily_cache, self._hf_db_path, self._config.hf_cache_ttl_hours
+        )
+        if cached is not None:
+            self._hf_cache = cached
+            self._refresh_detail_pane()
+            self._refresh_hf_badges()
+            matched = sum(1 for aid in self._hf_cache if aid in self._papers_by_id)
+            self.notify(f"HF: {matched} trending papers matched", title="HF")
+            self._update_status_bar()
+            return
+        # Fetch from API
+        self._hf_loading = True
+        self._update_status_bar()
+        self._track_task(self._fetch_hf_daily_async())
+
+    async def _fetch_hf_daily_async(self) -> None:
+        """Background task: fetch HF daily papers and update UI."""
+        try:
+            client = self._http_client
+            if client is None:
+                return
+            papers = await fetch_hf_daily_papers(client)
+            if not papers:
+                self.notify("No HF trending data found", title="HF", severity="warning")
+                return
+            self._hf_cache = {p.arxiv_id: p for p in papers}
+            await asyncio.to_thread(save_hf_daily_cache, self._hf_db_path, papers)
+            self._refresh_detail_pane()
+            self._refresh_hf_badges()
+            matched = sum(1 for aid in self._hf_cache if aid in self._papers_by_id)
+            self.notify(f"HF: {matched} trending papers matched", title="HF")
+        except Exception:
+            logger.warning("HF daily fetch failed", exc_info=True)
+            self.notify("HF fetch failed", title="HF", severity="error")
+        finally:
+            self._hf_loading = False
+            self._update_status_bar()
+
+    def _hf_state_for(self, arxiv_id: str) -> HuggingFacePaper | None:
+        """Return HF data for a paper if HF is active, else None."""
+        if not self._hf_active:
+            return None
+        return self._hf_cache.get(arxiv_id)
+
+    def _refresh_hf_badges(self) -> None:
+        """Update all visible list items with HF data."""
+        try:
+            list_view = self.query_one("#paper-list", ListView)
+        except NoMatches:
+            return
+        for item in list_view.children:
+            if isinstance(item, PaperListItem):
+                hf = self._hf_cache.get(item.paper.arxiv_id) if self._hf_active else None
+                item.update_hf_data(hf)
+
+    # ========================================================================
+    # Version tracking
+    # ========================================================================
+
+    VERSION_CHECK_BATCH_SIZE = 40  # IDs per API request (URL length safe)
+
+    async def action_check_versions(self) -> None:
+        """Check starred papers for newer arXiv versions."""
+        if self._version_checking:
+            self.notify("Version check already in progress", title="Versions")
+            return
+
+        starred_ids = {
+            aid
+            for aid, meta in self._config.paper_metadata.items()
+            if meta.starred
+        }
+        if not starred_ids:
+            self.notify("No starred papers to check", title="Versions")
+            return
+
+        self._version_checking = True
+        self._update_status_bar()
+        self.notify(
+            f"Checking {len(starred_ids)} starred papers...",
+            title="Versions",
+        )
+        self._track_task(self._check_versions_async(starred_ids))
+
+    async def _check_versions_async(self, arxiv_ids: set[str]) -> None:
+        """Background task: check starred papers for newer arXiv versions."""
+        try:
+            client = self._http_client
+            if client is None:
+                return
+
+            # Batch IDs into groups
+            id_list = sorted(arxiv_ids)
+            version_map: dict[str, int] = {}
+
+            for i in range(0, len(id_list), self.VERSION_CHECK_BATCH_SIZE):
+                batch = id_list[i : i + self.VERSION_CHECK_BATCH_SIZE]
+                await self._apply_arxiv_rate_limit()
+
+                try:
+                    response = await client.get(
+                        ARXIV_API_URL,
+                        params={
+                            "id_list": ",".join(batch),
+                            "max_results": len(batch) + 10,
+                        },
+                        headers={"User-Agent": "arxiv-subscription-viewer/1.0"},
+                        timeout=ARXIV_API_TIMEOUT,
+                    )
+                    response.raise_for_status()
+                    batch_map = parse_arxiv_version_map(response.text)
+                    version_map.update(batch_map)
+                except Exception:
+                    logger.warning(
+                        "Version check batch failed (IDs %d-%d)",
+                        i, i + len(batch),
+                        exc_info=True,
+                    )
+
+            # Compare with stored versions
+            updates_found = 0
+            for aid, new_ver in version_map.items():
+                meta = self._config.paper_metadata.get(aid)
+                if meta is None or not meta.starred:
+                    continue
+                old_ver = meta.last_checked_version
+                if old_ver is not None and new_ver > old_ver:
+                    self._version_updates[aid] = (old_ver, new_ver)
+                    updates_found += 1
+                meta.last_checked_version = new_ver
+
+            # Persist updated metadata
+            save_config(self._config)
+
+            # Refresh UI
+            self._refresh_version_badges()
+            self._refresh_detail_pane()
+
+            if updates_found > 0:
+                self.notify(
+                    f"{updates_found} paper(s) have new versions",
+                    title="Versions",
+                )
+            else:
+                self.notify("All starred papers are up to date", title="Versions")
+        except Exception:
+            logger.warning("Version check failed", exc_info=True)
+            self.notify("Version check failed", title="Versions", severity="error")
+        finally:
+            self._version_checking = False
+            self._update_status_bar()
+
+    def _version_update_for(self, arxiv_id: str) -> tuple[int, int] | None:
+        """Return version update tuple if paper has an update, else None."""
+        return self._version_updates.get(arxiv_id)
+
+    def _refresh_version_badges(self) -> None:
+        """Update all visible list items with version update data."""
+        try:
+            list_view = self.query_one("#paper-list", ListView)
+        except NoMatches:
+            return
+        for item in list_view.children:
+            if isinstance(item, PaperListItem):
+                vu = self._version_updates.get(item.paper.arxiv_id)
+                item.update_version_data(vu)
+
+    def _refresh_detail_pane(self) -> None:
+        """Re-render the detail pane for the currently highlighted paper."""
+        item = self._get_current_paper_item()
+        if not item:
+            return
+        try:
+            details = self.query_one(PaperDetails)
+        except NoMatches:
+            return
+        aid = item.paper.arxiv_id
+        abstract_text = self._get_abstract_text(item.paper, allow_async=False)
+        s2_data, s2_loading = self._s2_state_for(aid)
+        details.update_paper(
+            item.paper,
+            abstract_text,
+            summary=self._paper_summaries.get(aid),
+            summary_loading=aid in self._summary_loading,
+            highlight_terms=self._highlight_terms.get("abstract"),
+            s2_data=s2_data,
+            s2_loading=s2_loading,
+            hf_data=self._hf_state_for(aid),
+            version_update=self._version_update_for(aid),
+            summary_mode=self._summary_mode_label.get(aid, ""),
+            tags=self._tags_for(aid),
+            relevance=self._relevance_scores.get(aid),
+        )
+
+    def _refresh_current_list_item(self) -> None:
+        """Update the current list item's S2 data display."""
+        item = self._get_current_paper_item()
+        if item and self._s2_active:
+            s2 = self._s2_cache.get(item.paper.arxiv_id)
+            item.update_s2_data(s2)
+
+    def action_exit_arxiv_search_mode(self) -> None:
+        """Exit API search mode and restore local papers."""
+        if not self._in_arxiv_api_mode:
+            return
+
+        # Invalidate in-flight responses from older requests.
+        self._arxiv_api_request_token += 1
+
+        self._in_arxiv_api_mode = False
+        self._arxiv_search_state = None
+        self._arxiv_api_fetch_inflight = False
+        self._arxiv_api_loading = False
+        self._restore_local_browse_snapshot()
+        self._local_browse_snapshot = None
+        self._update_header()
+        self.notify("Exited arXiv API mode", title="arXiv Search")
+
+    def action_arxiv_search(self) -> None:
+        """Open modal to search all arXiv."""
+        default_query = ""
+        default_field = "all"
+        default_category = ""
+        if self._arxiv_search_state is not None:
+            default_query = self._arxiv_search_state.request.query
+            default_field = self._arxiv_search_state.request.field
+            default_category = self._arxiv_search_state.request.category
+
+        def on_search(request: ArxivSearchRequest | None) -> None:
+            if request is None:
+                return
+            self._track_task(self._run_arxiv_search(request, start=0))
+
+        self.push_screen(
+            ArxivSearchModal(
+                initial_query=default_query,
+                initial_field=default_field,
+                initial_category=default_category,
+            ),
+            on_search,
+        )
+
+    @staticmethod
+    def _format_arxiv_search_label(request: ArxivSearchRequest) -> str:
+        """Build a human-readable query label for API mode UI."""
+        try:
+            return build_arxiv_search_query(
+                request.query, request.field, request.category
+            )
+        except ValueError:
+            return request.query or f"cat:{request.category}"
+
+    async def _apply_arxiv_rate_limit(self) -> None:
+        """Sleep as needed to respect arXiv API rate limits."""
+        now = asyncio.get_running_loop().time()
+        elapsed = now - self._last_arxiv_api_request_at
+        if self._last_arxiv_api_request_at > 0 and elapsed < ARXIV_API_MIN_INTERVAL_SECONDS:
+            wait_seconds = ARXIV_API_MIN_INTERVAL_SECONDS - elapsed
+            self.notify(
+                f"Waiting {wait_seconds:.1f}s for arXiv API rate limit",
+                title="arXiv Search",
+            )
+            await asyncio.sleep(wait_seconds)
+        self._last_arxiv_api_request_at = asyncio.get_running_loop().time()
+
+    async def _fetch_arxiv_api_page(
+        self,
+        request: ArxivSearchRequest,
+        start: int,
+        max_results: int,
+    ) -> list[Paper]:
+        """Fetch one page of results from arXiv API."""
+        search_query = build_arxiv_search_query(
+            request.query, request.field, request.category
+        )
+        params = {
+            "search_query": search_query,
+            "sortBy": "submittedDate",
+            "sortOrder": "descending",
+            "start": start,
+            "max_results": max_results,
+        }
+        headers = {"User-Agent": "arxiv-subscription-viewer/1.0"}
+
+        await self._apply_arxiv_rate_limit()
+
+        if self._http_client is not None:
+            response = await self._http_client.get(
+                ARXIV_API_URL,
+                params=params,
+                headers=headers,
+                timeout=ARXIV_API_TIMEOUT,
+            )
+        else:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    ARXIV_API_URL,
+                    params=params,
+                    headers=headers,
+                    timeout=ARXIV_API_TIMEOUT,
+                )
+
+        response.raise_for_status()
+        return parse_arxiv_api_feed(response.text)
+
+    def _apply_arxiv_search_results(
+        self,
+        request: ArxivSearchRequest,
+        start: int,
+        max_results: int,
+        papers: list[Paper],
+    ) -> None:
+        """Switch UI to API mode and render fetched papers."""
+        was_in_api_mode = self._in_arxiv_api_mode
+        if not was_in_api_mode and self._local_browse_snapshot is None:
+            self._local_browse_snapshot = self._capture_local_browse_snapshot()
+
+        self._in_arxiv_api_mode = True
+        self._arxiv_search_state = ArxivSearchModeState(
+            request=request,
+            start=start,
+            max_results=max_results,
+        )
+
+        # API mode has its own paper set and selection state.
+        self.all_papers = papers
+        self.filtered_papers = papers.copy()
+        self._papers_by_id = {paper.arxiv_id: paper for paper in papers}
+        self.selected_ids.clear()
+        if not was_in_api_mode:
+            # First API entry starts unfiltered; subsequent pages preserve user choice.
+            self._watch_filter_active = False
+        self._pending_query = ""
+        self._highlight_terms = {"title": [], "author": [], "abstract": []}
+        self._match_scores.clear()
+        try:
+            self.query_one("#search-input", Input).value = ""
+        except NoMatches:
+            pass
+
+        self._compute_watched_papers()
+        if self._watch_filter_active:
+            self.filtered_papers = [
+                paper
+                for paper in self.filtered_papers
+                if paper.arxiv_id in self._watched_paper_ids
+            ]
+        self._sort_papers()
+        self._refresh_list_view()
+        self._update_header()
+
+        query_label = self._format_arxiv_search_label(request)
+        self.sub_title = f"API search · {truncate_text(query_label, 60)}"
+
+        try:
+            self.query_one("#paper-list", ListView).focus()
+        except NoMatches:
+            pass
+
+    async def _run_arxiv_search(self, request: ArxivSearchRequest, start: int) -> None:
+        """Execute an arXiv API search and display one results page."""
+        if self._arxiv_api_fetch_inflight:
+            self.notify("Search already in progress", title="arXiv Search")
+            return
+
+        max_results = _coerce_arxiv_api_max_results(self._config.arxiv_api_max_results)
+        self._config.arxiv_api_max_results = max_results
+        start = max(0, start)
+
+        self._arxiv_api_request_token += 1
+        request_token = self._arxiv_api_request_token
+        self._arxiv_api_fetch_inflight = True
+        self._arxiv_api_loading = True
+        self._update_status_bar()
+
+        try:
+            papers = await self._fetch_arxiv_api_page(request, start, max_results)
+        except ValueError as exc:
+            self.notify(str(exc), title="arXiv Search", severity="error")
+            return
+        except httpx.HTTPStatusError as exc:
+            self.notify(
+                f"arXiv API returned HTTP {exc.response.status_code}",
+                title="arXiv Search",
+                severity="error",
+            )
+            return
+        except (httpx.HTTPError, OSError) as exc:
+            self.notify(f"Search failed: {exc}", title="arXiv Search", severity="error")
+            return
+        finally:
+            if request_token == self._arxiv_api_request_token:
+                self._arxiv_api_fetch_inflight = False
+                self._arxiv_api_loading = False
+                self._update_status_bar()
+
+        # Ignore stale responses after mode exits or newer requests.
+        if request_token != self._arxiv_api_request_token:
+            return
+
+        if start > 0 and not papers:
+            self.notify("No more results", title="arXiv Search")
+            return
+
+        self._apply_arxiv_search_results(request, start, max_results, papers)
+        page_number = (start // max_results) + 1
+        if papers:
+            self.notify(
+                f"Loaded {len(papers)} results (page {page_number})",
+                title="arXiv Search",
+            )
+        else:
+            self.notify("No results found", title="arXiv Search")
+
+    async def _change_arxiv_page(self, direction: int) -> None:
+        """Move to the previous or next arXiv API results page."""
+        state = self._arxiv_search_state
+        if not self._in_arxiv_api_mode or state is None:
+            return
+        if self._arxiv_api_fetch_inflight:
+            self.notify("Search already in progress", title="arXiv Search")
+            return
+
+        if direction < 0 and state.start <= 0:
+            self.notify("Already at first API page", title="arXiv Search")
+            return
+
+        target_start = max(0, state.start + (direction * state.max_results))
+        await self._run_arxiv_search(state.request, start=target_start)
 
     def action_cursor_down(self) -> None:
         """Move cursor down (vim-style j key)."""
@@ -3656,6 +6225,19 @@ class ArxivBrowser(App):
 
     def _format_header_text(self, query: str = "") -> str:
         """Format the header text with paper count, date info, and filter indicator."""
+        if self._in_arxiv_api_mode and self._arxiv_search_state is not None:
+            state = self._arxiv_search_state
+            page = (state.start // state.max_results) + 1
+            mode_query = self._format_arxiv_search_label(state.request)
+            mode_query = truncate_text(mode_query, 28)
+            mode_info = (
+                f" · [{THEME_COLORS['orange']}]API[/]"
+                f" [dim]({escape_rich_text(mode_query)} · page {page})[/]"
+            )
+            if query:
+                return f" [bold]Papers[/] ({len(self.filtered_papers)}/{len(self.all_papers)}){mode_info}"
+            return f" [bold]Papers[/] ({len(self.all_papers)} total){mode_info}"
+
         # Date info for history mode
         date_info = ""
         if self._is_history_mode():
@@ -3803,7 +6385,12 @@ class ArxivBrowser(App):
     def _sort_papers(self) -> None:
         """Sort filtered_papers according to current sort order."""
         sort_key = SORT_OPTIONS[self._sort_index]
-        self.filtered_papers = sort_papers(self.filtered_papers, sort_key)
+        self.filtered_papers = sort_papers(
+            self.filtered_papers, sort_key,
+            s2_cache=self._s2_cache,
+            hf_cache=self._hf_cache,
+            relevance_cache=self._relevance_scores,
+        )
 
     def _refresh_list_view(self) -> None:
         """Refresh the list view with current filtered papers.
@@ -3838,6 +6425,8 @@ class ArxivBrowser(App):
             query = self._get_active_query()
             if query:
                 empty_msg = "[dim italic]No papers match your search.[/]\n[dim]Try a different query or press [bold]Escape[/bold] to clear.[/]"
+            elif self._in_arxiv_api_mode:
+                empty_msg = "[dim italic]No arXiv API results on this page.[/]\n[dim]Try [bold]][/bold] for next page or [bold]A[/bold] for a new query.[/]"
             elif self._watch_filter_active:
                 empty_msg = "[dim italic]No watched papers found.[/]\n[dim]Press [bold]w[/bold] to show all papers or [bold]W[/bold] to manage watch list.[/]"
             else:
@@ -3940,6 +6529,15 @@ class ArxivBrowser(App):
         if arxiv_id in self._config.paper_metadata:
             current_tags = self._config.paper_metadata[arxiv_id].tags.copy()
 
+        # Collect all unique tags across all paper metadata for suggestions
+        all_tags: list[str] = []
+        seen: set[str] = set()
+        for meta in self._config.paper_metadata.values():
+            for tag in meta.tags:
+                if tag not in seen:
+                    seen.add(tag)
+                    all_tags.append(tag)
+
         def on_tags_saved(tags: list[str] | None) -> None:
             if tags is None:
                 return
@@ -3951,7 +6549,9 @@ class ArxivBrowser(App):
                 current_item.set_metadata(metadata)
             self.notify(f"Tags: {', '.join(tags) if tags else 'none'}", title="Tags")
 
-        self.push_screen(TagsModal(arxiv_id, current_tags), on_tags_saved)
+        self.push_screen(
+            TagsModal(arxiv_id, current_tags, all_tags=all_tags), on_tags_saved
+        )
 
     # ========================================================================
     # Phase 3: Watch List
@@ -4275,6 +6875,131 @@ class ArxivBrowser(App):
                 "Failed to copy to clipboard", title="Markdown", severity="error"
             )
 
+    def action_export_menu(self) -> None:
+        """Open the unified export menu modal."""
+        papers = self._get_target_papers()
+        if not papers:
+            self.notify("No paper selected", title="Export", severity="warning")
+            return
+        self.push_screen(
+            ExportMenuModal(len(papers)),
+            callback=lambda fmt: self._do_export(fmt, papers) if fmt else None,
+        )
+
+    def _do_export(self, fmt: str, papers: list[Paper]) -> None:
+        """Dispatch export based on format string from ExportMenuModal."""
+        dispatch: dict[str, Callable[..., None]] = {
+            "clipboard-plain": lambda: self.action_copy_selected(),
+            "clipboard-bibtex": lambda: self.action_copy_bibtex(),
+            "clipboard-markdown": lambda: self.action_export_markdown(),
+            "clipboard-ris": lambda: self._export_clipboard_ris(papers),
+            "clipboard-csv": lambda: self._export_clipboard_csv(papers),
+            "clipboard-mdtable": lambda: self._export_clipboard_mdtable(papers),
+            "file-bibtex": lambda: self.action_export_bibtex_file(),
+            "file-ris": lambda: self._export_file_ris(papers),
+            "file-csv": lambda: self._export_file_csv(papers),
+        }
+        handler = dispatch.get(fmt)
+        if handler:
+            handler()
+
+    def _export_to_file(self, content: str, extension: str, format_name: str) -> None:
+        """Write content to a timestamped file using atomic write."""
+        export_dir = Path(
+            self._config.bibtex_export_dir or Path.home() / DEFAULT_BIBTEX_EXPORT_DIR
+        )
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        filename = f"arxiv-{timestamp}.{extension}"
+        filepath = export_dir / filename
+        try:
+            export_dir.mkdir(parents=True, exist_ok=True)
+            fd, tmp_path = tempfile.mkstemp(
+                dir=export_dir, suffix=".tmp", prefix=f".{extension}-"
+            )
+            closed = False
+            try:
+                os.write(fd, content.encode("utf-8"))
+                os.close(fd)
+                closed = True
+                os.replace(tmp_path, filepath)
+            except BaseException:
+                if not closed:
+                    os.close(fd)
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
+        except OSError as exc:
+            self.notify(
+                f"Failed to export {format_name}: {exc}",
+                title=f"{format_name} Export",
+                severity="error",
+            )
+            return
+        self.notify(
+            f"Exported to {filepath.name}",
+            title=f"{format_name} Export",
+        )
+
+    def _export_clipboard_ris(self, papers: list[Paper]) -> None:
+        """Copy selected papers as RIS entries to clipboard."""
+        entries = []
+        for paper in papers:
+            abstract_text = self._get_abstract_text(paper, allow_async=False) or ""
+            entries.append(format_paper_as_ris(paper, abstract_text))
+        ris_text = "\n\n".join(entries)
+        if self._copy_to_clipboard(ris_text):
+            count = len(papers)
+            self.notify(
+                f"Copied {count} RIS entr{'ies' if count > 1 else 'y'}",
+                title="RIS",
+            )
+        else:
+            self.notify("Failed to copy to clipboard", title="RIS", severity="error")
+
+    def _export_clipboard_csv(self, papers: list[Paper]) -> None:
+        """Copy selected papers as CSV to clipboard."""
+        csv_text = format_papers_as_csv(papers, self._metadata)
+        if self._copy_to_clipboard(csv_text):
+            count = len(papers)
+            self.notify(
+                f"Copied {count} paper{'s' if count > 1 else ''} as CSV",
+                title="CSV",
+            )
+        else:
+            self.notify("Failed to copy to clipboard", title="CSV", severity="error")
+
+    def _export_clipboard_mdtable(self, papers: list[Paper]) -> None:
+        """Copy selected papers as a Markdown table to clipboard."""
+        table_text = format_papers_as_markdown_table(papers)
+        if self._copy_to_clipboard(table_text):
+            count = len(papers)
+            self.notify(
+                f"Copied {count} paper{'s' if count > 1 else ''} as Markdown table",
+                title="Markdown Table",
+            )
+        else:
+            self.notify(
+                "Failed to copy to clipboard",
+                title="Markdown Table",
+                severity="error",
+            )
+
+    def _export_file_ris(self, papers: list[Paper]) -> None:
+        """Export selected papers to an RIS file."""
+        entries = []
+        for paper in papers:
+            abstract_text = self._get_abstract_text(paper, allow_async=False) or ""
+            entries.append(format_paper_as_ris(paper, abstract_text))
+        content = "\n\n".join(entries)
+        self._export_to_file(content, "ris", "RIS")
+
+    def _export_file_csv(self, papers: list[Paper]) -> None:
+        """Export selected papers to a CSV file."""
+        content = format_papers_as_csv(papers, self._metadata)
+        self._export_to_file(content, "csv", "CSV")
+
     def _get_target_papers(self) -> list[Paper]:
         """Get papers to export (selected or current)."""
         if self.selected_ids:
@@ -4310,42 +7035,230 @@ class ArxivBrowser(App):
             self.notify("No paper selected", title="Similar", severity="warning")
             return
 
-        target_paper = item.paper
+        if self._s2_active:
+            self.push_screen(
+                RecommendationSourceModal(),
+                callback=lambda source: self._show_recommendations(item.paper, source),
+            )
+        else:
+            self._show_recommendations(item.paper, "local")
+
+    def _show_recommendations(self, paper: Paper, source: str) -> None:
+        """Dispatcher for local or S2 recommendations."""
+        if not source:  # User cancelled the source modal
+            return
+        if source == "s2":
+            self._track_task(self._show_s2_recommendations(paper))
+        else:
+            self._show_local_recommendations(paper)
+
+    def _show_local_recommendations(self, paper: Paper) -> None:
+        """Show TF-IDF + metadata local recommendations."""
+        if self._tfidf_index is None:
+            self._tfidf_index = TfidfIndex.build(
+                self.all_papers,
+                text_fn=lambda p: f"{p.title} {self._get_abstract_text(p, allow_async=False) or ''}",
+            )
         similar_papers = find_similar_papers(
-            target_paper,
+            paper,
             self.all_papers,
             metadata=self._config.paper_metadata,
-            abstract_lookup=lambda paper: self._get_abstract_text(
-                paper, allow_async=False
+            abstract_lookup=lambda p: self._get_abstract_text(
+                p, allow_async=False
             )
             or "",
+            tfidf_index=self._tfidf_index,
         )
-
         if not similar_papers:
             self.notify("No similar papers found", title="Similar", severity="warning")
             return
-
-        def on_paper_selected(arxiv_id: str | None) -> None:
-            if arxiv_id:
-                # Find and scroll to the selected paper
-                list_view = self.query_one("#paper-list", ListView)
-                for i, list_item in enumerate(list_view.children):
-                    if (
-                        isinstance(list_item, PaperListItem)
-                        and list_item.paper.arxiv_id == arxiv_id
-                    ):
-                        list_view.index = i
-                        return
-                # Paper not in current view
-                self.notify(
-                    "Paper not in current view (try clearing filter)",
-                    title="Similar",
-                    severity="warning",
-                )
-
         self.push_screen(
-            RecommendationsScreen(target_paper, similar_papers), on_paper_selected
+            RecommendationsScreen(paper, similar_papers),
+            self._on_recommendation_selected,
         )
+
+    async def _show_s2_recommendations(self, paper: Paper) -> None:
+        """Fetch S2 recommendations and show them in the modal."""
+        try:
+            self.notify("Fetching S2 recommendations...", title="S2")
+            recs = await self._fetch_s2_recommendations_async(paper.arxiv_id)
+            if not recs:
+                self.notify(
+                    "No S2 recommendations found", title="S2", severity="warning"
+                )
+                return
+            similar = self._s2_recs_to_paper_tuples(recs)
+            self.push_screen(
+                RecommendationsScreen(paper, similar),
+                self._on_recommendation_selected,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to show S2 recommendations for %s",
+                paper.arxiv_id,
+                exc_info=True,
+            )
+            self.notify("S2 recommendations failed", title="S2", severity="error")
+
+    def _on_recommendation_selected(self, arxiv_id: str | None) -> None:
+        """Handle selection from the recommendations modal."""
+        if not arxiv_id:
+            return
+        list_view = self.query_one("#paper-list", ListView)
+        for i, list_item in enumerate(list_view.children):
+            if (
+                isinstance(list_item, PaperListItem)
+                and list_item.paper.arxiv_id == arxiv_id
+            ):
+                list_view.index = i
+                return
+        self.notify(
+            "Paper not in current view (try clearing filter)",
+            title="Similar",
+            severity="warning",
+        )
+
+    async def _fetch_s2_recommendations_async(
+        self, arxiv_id: str
+    ) -> list[SemanticScholarPaper]:
+        """Fetch S2 recommendations with SQLite cache."""
+        cached = await asyncio.to_thread(
+            load_s2_recommendations,
+            self._s2_db_path,
+            arxiv_id,
+            S2_REC_CACHE_TTL_DAYS,
+        )
+        if cached:
+            return cached
+        client = self._http_client
+        if client is None:
+            return []
+        recs = await fetch_s2_recommendations(
+            arxiv_id, client, api_key=self._config.s2_api_key
+        )
+        if recs:
+            await asyncio.to_thread(
+                save_s2_recommendations, self._s2_db_path, arxiv_id, recs
+            )
+        return recs
+
+    @staticmethod
+    def _s2_recs_to_paper_tuples(
+        recs: list[SemanticScholarPaper],
+    ) -> list[tuple[Paper, float]]:
+        """Convert S2 recommendations to (Paper, score) tuples for RecommendationsScreen."""
+        max_cites = max((r.citation_count for r in recs), default=1) or 1
+        results = []
+        for r in recs:
+            paper = Paper(
+                arxiv_id=r.arxiv_id or r.s2_paper_id,
+                date="",
+                title=r.title or "Unknown Title",
+                authors="",
+                categories="",
+                comments=None,
+                abstract=r.abstract or r.tldr or None,
+                url=r.url or (f"https://arxiv.org/abs/{r.arxiv_id}" if r.arxiv_id else ""),
+                source="s2",
+            )
+            score = r.citation_count / max_cites
+            results.append((paper, score))
+        return results
+
+    # ========================================================================
+    # Citation Graph
+    # ========================================================================
+
+    def action_citation_graph(self) -> None:
+        """Open the citation graph modal for the current paper."""
+        if not self._s2_active:
+            self.notify(
+                "S2 is disabled (Ctrl+e to enable)", title="S2", severity="warning"
+            )
+            return
+        item = self._get_current_paper_item()
+        if not item:
+            return
+        paper = item.paper
+        # Determine S2 paper ID: prefer cached S2 data, fallback to ARXIV:id
+        s2_data = self._s2_cache.get(paper.arxiv_id)
+        paper_id = s2_data.s2_paper_id if s2_data else f"ARXIV:{paper.arxiv_id}"
+        self.notify("Fetching citation graph...", title="Citations")
+        self._track_task(self._show_citation_graph(paper_id, paper.title))
+
+    async def _show_citation_graph(self, paper_id: str, title: str) -> None:
+        """Fetch citation graph data and push the CitationGraphScreen."""
+        try:
+            refs, cites = await self._fetch_citation_graph(paper_id)
+            if not refs and not cites:
+                self.notify(
+                    "No citation data found", title="Citations", severity="warning"
+                )
+                return
+            local_ids = frozenset(self._papers_by_id.keys())
+            self.push_screen(
+                CitationGraphScreen(
+                    root_title=title,
+                    root_paper_id=paper_id,
+                    references=refs,
+                    citations=cites,
+                    fetch_callback=self._fetch_citation_graph,
+                    local_arxiv_ids=local_ids,
+                ),
+                self._on_citation_graph_selected,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to show citation graph for %s", paper_id, exc_info=True
+            )
+            self.notify("Citation graph failed", title="Citations", severity="error")
+
+    async def _fetch_citation_graph(
+        self, paper_id: str
+    ) -> tuple[list[CitationEntry], list[CitationEntry]]:
+        """Fetch references + citations with SQLite cache.
+
+        Both directions are saved/loaded as a unit.  Since
+        ``load_s2_citation_graph`` returns ``[]`` for both "not in cache"
+        and "cached but the paper has zero entries", we use a simple
+        heuristic: if either direction has entries, the cache was populated
+        and we trust both results.
+        """
+        cached_refs = await asyncio.to_thread(
+            load_s2_citation_graph,
+            self._s2_db_path, paper_id, "references",
+            S2_CITATION_GRAPH_CACHE_TTL_DAYS,
+        )
+        cached_cites = await asyncio.to_thread(
+            load_s2_citation_graph,
+            self._s2_db_path, paper_id, "citations",
+            S2_CITATION_GRAPH_CACHE_TTL_DAYS,
+        )
+        if cached_refs or cached_cites:
+            return cached_refs, cached_cites
+
+        # Fetch from API
+        client = self._http_client
+        if client is None:
+            return [], []
+        api_key = self._config.s2_api_key
+        refs = await fetch_s2_references(paper_id, client, api_key=api_key)
+        cites = await fetch_s2_citations(paper_id, client, api_key=api_key)
+
+        # Always cache both directions together (even if empty)
+        await asyncio.to_thread(
+            save_s2_citation_graph,
+            self._s2_db_path, paper_id, "references", refs,
+        )
+        await asyncio.to_thread(
+            save_s2_citation_graph,
+            self._s2_db_path, paper_id, "citations", cites,
+        )
+        return refs, cites
+
+    def _on_citation_graph_selected(self, arxiv_id: str | None) -> None:
+        """Handle selection from the citation graph modal (jump to local paper)."""
+        self._on_recommendation_selected(arxiv_id)
 
     def action_show_help(self) -> None:
         """Show the help overlay with all keyboard shortcuts."""
@@ -4381,28 +7294,49 @@ class ArxivBrowser(App):
             self.notify("Summary already generating...", title="AI Summary")
             return
 
-        # Check in-memory cache first
-        if arxiv_id in self._paper_summaries:
-            self.notify("Summary already available", title="AI Summary")
+        self.push_screen(
+            SummaryModeModal(),
+            lambda mode: self._on_summary_mode_selected(
+                mode, item.paper, command_template
+            ),
+        )
+
+    def _on_summary_mode_selected(
+        self, mode: str, paper: Paper, command_template: str
+    ) -> None:
+        """Handle the mode chosen from SummaryModeModal."""
+        if not mode:
             return
 
-        prompt_template = self._config.llm_prompt_template or DEFAULT_LLM_PROMPT
-        cmd_hash = _compute_command_hash(command_template, prompt_template)
+        arxiv_id = paper.arxiv_id
+        if arxiv_id in self._summary_loading:
+            return
 
-        # Check SQLite cache
+        # Resolve prompt template for this mode
+        if mode == "default" and self._config.llm_prompt_template:
+            prompt_template = self._config.llm_prompt_template
+        else:
+            prompt_template = SUMMARY_MODES[mode][1]
+
+        cmd_hash = _compute_command_hash(command_template, prompt_template)
+        mode_label = mode.upper() if mode != "default" else ""
+
+        # Check SQLite cache first
         cached = _load_summary(self._summary_db_path, arxiv_id, cmd_hash)
         if cached:
             self._paper_summaries[arxiv_id] = cached
+            self._summary_mode_label[arxiv_id] = mode_label
             self._update_abstract_display(arxiv_id)
             self.notify("Summary loaded from cache", title="AI Summary")
             return
 
         # Start async generation
         self._summary_loading.add(arxiv_id)
+        self._summary_mode_label[arxiv_id] = mode_label
         self._update_abstract_display(arxiv_id)
         self._track_task(
             self._generate_summary_async(
-                item.paper, command_template, prompt_template, cmd_hash
+                paper, command_template, prompt_template, cmd_hash
             )
         )
 
@@ -4477,6 +7411,243 @@ class ArxivBrowser(App):
             self._update_abstract_display(arxiv_id)
 
     # ========================================================================
+    # Relevance Scoring
+    # ========================================================================
+
+    def action_score_relevance(self) -> None:
+        """Score all loaded papers for relevance using the configured LLM."""
+        command_template = _resolve_llm_command(self._config)
+        if not command_template:
+            preset = self._config.llm_preset
+            if preset and preset not in LLM_PRESETS:
+                valid = ", ".join(sorted(LLM_PRESETS))
+                msg = f"Unknown preset '{preset}'. Valid: {valid}"
+            else:
+                msg = (
+                    "Set llm_command or llm_preset in config.json "
+                    f"({get_config_path()})"
+                )
+            self.notify(msg, title="LLM not configured", severity="warning", timeout=8)
+            return
+
+        if self._relevance_scoring_active:
+            self.notify("Relevance scoring already in progress", title="Relevance")
+            return
+
+        interests = self._config.research_interests
+        if not interests:
+            self.push_screen(
+                ResearchInterestsModal(),
+                lambda text: self._on_interests_saved_then_score(text, command_template),
+            )
+            return
+
+        self._start_relevance_scoring(command_template, interests)
+
+    def _on_interests_saved_then_score(
+        self, interests: str, command_template: str
+    ) -> None:
+        """Callback after ResearchInterestsModal: save interests then start scoring."""
+        if not interests:
+            return
+        self._config.research_interests = interests
+        save_config(self._config)
+        self.notify("Research interests saved", title="Relevance")
+        self._start_relevance_scoring(command_template, interests)
+
+    def _start_relevance_scoring(
+        self, command_template: str, interests: str
+    ) -> None:
+        """Begin batch relevance scoring for all loaded papers."""
+        papers = list(self.all_papers)
+        self._track_task(
+            self._score_relevance_batch_async(papers, command_template, interests)
+        )
+
+    def action_edit_interests(self) -> None:
+        """Edit research interests and clear relevance cache."""
+        self.push_screen(
+            ResearchInterestsModal(self._config.research_interests),
+            self._on_interests_edited,
+        )
+
+    def _on_interests_edited(self, interests: str) -> None:
+        """Callback after editing interests: save and clear cache."""
+        if interests == self._config.research_interests:
+            return
+        self._config.research_interests = interests
+        save_config(self._config)
+        self._relevance_scores.clear()
+        self._refresh_relevance_badges()
+        self._refresh_detail_pane()
+        if interests:
+            self.notify("Research interests updated — press L to re-score", title="Relevance")
+        else:
+            self.notify("Research interests cleared", title="Relevance")
+
+    async def _score_relevance_batch_async(
+        self,
+        papers: list[Paper],
+        command_template: str,
+        interests: str,
+    ) -> None:
+        """Background task: batch-score papers for relevance."""
+        self._relevance_scoring_active = True
+        try:
+            interests_hash = _compute_command_hash(command_template, interests)
+
+            # Bulk-load existing scores from SQLite
+            cached_scores = await asyncio.to_thread(
+                _load_all_relevance_scores, self._relevance_db_path, interests_hash
+            )
+
+            # Populate in-memory cache with DB-cached scores
+            for aid, score_data in cached_scores.items():
+                self._relevance_scores[aid] = score_data
+
+            # Refresh badges for cached papers
+            self._refresh_relevance_badges()
+            self._refresh_detail_pane()
+
+            # Filter to uncached papers
+            uncached = [p for p in papers if p.arxiv_id not in cached_scores]
+
+            if not uncached:
+                self.notify(
+                    f"All {len(papers)} papers already scored",
+                    title="Relevance",
+                )
+                return
+
+            total = len(uncached)
+            scored = 0
+            failed = 0
+
+            for i, paper in enumerate(uncached):
+                prompt = build_relevance_prompt(paper, interests)
+                try:
+                    shell_command = _build_llm_shell_command(command_template, prompt)
+                except ValueError as e:
+                    logger.warning("Relevance prompt error: %s", e)
+                    self.notify(str(e), title="Relevance", severity="error", timeout=10)
+                    return
+
+                try:
+                    proc = await asyncio.create_subprocess_shell(
+                        shell_command,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    try:
+                        stdout, stderr = await asyncio.wait_for(
+                            proc.communicate(), timeout=RELEVANCE_SCORE_TIMEOUT
+                        )
+                    except asyncio.TimeoutError:
+                        proc.kill()
+                        await proc.wait()
+                        logger.warning(
+                            "Relevance scoring timed out for %s", paper.arxiv_id
+                        )
+                        failed += 1
+                        continue
+
+                    if proc.returncode != 0:
+                        err_msg = (stderr or b"").decode("utf-8", errors="replace").strip()
+                        logger.warning(
+                            "Relevance scoring failed for %s (exit %d): %s",
+                            paper.arxiv_id, proc.returncode, err_msg[:200],
+                        )
+                        failed += 1
+                        continue
+
+                    output = (stdout or b"").decode("utf-8", errors="replace").strip()
+                    result = _parse_relevance_response(output)
+                    if result is None:
+                        logger.warning(
+                            "Failed to parse relevance response for %s: %s",
+                            paper.arxiv_id, output[:200],
+                        )
+                        failed += 1
+                        continue
+
+                    score, reason = result
+                    self._relevance_scores[paper.arxiv_id] = (score, reason)
+
+                    # Persist to SQLite
+                    await asyncio.to_thread(
+                        _save_relevance_score,
+                        self._relevance_db_path,
+                        paper.arxiv_id,
+                        interests_hash,
+                        score,
+                        reason,
+                    )
+
+                    # Update list item badge
+                    self._update_relevance_badge(paper.arxiv_id)
+                    scored += 1
+
+                except Exception:
+                    logger.warning(
+                        "Relevance scoring error for %s",
+                        paper.arxiv_id,
+                        exc_info=True,
+                    )
+                    failed += 1
+
+                # Progress notification every 5 papers
+                done = i + 1
+                if done % 5 == 0:
+                    self.notify(
+                        f"Scoring relevance {done}/{total}...",
+                        title="Relevance",
+                    )
+
+            # Final notification
+            msg = f"Relevance scoring complete: {scored} scored"
+            if failed:
+                msg += f", {failed} failed"
+            cached_count = len(papers) - total
+            if cached_count:
+                msg += f", {cached_count} cached"
+            self.notify(msg, title="Relevance")
+
+            # Refresh display
+            self._refresh_relevance_badges()
+            self._refresh_detail_pane()
+
+        except Exception:
+            logger.warning("Relevance batch scoring failed", exc_info=True)
+            self.notify(
+                "Relevance scoring failed", title="Relevance", severity="error"
+            )
+        finally:
+            self._relevance_scoring_active = False
+
+    def _update_relevance_badge(self, arxiv_id: str) -> None:
+        """Update a single list item's relevance badge."""
+        try:
+            list_view = self.query_one("#paper-list", ListView)
+        except NoMatches:
+            return
+        rel = self._relevance_scores.get(arxiv_id)
+        for item in list_view.children:
+            if isinstance(item, PaperListItem) and item.paper.arxiv_id == arxiv_id:
+                item.update_relevance_data(rel)
+                break
+
+    def _refresh_relevance_badges(self) -> None:
+        """Update all visible list items with relevance score data."""
+        try:
+            list_view = self.query_one("#paper-list", ListView)
+        except NoMatches:
+            return
+        for item in list_view.children:
+            if isinstance(item, PaperListItem):
+                rel = self._relevance_scores.get(item.paper.arxiv_id)
+                item.update_relevance_data(rel)
+
+    # ========================================================================
     # History Mode: Date Navigation
     # ========================================================================
 
@@ -4514,6 +7685,15 @@ class ArxivBrowser(App):
         self._abstract_pending_ids.clear()
         self._paper_summaries.clear()
         self._summary_loading.clear()
+        self._summary_mode_label.clear()
+        self._s2_cache.clear()
+        self._s2_loading.clear()
+        self._hf_cache.clear()
+        self._hf_loading = False
+        self._version_updates.clear()
+        self._relevance_scores.clear()
+        self._relevance_scoring_active = False
+        self._tfidf_index = None
 
         # Clear selection when switching dates
         self.selected_ids.clear()
@@ -4525,11 +7705,19 @@ class ArxivBrowser(App):
         query = self.query_one("#search-input", Input).value.strip()
         self._apply_filter(query)
 
+        # Re-fetch HF data if active (since HF data is date-specific)
+        if self._hf_active:
+            self._track_task(self._fetch_hf_daily())
+
         # Update subtitle
         self.sub_title = f"{len(self.all_papers)} papers · {current_date.strftime(HISTORY_DATE_FORMAT)}"
 
     def action_prev_date(self) -> None:
         """Navigate to previous (older) date file."""
+        if self._in_arxiv_api_mode:
+            self._track_task(self._change_arxiv_page(-1))
+            return
+
         if not self._is_history_mode():
             self.notify("Not in history mode", title="Navigate", severity="warning")
             return
@@ -4548,6 +7736,10 @@ class ArxivBrowser(App):
 
     def action_next_date(self) -> None:
         """Navigate to next (newer) date file."""
+        if self._in_arxiv_api_mode:
+            self._track_task(self._change_arxiv_page(1))
+            return
+
         if not self._is_history_mode():
             self.notify("Not in history mode", title="Navigate", severity="warning")
             return
@@ -4605,8 +7797,37 @@ class ArxivBrowser(App):
         parts.append(f"[dim]Sort: {SORT_OPTIONS[self._sort_index]}[/]")
 
         # Mode badges
+        if self._in_arxiv_api_mode and self._arxiv_search_state is not None:
+            page = (self._arxiv_search_state.start // self._arxiv_search_state.max_results) + 1
+            parts.append(f"[{THEME_COLORS['orange']}]API[/]")
+            parts.append(f"[dim]Page: {page}[/]")
+            if self._arxiv_api_loading:
+                parts.append(f"[{THEME_COLORS['orange']}]Loading...[/]")
         if self._show_abstract_preview:
             parts.append(f"[{THEME_COLORS['purple']}]Preview[/]")
+        if self._s2_active:
+            s2_count = len(self._s2_cache)
+            if self._s2_loading:
+                parts.append(f"[{THEME_COLORS['green']}]S2 loading...[/]")
+            elif s2_count > 0:
+                parts.append(f"[{THEME_COLORS['green']}]S2:{s2_count}[/]")
+            else:
+                parts.append(f"[{THEME_COLORS['green']}]S2[/]")
+        if self._hf_active:
+            if self._hf_loading:
+                parts.append(f"[{THEME_COLORS['orange']}]HF loading...[/]")
+            else:
+                matched = sum(1 for aid in self._hf_cache if aid in self._papers_by_id)
+                if matched > 0:
+                    parts.append(f"[{THEME_COLORS['orange']}]HF:{matched}[/]")
+                else:
+                    parts.append(f"[{THEME_COLORS['orange']}]HF[/]")
+        if self._version_checking:
+            parts.append(f"[{THEME_COLORS['pink']}]Checking versions...[/]")
+        elif self._version_updates:
+            parts.append(
+                f"[{THEME_COLORS['pink']}]{len(self._version_updates)} updated[/]"
+            )
 
         status.update(" [dim]│[/] ".join(parts))
 
