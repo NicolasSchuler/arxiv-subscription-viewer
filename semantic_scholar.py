@@ -671,7 +671,9 @@ def has_s2_citation_graph_cache(
                 return False
             return _is_fresh(row[0], ttl_days)
     except sqlite3.Error:
-        logger.warning("Failed to check citation graph cache marker for %s", paper_id, exc_info=True)
+        logger.warning(
+            "Failed to check citation graph cache marker for %s", paper_id, exc_info=True
+        )
         return False
 
 

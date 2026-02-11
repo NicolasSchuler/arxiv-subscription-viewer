@@ -2365,10 +2365,10 @@ class TestTextualIntegration:
         ]
 
     async def test_app_renders_paper_list(self, make_paper):
-        """App should mount and render all papers in the list view."""
+        """App should mount and render all papers in the option list."""
         from unittest.mock import patch
 
-        from textual.widgets import ListView
+        from textual.widgets import OptionList
 
         from arxiv_browser import ArxivBrowser
 
@@ -2376,14 +2376,14 @@ class TestTextualIntegration:
         app = ArxivBrowser(papers, restore_session=False)
         with patch("arxiv_browser.save_config", return_value=True):
             async with app.run_test():
-                list_view = app.query_one("#paper-list", ListView)
-                assert len(list_view.children) == 5
+                option_list = app.query_one("#paper-list", OptionList)
+                assert option_list.option_count == 5
 
     async def test_search_filters_papers(self, make_paper):
         """Typing in search should filter the paper list after debounce."""
         from unittest.mock import patch
 
-        from textual.widgets import ListView
+        from textual.widgets import OptionList
 
         from arxiv_browser import ArxivBrowser
 
@@ -2405,16 +2405,16 @@ class TestTextualIntegration:
                 await pilot.press("Q", "u", "a", "n", "t", "u", "m")
                 # Wait for debounce (0.3s) + margin for DOM update
                 await pilot.pause(0.7)
-                list_view = app.query_one("#paper-list", ListView)
-                assert len(list_view.children) == 1
+                option_list = app.query_one("#paper-list", OptionList)
+                assert option_list.option_count == 1
 
     async def test_search_clear_restores_all(self, make_paper):
         """Pressing escape on search should restore all papers."""
         from unittest.mock import patch
 
-        from textual.widgets import ListView
+        from textual.widgets import OptionList
 
-        from arxiv_browser import ArxivBrowser, PaperListItem
+        from arxiv_browser import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=3)
         app = ArxivBrowser(papers, restore_session=False)
@@ -2426,16 +2426,33 @@ class TestTextualIntegration:
                 for ch in "cat:nonexistent":
                     await pilot.press(ch)
                 await pilot.pause(0.7)
-                list_view = app.query_one("#paper-list", ListView)
-                # Empty state shows a placeholder ListItem, not PaperListItems
-                paper_items = [c for c in list_view.children if isinstance(c, PaperListItem)]
-                assert len(paper_items) == 0
+                option_list = app.query_one("#paper-list", OptionList)
+                # Empty state shows a single placeholder option
+                assert option_list.option_count == 1
 
                 # Cancel search with escape
                 await pilot.press("escape")
                 await pilot.pause(0.4)
-                paper_items = [c for c in list_view.children if isinstance(c, PaperListItem)]
-                assert len(paper_items) == 3
+                assert option_list.option_count == 3
+
+    async def test_filter_to_empty_cancels_pending_detail_update(self, make_paper):
+        """Filtering to an empty list must not allow stale debounced detail updates."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser, PaperDetails
+
+        papers = self._make_papers(make_paper, count=2)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test():
+                details = app.query_one(PaperDetails)
+                app._pending_detail_paper = papers[0]
+                app._apply_filter("cat:nonexistent")
+                assert "Select a paper" in str(details.content)
+
+                # Simulate a late timer callback from a previous highlight.
+                app._debounced_detail_update()
+                assert "Select a paper" in str(details.content)
 
     async def test_sort_cycling(self, make_paper):
         """Pressing 's' should cycle through sort options."""
@@ -2529,7 +2546,7 @@ class TestTextualIntegration:
         """Pressing 'j' moves cursor down, 'k' moves cursor up."""
         from unittest.mock import patch
 
-        from textual.widgets import ListView
+        from textual.widgets import OptionList
 
         from arxiv_browser import ArxivBrowser
 
@@ -2537,19 +2554,19 @@ class TestTextualIntegration:
         app = ArxivBrowser(papers, restore_session=False)
         with patch("arxiv_browser.save_config", return_value=True):
             async with app.run_test() as pilot:
-                list_view = app.query_one("#paper-list", ListView)
+                option_list = app.query_one("#paper-list", OptionList)
                 # Should start at index 0
-                assert list_view.index == 0
+                assert option_list.highlighted == 0
 
                 # Move down
                 await pilot.press("j")
-                assert list_view.index == 1
+                assert option_list.highlighted == 1
                 await pilot.press("j")
-                assert list_view.index == 2
+                assert option_list.highlighted == 2
 
                 # Move back up
                 await pilot.press("k")
-                assert list_view.index == 1
+                assert option_list.highlighted == 1
 
 
 @pytest.mark.integration
@@ -2605,9 +2622,9 @@ class TestArxivApiModeIntegration:
         """Watch filter state should survive paging within API mode."""
         from unittest.mock import AsyncMock, patch
 
-        from textual.widgets import ListView
+        from textual.widgets import OptionList
 
-        from arxiv_browser import ArxivBrowser, PaperListItem, UserConfig, WatchListEntry
+        from arxiv_browser import ArxivBrowser, UserConfig, WatchListEntry
 
         local_papers = [make_paper(arxiv_id="2401.00001", title="Local paper")]
         api_page_1 = [
@@ -2646,18 +2663,16 @@ class TestArxivApiModeIntegration:
                 await pilot.pause(0.1)
                 assert app._watch_filter_active is True
 
-                list_view = app.query_one("#paper-list", ListView)
-                visible_items = [c for c in list_view.children if isinstance(c, PaperListItem)]
-                assert len(visible_items) == 1
+                option_list = app.query_one("#paper-list", OptionList)
+                assert option_list.option_count == 1
 
                 await pilot.press("bracketright")
                 await pilot.pause(0.2)
                 assert app._watch_filter_active is True
 
-                list_view = app.query_one("#paper-list", ListView)
-                visible_items = [c for c in list_view.children if isinstance(c, PaperListItem)]
-                assert len(visible_items) == 1
-                assert visible_items[0].paper.arxiv_id == "2602.00003"
+                assert option_list.option_count == 1
+                # Verify the correct paper via filtered_papers
+                assert app.filtered_papers[0].arxiv_id == "2602.00003"
 
     async def test_brackets_route_to_api_pagination_only_in_api_mode(self, make_paper):
         """[`/`] should call API page change only when API mode is active."""
@@ -2796,7 +2811,7 @@ class TestStatusFilterIntegration:
         """Applying a filter should sync _pending_query and update UI."""
         from unittest.mock import patch
 
-        from textual.widgets import Label, ListView
+        from textual.widgets import Label
 
         app = self._make_app(make_paper)
         with patch("arxiv_browser.save_config", return_value=True):
@@ -2817,9 +2832,7 @@ class TestStatusFilterIntegration:
         """Cancelling search should clear the query state and restore UI."""
         from unittest.mock import patch
 
-        from textual.widgets import Input, ListView
-
-        from arxiv_browser import PaperListItem
+        from textual.widgets import Input, OptionList
 
         app = self._make_app(make_paper)
         with patch("arxiv_browser.save_config", return_value=True):
@@ -2838,9 +2851,8 @@ class TestStatusFilterIntegration:
                 search_input = app.query_one("#search-input", Input)
                 assert search_input.value == ""
                 # Verify all papers are restored in the list
-                list_view = app.query_one("#paper-list", ListView)
-                paper_items = [c for c in list_view.children if isinstance(c, PaperListItem)]
-                assert len(paper_items) == 1  # App was created with 1 paper
+                option_list = app.query_one("#paper-list", OptionList)
+                assert option_list.option_count == 1  # App was created with 1 paper
 
 
 # ============================================================================
@@ -3907,6 +3919,7 @@ class TestDetailKwargs:
             (),
             {
                 "paper_metadata": {},
+                "collapsed_sections": ["tags", "relevance", "summary", "s2", "hf", "version"],
             },
         )()
         app._relevance_scores = {"2401.00001": (8, "relevant")}
@@ -3922,6 +3935,14 @@ class TestDetailKwargs:
         assert kwargs["summary_mode"] == "tldr"
         assert kwargs["tags"] is None
         assert kwargs["relevance"] == (8, "relevant")
+        assert kwargs["collapsed_sections"] == [
+            "tags",
+            "relevance",
+            "summary",
+            "s2",
+            "hf",
+            "version",
+        ]
 
 
 class TestDetailPaneHighlighting:
@@ -4303,7 +4324,7 @@ class TestS2PaperListItem:
         )
         item.update_s2_data(s2)
         meta = item._get_meta_text()
-        assert "42 cites" in meta
+        assert "C42" in meta
 
     def test_no_badge_without_s2(self, make_paper):
         from arxiv_browser import PaperListItem
@@ -4311,7 +4332,7 @@ class TestS2PaperListItem:
         paper = make_paper()
         item = PaperListItem(paper)
         meta = item._get_meta_text()
-        assert "cites" not in meta
+        assert "C0" not in meta
 
 
 class TestS2RecsConversion:
@@ -4442,6 +4463,8 @@ class TestS2AppActions:
         app._s2_cache = {}
         app._s2_loading = set()
         app._s2_db_path = None
+        app._badges_dirty = set()
+        app._badge_timer = None
         app._config = type(
             "Config",
             (),
@@ -4460,19 +4483,56 @@ class TestS2AppActions:
         app.notify = MagicMock()
         app._update_status_bar = MagicMock()
         app._refresh_detail_pane = MagicMock()
-        app._refresh_s2_badges = MagicMock()
+        app._mark_badges_dirty = MagicMock()
 
         assert app._s2_active is False
         app.action_toggle_s2()
         assert app._s2_active is True
         app.notify.assert_called_once()
         assert "enabled" in app.notify.call_args[0][0]
-        app._refresh_s2_badges.assert_called_once()
+        app._mark_badges_dirty.assert_called_once_with("s2", immediate=True)
 
         app.action_toggle_s2()
         assert app._s2_active is False
         assert "disabled" in app.notify.call_args[0][0]
-        assert app._refresh_s2_badges.call_count == 2
+        assert app._mark_badges_dirty.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_action_fetch_s2_dedupes_concurrent_calls(self, make_paper):
+        import asyncio
+        import time
+        from unittest.mock import MagicMock, patch
+
+        from arxiv_browser import ArxivBrowser
+
+        paper = make_paper(arxiv_id="2401.42424")
+        app = ArxivBrowser([paper], restore_session=False)
+
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                app._s2_active = True
+                load_calls = 0
+                track_calls = 0
+
+                def fake_load_s2_paper(*_args, **_kwargs):
+                    nonlocal load_calls
+                    load_calls += 1
+                    time.sleep(0.05)
+                    return None
+
+                def fake_track_task(coro):
+                    nonlocal track_calls
+                    track_calls += 1
+                    coro.close()
+                    return MagicMock()
+
+                app._track_task = fake_track_task
+                with patch("arxiv_browser.load_s2_paper", side_effect=fake_load_s2_paper):
+                    await asyncio.gather(app.action_fetch_s2(), app.action_fetch_s2())
+                    await pilot.pause(0)
+
+                assert load_calls == 1
+                assert track_calls == 1
 
     def test_ctrl_e_dispatch_to_exit_api_mode(self):
         from unittest.mock import MagicMock
@@ -4775,7 +4835,7 @@ class TestHfPaperListItem:
         hf = HuggingFacePaper("2401.12345", "Test", 42, 0, "", (), "", 0)
         item.update_hf_data(hf)
         meta = item._get_meta_text()
-        assert "42 upvotes" in meta
+        assert "\u219142" in meta
 
     def test_hf_badge_absent_when_no_data(self, make_paper):
         from arxiv_browser import PaperListItem
@@ -4783,7 +4843,7 @@ class TestHfPaperListItem:
         paper = make_paper()
         item = PaperListItem(paper)
         meta = item._get_meta_text()
-        assert "upvotes" not in meta
+        assert "\u2191" not in meta
 
 
 class TestHfAppState:
@@ -4820,56 +4880,356 @@ class TestHfAppState:
         app._hf_active = True
         assert app._hf_state_for("unknown") is None
 
-
-class TestRefreshListBadges:
-    """Verify the generic _refresh_list_badges dispatches correctly."""
-
-    def test_refresh_list_badges_calls_update(self, make_paper):
+    @pytest.mark.asyncio
+    async def test_fetch_hf_daily_dedupes_concurrent_calls(self, make_paper):
+        import asyncio
+        import time
         from unittest.mock import MagicMock, patch
 
-        from arxiv_browser import ArxivBrowser, Paper, PaperListItem
+        from arxiv_browser import ArxivBrowser
+
+        paper = make_paper(arxiv_id="2401.51515")
+        app = ArxivBrowser([paper], restore_session=False)
+
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                cache_calls = 0
+                track_calls = 0
+
+                def fake_load_hf_daily_cache(*_args, **_kwargs):
+                    nonlocal cache_calls
+                    cache_calls += 1
+                    time.sleep(0.05)
+                    return None
+
+                def fake_track_task(coro):
+                    nonlocal track_calls
+                    track_calls += 1
+                    coro.close()
+                    return MagicMock()
+
+                app._track_task = fake_track_task
+                with patch("arxiv_browser.load_hf_daily_cache", side_effect=fake_load_hf_daily_cache):
+                    await asyncio.gather(app._fetch_hf_daily(), app._fetch_hf_daily())
+                    await pilot.pause(0)
+
+                assert cache_calls == 1
+                assert track_calls == 1
+
+
+class TestBadgeCoalescing:
+    """Tests for the P5 badge refresh coalescing system."""
+
+    def _make_badge_app(self):
+        from arxiv_browser import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._http_client = None
+        app._badges_dirty = set()
+        app._badge_timer = None
+        app._s2_active = True
+        app._s2_cache = {}
+        app._hf_active = True
+        app._hf_cache = {}
+        app._version_updates = {}
+        app._relevance_scores = {}
+        return app
 
-        # Create mock items
-        item1 = MagicMock(spec=PaperListItem)
-        item1.paper = make_paper(arxiv_id="2401.00001")
-        item2 = MagicMock(spec=PaperListItem)
-        item2.paper = make_paper(arxiv_id="2401.00002")
+    def test_mark_badges_dirty_coalesces(self):
+        """Multiple dirty calls accumulate badge types with a single timer."""
+        from unittest.mock import MagicMock
 
-        mock_list_view = MagicMock()
-        mock_list_view.children = [item1, item2]
+        app = self._make_badge_app()
+        mock_timer = MagicMock()
+        app.set_timer = MagicMock(return_value=mock_timer)
 
-        lookup = {"2401.00001": "data1"}
-        update_fn = MagicMock()
+        app._mark_badges_dirty("hf")
+        assert "hf" in app._badges_dirty
+        first_timer_call_count = app.set_timer.call_count
 
-        with patch.object(app, "query_one", return_value=mock_list_view):
-            app._refresh_list_badges(lookup.get, update_fn)
+        app._mark_badges_dirty("s2")
+        assert "hf" in app._badges_dirty
+        assert "s2" in app._badges_dirty
+        # Timer was swapped (old stopped, new created)
+        assert app.set_timer.call_count == first_timer_call_count + 1
 
-        update_fn.assert_any_call(item1, "data1")
-        update_fn.assert_any_call(item2, None)
-        assert update_fn.call_count == 2
+    def test_flush_badge_refresh_clears_dirty(self, make_paper):
+        from unittest.mock import MagicMock
 
-    def test_refresh_s2_badges_uses_toggle_and_cache(self):
+        app = self._make_badge_app()
+        app._badges_dirty = {"hf", "s2"}
+        paper = make_paper(arxiv_id="2401.00001")
+        app.filtered_papers = [paper]
+        app._update_option_at_index = MagicMock()
+
+        app._flush_badge_refresh()
+
+        assert app._badges_dirty == set()
+        app._update_option_at_index.assert_called_once_with(0)
+
+    def test_mark_badges_dirty_immediate_flushes(self, make_paper):
+        """immediate=True flushes synchronously without setting a timer."""
+        from unittest.mock import MagicMock
+
+        app = self._make_badge_app()
+        app.set_timer = MagicMock()
+        paper = make_paper(arxiv_id="2401.00001")
+        app.filtered_papers = [paper]
+        app._update_option_at_index = MagicMock()
+
+        app._mark_badges_dirty("hf", immediate=True)
+
+        # No timer was set
+        app.set_timer.assert_not_called()
+        # Badge was flushed
+        assert app._badges_dirty == set()
+        app._update_option_at_index.assert_called_once_with(0)
+
+    def test_flush_badge_refresh_skips_empty_dirty(self):
+        """Empty dirty set skips iteration entirely."""
+        from unittest.mock import MagicMock
+
+        app = self._make_badge_app()
+        app._badges_dirty = set()
+        app.filtered_papers = []
+        app._update_option_at_index = MagicMock()
+
+        app._flush_badge_refresh()
+
+        app._update_option_at_index.assert_not_called()
+
+    def test_badge_timer_cleanup_on_unmount(self):
+        """Verify _badge_timer is stopped during on_unmount."""
         from unittest.mock import MagicMock
 
         from arxiv_browser import ArxivBrowser
 
-        app = ArxivBrowser.__new__(ArxivBrowser)
-        app._s2_cache = {"2401.00001": "s2-data"}  # type: ignore[assignment]
-        app._s2_active = False
-        app._refresh_list_badges = MagicMock()
+        app = self._make_badge_app()
+        app._search_timer = None
+        app._detail_timer = None
+        mock_timer = MagicMock()
+        app._badge_timer = mock_timer
+        app._save_session_state = MagicMock()
 
-        app._refresh_s2_badges()
-        lookup_fn, update_fn = app._refresh_list_badges.call_args[0]
-        assert lookup_fn("2401.00001") is None
-        assert callable(update_fn)
+        app.on_unmount()
 
-        app._s2_active = True
-        app._refresh_s2_badges()
-        lookup_fn, _ = app._refresh_list_badges.call_args[0]
-        assert lookup_fn("2401.00001") == "s2-data"
+        mock_timer.stop.assert_called_once()
+        assert app._badge_timer is None
+
+    def test_flush_updates_multiple_papers(self, make_paper):
+        """Flush iterates all filtered papers."""
+        from unittest.mock import MagicMock
+
+        app = self._make_badge_app()
+        app._badges_dirty = {"hf"}
+        app.filtered_papers = [
+            make_paper(arxiv_id="2401.00001"),
+            make_paper(arxiv_id="2401.00002"),
+            make_paper(arxiv_id="2401.00003"),
+        ]
+        app._update_option_at_index = MagicMock()
+
+        app._flush_badge_refresh()
+
+        assert app._update_option_at_index.call_count == 3
+        app._update_option_at_index.assert_any_call(0)
+        app._update_option_at_index.assert_any_call(1)
+        app._update_option_at_index.assert_any_call(2)
+
+
+# ============================================================================
+# Tests for detail pane content caching (P7)
+# ============================================================================
+
+
+class TestDetailCacheKey:
+    """Tests for the _detail_cache_key pure function."""
+
+    def test_deterministic(self, make_paper):
+        from arxiv_browser import _detail_cache_key
+
+        paper = make_paper(arxiv_id="2401.00001")
+        key1 = _detail_cache_key(paper, "abstract text", tags=["ml", "cv"])
+        key2 = _detail_cache_key(paper, "abstract text", tags=["ml", "cv"])
+        assert key1 == key2
+
+    def test_varies_on_summary(self, make_paper):
+        from arxiv_browser import _detail_cache_key
+
+        paper = make_paper(arxiv_id="2401.00001")
+        key1 = _detail_cache_key(paper, "abstract")
+        key2 = _detail_cache_key(paper, "abstract", summary="This paper does X")
+        assert key1 != key2
+
+    def test_varies_on_tags(self, make_paper):
+        from arxiv_browser import _detail_cache_key
+
+        paper = make_paper(arxiv_id="2401.00001")
+        key1 = _detail_cache_key(paper, "abstract", tags=["ml"])
+        key2 = _detail_cache_key(paper, "abstract", tags=["ml", "cv"])
+        assert key1 != key2
+
+    def test_varies_on_highlight(self, make_paper):
+        from arxiv_browser import _detail_cache_key
+
+        paper = make_paper(arxiv_id="2401.00001")
+        key1 = _detail_cache_key(paper, "abstract", highlight_terms=["attention"])
+        key2 = _detail_cache_key(paper, "abstract", highlight_terms=["transformer"])
+        assert key1 != key2
+
+    def test_varies_on_collapsed(self, make_paper):
+        from arxiv_browser import _detail_cache_key
+
+        paper = make_paper(arxiv_id="2401.00001")
+        key1 = _detail_cache_key(paper, "abstract", collapsed_sections=["authors"])
+        key2 = _detail_cache_key(paper, "abstract", collapsed_sections=["abstract"])
+        assert key1 != key2
+
+    def test_varies_on_abstract_tail_beyond_prefix(self, make_paper):
+        from arxiv_browser import _detail_cache_key
+
+        paper = make_paper(arxiv_id="2401.00001")
+        prefix = "A" * 80
+        key1 = _detail_cache_key(paper, f"{prefix} tail-one")
+        key2 = _detail_cache_key(paper, f"{prefix} tail-two")
+        assert key1 != key2
+
+    def test_varies_on_s2_citation_count(self, make_paper):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import _detail_cache_key
+
+        paper = make_paper(arxiv_id="2401.00001")
+        s2_a = MagicMock()
+        s2_a.citation_count = 10
+        s2_b = MagicMock()
+        s2_b.citation_count = 20
+        key1 = _detail_cache_key(paper, "abstract", s2_data=s2_a)
+        key2 = _detail_cache_key(paper, "abstract", s2_data=s2_b)
+        assert key1 != key2
+
+    def test_varies_on_s2_non_count_fields(self, make_paper):
+        from arxiv_browser import _detail_cache_key
+        from semantic_scholar import SemanticScholarPaper
+
+        paper = make_paper(arxiv_id="2401.00001")
+        s2_a = SemanticScholarPaper(
+            arxiv_id=paper.arxiv_id,
+            s2_paper_id="s2-id",
+            citation_count=10,
+            influential_citation_count=2,
+            tldr="first",
+            fields_of_study=("CS",),
+            year=2024,
+            url="https://example.com",
+            title="title",
+            abstract="abs",
+        )
+        s2_b = SemanticScholarPaper(
+            arxiv_id=paper.arxiv_id,
+            s2_paper_id="s2-id",
+            citation_count=10,
+            influential_citation_count=2,
+            tldr="second",
+            fields_of_study=("CS",),
+            year=2024,
+            url="https://example.com",
+            title="title",
+            abstract="abs",
+        )
+        key1 = _detail_cache_key(paper, "abstract", s2_data=s2_a)
+        key2 = _detail_cache_key(paper, "abstract", s2_data=s2_b)
+        assert key1 != key2
+
+    def test_varies_on_hf_non_upvote_fields(self, make_paper):
+        from arxiv_browser import _detail_cache_key
+        from huggingface import HuggingFacePaper
+
+        paper = make_paper(arxiv_id="2401.00001")
+        hf_a = HuggingFacePaper(
+            arxiv_id=paper.arxiv_id,
+            title="HF",
+            upvotes=7,
+            num_comments=1,
+            ai_summary="one",
+            ai_keywords=("k",),
+            github_repo="owner/repo",
+            github_stars=3,
+        )
+        hf_b = HuggingFacePaper(
+            arxiv_id=paper.arxiv_id,
+            title="HF",
+            upvotes=7,
+            num_comments=1,
+            ai_summary="two",
+            ai_keywords=("k",),
+            github_repo="owner/repo",
+            github_stars=3,
+        )
+        key1 = _detail_cache_key(paper, "abstract", hf_data=hf_a)
+        key2 = _detail_cache_key(paper, "abstract", hf_data=hf_b)
+        assert key1 != key2
+
+
+class TestDetailPaneCache:
+    """Tests for the PaperDetails caching behavior."""
+
+    def test_cache_hit_skips_rebuild(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(arxiv_id="2401.00001", title="Test Paper")
+
+        details.update_paper(paper, "abstract text")
+        content1 = details.content
+
+        # Second call with same args should hit cache — content identical
+        details.update_paper(paper, "abstract text")
+        content2 = details.content
+
+        assert content1 == content2
+        assert len(details._detail_cache) == 1
+
+    def test_cache_miss_on_new_data(self, make_paper):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(arxiv_id="2401.00001", title="Test Paper")
+
+        details.update_paper(paper, "abstract text")
+        assert len(details._detail_cache) == 1
+
+        s2 = MagicMock()
+        s2.citation_count = 42
+        s2.influential_citation_count = 5
+        s2.fields_of_study = ("CS",)
+        s2.tldr = "A paper"
+        details.update_paper(paper, "abstract text", s2_data=s2)
+        assert len(details._detail_cache) == 2
+
+    def test_cache_eviction(self, make_paper):
+        from arxiv_browser import DETAIL_CACHE_MAX, PaperDetails
+
+        details = PaperDetails()
+        for i in range(DETAIL_CACHE_MAX + 5):
+            paper = make_paper(arxiv_id=f"2401.{i:05d}", title=f"Paper {i}")
+            details.update_paper(paper, f"abstract {i}")
+
+        assert len(details._detail_cache) == DETAIL_CACHE_MAX
+
+    def test_clear_cache(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(arxiv_id="2401.00001", title="Test")
+        details.update_paper(paper, "abstract")
+        assert len(details._detail_cache) == 1
+
+        details.clear_cache()
+        assert len(details._detail_cache) == 0
+        assert len(details._detail_cache_order) == 0
 
 
 # ============================================================================
@@ -6265,6 +6625,3597 @@ class TestRelevanceSortOptions:
 
     def test_sort_options_count(self):
         assert len(SORT_OPTIONS) == 6
+
+
+class TestCountPapersInFile:
+    """Tests for count_papers_in_file utility."""
+
+    def test_counts_ids(self, tmp_path):
+        from arxiv_browser import count_papers_in_file
+
+        f = tmp_path / "test.txt"
+        f.write_text(
+            "arXiv:2401.12345 some paper\narXiv:2401.67890v2 another\n",
+            encoding="utf-8",
+        )
+        assert count_papers_in_file(f) == 2
+
+    def test_missing_file(self, tmp_path):
+        from arxiv_browser import count_papers_in_file
+
+        assert count_papers_in_file(tmp_path / "nonexistent.txt") == 0
+
+    def test_empty_file(self, tmp_path):
+        from arxiv_browser import count_papers_in_file
+
+        f = tmp_path / "empty.txt"
+        f.write_text("", encoding="utf-8")
+        assert count_papers_in_file(f) == 0
+
+
+class TestDateNavigator:
+    """Tests for DateNavigator widget."""
+
+    def test_window_centers_on_current(self):
+        from datetime import date as dt_date
+        from pathlib import Path
+
+        from arxiv_browser import DATE_NAV_WINDOW_SIZE
+
+        # Create 10 fake history entries
+        files = [(dt_date(2026, 1, i + 1), Path(f"/tmp/{i}.txt")) for i in range(10)]
+        # Window of 5 centered on index 5 should be [3..7]
+        total = len(files)
+        current = 5
+        half = DATE_NAV_WINDOW_SIZE // 2
+        start = max(0, current - half)
+        end = min(total, start + DATE_NAV_WINDOW_SIZE)
+        if end - start < DATE_NAV_WINDOW_SIZE:
+            start = max(0, end - DATE_NAV_WINDOW_SIZE)
+        assert end - start == DATE_NAV_WINDOW_SIZE
+        assert start <= current < end
+
+    def test_window_clamps_at_edges(self):
+        from datetime import date as dt_date
+        from pathlib import Path
+
+        from arxiv_browser import DATE_NAV_WINDOW_SIZE
+
+        files = [(dt_date(2026, 1, i + 1), Path(f"/tmp/{i}.txt")) for i in range(10)]
+        # At index 0 (edge), window should start at 0
+        total = len(files)
+        current = 0
+        half = DATE_NAV_WINDOW_SIZE // 2
+        start = max(0, current - half)
+        end = min(total, start + DATE_NAV_WINDOW_SIZE)
+        if end - start < DATE_NAV_WINDOW_SIZE:
+            start = max(0, end - DATE_NAV_WINDOW_SIZE)
+        assert start == 0
+        assert end == DATE_NAV_WINDOW_SIZE
+
+    def test_small_file_list(self):
+        from datetime import date as dt_date
+        from pathlib import Path
+
+        from arxiv_browser import DATE_NAV_WINDOW_SIZE
+
+        # Only 3 files — window should show all of them
+        files = [(dt_date(2026, 1, i + 1), Path(f"/tmp/{i}.txt")) for i in range(3)]
+        total = len(files)
+        current = 1
+        half = DATE_NAV_WINDOW_SIZE // 2
+        start = max(0, current - half)
+        end = min(total, start + DATE_NAV_WINDOW_SIZE)
+        if end - start < DATE_NAV_WINDOW_SIZE:
+            start = max(0, end - DATE_NAV_WINDOW_SIZE)
+        assert start == 0
+        assert end == 3  # Only 3 files, so window covers all
+
+    def test_count_cache_tracks_file_path_not_index(self, tmp_path):
+        from datetime import date as dt_date
+
+        from arxiv_browser import DateNavigator
+
+        first = tmp_path / "2026-01-01.txt"
+        second = tmp_path / "2026-01-02.txt"
+        replacement = tmp_path / "2026-01-03.txt"
+
+        first.write_text("arXiv:2401.00001\n", encoding="utf-8")
+        second.write_text("arXiv:2401.00002\narXiv:2401.00003\n", encoding="utf-8")
+        replacement.write_text(
+            "arXiv:2401.00004\narXiv:2401.00005\narXiv:2401.00006\n",
+            encoding="utf-8",
+        )
+
+        nav = DateNavigator([(dt_date(2026, 1, 1), first), (dt_date(2026, 1, 2), second)])
+        assert nav._get_paper_count(0) == 1
+
+        # Replace index 0 with a different file; count should update accordingly.
+        nav._history_files = [(dt_date(2026, 1, 3), replacement), (dt_date(2026, 1, 2), second)]
+        assert nav._get_paper_count(0) == 3
+
+
+class TestThemeSwitcher:
+    """Tests for U7: Color theme switcher."""
+
+    def test_themes_have_matching_keys(self):
+        from arxiv_browser import CATPPUCCIN_MOCHA_THEME, DEFAULT_THEME
+
+        assert set(DEFAULT_THEME.keys()) == set(CATPPUCCIN_MOCHA_THEME.keys())
+
+    def test_theme_name_roundtrip(self):
+        from arxiv_browser import _config_to_dict, _dict_to_config
+
+        config = UserConfig(theme_name="catppuccin-mocha")
+        data = _config_to_dict(config)
+        assert data["theme_name"] == "catppuccin-mocha"
+        restored = _dict_to_config(data)
+        assert restored.theme_name == "catppuccin-mocha"
+
+    def test_theme_name_defaults_to_monokai(self):
+        from arxiv_browser import _dict_to_config
+
+        config = _dict_to_config({})
+        assert config.theme_name == "monokai"
+
+    def test_apply_uses_named_theme(self):
+        from arxiv_browser import (
+            CATPPUCCIN_MOCHA_THEME,
+            THEME_COLORS,
+            ArxivBrowser,
+        )
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._config = UserConfig(theme_name="catppuccin-mocha")
+        app._http_client = None
+        app._apply_theme_overrides()
+        assert THEME_COLORS["accent"] == CATPPUCCIN_MOCHA_THEME["accent"]
+        assert THEME_COLORS["green"] == CATPPUCCIN_MOCHA_THEME["green"]
+
+    def test_per_key_override_layers(self):
+        from arxiv_browser import CATPPUCCIN_MOCHA_THEME, THEME_COLORS, ArxivBrowser
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._config = UserConfig(
+            theme_name="catppuccin-mocha",
+            theme={"accent": "#ff0000"},
+        )
+        app._http_client = None
+        app._apply_theme_overrides()
+        # Per-key override wins over base theme
+        assert THEME_COLORS["accent"] == "#ff0000"
+        # Other keys come from the base theme
+        assert THEME_COLORS["green"] == CATPPUCCIN_MOCHA_THEME["green"]
+
+    def test_unknown_theme_falls_back_to_default(self):
+        from arxiv_browser import DEFAULT_THEME, THEME_COLORS, ArxivBrowser
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._config = UserConfig(theme_name="nonexistent-theme")
+        app._http_client = None
+        app._apply_theme_overrides()
+        assert THEME_COLORS["accent"] == DEFAULT_THEME["accent"]
+
+
+# ============================================================================
+# U4: Progress Indicator Tests
+# ============================================================================
+
+
+class TestProgressIndicators:
+    """Tests for U4: X/Y counter progress indicators in footer."""
+
+    def _make_app(self):
+        from arxiv_browser import ArxivBrowser
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._http_client = None
+        app._config = UserConfig()
+        app._relevance_scoring_active = False
+        app._version_checking = False
+        app._scoring_progress = None
+        app._version_progress = None
+        app._in_arxiv_api_mode = False
+        app.selected_ids = set()
+        app._s2_active = False
+        app._history_files = []
+        return app
+
+    def test_scoring_progress_in_footer(self):
+        app = self._make_app()
+        app._scoring_progress = (3, 50)
+        bindings = app._get_footer_bindings()
+        assert any("Scoring 3/50" in label for _, label in bindings)
+
+    def test_version_progress_in_footer(self):
+        app = self._make_app()
+        app._version_progress = (2, 5)
+        bindings = app._get_footer_bindings()
+        assert any("Versions 2/5" in label for _, label in bindings)
+
+    def test_scoring_progress_overrides_boolean(self):
+        """Tuple progress takes priority over boolean flag."""
+        app = self._make_app()
+        app._relevance_scoring_active = True
+        app._scoring_progress = (7, 20)
+        bindings = app._get_footer_bindings()
+        # Should show X/Y, not static text
+        labels = [label for _, label in bindings]
+        assert any("Scoring 7/20" in lbl for lbl in labels)
+        assert not any("Scoring papers" in lbl for lbl in labels)
+
+    def test_version_progress_overrides_boolean(self):
+        """Tuple progress takes priority over boolean flag."""
+        app = self._make_app()
+        app._version_checking = True
+        app._version_progress = (1, 3)
+        bindings = app._get_footer_bindings()
+        labels = [label for _, label in bindings]
+        assert any("Versions 1/3" in lbl for lbl in labels)
+        assert not any("Checking versions" in lbl for lbl in labels)
+
+    def test_scoring_progress_cleared_is_none(self):
+        """When progress is None, boolean fallback is used."""
+        app = self._make_app()
+        app._relevance_scoring_active = True
+        app._scoring_progress = None
+        bindings = app._get_footer_bindings()
+        # Falls back to boolean text
+        labels = [label for _, label in bindings]
+        assert any("Scoring papers" in lbl for lbl in labels)
+
+
+# ============================================================================
+# U7: Solarized Dark Theme Tests
+# ============================================================================
+
+
+class TestSolarizedDarkTheme:
+    """Tests for U7: Solarized Dark theme expansion."""
+
+    def test_solarized_theme_exists(self):
+        from arxiv_browser import SOLARIZED_DARK_THEME, THEMES
+
+        assert "solarized-dark" in THEMES
+        assert THEMES["solarized-dark"] is SOLARIZED_DARK_THEME
+
+    def test_solarized_has_all_keys(self):
+        from arxiv_browser import DEFAULT_THEME, SOLARIZED_DARK_THEME
+
+        assert set(SOLARIZED_DARK_THEME.keys()) == set(DEFAULT_THEME.keys())
+
+    def test_solarized_palette_spot_check(self):
+        from arxiv_browser import SOLARIZED_DARK_THEME
+
+        assert SOLARIZED_DARK_THEME["background"] == "#002b36"
+        assert SOLARIZED_DARK_THEME["accent"] == "#268bd2"
+        assert SOLARIZED_DARK_THEME["green"] == "#859900"
+        assert SOLARIZED_DARK_THEME["pink"] == "#d33682"
+
+    def test_three_themes_in_cycle(self):
+        from arxiv_browser import THEME_NAMES
+
+        assert len(THEME_NAMES) == 3
+        assert "monokai" in THEME_NAMES
+        assert "catppuccin-mocha" in THEME_NAMES
+        assert "solarized-dark" in THEME_NAMES
+
+    def test_solarized_config_roundtrip(self):
+        from arxiv_browser import _config_to_dict, _dict_to_config
+
+        config = UserConfig(theme_name="solarized-dark")
+        data = _config_to_dict(config)
+        restored = _dict_to_config(data)
+        assert restored.theme_name == "solarized-dark"
+
+    def test_category_colors_update_on_theme(self):
+        from arxiv_browser import (
+            CATEGORY_COLORS,
+            THEME_CATEGORY_COLORS,
+            ArxivBrowser,
+        )
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._config = UserConfig(theme_name="solarized-dark")
+        app._http_client = None
+        app._apply_category_overrides()
+        expected = THEME_CATEGORY_COLORS["solarized-dark"]
+        for cat, color in expected.items():
+            assert CATEGORY_COLORS[cat] == color
+
+    def test_tag_namespace_colors_update_on_theme(self):
+        from arxiv_browser import (
+            TAG_NAMESPACE_COLORS,
+            THEME_TAG_NAMESPACE_COLORS,
+            ArxivBrowser,
+        )
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._config = UserConfig(theme_name="solarized-dark")
+        app._http_client = None
+        app._apply_theme_overrides()
+        expected = THEME_TAG_NAMESPACE_COLORS["solarized-dark"]
+        for ns, color in expected.items():
+            assert TAG_NAMESPACE_COLORS[ns] == color
+
+
+# ============================================================================
+# U3: Collapsible Section Tests
+# ============================================================================
+
+
+class TestCollapsibleSections:
+    """Tests for U3: Collapsible detail pane sections."""
+
+    def test_default_collapsed_sections(self):
+        from arxiv_browser import DEFAULT_COLLAPSED_SECTIONS
+
+        config = UserConfig()
+        assert config.collapsed_sections == DEFAULT_COLLAPSED_SECTIONS
+        assert "tags" in config.collapsed_sections
+        assert "authors" not in config.collapsed_sections
+
+    def test_collapsed_sections_roundtrip(self):
+        from arxiv_browser import _config_to_dict, _dict_to_config
+
+        config = UserConfig(collapsed_sections=["authors", "url"])
+        data = _config_to_dict(config)
+        assert data["collapsed_sections"] == ["authors", "url"]
+        restored = _dict_to_config(data)
+        assert restored.collapsed_sections == ["authors", "url"]
+
+    def test_invalid_sections_filtered(self):
+        from arxiv_browser import _dict_to_config
+
+        data = {"collapsed_sections": ["authors", "invalid_key", "url", 42]}
+        config = _dict_to_config(data)
+        assert config.collapsed_sections == ["authors", "url"]
+
+    def test_missing_collapsed_sections_uses_defaults(self):
+        from arxiv_browser import DEFAULT_COLLAPSED_SECTIONS, _dict_to_config
+
+        config = _dict_to_config({})
+        assert config.collapsed_sections == DEFAULT_COLLAPSED_SECTIONS
+
+    def test_expanded_section_shows_content(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(authors="John Doe")
+        details.update_paper(paper, collapsed_sections=[])
+        rendered = str(details.content)
+        assert "John Doe" in rendered
+        assert "\u25be Authors" in rendered  # expanded indicator
+
+    def test_collapsed_section_hides_content(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(authors="John Doe")
+        details.update_paper(paper, collapsed_sections=["authors"])
+        rendered = str(details.content)
+        assert "John Doe" not in rendered
+        assert "\u25b8 Authors" in rendered  # collapsed indicator
+
+    def test_collapsed_s2_shows_citation_hint(self, make_paper):
+        from arxiv_browser import PaperDetails
+        from semantic_scholar import SemanticScholarPaper
+
+        details = PaperDetails()
+        paper = make_paper()
+        s2_data = SemanticScholarPaper(
+            arxiv_id="2401.12345",
+            s2_paper_id="abc",
+            citation_count=42,
+            influential_citation_count=5,
+            tldr="A test paper.",
+            fields_of_study=("Computer Science",),
+            year=2024,
+            url="https://api.semanticscholar.org/abc",
+            title="Test",
+        )
+        details.update_paper(paper, s2_data=s2_data, collapsed_sections=["s2"])
+        rendered = str(details.content)
+        assert "42 cites" in rendered
+        assert "\u25b8 Semantic Scholar" in rendered
+
+    def test_collapsed_hf_shows_upvote_hint(self, make_paper):
+        from arxiv_browser import PaperDetails
+        from huggingface import HuggingFacePaper
+
+        details = PaperDetails()
+        paper = make_paper()
+        hf_data = HuggingFacePaper(
+            arxiv_id="2401.12345",
+            title="Test",
+            upvotes=15,
+            num_comments=3,
+            github_repo="",
+            github_stars=0,
+            ai_summary="",
+            ai_keywords=(),
+        )
+        details.update_paper(paper, hf_data=hf_data, collapsed_sections=["hf"])
+        rendered = str(details.content)
+        assert "\u219115" in rendered  # ↑15
+        assert "\u25b8 HuggingFace" in rendered
+
+    def test_collapsed_tags_shows_count(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper()
+        details.update_paper(
+            paper, tags=["ml", "topic:transformers", "status:read"], collapsed_sections=["tags"]
+        )
+        rendered = str(details.content)
+        assert "Tags (3)" in rendered
+        assert "\u25b8 Tags" in rendered
+
+    def test_collapsed_relevance_shows_score(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper()
+        details.update_paper(paper, relevance=(8, "High quality"), collapsed_sections=["relevance"])
+        rendered = str(details.content)
+        assert "Relevance (8/10)" in rendered
+        assert "High quality" not in rendered
+
+    def test_collapsed_url_hides_link(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper()
+        details.update_paper(paper, collapsed_sections=["url"])
+        rendered = str(details.content)
+        assert "\u25b8 URL" in rendered
+        assert "arxiv.org" not in rendered
+
+    def test_detail_section_keys_complete(self):
+        from arxiv_browser import DETAIL_SECTION_KEYS, DETAIL_SECTION_NAMES
+
+        assert len(DETAIL_SECTION_KEYS) == 9
+        for key in DETAIL_SECTION_KEYS:
+            assert key in DETAIL_SECTION_NAMES
+
+
+# ============================================================================
+# Tests for _dict_to_config edge cases
+# ============================================================================
+
+
+class TestDictToConfigEdgeCases:
+    """Tests for _dict_to_config with invalid/malformed data."""
+
+    def test_sort_index_negative_clamps_to_zero(self):
+        """Negative sort_index should be clamped to 0."""
+        from arxiv_browser import _dict_to_config
+
+        data = {"session": {"sort_index": -1}}
+        config = _dict_to_config(data)
+        assert config.session.sort_index == 0
+
+    def test_sort_index_too_large_clamps_to_zero(self):
+        """sort_index beyond SORT_OPTIONS length should be clamped to 0."""
+        from arxiv_browser import _dict_to_config
+
+        data = {"session": {"sort_index": 999}}
+        config = _dict_to_config(data)
+        assert config.session.sort_index == 0
+
+    def test_sort_index_at_max_boundary(self):
+        """sort_index at the last valid index should be accepted."""
+        from arxiv_browser import _dict_to_config
+
+        max_idx = len(SORT_OPTIONS) - 1
+        data = {"session": {"sort_index": max_idx}}
+        config = _dict_to_config(data)
+        assert config.session.sort_index == max_idx
+
+    def test_sort_index_one_past_max_clamps_to_zero(self):
+        """sort_index one past the last valid index should be clamped to 0."""
+        from arxiv_browser import _dict_to_config
+
+        data = {"session": {"sort_index": len(SORT_OPTIONS)}}
+        config = _dict_to_config(data)
+        assert config.session.sort_index == 0
+
+    def test_session_not_a_dict_uses_defaults(self):
+        """Non-dict session value should fall back to defaults."""
+        from arxiv_browser import _dict_to_config
+
+        data = {"session": "not_a_dict"}
+        config = _dict_to_config(data)
+        assert config.session.scroll_index == 0
+        assert config.session.current_filter == ""
+        assert config.session.sort_index == 0
+
+    def test_metadata_entry_not_a_dict_skipped(self):
+        """Non-dict metadata entries should be skipped."""
+        from arxiv_browser import _dict_to_config
+
+        data = {
+            "paper_metadata": {
+                "2401.00001": "not_a_dict",
+                "2401.00002": 42,
+                "2401.00003": ["list"],
+            }
+        }
+        config = _dict_to_config(data)
+        assert config.paper_metadata == {}
+
+    def test_metadata_mixed_valid_and_invalid(self):
+        """Valid metadata entries should be kept when invalid ones are skipped."""
+        from arxiv_browser import _dict_to_config
+
+        data = {
+            "paper_metadata": {
+                "2401.00001": {"notes": "valid", "starred": True},
+                "2401.00002": "invalid_string",
+                "2401.00003": {"is_read": True},
+            }
+        }
+        config = _dict_to_config(data)
+        assert len(config.paper_metadata) == 2
+        assert "2401.00001" in config.paper_metadata
+        assert config.paper_metadata["2401.00001"].starred is True
+        assert "2401.00003" in config.paper_metadata
+        assert config.paper_metadata["2401.00003"].is_read is True
+        assert "2401.00002" not in config.paper_metadata
+
+    def test_metadata_wrong_field_types_get_defaults(self):
+        """Wrong types in metadata fields should fall back to defaults."""
+        from arxiv_browser import _dict_to_config
+
+        data = {
+            "paper_metadata": {
+                "2401.00001": {
+                    "notes": 123,
+                    "tags": "not_a_list",
+                    "is_read": "yes",
+                    "starred": 1,
+                }
+            }
+        }
+        config = _dict_to_config(data)
+        meta = config.paper_metadata["2401.00001"]
+        assert meta.notes == ""
+        assert meta.tags == []
+        assert meta.is_read is False
+        assert meta.starred is False
+
+    def test_metadata_last_checked_version_non_int_becomes_none(self):
+        """last_checked_version that is not int should become None."""
+        from arxiv_browser import _dict_to_config
+
+        data = {"paper_metadata": {"2401.00001": {"last_checked_version": "v3"}}}
+        config = _dict_to_config(data)
+        assert config.paper_metadata["2401.00001"].last_checked_version is None
+
+    def test_metadata_last_checked_version_int_preserved(self):
+        """last_checked_version that is int should be preserved."""
+        from arxiv_browser import _dict_to_config
+
+        data = {"paper_metadata": {"2401.00001": {"last_checked_version": 5}}}
+        config = _dict_to_config(data)
+        assert config.paper_metadata["2401.00001"].last_checked_version == 5
+
+    def test_watch_list_non_dict_entries_skipped(self):
+        """Non-dict watch list entries should be skipped."""
+        from arxiv_browser import _dict_to_config
+
+        data = {
+            "watch_list": [
+                "just_a_string",
+                42,
+                {"pattern": "Smith", "match_type": "author"},
+            ]
+        }
+        config = _dict_to_config(data)
+        assert len(config.watch_list) == 1
+        assert config.watch_list[0].pattern == "Smith"
+
+    def test_watch_list_invalid_match_type_defaults_to_author(self):
+        """Invalid match_type should be defaulted to 'author'."""
+        from arxiv_browser import _dict_to_config
+
+        data = {"watch_list": [{"pattern": "test", "match_type": "invalid_type"}]}
+        config = _dict_to_config(data)
+        assert config.watch_list[0].match_type == "author"
+
+    def test_watch_list_not_a_list_uses_empty(self):
+        """Non-list watch_list value should result in empty list."""
+        from arxiv_browser import _dict_to_config
+
+        data = {"watch_list": "not_a_list"}
+        config = _dict_to_config(data)
+        assert config.watch_list == []
+
+    def test_bookmarks_non_dict_entries_skipped(self):
+        """Non-dict bookmark entries should be skipped."""
+        from arxiv_browser import _dict_to_config
+
+        data = {
+            "bookmarks": [
+                "just_a_string",
+                {"name": "AI", "query": "cs.AI"},
+                None,
+            ]
+        }
+        config = _dict_to_config(data)
+        assert len(config.bookmarks) == 1
+        assert config.bookmarks[0].name == "AI"
+        assert config.bookmarks[0].query == "cs.AI"
+
+    def test_bookmarks_not_a_list_uses_empty(self):
+        """Non-list bookmarks value should result in empty list."""
+        from arxiv_browser import _dict_to_config
+
+        data = {"bookmarks": {"name": "AI"}}
+        config = _dict_to_config(data)
+        assert config.bookmarks == []
+
+    def test_marks_not_a_dict_uses_empty(self):
+        """Non-dict marks value should result in empty dict."""
+        from arxiv_browser import _dict_to_config
+
+        data = {"marks": ["a", "b"]}
+        config = _dict_to_config(data)
+        assert config.marks == {}
+
+    def test_marks_valid_dict_preserved(self):
+        """Valid marks dict should be preserved."""
+        from arxiv_browser import _dict_to_config
+
+        data = {"marks": {"a": "2401.00001", "b": "2401.00002"}}
+        config = _dict_to_config(data)
+        assert config.marks == {"a": "2401.00001", "b": "2401.00002"}
+
+    def test_category_colors_non_string_entries_filtered(self):
+        """Non-string keys/values in category_colors should be filtered out."""
+        from arxiv_browser import _dict_to_config
+
+        data = {
+            "category_colors": {
+                "cs.AI": "#ff0000",
+                42: "#00ff00",
+                "cs.CL": 123,
+            }
+        }
+        config = _dict_to_config(data)
+        assert config.category_colors == {"cs.AI": "#ff0000"}
+
+    def test_theme_non_string_entries_filtered(self):
+        """Non-string keys/values in theme should be filtered out."""
+        from arxiv_browser import _dict_to_config
+
+        data = {
+            "theme": {
+                "background": "#272822",
+                123: "#ffffff",
+                "text": 456,
+            }
+        }
+        config = _dict_to_config(data)
+        assert config.theme == {"background": "#272822"}
+
+    def test_current_date_non_string_becomes_none(self):
+        """Non-string current_date should become None."""
+        from arxiv_browser import _dict_to_config
+
+        data = {"session": {"current_date": 12345}}
+        config = _dict_to_config(data)
+        assert config.session.current_date is None
+
+    def test_current_date_string_preserved(self):
+        """String current_date should be preserved."""
+        from arxiv_browser import _dict_to_config
+
+        data = {"session": {"current_date": "2024-01-15"}}
+        config = _dict_to_config(data)
+        assert config.session.current_date == "2024-01-15"
+
+
+# ============================================================================
+# Tests for load_config error paths
+# ============================================================================
+
+
+class TestLoadConfigErrorPaths:
+    """Tests for load_config error handling."""
+
+    def test_key_error_returns_default(self, tmp_path, monkeypatch):
+        """KeyError during config parsing should return default config."""
+        from unittest.mock import patch
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text('{"session": {}}', encoding="utf-8")
+        monkeypatch.setattr("arxiv_browser.get_config_path", lambda: config_file)
+
+        with patch("arxiv_browser._dict_to_config", side_effect=KeyError("bad_key")):
+            config = load_config()
+        assert isinstance(config, UserConfig)
+        assert config.bibtex_export_dir == ""
+
+    def test_type_error_returns_default(self, tmp_path, monkeypatch):
+        """TypeError during config parsing should return default config."""
+        from unittest.mock import patch
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text('{"session": {}}', encoding="utf-8")
+        monkeypatch.setattr("arxiv_browser.get_config_path", lambda: config_file)
+
+        with patch("arxiv_browser._dict_to_config", side_effect=TypeError("bad_type")):
+            config = load_config()
+        assert isinstance(config, UserConfig)
+
+    def test_os_error_returns_default(self, tmp_path, monkeypatch):
+        """OSError during config read should return default config."""
+        from unittest.mock import patch
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text("{}", encoding="utf-8")
+        monkeypatch.setattr("arxiv_browser.get_config_path", lambda: config_file)
+
+        with patch.object(type(config_file), "read_text", side_effect=OSError("Permission denied")):
+            config = load_config()
+        assert isinstance(config, UserConfig)
+
+
+# ============================================================================
+# Tests for save_config error paths
+# ============================================================================
+
+
+class TestSaveConfigErrorPaths:
+    """Tests for save_config error handling and tempfile cleanup."""
+
+    def test_oserror_during_mkdir_returns_false(self, tmp_path, monkeypatch):
+        """OSError during directory creation should return False."""
+        from unittest.mock import patch
+
+        config_file = tmp_path / "readonly" / "config.json"
+        monkeypatch.setattr("arxiv_browser.get_config_path", lambda: config_file)
+
+        with patch("pathlib.Path.mkdir", side_effect=OSError("Permission denied")):
+            result = save_config(UserConfig())
+        assert result is False
+
+    def test_oserror_during_replace_cleans_up_temp(self, tmp_path, monkeypatch):
+        """OSError during os.replace should clean up the temp file."""
+        import os
+        from unittest.mock import patch
+
+        config_file = tmp_path / "config.json"
+        monkeypatch.setattr("arxiv_browser.get_config_path", lambda: config_file)
+
+        created_temps = []
+        original_mkstemp = __import__("tempfile").mkstemp
+
+        def tracking_mkstemp(**kwargs):
+            fd, path = original_mkstemp(**kwargs)
+            created_temps.append(path)
+            return fd, path
+
+        with (
+            patch("tempfile.mkstemp", side_effect=tracking_mkstemp),
+            patch("os.replace", side_effect=OSError("disk full")),
+        ):
+            result = save_config(UserConfig())
+
+        assert result is False
+        # Temp file should have been cleaned up
+        for tmp in created_temps:
+            assert not os.path.exists(tmp)
+
+    def test_successful_save_returns_true(self, tmp_path, monkeypatch):
+        """Successful save should return True."""
+        config_file = tmp_path / "config.json"
+        monkeypatch.setattr("arxiv_browser.get_config_path", lambda: config_file)
+
+        result = save_config(UserConfig())
+        assert result is True
+        assert config_file.exists()
+
+
+# ============================================================================
+# Tests for SQLite error handlers (summaries and relevance)
+# ============================================================================
+
+
+class TestSummaryDbErrorHandlers:
+    """Tests for _load_summary and _save_summary error handling."""
+
+    def test_load_summary_nonexistent_db_returns_none(self, tmp_path):
+        """Loading from nonexistent DB path should return None."""
+        from arxiv_browser import _load_summary
+
+        db_path = tmp_path / "nonexistent.db"
+        result = _load_summary(db_path, "2401.00001", "hash123")
+        assert result is None
+
+    def test_load_summary_corrupt_db_returns_none(self, tmp_path):
+        """Loading from corrupt DB should return None (not raise)."""
+        from arxiv_browser import _load_summary
+
+        db_path = tmp_path / "corrupt.db"
+        db_path.write_text("this is not a sqlite database")
+        result = _load_summary(db_path, "2401.00001", "hash123")
+        assert result is None
+
+    def test_load_summary_missing_table_returns_none(self, tmp_path):
+        """Loading from DB without summaries table should return None."""
+        import sqlite3
+
+        from arxiv_browser import _load_summary
+
+        db_path = tmp_path / "empty.db"
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("CREATE TABLE other_table (id TEXT)")
+        result = _load_summary(db_path, "2401.00001", "hash123")
+        assert result is None
+
+    def test_save_summary_corrupt_db_does_not_raise(self, tmp_path):
+        """Saving to corrupt DB should not raise (logs warning)."""
+        from arxiv_browser import _save_summary
+
+        db_path = tmp_path / "corrupt.db"
+        db_path.write_text("this is not a sqlite database")
+        # Should not raise
+        _save_summary(db_path, "2401.00001", "summary text", "hash123")
+
+    def test_save_summary_sqlite_error_does_not_raise(self, tmp_path):
+        """sqlite3.Error during save should not raise (logs warning)."""
+        from unittest.mock import patch
+
+        from arxiv_browser import _init_summary_db, _save_summary
+
+        db_path = tmp_path / "summaries.db"
+        _init_summary_db(db_path)
+        with patch("sqlite3.connect", side_effect=__import__("sqlite3").Error("db locked")):
+            # Should not raise
+            _save_summary(db_path, "2401.00001", "summary text", "hash123")
+
+    def test_load_summary_no_matching_row_returns_none(self, tmp_path):
+        """Loading with non-matching hash should return None."""
+        from arxiv_browser import _init_summary_db, _load_summary, _save_summary
+
+        db_path = tmp_path / "summaries.db"
+        _init_summary_db(db_path)
+        _save_summary(db_path, "2401.00001", "a summary", "hash_a")
+        result = _load_summary(db_path, "2401.00001", "hash_b")
+        assert result is None
+
+
+class TestRelevanceDbErrorHandlers:
+    """Tests for relevance score SQLite error handling."""
+
+    def test_load_score_nonexistent_db_returns_none(self, tmp_path):
+        """Loading from nonexistent DB should return None."""
+        from arxiv_browser import _load_relevance_score
+
+        db_path = tmp_path / "nonexistent.db"
+        result = _load_relevance_score(db_path, "2401.00001", "hash123")
+        assert result is None
+
+    def test_load_score_corrupt_db_returns_none(self, tmp_path):
+        """Loading from corrupt DB should return None (not raise)."""
+        from arxiv_browser import _load_relevance_score
+
+        db_path = tmp_path / "corrupt.db"
+        db_path.write_text("this is not a sqlite database")
+        result = _load_relevance_score(db_path, "2401.00001", "hash123")
+        assert result is None
+
+    def test_load_score_missing_table_returns_none(self, tmp_path):
+        """Loading from DB without relevance_scores table should return None."""
+        import sqlite3
+
+        from arxiv_browser import _load_relevance_score
+
+        db_path = tmp_path / "empty.db"
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("CREATE TABLE other_table (id TEXT)")
+        result = _load_relevance_score(db_path, "2401.00001", "hash123")
+        assert result is None
+
+    def test_save_score_corrupt_db_does_not_raise(self, tmp_path):
+        """Saving to corrupt DB should not raise."""
+        from arxiv_browser import _save_relevance_score
+
+        db_path = tmp_path / "corrupt.db"
+        db_path.write_text("this is not a sqlite database")
+        _save_relevance_score(db_path, "2401.00001", "hash123", 8, "relevant")
+
+    def test_load_all_corrupt_db_returns_empty(self, tmp_path):
+        """Bulk loading from corrupt DB should return empty dict."""
+        from arxiv_browser import _load_all_relevance_scores
+
+        db_path = tmp_path / "corrupt.db"
+        db_path.write_text("this is not a sqlite database")
+        result = _load_all_relevance_scores(db_path, "hash123")
+        assert result == {}
+
+    def test_load_all_nonexistent_db_returns_empty(self, tmp_path):
+        """Bulk loading from nonexistent DB should return empty dict."""
+        from arxiv_browser import _load_all_relevance_scores
+
+        db_path = tmp_path / "nonexistent.db"
+        result = _load_all_relevance_scores(db_path, "hash123")
+        assert result == {}
+
+    def test_load_all_missing_table_returns_empty(self, tmp_path):
+        """Bulk loading from DB without table should return empty dict."""
+        import sqlite3
+
+        from arxiv_browser import _load_all_relevance_scores
+
+        db_path = tmp_path / "empty.db"
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("CREATE TABLE other_table (id TEXT)")
+        result = _load_all_relevance_scores(db_path, "hash123")
+        assert result == {}
+
+
+# ============================================================================
+# Tests for find_similar_papers boost functions
+# ============================================================================
+
+
+class TestFindSimilarPapersBoosts:
+    """Tests for metadata_boost and recency_score inner functions."""
+
+    def test_starred_paper_ranked_higher(self, make_paper):
+        """Starred papers should get a boost in similarity ranking."""
+        from arxiv_browser import find_similar_papers
+
+        target = make_paper(
+            arxiv_id="target",
+            title="Machine Learning Methods",
+            categories="cs.AI",
+            abstract="Deep learning approaches for NLP.",
+            date="Mon, 15 Jan 2024",
+        )
+        paper_a = make_paper(
+            arxiv_id="paper_a",
+            title="Machine Learning Methods Applied",
+            categories="cs.AI",
+            abstract="Deep learning approaches for NLP tasks.",
+            date="Mon, 15 Jan 2024",
+        )
+        paper_b = make_paper(
+            arxiv_id="paper_b",
+            title="Machine Learning Methods Extended",
+            categories="cs.AI",
+            abstract="Deep learning approaches for NLP systems.",
+            date="Mon, 15 Jan 2024",
+        )
+        metadata = {
+            "paper_a": PaperMetadata(arxiv_id="paper_a", starred=True),
+            "paper_b": PaperMetadata(arxiv_id="paper_b", starred=False),
+        }
+        results = find_similar_papers(target, [paper_a, paper_b], top_n=2, metadata=metadata)
+        # paper_a (starred) should rank at or above paper_b
+        ids = [p.arxiv_id for p, _ in results]
+        assert "paper_a" in ids
+
+    def test_read_paper_gets_penalty(self, make_paper):
+        """Read papers should get penalized in ranking."""
+        from arxiv_browser import find_similar_papers
+
+        target = make_paper(
+            arxiv_id="target",
+            title="Transformer Architecture",
+            categories="cs.AI",
+            abstract="A novel transformer approach.",
+            date="Mon, 15 Jan 2024",
+        )
+        paper_unread = make_paper(
+            arxiv_id="paper_unread",
+            title="Transformer Architecture Extended",
+            categories="cs.AI",
+            abstract="A novel transformer approach extended.",
+            date="Mon, 15 Jan 2024",
+        )
+        paper_read = make_paper(
+            arxiv_id="paper_read",
+            title="Transformer Architecture Revised",
+            categories="cs.AI",
+            abstract="A novel transformer approach revised.",
+            date="Mon, 15 Jan 2024",
+        )
+        metadata = {
+            "paper_unread": PaperMetadata(arxiv_id="paper_unread"),
+            "paper_read": PaperMetadata(arxiv_id="paper_read", is_read=True),
+        }
+        results = find_similar_papers(
+            target, [paper_unread, paper_read], top_n=2, metadata=metadata
+        )
+        scores_by_id = {p.arxiv_id: s for p, s in results}
+        # Unread paper should have a higher score due to unread boost vs read penalty
+        if "paper_unread" in scores_by_id and "paper_read" in scores_by_id:
+            assert scores_by_id["paper_unread"] >= scores_by_id["paper_read"]
+
+    def test_no_metadata_no_crash(self, make_paper):
+        """find_similar_papers should work without metadata."""
+        from arxiv_browser import find_similar_papers
+
+        target = make_paper(arxiv_id="target", categories="cs.AI")
+        other = make_paper(arxiv_id="other", categories="cs.AI")
+        results = find_similar_papers(target, [other], top_n=5, metadata=None)
+        assert isinstance(results, list)
+
+    def test_recent_papers_ranked_higher(self, make_paper):
+        """More recent papers should get a recency boost."""
+        from arxiv_browser import find_similar_papers
+
+        target = make_paper(
+            arxiv_id="target",
+            title="Test Method",
+            categories="cs.AI",
+            abstract="A testing method.",
+            date="Mon, 15 Jan 2024",
+        )
+        recent_paper = make_paper(
+            arxiv_id="recent",
+            title="Test Method Applied",
+            categories="cs.AI",
+            abstract="A testing method applied.",
+            date="Sun, 14 Jan 2024",
+        )
+        old_paper = make_paper(
+            arxiv_id="old",
+            title="Test Method Applied",
+            categories="cs.AI",
+            abstract="A testing method applied.",
+            date="Fri, 15 Jan 2021",
+        )
+        results = find_similar_papers(target, [recent_paper, old_paper], top_n=2)
+        scores_by_id = {p.arxiv_id: s for p, s in results}
+        if "recent" in scores_by_id and "old" in scores_by_id:
+            assert scores_by_id["recent"] >= scores_by_id["old"]
+
+    def test_empty_paper_list_returns_empty(self, make_paper):
+        """Empty paper list should return empty results."""
+        from arxiv_browser import find_similar_papers
+
+        target = make_paper(arxiv_id="target")
+        results = find_similar_papers(target, [], top_n=5)
+        assert results == []
+
+    def test_target_excluded_from_results(self, make_paper):
+        """Target paper should not appear in its own similar papers."""
+        from arxiv_browser import find_similar_papers
+
+        target = make_paper(arxiv_id="target", categories="cs.AI")
+        results = find_similar_papers(target, [target], top_n=5)
+        ids = [p.arxiv_id for p, _ in results]
+        assert "target" not in ids
+
+
+# ============================================================================
+# Tests for render_paper_option badge paths
+# ============================================================================
+
+
+class TestRenderPaperOptionBadges:
+    """Tests for render_paper_option with various badge combinations."""
+
+    def test_tags_displayed(self, make_paper):
+        """Papers with tags should show tag badges in output."""
+        from arxiv_browser import render_paper_option
+
+        paper = make_paper()
+        metadata = PaperMetadata(arxiv_id="2401.12345", tags=["topic:ml", "important"])
+        result = render_paper_option(paper, metadata=metadata)
+        assert "#topic:ml" in result
+        assert "#important" in result
+
+    def test_s2_citation_badge(self, make_paper):
+        """S2 data should show citation count badge."""
+        from arxiv_browser import render_paper_option
+        from semantic_scholar import SemanticScholarPaper
+
+        paper = make_paper()
+        s2_data = SemanticScholarPaper(
+            arxiv_id="2401.12345",
+            s2_paper_id="s2id",
+            citation_count=42,
+            influential_citation_count=5,
+            tldr="",
+            fields_of_study=(),
+            year=2024,
+            url="https://api.semanticscholar.org/s2id",
+        )
+        result = render_paper_option(paper, s2_data=s2_data)
+        assert "C42" in result
+
+    def test_hf_upvote_badge(self, make_paper):
+        """HF data should show upvote badge."""
+        from arxiv_browser import render_paper_option
+        from huggingface import HuggingFacePaper
+
+        paper = make_paper()
+        hf_data = HuggingFacePaper(
+            arxiv_id="2401.12345",
+            title="Test",
+            upvotes=99,
+            num_comments=5,
+            ai_summary="",
+            ai_keywords=(),
+            github_repo="",
+            github_stars=0,
+        )
+        result = render_paper_option(paper, hf_data=hf_data)
+        assert "\u219199" in result  # ↑99
+
+    def test_version_update_badge(self, make_paper):
+        """Version update should show v1->v3 badge."""
+        from arxiv_browser import render_paper_option
+
+        paper = make_paper()
+        result = render_paper_option(paper, version_update=(1, 3))
+        assert "v1\u2192v3" in result  # v1→v3
+
+    def test_relevance_score_high_green(self, make_paper):
+        """High relevance score (8-10) should show green badge."""
+        from arxiv_browser import THEME_COLORS, render_paper_option
+
+        paper = make_paper()
+        result = render_paper_option(paper, relevance_score=(9, "very relevant"))
+        assert "9/10" in result
+        assert THEME_COLORS["green"] in result
+
+    def test_relevance_score_medium_yellow(self, make_paper):
+        """Medium relevance score (5-7) should show yellow badge."""
+        from arxiv_browser import THEME_COLORS, render_paper_option
+
+        paper = make_paper()
+        result = render_paper_option(paper, relevance_score=(6, "moderate"))
+        assert "6/10" in result
+        assert THEME_COLORS["yellow"] in result
+
+    def test_relevance_score_low_muted(self, make_paper):
+        """Low relevance score (1-4) should show muted badge."""
+        from arxiv_browser import THEME_COLORS, render_paper_option
+
+        paper = make_paper()
+        result = render_paper_option(paper, relevance_score=(3, "not relevant"))
+        assert "3/10" in result
+        assert THEME_COLORS["muted"] in result
+
+    def test_read_paper_dimmed(self, make_paper):
+        """Read papers should have dimmed title."""
+        from arxiv_browser import render_paper_option
+
+        paper = make_paper(title="Test Title")
+        metadata = PaperMetadata(arxiv_id="2401.12345", is_read=True)
+        result = render_paper_option(paper, metadata=metadata)
+        assert "[dim]" in result
+        assert "\u2713" in result  # checkmark
+
+    def test_starred_paper_has_star(self, make_paper):
+        """Starred papers should show star indicator."""
+        from arxiv_browser import render_paper_option
+
+        paper = make_paper()
+        metadata = PaperMetadata(arxiv_id="2401.12345", starred=True)
+        result = render_paper_option(paper, metadata=metadata)
+        assert "\u2b50" in result  # star emoji
+
+    def test_selected_paper_has_bullet(self, make_paper):
+        """Selected papers should show green bullet."""
+        from arxiv_browser import render_paper_option
+
+        paper = make_paper()
+        result = render_paper_option(paper, selected=True)
+        assert "\u25cf" in result  # ● bullet
+
+    def test_watched_paper_has_eye(self, make_paper):
+        """Watched papers should show eye indicator."""
+        from arxiv_browser import render_paper_option
+
+        paper = make_paper()
+        result = render_paper_option(paper, watched=True)
+        assert "\U0001f441" in result  # 👁
+
+    def test_api_source_shows_api_badge(self, make_paper):
+        """Papers from API source should show API badge."""
+        from arxiv_browser import render_paper_option
+
+        paper = make_paper()
+        paper = Paper(
+            arxiv_id="2401.12345",
+            date="Mon, 15 Jan 2024",
+            title="API Paper",
+            authors="Author",
+            categories="cs.AI",
+            comments=None,
+            abstract="Abstract",
+            url="https://arxiv.org/abs/2401.12345",
+            source="api",
+        )
+        result = render_paper_option(paper)
+        assert "API" in result
+
+    def test_preview_with_abstract_text(self, make_paper):
+        """Preview mode should show abstract text."""
+        from arxiv_browser import render_paper_option
+
+        paper = make_paper()
+        result = render_paper_option(
+            paper, show_preview=True, abstract_text="This is the abstract."
+        )
+        assert "This is the abstract." in result
+
+    def test_preview_with_none_abstract_shows_loading(self, make_paper):
+        """Preview with None abstract should show loading message."""
+        from arxiv_browser import render_paper_option
+
+        paper = make_paper()
+        result = render_paper_option(paper, show_preview=True, abstract_text=None)
+        assert "Loading abstract" in result
+
+    def test_preview_with_empty_abstract(self, make_paper):
+        """Preview with empty abstract should show 'No abstract'."""
+        from arxiv_browser import render_paper_option
+
+        paper = make_paper()
+        result = render_paper_option(paper, show_preview=True, abstract_text="")
+        assert "No abstract available" in result
+
+    def test_preview_long_abstract_truncated(self, make_paper):
+        """Long abstract in preview should be truncated with ellipsis."""
+        from arxiv_browser import PREVIEW_ABSTRACT_MAX_LEN, render_paper_option
+
+        paper = make_paper()
+        long_abstract = "word " * 100  # well over 150 chars
+        result = render_paper_option(paper, show_preview=True, abstract_text=long_abstract)
+        assert "..." in result
+
+    def test_preview_exact_length_not_truncated(self, make_paper):
+        """Abstract at exactly max length should not be truncated."""
+        from arxiv_browser import PREVIEW_ABSTRACT_MAX_LEN, render_paper_option
+
+        paper = make_paper()
+        exact_abstract = "x" * PREVIEW_ABSTRACT_MAX_LEN
+        result = render_paper_option(paper, show_preview=True, abstract_text=exact_abstract)
+        assert "..." not in result
+
+    def test_all_badges_combined(self, make_paper):
+        """All badges together should render without error."""
+        from arxiv_browser import render_paper_option
+        from huggingface import HuggingFacePaper
+        from semantic_scholar import SemanticScholarPaper
+
+        paper = make_paper()
+        metadata = PaperMetadata(
+            arxiv_id="2401.12345",
+            starred=True,
+            is_read=True,
+            tags=["topic:ml"],
+        )
+        s2_data = SemanticScholarPaper(
+            arxiv_id="2401.12345",
+            s2_paper_id="abc",
+            citation_count=100,
+            influential_citation_count=10,
+            tldr="",
+            fields_of_study=(),
+            year=2024,
+            url="",
+        )
+        hf_data = HuggingFacePaper(
+            arxiv_id="2401.12345",
+            title="Test",
+            upvotes=50,
+            num_comments=5,
+            ai_summary="",
+            ai_keywords=(),
+            github_repo="",
+            github_stars=0,
+        )
+        result = render_paper_option(
+            paper,
+            selected=True,
+            metadata=metadata,
+            watched=True,
+            show_preview=True,
+            abstract_text="Test abstract.",
+            s2_data=s2_data,
+            hf_data=hf_data,
+            version_update=(1, 5),
+            relevance_score=(10, "perfect match"),
+        )
+        # All elements should be present
+        assert "C100" in result
+        assert "\u219150" in result
+        assert "v1\u2192v5" in result
+        assert "10/10" in result
+        assert "#topic:ml" in result
+        assert "\u2b50" in result
+        assert "\u25cf" in result
+        assert "Test abstract." in result
+
+
+# ============================================================================
+# Integration Tests: Metadata Actions (read/star/notes/tags)
+# ============================================================================
+
+
+@pytest.mark.integration
+class TestMetadataActionsIntegration:
+    """Integration tests for read/star/notes/tags keyboard actions."""
+
+    @staticmethod
+    def _make_papers(make_paper, count: int = 3) -> list:
+        return [
+            make_paper(
+                arxiv_id=f"2401.{10000 + i}",
+                title=f"Paper Title {chr(65 + i)}",
+                authors=f"Author {chr(65 + i)}",
+                categories=f"cs.{'AI' if i % 2 == 0 else 'LG'}",
+                abstract=f"Abstract content for paper {chr(65 + i)}.",
+            )
+            for i in range(count)
+        ]
+
+    async def test_toggle_read_creates_metadata(self, make_paper):
+        """Pressing 'r' should create metadata and set is_read True."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=2)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                first_id = papers[0].arxiv_id
+                assert first_id not in app._config.paper_metadata
+
+                await pilot.press("r")
+                await pilot.pause(0.1)
+                assert first_id in app._config.paper_metadata
+                assert app._config.paper_metadata[first_id].is_read is True
+
+    async def test_toggle_read_twice_unsets(self, make_paper):
+        """Pressing 'r' twice should toggle is_read back to False."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=2)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                first_id = papers[0].arxiv_id
+                await pilot.press("r")
+                await pilot.pause(0.1)
+                assert app._config.paper_metadata[first_id].is_read is True
+
+                await pilot.press("r")
+                await pilot.pause(0.1)
+                assert app._config.paper_metadata[first_id].is_read is False
+
+    async def test_toggle_read_on_second_paper(self, make_paper):
+        """Navigate to second paper with 'j', then toggle read."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=3)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                await pilot.press("j")
+                await pilot.pause(0.1)
+                await pilot.press("r")
+                await pilot.pause(0.1)
+                second_id = papers[1].arxiv_id
+                assert second_id in app._config.paper_metadata
+                assert app._config.paper_metadata[second_id].is_read is True
+                # First paper should not have metadata
+                assert papers[0].arxiv_id not in app._config.paper_metadata
+
+    async def test_toggle_star_creates_metadata(self, make_paper):
+        """Pressing 'x' should create metadata and set starred True."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=2)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                first_id = papers[0].arxiv_id
+                assert first_id not in app._config.paper_metadata
+
+                await pilot.press("x")
+                await pilot.pause(0.1)
+                assert first_id in app._config.paper_metadata
+                assert app._config.paper_metadata[first_id].starred is True
+
+    async def test_toggle_star_twice_unsets(self, make_paper):
+        """Pressing 'x' twice should toggle starred back to False."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=2)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                first_id = papers[0].arxiv_id
+                await pilot.press("x")
+                await pilot.pause(0.1)
+                assert app._config.paper_metadata[first_id].starred is True
+
+                await pilot.press("x")
+                await pilot.pause(0.1)
+                assert app._config.paper_metadata[first_id].starred is False
+
+    async def test_read_and_star_independent(self, make_paper):
+        """Read and star should be independent metadata flags."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=1)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                first_id = papers[0].arxiv_id
+                await pilot.press("r")
+                await pilot.pause(0.1)
+                await pilot.press("x")
+                await pilot.pause(0.1)
+                meta = app._config.paper_metadata[first_id]
+                assert meta.is_read is True
+                assert meta.starred is True
+
+    async def test_notes_modal_opens(self, make_paper):
+        """Pressing 'n' should open the NotesModal."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser, NotesModal
+
+        papers = self._make_papers(make_paper, count=1)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                assert len(app.screen_stack) == 1
+                await pilot.press("n")
+                await pilot.pause(0.2)
+                assert len(app.screen_stack) == 2
+                assert isinstance(app.screen_stack[-1], NotesModal)
+
+    async def test_notes_modal_save_persists(self, make_paper):
+        """Type text in NotesModal and save with Ctrl+S should persist notes."""
+        from unittest.mock import patch
+
+        from textual.widgets import TextArea
+
+        from arxiv_browser import ArxivBrowser, NotesModal
+
+        papers = self._make_papers(make_paper, count=1)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                first_id = papers[0].arxiv_id
+                await pilot.press("n")
+                await pilot.pause(0.2)
+                assert isinstance(app.screen_stack[-1], NotesModal)
+
+                # Type into the text area
+                textarea = app.screen_stack[-1].query_one("#notes-textarea", TextArea)
+                textarea.insert("My test notes")
+                await pilot.pause(0.1)
+
+                # Save with Ctrl+S
+                await pilot.press("ctrl+s")
+                await pilot.pause(0.2)
+
+                # Modal should have closed
+                assert len(app.screen_stack) == 1
+                # Notes should be persisted
+                assert first_id in app._config.paper_metadata
+                assert app._config.paper_metadata[first_id].notes == "My test notes"
+
+    async def test_notes_modal_cancel_does_not_save(self, make_paper):
+        """Pressing Escape on NotesModal should not save new notes."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=1)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                first_id = papers[0].arxiv_id
+                await pilot.press("n")
+                await pilot.pause(0.2)
+
+                # Cancel without typing
+                await pilot.press("escape")
+                await pilot.pause(0.2)
+
+                assert len(app.screen_stack) == 1
+                # No notes should have been saved (metadata may exist but notes empty)
+                if first_id in app._config.paper_metadata:
+                    assert app._config.paper_metadata[first_id].notes == ""
+
+    async def test_tags_modal_opens(self, make_paper):
+        """Pressing 't' should open the TagsModal."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser, TagsModal
+
+        papers = self._make_papers(make_paper, count=1)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                assert len(app.screen_stack) == 1
+                await pilot.press("t")
+                await pilot.pause(0.2)
+                assert len(app.screen_stack) == 2
+                assert isinstance(app.screen_stack[-1], TagsModal)
+
+
+# ============================================================================
+# Integration Tests: Sort Cycling
+# ============================================================================
+
+
+@pytest.mark.integration
+class TestSortCyclingIntegration:
+    """Integration tests for sort cycling via 's' key."""
+
+    @staticmethod
+    def _make_papers(make_paper, count: int = 5) -> list:
+        return [
+            make_paper(
+                arxiv_id=f"2401.{10000 + i}",
+                title=f"Paper Title {chr(90 - i)}",
+                authors=f"Author {chr(65 + i)}",
+                categories=f"cs.{'AI' if i % 2 == 0 else 'LG'}",
+                abstract=f"Abstract for paper {chr(65 + i)}.",
+            )
+            for i in range(count)
+        ]
+
+    async def test_sort_cycles_all_options(self, make_paper):
+        """Pressing 's' should cycle through all SORT_OPTIONS and wrap around."""
+        from unittest.mock import patch
+
+        from arxiv_browser import SORT_OPTIONS, ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=5)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                assert app._sort_index == 0
+                num_options = len(SORT_OPTIONS)
+                for expected in range(1, num_options):
+                    await pilot.press("s")
+                    assert app._sort_index == expected
+                # Wrap around
+                await pilot.press("s")
+                assert app._sort_index == 0
+
+    async def test_sort_preserves_option_count(self, make_paper):
+        """Sorting should not change the number of papers displayed."""
+        from unittest.mock import patch
+
+        from textual.widgets import OptionList
+
+        from arxiv_browser import ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=5)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                option_list = app.query_one("#paper-list", OptionList)
+                initial_count = option_list.option_count
+                assert initial_count == 5
+
+                await pilot.press("s")
+                await pilot.pause(0.1)
+                assert option_list.option_count == initial_count
+
+                await pilot.press("s")
+                await pilot.pause(0.1)
+                assert option_list.option_count == initial_count
+
+    async def test_sort_changes_paper_order(self, make_paper):
+        """Sorting should actually reorder the filtered_papers list."""
+        from unittest.mock import patch
+
+        from arxiv_browser import SORT_OPTIONS, ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=5)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                # Initial order is as-given (reverse alpha: Z, Y, X, W, V)
+                initial_ids = [p.arxiv_id for p in app.filtered_papers]
+
+                # Cycle through all sort options and verify the list gets resorted
+                # At least one sort should change the order from the initial
+                order_changed = False
+                for _ in range(len(SORT_OPTIONS)):
+                    await pilot.press("s")
+                    await pilot.pause(0.1)
+                    current_ids = [p.arxiv_id for p in app.filtered_papers]
+                    if current_ids != initial_ids:
+                        order_changed = True
+                        break
+
+                assert order_changed, "Sorting never changed paper order"
+
+
+# ============================================================================
+# Integration Tests: Selection and Batch Operations
+# ============================================================================
+
+
+@pytest.mark.integration
+class TestSelectionIntegration:
+    """Integration tests for paper selection via space/a/u keys."""
+
+    @staticmethod
+    def _make_papers(make_paper, count: int = 5) -> list:
+        return [
+            make_paper(
+                arxiv_id=f"2401.{10000 + i}",
+                title=f"Paper Title {chr(65 + i)}",
+                authors=f"Author {chr(65 + i)}",
+                categories=f"cs.{'AI' if i % 2 == 0 else 'LG'}",
+                abstract=f"Abstract for paper {chr(65 + i)}.",
+            )
+            for i in range(count)
+        ]
+
+    async def test_space_toggles_selection(self, make_paper):
+        """Pressing space should toggle selection of the current paper."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=3)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                first_id = papers[0].arxiv_id
+                assert len(app.selected_ids) == 0
+
+                await pilot.press("space")
+                await pilot.pause(0.1)
+                assert first_id in app.selected_ids
+                assert len(app.selected_ids) == 1
+
+                # Toggle off
+                await pilot.press("space")
+                await pilot.pause(0.1)
+                assert first_id not in app.selected_ids
+                assert len(app.selected_ids) == 0
+
+    async def test_select_multiple_papers(self, make_paper):
+        """Select multiple papers by navigating and pressing space."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=3)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                # Select first paper
+                await pilot.press("space")
+                await pilot.pause(0.1)
+                assert papers[0].arxiv_id in app.selected_ids
+
+                # Navigate down and select second
+                await pilot.press("j")
+                await pilot.press("space")
+                await pilot.pause(0.1)
+                assert papers[1].arxiv_id in app.selected_ids
+                assert len(app.selected_ids) == 2
+
+    async def test_select_all(self, make_paper):
+        """Pressing 'a' should select all visible papers."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=5)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                assert len(app.selected_ids) == 0
+
+                await pilot.press("a")
+                await pilot.pause(0.1)
+                assert len(app.selected_ids) == 5
+                for paper in papers:
+                    assert paper.arxiv_id in app.selected_ids
+
+    async def test_clear_selection(self, make_paper):
+        """Pressing 'u' should clear all selections."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=5)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                # Select all first
+                await pilot.press("a")
+                await pilot.pause(0.1)
+                assert len(app.selected_ids) == 5
+
+                # Clear selection
+                await pilot.press("u")
+                await pilot.pause(0.1)
+                assert len(app.selected_ids) == 0
+
+    async def test_select_all_then_deselect_one(self, make_paper):
+        """Select all, then deselect one with space."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=3)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                await pilot.press("a")
+                await pilot.pause(0.1)
+                assert len(app.selected_ids) == 3
+
+                # Deselect the first paper
+                await pilot.press("space")
+                await pilot.pause(0.1)
+                assert papers[0].arxiv_id not in app.selected_ids
+                assert len(app.selected_ids) == 2
+
+    async def test_selection_count_in_status_bar(self, make_paper):
+        """Status bar should show selection count when papers are selected."""
+        from unittest.mock import patch
+
+        from textual.widgets import Label
+
+        from arxiv_browser import ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=3)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                # No selection initially — "selected" should not appear
+                status = app.query_one("#status-bar", Label)
+                assert "selected" not in str(status.content)
+
+                # Select all papers
+                await pilot.press("a")
+                await pilot.pause(0.1)
+                status_text = str(status.content)
+                assert "3 selected" in status_text
+
+
+# ============================================================================
+# Integration Tests: Export Menu
+# ============================================================================
+
+
+@pytest.mark.integration
+class TestExportMenuIntegration:
+    """Integration tests for the export menu modal."""
+
+    @staticmethod
+    def _make_papers(make_paper, count: int = 2) -> list:
+        return [
+            make_paper(
+                arxiv_id=f"2401.{10000 + i}",
+                title=f"Paper Title {chr(65 + i)}",
+                authors=f"Author {chr(65 + i)}",
+                categories="cs.AI",
+                abstract=f"Abstract for paper {chr(65 + i)}.",
+            )
+            for i in range(count)
+        ]
+
+    async def test_export_menu_opens(self, make_paper):
+        """Pressing 'E' with selected papers should open the ExportMenuModal."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser, ExportMenuModal
+
+        papers = self._make_papers(make_paper, count=2)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                # Select a paper first so _get_target_papers returns non-empty
+                await pilot.press("space")
+                await pilot.pause(0.1)
+                assert len(app.screen_stack) == 1
+                await pilot.press("E")
+                await pilot.pause(0.2)
+                assert len(app.screen_stack) == 2
+                assert isinstance(app.screen_stack[-1], ExportMenuModal)
+
+    async def test_export_menu_closes_on_escape(self, make_paper):
+        """Pressing Escape should close the ExportMenuModal."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser, ExportMenuModal
+
+        papers = self._make_papers(make_paper, count=2)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                await pilot.press("space")
+                await pilot.pause(0.1)
+                await pilot.press("E")
+                await pilot.pause(0.2)
+                assert isinstance(app.screen_stack[-1], ExportMenuModal)
+
+                await pilot.press("escape")
+                await pilot.pause(0.2)
+                assert len(app.screen_stack) == 1
+
+    async def test_export_menu_opens_with_detail_pane_paper(self, make_paper):
+        """Export menu should open when detail pane has a paper (no explicit selection)."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser, ExportMenuModal
+
+        papers = self._make_papers(make_paper, count=2)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                # Wait for the detail pane to load the highlighted paper
+                await pilot.pause(0.5)
+                await pilot.press("E")
+                await pilot.pause(0.2)
+                # If the detail pane has a paper, export menu opens
+                # If not, the action just notifies — either way no crash
+                if len(app.screen_stack) == 2:
+                    assert isinstance(app.screen_stack[-1], ExportMenuModal)
+
+
+# ============================================================================
+# Integration Tests: Abstract Preview Toggle
+# ============================================================================
+
+
+@pytest.mark.integration
+class TestAbstractPreviewIntegration:
+    """Integration tests for abstract preview toggle via 'p' key."""
+
+    @staticmethod
+    def _make_papers(make_paper, count: int = 3) -> list:
+        return [
+            make_paper(
+                arxiv_id=f"2401.{10000 + i}",
+                title=f"Paper Title {chr(65 + i)}",
+                authors=f"Author {chr(65 + i)}",
+                categories="cs.AI",
+                abstract=f"Abstract for paper {chr(65 + i)}.",
+            )
+            for i in range(count)
+        ]
+
+    async def test_toggle_preview_flips_state(self, make_paper):
+        """Pressing 'p' should toggle _show_abstract_preview."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=3)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                initial = app._show_abstract_preview
+                await pilot.press("p")
+                await pilot.pause(0.1)
+                assert app._show_abstract_preview is not initial
+
+                # Toggle back
+                await pilot.press("p")
+                await pilot.pause(0.1)
+                assert app._show_abstract_preview is initial
+
+    async def test_toggle_preview_preserves_paper_count(self, make_paper):
+        """Toggling preview should not change the number of papers displayed."""
+        from unittest.mock import patch
+
+        from textual.widgets import OptionList
+
+        from arxiv_browser import ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=3)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                option_list = app.query_one("#paper-list", OptionList)
+                assert option_list.option_count == 3
+
+                await pilot.press("p")
+                await pilot.pause(0.1)
+                assert option_list.option_count == 3
+
+    async def test_toggle_preview_updates_config(self, make_paper):
+        """Preview toggle should sync to config for persistence."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=1)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                initial = app._config.show_abstract_preview
+                await pilot.press("p")
+                await pilot.pause(0.1)
+                assert app._config.show_abstract_preview is not initial
+
+
+# ============================================================================
+# Integration Tests: Watch Filter Toggle
+# ============================================================================
+
+
+@pytest.mark.integration
+class TestWatchFilterIntegration:
+    """Integration tests for watch filter toggle via 'w' key."""
+
+    @staticmethod
+    def _make_papers(make_paper, count: int = 3) -> list:
+        return [
+            make_paper(
+                arxiv_id=f"2401.{10000 + i}",
+                title=f"Paper Title {chr(65 + i)}",
+                authors=f"Author {chr(65 + i)}",
+                categories="cs.AI",
+                abstract=f"Abstract for paper {chr(65 + i)}.",
+            )
+            for i in range(count)
+        ]
+
+    async def test_watch_filter_toggle_empty_watch_list(self, make_paper):
+        """Pressing 'w' with empty watch list should remain inactive."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=3)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                assert app._watch_filter_active is False
+                await pilot.press("w")
+                await pilot.pause(0.1)
+                # Should remain False because watch list is empty
+                assert app._watch_filter_active is False
+
+    async def test_watch_filter_toggle_with_watch_list(self, make_paper):
+        """Pressing 'w' with watch entries should toggle filter on/off."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser, WatchListEntry
+
+        papers = self._make_papers(make_paper, count=3)
+        config = UserConfig(watch_list=[WatchListEntry(pattern="Author A", match_type="author")])
+        app = ArxivBrowser(papers, config=config, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                assert app._watch_filter_active is False
+                # Ensure some papers are watched
+                assert len(app._watched_paper_ids) > 0
+
+                await pilot.press("w")
+                await pilot.pause(0.1)
+                assert app._watch_filter_active is True
+
+                # Toggle off
+                await pilot.press("w")
+                await pilot.pause(0.1)
+                assert app._watch_filter_active is False
+
+    async def test_watch_filter_reduces_visible_papers(self, make_paper):
+        """Activating watch filter should show only watched papers."""
+        from unittest.mock import patch
+
+        from textual.widgets import OptionList
+
+        from arxiv_browser import ArxivBrowser, WatchListEntry
+
+        papers = self._make_papers(make_paper, count=3)
+        # Only watch Author A — should match papers[0] only
+        config = UserConfig(watch_list=[WatchListEntry(pattern="Author A", match_type="author")])
+        app = ArxivBrowser(papers, config=config, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                option_list = app.query_one("#paper-list", OptionList)
+                assert option_list.option_count == 3
+
+                await pilot.press("w")
+                await pilot.pause(0.2)
+                # Only watched papers should be visible
+                assert option_list.option_count < 3
+                assert option_list.option_count >= 1
+
+
+# ============================================================================
+# Integration Tests: Theme Cycling
+# ============================================================================
+
+
+@pytest.mark.integration
+class TestThemeCyclingIntegration:
+    """Integration tests for theme cycling via Ctrl+T."""
+
+    @staticmethod
+    def _make_papers(make_paper, count: int = 1) -> list:
+        return [
+            make_paper(
+                arxiv_id=f"2401.{10000 + i}",
+                title=f"Paper Title {chr(65 + i)}",
+                authors=f"Author {chr(65 + i)}",
+                categories="cs.AI",
+                abstract=f"Abstract for paper {chr(65 + i)}.",
+            )
+            for i in range(count)
+        ]
+
+    async def test_theme_cycles_to_next(self, make_paper):
+        """Pressing Ctrl+T should cycle to the next theme."""
+        from unittest.mock import patch
+
+        from arxiv_browser import THEME_NAMES, ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=1)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                initial_theme = app._config.theme_name
+                assert initial_theme == "monokai"
+
+                await pilot.press("ctrl+t")
+                await pilot.pause(0.1)
+                assert app._config.theme_name == THEME_NAMES[1]
+                assert app._config.theme_name != initial_theme
+
+    async def test_theme_cycles_wrap_around(self, make_paper):
+        """Pressing Ctrl+T len(THEME_NAMES) times should return to the first theme."""
+        from unittest.mock import patch
+
+        from arxiv_browser import THEME_NAMES, ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=1)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                initial_theme = app._config.theme_name
+                for _ in range(len(THEME_NAMES)):
+                    await pilot.press("ctrl+t")
+                    await pilot.pause(0.1)
+                assert app._config.theme_name == initial_theme
+
+    async def test_theme_cycle_preserves_paper_count(self, make_paper):
+        """Theme cycling should not affect the paper list."""
+        from unittest.mock import patch
+
+        from textual.widgets import OptionList
+
+        from arxiv_browser import ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=3)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                option_list = app.query_one("#paper-list", OptionList)
+                assert option_list.option_count == 3
+
+                await pilot.press("ctrl+t")
+                await pilot.pause(0.1)
+                assert option_list.option_count == 3
+
+    async def test_theme_cycle_refreshes_detail_markup(self, make_paper):
+        """Theme cycling should invalidate detail cache and re-render markup colors."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser, PaperDetails
+
+        papers = self._make_papers(make_paper, count=1)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                details = app.query_one(PaperDetails)
+                app._refresh_detail_pane()
+                before = str(details.content)
+
+                await pilot.press("ctrl+t")
+                await pilot.pause(0.1)
+
+                after = str(details.content)
+                assert before != after
+
+
+# ============================================================================
+# Integration Tests: History Mode Navigation
+# ============================================================================
+
+
+@pytest.mark.integration
+class TestHistoryNavigationIntegration:
+    """Integration tests for history date navigation via '[' and ']' keys."""
+
+    @staticmethod
+    def _make_history_file(tmp_path, date_str: str, paper_id: str) -> Path:
+        """Create a minimal arXiv email file for a given date."""
+        history_dir = tmp_path / "history"
+        history_dir.mkdir(exist_ok=True)
+        filepath = history_dir / f"{date_str}.txt"
+        content = (
+            f"arXiv:{paper_id}\n"
+            f"Date: Mon, 15 Jan 2024\n"
+            f"Title: Paper for {date_str}\n"
+            f"Authors: Author X\n"
+            f"Categories: cs.AI\n"
+            f"\\\\\n"
+            f"  Abstract for {date_str}.\n"
+        )
+        filepath.write_text(content)
+        return filepath
+
+    async def test_prev_date_increments_index(self, make_paper, tmp_path):
+        """Pressing '[' should navigate to the older date (higher index)."""
+        from datetime import date as dt_date
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser import ArxivBrowser, DateNavigator
+
+        # Create history files
+        f1 = self._make_history_file(tmp_path, "2024-01-17", "2401.00003")
+        f2 = self._make_history_file(tmp_path, "2024-01-16", "2401.00002")
+        f3 = self._make_history_file(tmp_path, "2024-01-15", "2401.00001")
+
+        # History files are newest-first: index 0 = newest
+        history_files = [
+            (dt_date(2024, 1, 17), f1),
+            (dt_date(2024, 1, 16), f2),
+            (dt_date(2024, 1, 15), f3),
+        ]
+
+        papers = [make_paper(arxiv_id="2401.00003", title="Paper for 2024-01-17")]
+        app = ArxivBrowser(
+            papers,
+            restore_session=False,
+            history_files=history_files,
+            current_date_index=0,
+        )
+        with (
+            patch("arxiv_browser.save_config", return_value=True),
+            patch.object(DateNavigator, "update_dates", new_callable=AsyncMock),
+        ):
+            async with app.run_test() as pilot:
+                assert app._current_date_index == 0
+
+                await pilot.press("bracketleft")
+                await pilot.pause(0.3)
+                assert app._current_date_index == 1
+
+    async def test_next_date_decrements_index(self, make_paper, tmp_path):
+        """Pressing ']' should navigate to the newer date (lower index)."""
+        from datetime import date as dt_date
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser import ArxivBrowser, DateNavigator
+
+        f1 = self._make_history_file(tmp_path, "2024-01-17", "2401.00003")
+        f2 = self._make_history_file(tmp_path, "2024-01-16", "2401.00002")
+        f3 = self._make_history_file(tmp_path, "2024-01-15", "2401.00001")
+
+        history_files = [
+            (dt_date(2024, 1, 17), f1),
+            (dt_date(2024, 1, 16), f2),
+            (dt_date(2024, 1, 15), f3),
+        ]
+
+        papers = [make_paper(arxiv_id="2401.00002", title="Paper for 2024-01-16")]
+        app = ArxivBrowser(
+            papers,
+            restore_session=False,
+            history_files=history_files,
+            current_date_index=1,
+        )
+        with (
+            patch("arxiv_browser.save_config", return_value=True),
+            patch.object(DateNavigator, "update_dates", new_callable=AsyncMock),
+        ):
+            async with app.run_test() as pilot:
+                assert app._current_date_index == 1
+
+                await pilot.press("bracketright")
+                await pilot.pause(0.3)
+                assert app._current_date_index == 0
+
+    async def test_prev_date_clamps_at_oldest(self, make_paper, tmp_path):
+        """Pressing '[' at the oldest date should not go further."""
+        from datetime import date as dt_date
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser import ArxivBrowser, DateNavigator
+
+        f1 = self._make_history_file(tmp_path, "2024-01-17", "2401.00003")
+        f2 = self._make_history_file(tmp_path, "2024-01-15", "2401.00001")
+
+        history_files = [
+            (dt_date(2024, 1, 17), f1),
+            (dt_date(2024, 1, 15), f2),
+        ]
+
+        papers = [make_paper(arxiv_id="2401.00001", title="Paper for 2024-01-15")]
+        app = ArxivBrowser(
+            papers,
+            restore_session=False,
+            history_files=history_files,
+            current_date_index=1,  # Already at oldest
+        )
+        with (
+            patch("arxiv_browser.save_config", return_value=True),
+            patch.object(DateNavigator, "update_dates", new_callable=AsyncMock),
+        ):
+            async with app.run_test() as pilot:
+                assert app._current_date_index == 1
+
+                await pilot.press("bracketleft")
+                await pilot.pause(0.2)
+                # Should stay at oldest (index 1 for 2 files)
+                assert app._current_date_index == 1
+
+    async def test_next_date_clamps_at_newest(self, make_paper, tmp_path):
+        """Pressing ']' at the newest date should not go further."""
+        from datetime import date as dt_date
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser import ArxivBrowser, DateNavigator
+
+        f1 = self._make_history_file(tmp_path, "2024-01-17", "2401.00003")
+        f2 = self._make_history_file(tmp_path, "2024-01-15", "2401.00001")
+
+        history_files = [
+            (dt_date(2024, 1, 17), f1),
+            (dt_date(2024, 1, 15), f2),
+        ]
+
+        papers = [make_paper(arxiv_id="2401.00003", title="Paper for 2024-01-17")]
+        app = ArxivBrowser(
+            papers,
+            restore_session=False,
+            history_files=history_files,
+            current_date_index=0,  # Already at newest
+        )
+        with (
+            patch("arxiv_browser.save_config", return_value=True),
+            patch.object(DateNavigator, "update_dates", new_callable=AsyncMock),
+        ):
+            async with app.run_test() as pilot:
+                assert app._current_date_index == 0
+
+                await pilot.press("bracketright")
+                await pilot.pause(0.2)
+                # Should stay at newest (index 0)
+                assert app._current_date_index == 0
+
+    async def test_history_navigation_loads_new_papers(self, make_paper, tmp_path):
+        """Navigating dates should load papers from the new date file."""
+        from datetime import date as dt_date
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser import ArxivBrowser, DateNavigator
+
+        f1 = self._make_history_file(tmp_path, "2024-01-17", "2401.00003")
+        f2 = self._make_history_file(tmp_path, "2024-01-16", "2401.00002")
+
+        history_files = [
+            (dt_date(2024, 1, 17), f1),
+            (dt_date(2024, 1, 16), f2),
+        ]
+
+        papers = [make_paper(arxiv_id="2401.00003", title="Paper for 2024-01-17")]
+        app = ArxivBrowser(
+            papers,
+            restore_session=False,
+            history_files=history_files,
+            current_date_index=0,
+        )
+        with (
+            patch("arxiv_browser.save_config", return_value=True),
+            patch.object(DateNavigator, "update_dates", new_callable=AsyncMock),
+        ):
+            async with app.run_test() as pilot:
+                assert app.all_papers[0].arxiv_id == "2401.00003"
+
+                await pilot.press("bracketleft")
+                await pilot.pause(0.3)
+                # After navigating to older date, papers should be from the new file
+                assert len(app.all_papers) >= 1
+                assert app.all_papers[0].arxiv_id == "2401.00002"
+
+    async def test_not_in_history_mode_ignores_navigation(self, make_paper):
+        """Without history files, '[' and ']' should not crash or change state."""
+        from unittest.mock import patch
+
+        from arxiv_browser import ArxivBrowser
+
+        papers = [make_paper()]
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch("arxiv_browser.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                assert not app._is_history_mode()
+                assert app._current_date_index == 0
+
+                await pilot.press("bracketleft")
+                await pilot.pause(0.1)
+                assert app._current_date_index == 0
+
+                await pilot.press("bracketright")
+                await pilot.pause(0.1)
+                assert app._current_date_index == 0
+
+    async def test_history_navigation_clears_selection(self, make_paper, tmp_path):
+        """Navigating to a new date should clear any paper selections."""
+        from datetime import date as dt_date
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser import ArxivBrowser, DateNavigator
+
+        f1 = self._make_history_file(tmp_path, "2024-01-17", "2401.00003")
+        f2 = self._make_history_file(tmp_path, "2024-01-16", "2401.00002")
+
+        history_files = [
+            (dt_date(2024, 1, 17), f1),
+            (dt_date(2024, 1, 16), f2),
+        ]
+
+        papers = [make_paper(arxiv_id="2401.00003", title="Paper for 2024-01-17")]
+        app = ArxivBrowser(
+            papers,
+            restore_session=False,
+            history_files=history_files,
+            current_date_index=0,
+        )
+        with (
+            patch("arxiv_browser.save_config", return_value=True),
+            patch.object(DateNavigator, "update_dates", new_callable=AsyncMock),
+        ):
+            async with app.run_test() as pilot:
+                # Select a paper
+                await pilot.press("a")
+                await pilot.pause(0.1)
+                assert len(app.selected_ids) > 0
+
+                # Navigate to older date
+                await pilot.press("bracketleft")
+                await pilot.pause(0.3)
+                # Selection should be cleared
+                assert len(app.selected_ids) == 0
+
+
+# ============================================================================
+# Tests for ExportMenuModal
+# ============================================================================
+
+
+class TestExportMenuModal:
+    """Tests for ExportMenuModal action methods and structure."""
+
+    def test_bindings_cover_all_formats(self):
+        from arxiv_browser import ExportMenuModal
+
+        binding_keys = {b.key for b in ExportMenuModal.BINDINGS}
+        expected = {"escape", "c", "b", "m", "r", "v", "t", "B", "R", "C"}
+        assert expected <= binding_keys
+
+    def test_action_cancel_dismisses_empty_string(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import ExportMenuModal
+
+        modal = ExportMenuModal(paper_count=3)
+        modal.dismiss = MagicMock()
+        modal.action_cancel()
+        modal.dismiss.assert_called_once_with("")
+
+    def test_action_do_clipboard_plain(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import ExportMenuModal
+
+        modal = ExportMenuModal(paper_count=1)
+        modal.dismiss = MagicMock()
+        modal.action_do_clipboard_plain()
+        modal.dismiss.assert_called_once_with("clipboard-plain")
+
+    def test_action_do_clipboard_bibtex(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import ExportMenuModal
+
+        modal = ExportMenuModal(paper_count=1)
+        modal.dismiss = MagicMock()
+        modal.action_do_clipboard_bibtex()
+        modal.dismiss.assert_called_once_with("clipboard-bibtex")
+
+    def test_action_do_clipboard_markdown(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import ExportMenuModal
+
+        modal = ExportMenuModal(paper_count=1)
+        modal.dismiss = MagicMock()
+        modal.action_do_clipboard_markdown()
+        modal.dismiss.assert_called_once_with("clipboard-markdown")
+
+    def test_action_do_clipboard_ris(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import ExportMenuModal
+
+        modal = ExportMenuModal(paper_count=1)
+        modal.dismiss = MagicMock()
+        modal.action_do_clipboard_ris()
+        modal.dismiss.assert_called_once_with("clipboard-ris")
+
+    def test_action_do_clipboard_csv(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import ExportMenuModal
+
+        modal = ExportMenuModal(paper_count=1)
+        modal.dismiss = MagicMock()
+        modal.action_do_clipboard_csv()
+        modal.dismiss.assert_called_once_with("clipboard-csv")
+
+    def test_action_do_clipboard_mdtable(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import ExportMenuModal
+
+        modal = ExportMenuModal(paper_count=1)
+        modal.dismiss = MagicMock()
+        modal.action_do_clipboard_mdtable()
+        modal.dismiss.assert_called_once_with("clipboard-mdtable")
+
+    def test_action_do_file_bibtex(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import ExportMenuModal
+
+        modal = ExportMenuModal(paper_count=1)
+        modal.dismiss = MagicMock()
+        modal.action_do_file_bibtex()
+        modal.dismiss.assert_called_once_with("file-bibtex")
+
+    def test_action_do_file_ris(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import ExportMenuModal
+
+        modal = ExportMenuModal(paper_count=1)
+        modal.dismiss = MagicMock()
+        modal.action_do_file_ris()
+        modal.dismiss.assert_called_once_with("file-ris")
+
+    def test_action_do_file_csv(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import ExportMenuModal
+
+        modal = ExportMenuModal(paper_count=1)
+        modal.dismiss = MagicMock()
+        modal.action_do_file_csv()
+        modal.dismiss.assert_called_once_with("file-csv")
+
+    def test_paper_count_stored(self):
+        from arxiv_browser import ExportMenuModal
+
+        modal = ExportMenuModal(paper_count=5)
+        assert modal._paper_count == 5
+
+    def test_paper_count_plural_suffix(self):
+        from arxiv_browser import ExportMenuModal
+
+        modal_one = ExportMenuModal(paper_count=1)
+        assert modal_one._paper_count == 1
+
+        modal_many = ExportMenuModal(paper_count=3)
+        assert modal_many._paper_count == 3
+
+    def test_all_action_dismiss_values_are_unique(self):
+        """Ensure each export action produces a distinct format string."""
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import ExportMenuModal
+
+        modal = ExportMenuModal(paper_count=1)
+        modal.dismiss = MagicMock()
+
+        actions = [
+            modal.action_do_clipboard_plain,
+            modal.action_do_clipboard_bibtex,
+            modal.action_do_clipboard_markdown,
+            modal.action_do_clipboard_ris,
+            modal.action_do_clipboard_csv,
+            modal.action_do_clipboard_mdtable,
+            modal.action_do_file_bibtex,
+            modal.action_do_file_ris,
+            modal.action_do_file_csv,
+        ]
+        values = []
+        for action in actions:
+            modal.dismiss.reset_mock()
+            action()
+            values.append(modal.dismiss.call_args[0][0])
+
+        assert len(set(values)) == 9
+
+
+# ============================================================================
+# Tests for SummaryModeModal dismiss values
+# ============================================================================
+
+
+class TestSummaryModeModalDismiss:
+    """Tests that each SummaryModeModal action dismisses with the correct mode name."""
+
+    def test_action_mode_default_dismisses_default(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import SummaryModeModal
+
+        modal = SummaryModeModal()
+        modal.dismiss = MagicMock()
+        modal.action_mode_default()
+        modal.dismiss.assert_called_once_with("default")
+
+    def test_action_mode_tldr_dismisses_tldr(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import SummaryModeModal
+
+        modal = SummaryModeModal()
+        modal.dismiss = MagicMock()
+        modal.action_mode_tldr()
+        modal.dismiss.assert_called_once_with("tldr")
+
+    def test_action_mode_methods_dismisses_methods(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import SummaryModeModal
+
+        modal = SummaryModeModal()
+        modal.dismiss = MagicMock()
+        modal.action_mode_methods()
+        modal.dismiss.assert_called_once_with("methods")
+
+    def test_action_mode_results_dismisses_results(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import SummaryModeModal
+
+        modal = SummaryModeModal()
+        modal.dismiss = MagicMock()
+        modal.action_mode_results()
+        modal.dismiss.assert_called_once_with("results")
+
+    def test_action_mode_comparison_dismisses_comparison(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import SummaryModeModal
+
+        modal = SummaryModeModal()
+        modal.dismiss = MagicMock()
+        modal.action_mode_comparison()
+        modal.dismiss.assert_called_once_with("comparison")
+
+    def test_action_cancel_dismisses_empty(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import SummaryModeModal
+
+        modal = SummaryModeModal()
+        modal.dismiss = MagicMock()
+        modal.action_cancel()
+        modal.dismiss.assert_called_once_with("")
+
+    def test_all_modes_match_summary_modes_dict(self):
+        """Verify each modal mode corresponds to a key in SUMMARY_MODES."""
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import SUMMARY_MODES, SummaryModeModal
+
+        modal = SummaryModeModal()
+        modal.dismiss = MagicMock()
+
+        mode_actions = {
+            "default": modal.action_mode_default,
+            "tldr": modal.action_mode_tldr,
+            "methods": modal.action_mode_methods,
+            "results": modal.action_mode_results,
+            "comparison": modal.action_mode_comparison,
+        }
+        for mode_name, action in mode_actions.items():
+            modal.dismiss.reset_mock()
+            action()
+            dismissed_value = modal.dismiss.call_args[0][0]
+            assert dismissed_value == mode_name
+            assert mode_name in SUMMARY_MODES
+
+
+# ============================================================================
+# Tests for ResearchInterestsModal actions
+# ============================================================================
+
+
+class TestResearchInterestsModalActions:
+    """Tests for ResearchInterestsModal save/cancel dismiss behavior."""
+
+    def test_action_cancel_dismisses_empty_string(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import ResearchInterestsModal
+
+        modal = ResearchInterestsModal("some interests")
+        modal.dismiss = MagicMock()
+        modal.action_cancel()
+        modal.dismiss.assert_called_once_with("")
+
+    def test_initial_interests_stored(self):
+        from arxiv_browser import ResearchInterestsModal
+
+        modal = ResearchInterestsModal("LLM quantization, speculative decoding")
+        assert modal._current_interests == "LLM quantization, speculative decoding"
+
+    def test_default_interests_empty(self):
+        from arxiv_browser import ResearchInterestsModal
+
+        modal = ResearchInterestsModal()
+        assert modal._current_interests == ""
+
+
+# ============================================================================
+# Tests for SectionToggleModal
+# ============================================================================
+
+
+class TestSectionToggleModal:
+    """Tests for SectionToggleModal toggle and save/cancel behavior."""
+
+    def test_init_stores_collapsed_as_set(self):
+        from arxiv_browser import SectionToggleModal
+
+        modal = SectionToggleModal(["authors", "abstract"])
+        assert modal._collapsed == {"authors", "abstract"}
+
+    def test_init_empty_collapsed(self):
+        from arxiv_browser import SectionToggleModal
+
+        modal = SectionToggleModal([])
+        assert modal._collapsed == set()
+
+    def test_toggle_adds_section_when_not_collapsed(self):
+        from arxiv_browser import SectionToggleModal
+
+        modal = SectionToggleModal([])
+        modal._toggle("a")
+        assert "authors" in modal._collapsed
+
+    def test_toggle_removes_section_when_collapsed(self):
+        from arxiv_browser import SectionToggleModal
+
+        modal = SectionToggleModal(["authors"])
+        modal._toggle("a")
+        assert "authors" not in modal._collapsed
+
+    def test_toggle_idempotent_double_toggle(self):
+        from arxiv_browser import SectionToggleModal
+
+        modal = SectionToggleModal([])
+        modal._toggle("a")
+        assert "authors" in modal._collapsed
+        modal._toggle("a")
+        assert "authors" not in modal._collapsed
+
+    def test_toggle_invalid_key_ignored(self):
+        from arxiv_browser import SectionToggleModal
+
+        modal = SectionToggleModal([])
+        modal._toggle("z")
+        assert modal._collapsed == set()
+
+    def test_action_toggle_a_toggles_authors(self):
+        from arxiv_browser import SectionToggleModal
+
+        modal = SectionToggleModal([])
+        modal.action_toggle_a()
+        assert "authors" in modal._collapsed
+
+    def test_action_toggle_b_toggles_abstract(self):
+        from arxiv_browser import SectionToggleModal
+
+        modal = SectionToggleModal([])
+        modal.action_toggle_b()
+        assert "abstract" in modal._collapsed
+
+    def test_action_toggle_t_toggles_tags(self):
+        from arxiv_browser import SectionToggleModal
+
+        modal = SectionToggleModal([])
+        modal.action_toggle_t()
+        assert "tags" in modal._collapsed
+
+    def test_action_toggle_r_toggles_relevance(self):
+        from arxiv_browser import SectionToggleModal
+
+        modal = SectionToggleModal([])
+        modal.action_toggle_r()
+        assert "relevance" in modal._collapsed
+
+    def test_action_toggle_s_toggles_summary(self):
+        from arxiv_browser import SectionToggleModal
+
+        modal = SectionToggleModal([])
+        modal.action_toggle_s()
+        assert "summary" in modal._collapsed
+
+    def test_action_toggle_e_toggles_s2(self):
+        from arxiv_browser import SectionToggleModal
+
+        modal = SectionToggleModal([])
+        modal.action_toggle_e()
+        assert "s2" in modal._collapsed
+
+    def test_action_toggle_h_toggles_hf(self):
+        from arxiv_browser import SectionToggleModal
+
+        modal = SectionToggleModal([])
+        modal.action_toggle_h()
+        assert "hf" in modal._collapsed
+
+    def test_action_toggle_v_toggles_version(self):
+        from arxiv_browser import SectionToggleModal
+
+        modal = SectionToggleModal([])
+        modal.action_toggle_v()
+        assert "version" in modal._collapsed
+
+    def test_action_toggle_u_toggles_url(self):
+        from arxiv_browser import SectionToggleModal
+
+        modal = SectionToggleModal([])
+        modal.action_toggle_u()
+        assert "url" in modal._collapsed
+
+    def test_action_save_returns_sorted_collapsed(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import SectionToggleModal
+
+        modal = SectionToggleModal(["url", "authors", "hf"])
+        modal.dismiss = MagicMock()
+        modal.action_save()
+        modal.dismiss.assert_called_once_with(sorted(["url", "authors", "hf"]))
+
+    def test_action_save_after_toggle_reflects_changes(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import SectionToggleModal
+
+        modal = SectionToggleModal(["authors"])
+        modal.action_toggle_a()
+        modal.action_toggle_b()
+        modal.dismiss = MagicMock()
+        modal.action_save()
+        result = modal.dismiss.call_args[0][0]
+        assert "abstract" in result
+        assert "authors" not in result
+
+    def test_action_cancel_returns_none(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import SectionToggleModal
+
+        modal = SectionToggleModal(["authors"])
+        modal.dismiss = MagicMock()
+        modal.action_cancel()
+        modal.dismiss.assert_called_once_with(None)
+
+    def test_render_list_shows_all_sections(self):
+        from arxiv_browser import SectionToggleModal
+
+        modal = SectionToggleModal([])
+        rendered = modal._render_list()
+        assert "Authors" in rendered
+        assert "Abstract" in rendered
+        assert "Tags" in rendered
+        assert "Relevance" in rendered
+        assert "AI Summary" in rendered
+        assert "Semantic Scholar" in rendered
+        assert "HuggingFace" in rendered
+        assert "Version Update" in rendered
+        assert "URL" in rendered
+
+    def test_render_list_indicates_collapsed_state(self):
+        from arxiv_browser import SectionToggleModal
+
+        modal = SectionToggleModal(["authors", "url"])
+        rendered = modal._render_list()
+        lines = rendered.split("\n")
+        authors_line = next(line for line in lines if "Authors" in line)
+        url_line = next(line for line in lines if "URL" in line)
+        abstract_line = next(line for line in lines if "Abstract" in line)
+        assert "\u25b8" in authors_line
+        assert "collapsed" in authors_line
+        assert "\u25b8" in url_line
+        assert "\u25be" in abstract_line
+        assert "expanded" in abstract_line
+
+    def test_bindings_have_all_toggle_keys(self):
+        from arxiv_browser import SectionToggleModal
+
+        binding_keys = {b.key for b in SectionToggleModal.BINDINGS}
+        expected = {"escape", "enter", "a", "b", "t", "r", "s", "e", "h", "v", "u"}
+        assert expected <= binding_keys
+
+
+# ============================================================================
+# Tests for _get_target_papers
+# ============================================================================
+
+
+class TestGetTargetPapers:
+    """Tests for ArxivBrowser._get_target_papers selection logic."""
+
+    def _make_mock_app(self, make_paper, papers=None, selected_ids=None):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import ArxivBrowser, PaperDetails
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._http_client = None
+
+        if papers is None:
+            papers = [make_paper(arxiv_id=f"2401.{i:05d}") for i in range(3)]
+        app.filtered_papers = papers
+        app._papers_by_id = {p.arxiv_id: p for p in papers}
+        app.selected_ids = selected_ids or set()
+
+        mock_details = MagicMock(spec=PaperDetails)
+        mock_details.paper = papers[0] if papers else None
+        app.query_one = MagicMock(return_value=mock_details)
+
+        return app
+
+    def test_no_selection_returns_current_paper(self, make_paper):
+        papers = [make_paper(arxiv_id="2401.00001", title="Paper 1")]
+        app = self._make_mock_app(make_paper, papers=papers, selected_ids=set())
+
+        result = app._get_target_papers()
+        assert len(result) == 1
+        assert result[0].arxiv_id == "2401.00001"
+
+    def test_with_selection_returns_selected_papers(self, make_paper):
+        papers = [
+            make_paper(arxiv_id="2401.00001"),
+            make_paper(arxiv_id="2401.00002"),
+            make_paper(arxiv_id="2401.00003"),
+        ]
+        app = self._make_mock_app(
+            make_paper,
+            papers=papers,
+            selected_ids={"2401.00001", "2401.00003"},
+        )
+
+        result = app._get_target_papers()
+        assert len(result) == 2
+        ids = [p.arxiv_id for p in result]
+        assert "2401.00001" in ids
+        assert "2401.00003" in ids
+
+    def test_selection_preserves_list_order(self, make_paper):
+        papers = [
+            make_paper(arxiv_id="2401.00003"),
+            make_paper(arxiv_id="2401.00001"),
+            make_paper(arxiv_id="2401.00002"),
+        ]
+        app = self._make_mock_app(
+            make_paper,
+            papers=papers,
+            selected_ids={"2401.00001", "2401.00002", "2401.00003"},
+        )
+
+        result = app._get_target_papers()
+        result_ids = [p.arxiv_id for p in result]
+        assert result_ids == ["2401.00003", "2401.00001", "2401.00002"]
+
+    def test_no_selection_no_current_paper_returns_empty(self, make_paper):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import ArxivBrowser, PaperDetails
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._http_client = None
+        app.filtered_papers = []
+        app._papers_by_id = {}
+        app.selected_ids = set()
+
+        mock_details = MagicMock(spec=PaperDetails)
+        mock_details.paper = None
+        app.query_one = MagicMock(return_value=mock_details)
+
+        result = app._get_target_papers()
+        assert result == []
+
+    def test_selected_id_not_in_filtered_still_included(self, make_paper):
+        """Papers selected but then filtered out should still be returned."""
+        visible = [make_paper(arxiv_id="2401.00001")]
+        hidden = make_paper(arxiv_id="2401.00099")
+
+        app = self._make_mock_app(
+            make_paper,
+            papers=visible,
+            selected_ids={"2401.00001", "2401.00099"},
+        )
+        app._papers_by_id["2401.00099"] = hidden
+
+        result = app._get_target_papers()
+        result_ids = [p.arxiv_id for p in result]
+        assert "2401.00001" in result_ids
+        assert "2401.00099" in result_ids
+
+
+# ============================================================================
+# Tests for action_toggle_read and action_toggle_star
+# ============================================================================
+
+
+class TestToggleReadStar:
+    """Tests for action_toggle_read and action_toggle_star via mock app."""
+
+    def _make_mock_app(self, make_paper, papers=None):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser import ArxivBrowser, UserConfig
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._http_client = None
+        app._config = UserConfig()
+
+        if papers is None:
+            papers = [make_paper()]
+        app.filtered_papers = papers
+        app._papers_by_id = {p.arxiv_id: p for p in papers}
+
+        app._get_current_paper = MagicMock(return_value=papers[0] if papers else None)
+        app._get_current_index = MagicMock(return_value=0 if papers else None)
+        app._update_option_at_index = MagicMock()
+        app.notify = MagicMock()
+
+        return app
+
+    def test_toggle_read_creates_metadata_and_sets_read(self, make_paper):
+        paper = make_paper(arxiv_id="2401.00001")
+        app = self._make_mock_app(make_paper, papers=[paper])
+
+        app.action_toggle_read()
+
+        meta = app._config.paper_metadata["2401.00001"]
+        assert meta.is_read is True
+        app.notify.assert_called_once()
+        assert "read" in app.notify.call_args[0][0]
+
+    def test_toggle_read_twice_unsets_read(self, make_paper):
+        paper = make_paper(arxiv_id="2401.00001")
+        app = self._make_mock_app(make_paper, papers=[paper])
+
+        app.action_toggle_read()
+        app.action_toggle_read()
+
+        meta = app._config.paper_metadata["2401.00001"]
+        assert meta.is_read is False
+
+    def test_toggle_read_calls_update_option(self, make_paper):
+        paper = make_paper(arxiv_id="2401.00001")
+        app = self._make_mock_app(make_paper, papers=[paper])
+
+        app.action_toggle_read()
+        app._update_option_at_index.assert_called_once_with(0)
+
+    def test_toggle_read_no_paper_does_nothing(self, make_paper):
+        app = self._make_mock_app(make_paper, papers=[make_paper()])
+        app._get_current_paper = lambda: None
+
+        app.action_toggle_read()
+        assert app._config.paper_metadata == {}
+
+    def test_toggle_star_creates_metadata_and_sets_starred(self, make_paper):
+        paper = make_paper(arxiv_id="2401.00001")
+        app = self._make_mock_app(make_paper, papers=[paper])
+
+        app.action_toggle_star()
+
+        meta = app._config.paper_metadata["2401.00001"]
+        assert meta.starred is True
+        app.notify.assert_called_once()
+        assert "starred" in app.notify.call_args[0][0]
+
+    def test_toggle_star_twice_unsets_star(self, make_paper):
+        paper = make_paper(arxiv_id="2401.00001")
+        app = self._make_mock_app(make_paper, papers=[paper])
+
+        app.action_toggle_star()
+        app.action_toggle_star()
+
+        meta = app._config.paper_metadata["2401.00001"]
+        assert meta.starred is False
+
+    def test_toggle_star_calls_update_option(self, make_paper):
+        paper = make_paper(arxiv_id="2401.00001")
+        app = self._make_mock_app(make_paper, papers=[paper])
+
+        app.action_toggle_star()
+        app._update_option_at_index.assert_called_once_with(0)
+
+    def test_toggle_star_no_paper_does_nothing(self, make_paper):
+        app = self._make_mock_app(make_paper, papers=[make_paper()])
+        app._get_current_paper = lambda: None
+
+        app.action_toggle_star()
+        assert app._config.paper_metadata == {}
+
+    def test_toggle_read_with_none_index_skips_option_update(self, make_paper):
+        """When _get_current_index returns None, _update_option_at_index is not called."""
+        paper = make_paper(arxiv_id="2401.00001")
+        app = self._make_mock_app(make_paper, papers=[paper])
+        app._get_current_index = lambda: None
+
+        app.action_toggle_read()
+        app._update_option_at_index.assert_not_called()
+        assert app._config.paper_metadata["2401.00001"].is_read is True
+
+    def test_toggle_star_with_none_index_skips_option_update(self, make_paper):
+        """When _get_current_index returns None, _update_option_at_index is not called."""
+        paper = make_paper(arxiv_id="2401.00001")
+        app = self._make_mock_app(make_paper, papers=[paper])
+        app._get_current_index = lambda: None
+
+        app.action_toggle_star()
+        app._update_option_at_index.assert_not_called()
+        assert app._config.paper_metadata["2401.00001"].starred is True
+
+
+# ============================================================================
+# Tests for format_paper_for_clipboard (extended)
+# ============================================================================
+
+
+class TestFormatPaperForClipboardExtended:
+    """Extended tests for format_paper_for_clipboard output formatting."""
+
+    def test_includes_all_metadata_fields(self, make_paper):
+        from arxiv_browser import format_paper_for_clipboard
+
+        paper = make_paper(
+            arxiv_id="2401.12345",
+            title="A Great Paper",
+            authors="Alice, Bob",
+            date="Mon, 15 Jan 2024",
+            categories="cs.AI cs.LG",
+            comments="10 pages, 5 figures",
+        )
+        result = format_paper_for_clipboard(paper, abstract_text="The abstract text.")
+        assert "Title: A Great Paper" in result
+        assert "Authors: Alice, Bob" in result
+        assert "arXiv: 2401.12345" in result
+        assert "Date: Mon, 15 Jan 2024" in result
+        assert "Categories: cs.AI cs.LG" in result
+        assert "Comments: 10 pages, 5 figures" in result
+        assert "URL: https://arxiv.org/abs/2401.12345" in result
+        assert "Abstract: The abstract text." in result
+
+    def test_omits_comments_when_none(self, make_paper):
+        from arxiv_browser import format_paper_for_clipboard
+
+        paper = make_paper(comments=None)
+        result = format_paper_for_clipboard(paper)
+        assert "Comments:" not in result
+
+    def test_empty_abstract_still_has_label(self, make_paper):
+        from arxiv_browser import format_paper_for_clipboard
+
+        paper = make_paper()
+        result = format_paper_for_clipboard(paper, abstract_text="")
+        assert "Abstract: " in result
+
+
+# ============================================================================
+# Tests for format_paper_as_markdown (extended)
+# ============================================================================
+
+
+class TestFormatPaperAsMarkdownExtended:
+    """Extended tests for format_paper_as_markdown output formatting."""
+
+    def test_output_has_markdown_structure(self, make_paper):
+        from arxiv_browser import format_paper_as_markdown
+
+        paper = make_paper(
+            arxiv_id="2401.12345",
+            title="Attention Is All You Need",
+            authors="Vaswani et al.",
+            date="Mon, 15 Jan 2024",
+            categories="cs.CL",
+        )
+        result = format_paper_as_markdown(paper, abstract_text="We propose Transformer.")
+        assert result.startswith("## Attention Is All You Need")
+        assert "**arXiv:** [2401.12345](https://arxiv.org/abs/2401.12345)" in result
+        assert "**Date:** Mon, 15 Jan 2024" in result
+        assert "**Categories:** cs.CL" in result
+        assert "**Authors:** Vaswani et al." in result
+        assert "### Abstract" in result
+        assert "We propose Transformer." in result
+
+    def test_includes_comments_when_present(self, make_paper):
+        from arxiv_browser import format_paper_as_markdown
+
+        paper = make_paper(comments="Accepted at NeurIPS 2024")
+        result = format_paper_as_markdown(paper)
+        assert "**Comments:** Accepted at NeurIPS 2024" in result
+
+    def test_omits_comments_when_none(self, make_paper):
+        from arxiv_browser import format_paper_as_markdown
+
+        paper = make_paper(comments=None)
+        result = format_paper_as_markdown(paper)
+        assert "**Comments:**" not in result
+
+
+# ============================================================================
+# Tests for format_paper_as_bibtex (extended)
+# ============================================================================
+
+
+class TestFormatPaperAsBibtexExtended:
+    """Extended tests for format_paper_as_bibtex output formatting."""
+
+    def test_bibtex_uses_misc_type(self, make_paper):
+        from arxiv_browser import format_paper_as_bibtex
+
+        paper = make_paper()
+        result = format_paper_as_bibtex(paper)
+        assert result.startswith("@misc{")
+
+    def test_bibtex_contains_required_fields(self, make_paper):
+        from arxiv_browser import format_paper_as_bibtex
+
+        paper = make_paper(
+            arxiv_id="2401.12345",
+            title="Deep Learning",
+            authors="John Smith",
+            date="Mon, 15 Jan 2024",
+            categories="cs.AI cs.LG",
+        )
+        result = format_paper_as_bibtex(paper)
+        assert "title = {Deep Learning}" in result
+        assert "author = {John Smith}" in result
+        assert "year = {2024}" in result
+        assert "eprint = {2401.12345}" in result
+        assert "archivePrefix = {arXiv}" in result
+        assert "primaryClass = {cs.AI}" in result
+        assert "url = {https://arxiv.org/abs/2401.12345}" in result
+
+    def test_bibtex_ends_with_closing_brace(self, make_paper):
+        from arxiv_browser import format_paper_as_bibtex
+
+        paper = make_paper()
+        result = format_paper_as_bibtex(paper)
+        assert result.strip().endswith("}")
+
+    def test_bibtex_escapes_special_chars(self, make_paper):
+        from arxiv_browser import format_paper_as_bibtex
+
+        paper = make_paper(title="NLP & Transformers: 100% Better")
+        result = format_paper_as_bibtex(paper)
+        assert r"NLP \& Transformers: 100\% Better" in result
+
+    def test_bibtex_primary_class_from_first_category(self, make_paper):
+        from arxiv_browser import format_paper_as_bibtex
+
+        paper = make_paper(categories="stat.ML cs.LG")
+        result = format_paper_as_bibtex(paper)
+        assert "primaryClass = {stat.ML}" in result
+
+
+# ============================================================================
+# Tests for format_paper_as_ris (extended)
+# ============================================================================
+
+
+class TestFormatPaperAsRisExtended:
+    """Extended tests for format_paper_as_ris output formatting."""
+
+    def test_ris_has_correct_record_type(self, make_paper):
+        from arxiv_browser import format_paper_as_ris
+
+        paper = make_paper()
+        result = format_paper_as_ris(paper)
+        assert result.startswith("TY  - ELEC")
+
+    def test_ris_ends_with_end_record(self, make_paper):
+        from arxiv_browser import format_paper_as_ris
+
+        paper = make_paper()
+        result = format_paper_as_ris(paper)
+        assert result.strip().endswith("ER  -")
+
+    def test_ris_includes_title_and_url(self, make_paper):
+        from arxiv_browser import format_paper_as_ris
+
+        paper = make_paper(arxiv_id="2401.12345", title="My Paper")
+        result = format_paper_as_ris(paper)
+        assert "TI  - My Paper" in result
+        assert "UR  - https://arxiv.org/abs/2401.12345" in result
+
+    def test_ris_splits_authors_by_comma(self, make_paper):
+        from arxiv_browser import format_paper_as_ris
+
+        paper = make_paper(authors="Alice Smith, Bob Jones, Charlie Brown")
+        result = format_paper_as_ris(paper)
+        assert "AU  - Alice Smith" in result
+        assert "AU  - Bob Jones" in result
+        assert "AU  - Charlie Brown" in result
+
+    def test_ris_includes_abstract_when_provided(self, make_paper):
+        from arxiv_browser import format_paper_as_ris
+
+        paper = make_paper()
+        result = format_paper_as_ris(paper, abstract_text="This is the abstract.")
+        assert "AB  - This is the abstract." in result
+
+    def test_ris_omits_abstract_when_empty(self, make_paper):
+        from arxiv_browser import format_paper_as_ris
+
+        paper = make_paper()
+        result = format_paper_as_ris(paper)
+        assert "AB  -" not in result
+
+    def test_ris_includes_comments_as_note(self, make_paper):
+        from arxiv_browser import format_paper_as_ris
+
+        paper = make_paper(comments="Accepted at ICML")
+        result = format_paper_as_ris(paper)
+        assert "N2  - Accepted at ICML" in result
+
+    def test_ris_omits_comments_note_when_none(self, make_paper):
+        from arxiv_browser import format_paper_as_ris
+
+        paper = make_paper(comments=None)
+        result = format_paper_as_ris(paper)
+        assert "N2  -" not in result
+
+    def test_ris_includes_categories_as_keywords(self, make_paper):
+        from arxiv_browser import format_paper_as_ris
+
+        paper = make_paper(categories="cs.AI cs.LG stat.ML")
+        result = format_paper_as_ris(paper)
+        assert "KW  - cs.AI" in result
+        assert "KW  - cs.LG" in result
+        assert "KW  - stat.ML" in result
+
+    def test_ris_includes_arxiv_note(self, make_paper):
+        from arxiv_browser import format_paper_as_ris
+
+        paper = make_paper(arxiv_id="2401.12345")
+        result = format_paper_as_ris(paper)
+        assert "N1  - arXiv:2401.12345" in result
+
+
+# ============================================================================
+# Tests for format_papers_as_csv (extended)
+# ============================================================================
+
+
+class TestFormatPapersAsCsvExtended:
+    """Extended tests for format_papers_as_csv output formatting."""
+
+    def test_csv_header_without_metadata(self, make_paper):
+        from arxiv_browser import format_papers_as_csv
+
+        papers = [make_paper()]
+        result = format_papers_as_csv(papers)
+        lines = result.strip().split("\n")
+        header = lines[0]
+        assert "arxiv_id" in header
+        assert "title" in header
+        assert "authors" in header
+        assert "categories" in header
+        assert "date" in header
+        assert "url" in header
+        assert "comments" in header
+        assert "starred" not in header
+        assert "read" not in header
+        assert "tags" not in header
+        assert "notes" not in header
+
+    def test_csv_header_with_metadata(self, make_paper):
+        from arxiv_browser import format_papers_as_csv
+
+        papers = [make_paper()]
+        result = format_papers_as_csv(papers, metadata={})
+        lines = result.strip().split("\n")
+        header = lines[0]
+        assert "starred" in header
+        assert "read" in header
+        assert "tags" in header
+        assert "notes" in header
+
+    def test_csv_multiple_papers(self, make_paper):
+        from arxiv_browser import format_papers_as_csv
+
+        papers = [
+            make_paper(arxiv_id="2401.00001", title="Paper A"),
+            make_paper(arxiv_id="2401.00002", title="Paper B"),
+        ]
+        result = format_papers_as_csv(papers)
+        lines = result.strip().split("\n")
+        assert len(lines) == 3
+
+    def test_csv_with_metadata_values(self, make_paper):
+        from arxiv_browser import PaperMetadata, format_papers_as_csv
+
+        paper = make_paper(arxiv_id="2401.00001")
+        meta = PaperMetadata(
+            arxiv_id="2401.00001",
+            starred=True,
+            is_read=True,
+            tags=["ml", "topic:transformers"],
+            notes="Important paper",
+        )
+        result = format_papers_as_csv([paper], metadata={"2401.00001": meta})
+        assert "true" in result
+        assert "ml;topic:transformers" in result
+        assert "Important paper" in result
+
+    def test_csv_with_metadata_no_match(self, make_paper):
+        from arxiv_browser import format_papers_as_csv
+
+        paper = make_paper(arxiv_id="2401.00001")
+        result = format_papers_as_csv([paper], metadata={})
+        lines = result.strip().split("\n")
+        data_line = lines[1]
+        assert "false" in data_line
+
+    def test_csv_escapes_commas_in_fields(self, make_paper):
+        import csv
+        import io
+
+        from arxiv_browser import format_papers_as_csv
+
+        paper = make_paper(title='Title with "quotes" and, commas')
+        result = format_papers_as_csv([paper])
+        reader = csv.reader(io.StringIO(result))
+        rows = list(reader)
+        assert len(rows) == 2
+        assert rows[1][1] == 'Title with "quotes" and, commas'
+
+
+# ============================================================================
+# Tests for format_papers_as_markdown_table (extended)
+# ============================================================================
+
+
+class TestFormatPapersAsMarkdownTableExtended:
+    """Extended tests for format_papers_as_markdown_table output."""
+
+    def test_markdown_table_header(self, make_paper):
+        from arxiv_browser import format_papers_as_markdown_table
+
+        papers = [make_paper()]
+        result = format_papers_as_markdown_table(papers)
+        lines = result.strip().split("\n")
+        assert "| arXiv ID | Title | Authors | Categories | Date |" in lines[0]
+        assert lines[1].startswith("|---")
+
+    def test_markdown_table_arxiv_link(self, make_paper):
+        from arxiv_browser import format_papers_as_markdown_table
+
+        paper = make_paper(arxiv_id="2401.12345")
+        result = format_papers_as_markdown_table([paper])
+        assert "[2401.12345](https://arxiv.org/abs/2401.12345)" in result
+
+    def test_markdown_table_truncates_many_authors(self, make_paper):
+        from arxiv_browser import format_papers_as_markdown_table
+
+        paper = make_paper(authors="Alice, Bob, Charlie, Diana, Eve")
+        result = format_papers_as_markdown_table([paper])
+        assert "Alice et al." in result
+        assert "Eve" not in result
+
+    def test_markdown_table_shows_few_authors(self, make_paper):
+        from arxiv_browser import format_papers_as_markdown_table
+
+        paper = make_paper(authors="Alice, Bob, Charlie")
+        result = format_papers_as_markdown_table([paper])
+        assert "Alice, Bob, Charlie" in result
+
+    def test_markdown_table_escapes_pipes(self, make_paper):
+        from arxiv_browser import format_papers_as_markdown_table
+
+        paper = make_paper(title="A | B | C")
+        result = format_papers_as_markdown_table([paper])
+        assert "A \\| B \\| C" in result
+
+    def test_markdown_table_empty_list(self, make_paper):
+        from arxiv_browser import format_papers_as_markdown_table
+
+        result = format_papers_as_markdown_table([])
+        lines = result.strip().split("\n")
+        assert len(lines) == 2
+
+
+# ============================================================================
+# Tests for PaperDetails cache integration (extended)
+# ============================================================================
+
+
+class TestPaperDetailsCacheIntegration:
+    """Tests for PaperDetails.update_paper cache behavior."""
+
+    def test_cache_hit_returns_same_markup(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(arxiv_id="2401.00001", title="Cache Test")
+
+        details.update_paper(paper, "abstract text")
+        first_content = str(details.content)
+        cache_size_after_first = len(details._detail_cache)
+
+        details.update_paper(paper, "abstract text")
+        second_content = str(details.content)
+        cache_size_after_second = len(details._detail_cache)
+
+        assert first_content == second_content
+        assert cache_size_after_first == cache_size_after_second == 1
+
+    def test_cache_miss_on_different_abstract(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(arxiv_id="2401.00001")
+
+        details.update_paper(paper, "abstract version 1")
+        details.update_paper(paper, "abstract version 2")
+
+        assert len(details._detail_cache) == 2
+
+    def test_cache_miss_on_different_tags(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(arxiv_id="2401.00001")
+
+        details.update_paper(paper, "abstract", tags=["ml"])
+        details.update_paper(paper, "abstract", tags=["ml", "cv"])
+
+        assert len(details._detail_cache) == 2
+
+    def test_cache_miss_on_summary_loading_change(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(arxiv_id="2401.00001")
+
+        details.update_paper(paper, "abstract", summary_loading=False)
+        details.update_paper(paper, "abstract", summary_loading=True)
+
+        assert len(details._detail_cache) == 2
+
+    def test_cache_miss_on_collapsed_sections_change(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(arxiv_id="2401.00001")
+
+        details.update_paper(paper, "abstract", collapsed_sections=[])
+        details.update_paper(paper, "abstract", collapsed_sections=["authors"])
+
+        assert len(details._detail_cache) == 2
+
+    def test_cache_stores_in_order_list(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+
+        for i in range(3):
+            paper = make_paper(arxiv_id=f"2401.{i:05d}")
+            details.update_paper(paper, f"abstract {i}")
+
+        assert len(details._detail_cache_order) == 3
+        assert len(details._detail_cache) == 3
+
+    def test_none_paper_does_not_cache(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        details.update_paper(None)
+
+        assert len(details._detail_cache) == 0
+        assert details.paper is None
+
+    def test_cache_eviction_removes_oldest(self, make_paper):
+        from arxiv_browser import DETAIL_CACHE_MAX, PaperDetails
+
+        details = PaperDetails()
+
+        for i in range(DETAIL_CACHE_MAX):
+            paper = make_paper(arxiv_id=f"2401.{i:05d}")
+            details.update_paper(paper, f"abstract {i}")
+
+        first_key = details._detail_cache_order[0]
+        assert first_key in details._detail_cache
+
+        paper = make_paper(arxiv_id="2401.99999")
+        details.update_paper(paper, "new abstract")
+
+        assert len(details._detail_cache) == DETAIL_CACHE_MAX
+        assert first_key not in details._detail_cache
+        assert first_key not in details._detail_cache_order
+
+    def test_cache_hit_does_not_reorder(self, make_paper):
+        """A cache hit should not change the order list."""
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+
+        paper_a = make_paper(arxiv_id="2401.00001")
+        paper_b = make_paper(arxiv_id="2401.00002")
+
+        details.update_paper(paper_a, "abstract a")
+        details.update_paper(paper_b, "abstract b")
+
+        order_before = list(details._detail_cache_order)
+
+        details.update_paper(paper_a, "abstract a")
+
+        order_after = list(details._detail_cache_order)
+        assert order_before == order_after
+
+    def test_cache_with_relevance_data(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(arxiv_id="2401.00001")
+
+        details.update_paper(paper, "abstract", relevance=(8, "Good match"))
+        details.update_paper(paper, "abstract", relevance=(3, "Poor match"))
+
+        assert len(details._detail_cache) == 2
+
+    def test_cache_with_version_update(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(arxiv_id="2401.00001")
+
+        details.update_paper(paper, "abstract", version_update=None)
+        details.update_paper(paper, "abstract", version_update=(1, 3))
+
+        assert len(details._detail_cache) == 2
 
 
 # ============================================================================

@@ -12,6 +12,7 @@ from arxiv_browser import (
     CATEGORY_COLORS,
     DEFAULT_CATEGORY_COLORS,
     DEFAULT_THEME,
+    TAG_NAMESPACE_COLORS,
     THEME_COLORS,
     Paper,
     PaperMetadata,
@@ -40,6 +41,17 @@ def _reset_global_dicts():
     THEME_COLORS.update(DEFAULT_THEME)
     # Clear LRU cache that captured stale color values
     format_categories.cache_clear()
+    # Reset tag namespace colors
+    TAG_NAMESPACE_COLORS.clear()
+    TAG_NAMESPACE_COLORS.update(
+        {
+            "topic": "#66d9ef",
+            "status": "#a6e22e",
+            "project": "#fd971f",
+            "method": "#ae81ff",
+            "priority": "#f92672",
+        }
+    )
     # Clear highlight pattern cache
     _HIGHLIGHT_PATTERN_CACHE.clear()
 

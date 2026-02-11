@@ -52,6 +52,12 @@ ArxivBrowser.action_check_versions
 ArxivBrowser.action_goto_bookmark
 ArxivBrowser.action_add_bookmark
 ArxivBrowser.action_remove_bookmark
+ArxivBrowser.action_cycle_theme
+ArxivBrowser.action_toggle_sections
+ArxivBrowser._mark_badges_dirty
+ArxivBrowser._flush_badge_refresh
+ArxivBrowser.on_paper_selected
+ArxivBrowser.on_paper_highlighted
 
 # ── PaperListItem (ListItem) ─────────────────────────────────────────
 from arxiv_browser import PaperListItem
@@ -62,6 +68,7 @@ PaperListItem.compose
 from arxiv_browser import PaperDetails
 
 PaperDetails.on_mount
+PaperDetails.clear_cache
 
 # ── HelpScreen (ModalScreen) ─────────────────────────────────────────
 from arxiv_browser import HelpScreen
@@ -166,6 +173,22 @@ ExportMenuModal.action_do_file_ris
 ExportMenuModal.action_do_file_csv
 ExportMenuModal.action_dismiss
 
+# ── SectionToggleModal (ModalScreen) ──────────────────────────────────
+from arxiv_browser import SectionToggleModal
+
+SectionToggleModal.compose
+SectionToggleModal.action_toggle_a
+SectionToggleModal.action_toggle_b
+SectionToggleModal.action_toggle_t
+SectionToggleModal.action_toggle_r
+SectionToggleModal.action_toggle_s
+SectionToggleModal.action_toggle_e
+SectionToggleModal.action_toggle_h
+SectionToggleModal.action_toggle_v
+SectionToggleModal.action_toggle_u
+SectionToggleModal.action_save
+SectionToggleModal.action_cancel
+
 # ── SummaryModeModal (ModalScreen) ────────────────────────────────────
 from arxiv_browser import SummaryModeModal
 
@@ -187,3 +210,9 @@ ResearchInterestsModal.action_cancel
 from arxiv_browser import BookmarkTabBar
 
 BookmarkTabBar.compose
+
+# ── DateNavigator (Horizontal) ──────────────────────────────────────
+from arxiv_browser import DateNavigator
+
+DateNavigator.compose
+DateNavigator.on_click
