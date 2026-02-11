@@ -12,11 +12,8 @@ Key bindings:
     o       - Open selected paper(s) in browser
     P       - Open selected paper(s) as PDF
     c       - Copy selected paper(s) to clipboard
-    b       - Copy as BibTeX
-    B       - Export BibTeX to file (for Zotero import)
     d       - Download PDF(s) to local folder
-    M       - Copy as Markdown
-    E       - Export menu (RIS, CSV, Markdown table + more)
+    E       - Export menu (BibTeX, Markdown, RIS, CSV + more)
     space   - Toggle selection
     a       - Select all visible
     u       - Clear selection
@@ -93,6 +90,7 @@ from textual.css.query import NoMatches
 from textual.events import Key
 from textual.message import Message
 from textual.screen import ModalScreen
+from textual.theme import Theme as TextualTheme
 from textual.timer import Timer
 from textual.widgets import (
     Button,
@@ -2226,7 +2224,7 @@ DEFAULT_THEME = {
     "scrollbar_background_active": "#5a5950",
     "scrollbar": "#75715e",
     "scrollbar_active": "#66d9ef",
-    "scrollbar_hover": "#a6e22e",
+    "scrollbar_hover": "#a8a8a2",
     "scrollbar_corner_color": "#3e3d32",
 }
 
@@ -2253,7 +2251,7 @@ CATPPUCCIN_MOCHA_THEME: dict[str, str] = {
     "scrollbar_background_active": "#585b70",
     "scrollbar": "#6c7086",
     "scrollbar_active": "#89b4fa",
-    "scrollbar_hover": "#a6e3a1",
+    "scrollbar_hover": "#9399b2",
     "scrollbar_corner_color": "#313244",
 }
 
@@ -2280,7 +2278,7 @@ SOLARIZED_DARK_THEME: dict[str, str] = {
     "scrollbar_background_active": "#657b83",
     "scrollbar": "#657b83",
     "scrollbar_active": "#268bd2",
-    "scrollbar_hover": "#859900",
+    "scrollbar_hover": "#93a1a1",
     "scrollbar_corner_color": "#073642",
 }
 
@@ -2290,6 +2288,53 @@ THEMES: dict[str, dict[str, str]] = {
     "solarized-dark": SOLARIZED_DARK_THEME,
 }
 THEME_NAMES: list[str] = list(THEMES.keys())
+
+
+def _build_textual_theme(name: str, colors: dict[str, str]) -> TextualTheme:
+    """Convert an app color dict to a Textual Theme with custom CSS variables.
+
+    Maps 16 color keys to $th-* CSS variables that replace hardcoded hex in TCSS.
+    Also sets primary/background/foreground for Textual's built-in widget styling.
+    """
+    variables = {
+        "th-background": colors["background"],
+        "th-panel": colors["panel"],
+        "th-panel-alt": colors["panel_alt"],
+        "th-highlight": colors["highlight"],
+        "th-highlight-focus": colors["highlight_focus"],
+        "th-accent": colors["accent"],
+        "th-accent-alt": colors["accent_alt"],
+        "th-muted": colors["muted"],
+        "th-text": colors["text"],
+        "th-green": colors["green"],
+        "th-orange": colors["orange"],
+        "th-purple": colors["purple"],
+        "th-scrollbar-bg": colors["scrollbar_background"],
+        "th-scrollbar-thumb": colors["scrollbar"],
+        "th-scrollbar-active": colors["scrollbar_active"],
+        "th-scrollbar-hover": colors["scrollbar_hover"],
+    }
+    return TextualTheme(
+        name=name,
+        primary=colors["accent"],
+        secondary=colors["accent_alt"],
+        accent=colors["green"],
+        foreground=colors["text"],
+        background=colors["background"],
+        surface=colors["panel"],
+        panel=colors["panel_alt"],
+        warning=colors["orange"],
+        error=colors["pink"],
+        success=colors["green"],
+        dark=True,
+        variables=variables,
+    )
+
+
+TEXTUAL_THEMES: dict[str, TextualTheme] = {
+    name: _build_textual_theme(name, colors) for name, colors in THEMES.items()
+}
+
 
 # Per-theme category colors — ensures categories are readable on each background
 THEME_CATEGORY_COLORS: dict[str, dict[str, str]] = {
@@ -2965,7 +3010,6 @@ DETAIL_SECTION_KEYS: list[str] = [
     "s2",
     "hf",
     "version",
-    "url",
 ]
 DETAIL_SECTION_NAMES: dict[str, str] = {
     "authors": "Authors",
@@ -2976,7 +3020,6 @@ DETAIL_SECTION_NAMES: dict[str, str] = {
     "s2": "Semantic Scholar",
     "hf": "HuggingFace",
     "version": "Version Update",
-    "url": "URL",
 }
 DEFAULT_COLLAPSED_SECTIONS: list[str] = ["tags", "relevance", "summary", "s2", "hf", "version"]
 
@@ -3141,14 +3184,7 @@ class PaperDetails(Static):
         if paper.comments:
             lines.append(f"  [bold {THEME_COLORS['accent']}]Comments:[/] [dim]{safe_comments}[/]")
 
-        # Authors section
-        if "authors" in collapsed:
-            lines.append("[dim]▸ Authors[/]")
-        else:
-            lines.append(f"[bold {THEME_COLORS['green']}]▾ Authors[/]")
-            lines.append(f"  [{THEME_COLORS['text']}]{safe_authors}[/]")
-
-        # Abstract section
+        # Abstract section (shown before authors — most important for triage)
         if "abstract" in collapsed:
             lines.append("[dim]▸ Abstract[/]")
         else:
@@ -3159,6 +3195,13 @@ class PaperDetails(Static):
                 lines.append(f"  [{THEME_COLORS['text']}]{safe_abstract}[/]")
             else:
                 lines.append("  [dim italic]No abstract available[/]")
+
+        # Authors section
+        if "authors" in collapsed:
+            lines.append("[dim]▸ Authors[/]")
+        else:
+            lines.append(f"[bold {THEME_COLORS['green']}]▾ Authors[/]")
+            lines.append(f"  [{THEME_COLORS['text']}]{safe_authors}[/]")
 
         # Tags section (shown when tags present)
         if tags:
@@ -3286,12 +3329,9 @@ class PaperDetails(Static):
                     f"  [bold {THEME_COLORS['accent']}]View diff:[/] [{THEME_COLORS['accent']}]https://arxivdiff.org/abs/{paper.arxiv_id}[/]"
                 )
 
-        # URL section
-        if "url" in collapsed:
-            lines.append("[dim]\u25b8 URL[/]")
-        else:
-            lines.append(f"[bold {THEME_COLORS['pink']}]\u25be URL[/]")
-            lines.append(f"  [{THEME_COLORS['accent']}]{safe_url}[/]")
+        # URL section (always visible — not collapsible)
+        lines.append(f"[bold {THEME_COLORS['pink']}]URL[/]")
+        lines.append(f"  [{THEME_COLORS['accent']}]{safe_url}[/]")
 
         markup = "\n".join(lines)
 
@@ -3338,15 +3378,15 @@ class HelpScreen(ModalScreen[None]):
         height: 85%;
         min-width: 60;
         min-height: 20;
-        background: #272822;
-        border: tall #66d9ef;
+        background: $th-background;
+        border: tall $th-accent;
         padding: 0 2;
         overflow-y: auto;
     }
 
     #help-title {
         text-style: bold;
-        color: #e6db74;
+        color: $th-accent-alt;
         text-align: center;
         margin-bottom: 1;
     }
@@ -3362,12 +3402,12 @@ class HelpScreen(ModalScreen[None]):
 
     .help-keys {
         padding-left: 2;
-        color: #f8f8f2;
+        color: $th-text;
     }
 
     #help-footer {
         text-align: center;
-        color: #75715e;
+        color: $th-muted;
         margin-top: 1;
     }
     """
@@ -3442,10 +3482,7 @@ class HelpScreen(ModalScreen[None]):
             )
             yield Static(
                 f"  [{THEME_COLORS['green']}]c[/]            Copy to clipboard\n"
-                f"  [{THEME_COLORS['green']}]b[/]            Copy as BibTeX\n"
-                f"  [{THEME_COLORS['green']}]B[/]            Export BibTeX to file\n"
-                f"  [{THEME_COLORS['green']}]M[/]            Copy as Markdown\n"
-                f"  [{THEME_COLORS['green']}]E[/]            Export menu  [dim](RIS, CSV, Md table + more)[/]\n"
+                f"  [{THEME_COLORS['green']}]E[/]            Export menu  [dim](BibTeX, Markdown, RIS, CSV + more)[/]\n"
                 f"  [{THEME_COLORS['green']}]d[/]            Download PDF",
                 classes="help-keys",
             )
@@ -3489,25 +3526,25 @@ class NotesModal(ModalScreen[str]):
         height: 60%;
         min-width: 50;
         min-height: 15;
-        background: #272822;
-        border: tall #66d9ef;
+        background: $th-background;
+        border: tall $th-accent;
         padding: 0 2;
     }
 
     #notes-title {
         text-style: bold;
-        color: #e6db74;
+        color: $th-accent-alt;
         margin-bottom: 1;
     }
 
     #notes-textarea {
         height: 1fr;
-        background: #1e1e1e;
+        background: $th-panel;
         border: none;
     }
 
     #notes-textarea:focus {
-        border-left: tall #66d9ef;
+        border-left: tall $th-accent;
     }
 
     #notes-buttons {
@@ -3570,30 +3607,30 @@ class TagsModal(ModalScreen[list[str]]):
         width: 50%;
         height: auto;
         min-width: 40;
-        background: #272822;
-        border: tall #a6e22e;
+        background: $th-background;
+        border: tall $th-green;
         padding: 0 2;
     }
 
     #tags-title {
         text-style: bold;
-        color: #a6e22e;
+        color: $th-green;
         margin-bottom: 1;
     }
 
     #tags-help {
-        color: #75715e;
+        color: $th-muted;
         margin-bottom: 1;
     }
 
     #tags-input {
         width: 100%;
-        background: #1e1e1e;
+        background: $th-panel;
         border: none;
     }
 
     #tags-input:focus {
-        border-left: tall #a6e22e;
+        border-left: tall $th-green;
     }
 
     #tags-buttons {
@@ -3607,7 +3644,7 @@ class TagsModal(ModalScreen[list[str]]):
     }
 
     #tags-suggestions {
-        color: #75715e;
+        color: $th-muted;
         margin-bottom: 1;
     }
     """
@@ -3717,14 +3754,14 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
         height: 70%;
         min-width: 60;
         min-height: 20;
-        background: #272822;
-        border: tall #66d9ef;
+        background: $th-background;
+        border: tall $th-accent;
         padding: 0 2;
     }
 
     #watch-title {
         text-style: bold;
-        color: #66d9ef;
+        color: $th-accent;
         margin-bottom: 1;
     }
 
@@ -3735,7 +3772,7 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
     #watch-list {
         width: 2fr;
         height: 1fr;
-        background: #1e1e1e;
+        background: $th-panel;
         border: none;
         margin-right: 2;
     }
@@ -3746,20 +3783,20 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
     }
 
     #watch-form Label {
-        color: #75715e;
+        color: $th-muted;
         margin-top: 1;
     }
 
     #watch-pattern,
     #watch-type {
         width: 100%;
-        background: #1e1e1e;
+        background: $th-panel;
         border: none;
     }
 
     #watch-pattern:focus,
     #watch-type:focus {
-        border-left: tall #66d9ef;
+        border-left: tall $th-accent;
     }
 
     #watch-case {
@@ -3926,19 +3963,19 @@ class ArxivSearchModal(ModalScreen[ArxivSearchRequest | None]):
         width: 70%;
         height: auto;
         min-width: 60;
-        background: #272822;
-        border: tall #66d9ef;
+        background: $th-background;
+        border: tall $th-accent;
         padding: 0 2;
     }
 
     #arxiv-search-title {
         text-style: bold;
-        color: #66d9ef;
+        color: $th-accent;
         margin-bottom: 1;
     }
 
     #arxiv-search-help {
-        color: #75715e;
+        color: $th-muted;
         margin-bottom: 1;
     }
 
@@ -3946,7 +3983,7 @@ class ArxivSearchModal(ModalScreen[ArxivSearchRequest | None]):
     #arxiv-search-field,
     #arxiv-search-category {
         width: 100%;
-        background: #1e1e1e;
+        background: $th-panel;
         border: none;
         margin-bottom: 1;
     }
@@ -3954,7 +3991,7 @@ class ArxivSearchModal(ModalScreen[ArxivSearchRequest | None]):
     #arxiv-search-query:focus,
     #arxiv-search-field:focus,
     #arxiv-search-category:focus {
-        border-left: tall #66d9ef;
+        border-left: tall $th-accent;
     }
 
     #arxiv-search-buttons {
@@ -4063,14 +4100,14 @@ class RecommendationSourceModal(ModalScreen[str]):
     #rec-source-dialog {
         width: 50;
         height: auto;
-        background: #272822;
-        border: tall #fd971f;
+        background: $th-background;
+        border: tall $th-orange;
         padding: 0 2;
     }
 
     #rec-source-title {
         text-style: bold;
-        color: #fd971f;
+        color: $th-orange;
         margin-bottom: 1;
     }
 
@@ -4138,20 +4175,20 @@ class RecommendationsScreen(ModalScreen[str | None]):
         height: 80%;
         min-width: 60;
         min-height: 20;
-        background: #272822;
-        border: tall #fd971f;
+        background: $th-background;
+        border: tall $th-orange;
         padding: 0 2;
     }
 
     #recommendations-title {
         text-style: bold;
-        color: #fd971f;
+        color: $th-orange;
         margin-bottom: 1;
     }
 
     #recommendations-list {
         height: 1fr;
-        background: #1e1e1e;
+        background: $th-panel;
         border: none;
     }
 
@@ -4160,19 +4197,19 @@ class RecommendationsScreen(ModalScreen[str | None]):
     }
 
     #recommendations-list > ListItem.--highlight {
-        background: #49483e;
+        background: $th-highlight;
     }
 
     .rec-title {
-        color: #f8f8f2;
+        color: $th-text;
     }
 
     .rec-meta {
-        color: #75715e;
+        color: $th-muted;
     }
 
     .rec-score {
-        color: #a6e22e;
+        color: $th-green;
         text-style: bold;
     }
 
@@ -4291,14 +4328,14 @@ class CitationGraphScreen(ModalScreen[str | None]):
         height: 85%;
         min-width: 60;
         min-height: 20;
-        background: #272822;
-        border: tall #ae81ff;
+        background: $th-background;
+        border: tall $th-purple;
         padding: 0 2;
     }
 
     #citation-graph-breadcrumb {
         text-style: bold;
-        color: #ae81ff;
+        color: $th-purple;
         margin-bottom: 1;
         height: auto;
     }
@@ -4314,18 +4351,18 @@ class CitationGraphScreen(ModalScreen[str | None]):
 
     .citation-panel-title {
         text-style: bold;
-        color: #66d9ef;
+        color: $th-accent;
         height: auto;
     }
 
     .citation-list {
         height: 1fr;
-        background: #1e1e1e;
+        background: $th-panel;
         border: none;
     }
 
     .citation-list.active-panel {
-        border-left: tall #ae81ff;
+        border-left: tall $th-purple;
     }
 
     .citation-list > ListItem {
@@ -4333,15 +4370,15 @@ class CitationGraphScreen(ModalScreen[str | None]):
     }
 
     .citation-list > ListItem.--highlight {
-        background: #49483e;
+        background: $th-highlight;
     }
 
     .cite-title {
-        color: #f8f8f2;
+        color: $th-text;
     }
 
     .cite-meta {
-        color: #75715e;
+        color: $th-muted;
     }
 
     #citation-graph-buttons {
@@ -4351,7 +4388,7 @@ class CitationGraphScreen(ModalScreen[str | None]):
     }
 
     #citation-graph-status {
-        color: #75715e;
+        color: $th-muted;
         height: auto;
     }
     """
@@ -4601,14 +4638,14 @@ class ConfirmModal(ModalScreen[bool]):
         width: 50%;
         min-width: 40;
         height: auto;
-        background: #272822;
-        border: tall #fd971f;
+        background: $th-background;
+        border: tall $th-orange;
         padding: 0 2;
     }
 
     #confirm-message {
         text-style: bold;
-        color: #e6db74;
+        color: $th-accent-alt;
         margin-bottom: 1;
     }
 
@@ -4672,29 +4709,29 @@ class ExportMenuModal(ModalScreen[str]):
     #export-dialog {
         width: 52;
         height: auto;
-        background: #272822;
-        border: tall #fd971f;
+        background: $th-background;
+        border: tall $th-orange;
         padding: 0 2;
     }
 
     #export-title {
         text-style: bold;
-        color: #fd971f;
+        color: $th-orange;
         margin-bottom: 1;
     }
 
     .export-section {
-        color: #75715e;
+        color: $th-muted;
         margin-top: 1;
     }
 
     .export-keys {
         padding-left: 2;
-        color: #f8f8f2;
+        color: $th-text;
     }
 
     #export-footer {
-        color: #75715e;
+        color: $th-muted;
         margin-top: 1;
     }
     """
@@ -4711,16 +4748,16 @@ class ExportMenuModal(ModalScreen[str]):
                 id="export-title",
             )
             yield Label("[bold]Clipboard[/bold]", classes="export-section")
+            g = THEME_COLORS["green"]
             yield Static(
-                "  [#a6e22e]c[/]  Plain text     [#a6e22e]b[/]  BibTeX\n"
-                "  [#a6e22e]m[/]  Markdown       [#a6e22e]r[/]  RIS\n"
-                "  [#a6e22e]v[/]  CSV            [#a6e22e]t[/]  Md table",
+                f"  [{g}]c[/]  Plain text     [{g}]b[/]  BibTeX\n"
+                f"  [{g}]m[/]  Markdown       [{g}]r[/]  RIS\n"
+                f"  [{g}]v[/]  CSV            [{g}]t[/]  Md table",
                 classes="export-keys",
             )
             yield Label("[bold]File[/bold]", classes="export-section")
             yield Static(
-                "  [#a6e22e]B[/]  BibTeX (.bib)  [#a6e22e]R[/]  RIS (.ris)\n"
-                "  [#a6e22e]C[/]  CSV (.csv)",
+                f"  [{g}]B[/]  BibTeX (.bib)  [{g}]R[/]  RIS (.ris)\n  [{g}]C[/]  CSV (.csv)",
                 classes="export-keys",
             )
             yield Static("[dim]Esc to cancel[/dim]", id="export-footer")
@@ -4776,24 +4813,24 @@ class SummaryModeModal(ModalScreen[str]):
     #summary-mode-dialog {
         width: 52;
         height: auto;
-        background: #272822;
-        border: tall #ae81ff;
+        background: $th-background;
+        border: tall $th-purple;
         padding: 0 2;
     }
 
     #summary-mode-title {
         text-style: bold;
-        color: #ae81ff;
+        color: $th-purple;
         margin-bottom: 1;
     }
 
     .summary-mode-keys {
         padding-left: 2;
-        color: #f8f8f2;
+        color: $th-text;
     }
 
     #summary-mode-footer {
-        color: #75715e;
+        color: $th-muted;
         margin-top: 1;
     }
     """
@@ -4801,12 +4838,13 @@ class SummaryModeModal(ModalScreen[str]):
     def compose(self) -> ComposeResult:
         with Vertical(id="summary-mode-dialog"):
             yield Label("AI Summary Mode", id="summary-mode-title")
+            g = THEME_COLORS["green"]
             yield Static(
-                "  [#a6e22e]d[/]  Default  [dim]— Full summary (Problem / Approach / Results)[/]\n"
-                "  [#a6e22e]t[/]  TLDR     [dim]— 1-2 sentence summary[/]\n"
-                "  [#a6e22e]m[/]  Methods  [dim]— Technical methodology deep-dive[/]\n"
-                "  [#a6e22e]r[/]  Results  [dim]— Key experimental results with numbers[/]\n"
-                "  [#a6e22e]c[/]  Compare  [dim]— Comparison with related work[/]",
+                f"  [{g}]d[/]  Default  [dim]— Full summary (Problem / Approach / Results)[/]\n"
+                f"  [{g}]t[/]  TLDR     [dim]— 1-2 sentence summary[/]\n"
+                f"  [{g}]m[/]  Methods  [dim]— Technical methodology deep-dive[/]\n"
+                f"  [{g}]r[/]  Results  [dim]— Key experimental results with numbers[/]\n"
+                f"  [{g}]c[/]  Compare  [dim]— Comparison with related work[/]",
                 classes="summary-mode-keys",
             )
             yield Static("[dim]Esc to cancel[/dim]", id="summary-mode-footer")
@@ -4848,30 +4886,30 @@ class ResearchInterestsModal(ModalScreen[str]):
         height: 60%;
         min-width: 50;
         min-height: 15;
-        background: #272822;
-        border: tall #e6db74;
+        background: $th-background;
+        border: tall $th-accent-alt;
         padding: 0 2;
     }
 
     #interests-title {
         text-style: bold;
-        color: #e6db74;
+        color: $th-accent-alt;
         margin-bottom: 1;
     }
 
     #interests-help {
-        color: #75715e;
+        color: $th-muted;
         margin-bottom: 1;
     }
 
     #interests-textarea {
         height: 1fr;
-        background: #1e1e1e;
+        background: $th-panel;
         border: none;
     }
 
     #interests-textarea:focus {
-        border-left: tall #66d9ef;
+        border-left: tall $th-accent;
     }
 
     #interests-buttons {
@@ -4930,7 +4968,6 @@ _SECTION_TOGGLE_KEYS: dict[str, str] = {
     "e": "s2",
     "h": "hf",
     "v": "version",
-    "u": "url",
 }
 
 
@@ -4948,7 +4985,6 @@ class SectionToggleModal(ModalScreen[list[str] | None]):
         Binding("e", "toggle_e", "", show=False),
         Binding("h", "toggle_h", "", show=False),
         Binding("v", "toggle_v", "", show=False),
-        Binding("u", "toggle_u", "", show=False),
     ]
 
     CSS = """
@@ -4959,24 +4995,24 @@ class SectionToggleModal(ModalScreen[list[str] | None]):
     #section-toggle-dialog {
         width: 52;
         height: auto;
-        background: #272822;
-        border: tall #66d9ef;
+        background: $th-background;
+        border: tall $th-accent;
         padding: 0 2;
     }
 
     #section-toggle-title {
         text-style: bold;
-        color: #66d9ef;
+        color: $th-accent;
         margin-bottom: 1;
     }
 
     .section-toggle-list {
         padding-left: 2;
-        color: #f8f8f2;
+        color: $th-text;
     }
 
     #section-toggle-footer {
-        color: #75715e;
+        color: $th-muted;
         margin-top: 1;
     }
     """
@@ -4997,12 +5033,13 @@ class SectionToggleModal(ModalScreen[list[str] | None]):
             )
 
     def _render_list(self) -> str:
+        g = THEME_COLORS["green"]
         lines = []
         for key, section in _SECTION_TOGGLE_KEYS.items():
             name = DETAIL_SECTION_NAMES[section]
             indicator = "\u25b8" if section in self._collapsed else "\u25be"
-            state = "[dim]collapsed[/]" if section in self._collapsed else "[#a6e22e]expanded[/]"
-            lines.append(f"  [#a6e22e]{key}[/]  {indicator} {name:<18s} {state}")
+            state = "[dim]collapsed[/]" if section in self._collapsed else f"[{g}]expanded[/]"
+            lines.append(f"  [{g}]{key}[/]  {indicator} {name:<18s} {state}")
         return "\n".join(lines)
 
     def _toggle(self, key: str) -> None:
@@ -5042,9 +5079,6 @@ class SectionToggleModal(ModalScreen[list[str] | None]):
     def action_toggle_v(self) -> None:
         self._toggle("v")
 
-    def action_toggle_u(self) -> None:
-        self._toggle("u")
-
     def action_save(self) -> None:
         self.dismiss(sorted(self._collapsed))
 
@@ -5059,25 +5093,30 @@ class ContextFooter(Static):
     ContextFooter {
         dock: bottom;
         height: 1;
-        background: #272822;
-        color: #75715e;
+        background: $th-background;
+        color: $th-muted;
         padding: 0 1;
+        border-top: solid $th-panel-alt;
     }
     """
 
-    def render_bindings(self, bindings: list[tuple[str, str]]) -> None:
+    def render_bindings(self, bindings: list[tuple[str, str]], mode_badge: str = "") -> None:
         """Update the footer with a list of (key, label) binding hints."""
+        accent = THEME_COLORS["accent"]
+        muted = THEME_COLORS["muted"]
         parts = []
+        if mode_badge:
+            parts.append(mode_badge)
         for key, label in bindings:
             safe_key = escape_rich_text(key)
             if key and label:
-                parts.append(f"[bold #75715e]{safe_key}[/] [dim]{label}[/]")
+                parts.append(f"[bold {accent}]{safe_key}[/] [{muted}]{label}[/]")
             elif label:
                 # Label-only entry (e.g., progress indicator)
-                parts.append(f"[dim italic]{label}[/]")
+                parts.append(f"[italic {muted}]{label}[/]")
             else:
                 # Key-only entry (e.g., "type to filter" hint)
-                parts.append(f"[dim italic]{safe_key}[/]")
+                parts.append(f"[italic {muted}]{safe_key}[/]")
         self.update("  ".join(parts))
 
 
@@ -5105,7 +5144,7 @@ class DateNavigator(Horizontal):
     DateNavigator {
         height: auto;
         padding: 0 1;
-        background: #1e1e1e;
+        background: $th-panel;
         display: none;
     }
 
@@ -5115,24 +5154,24 @@ class DateNavigator(Horizontal):
 
     DateNavigator .date-nav-arrow {
         padding: 0 1;
-        color: #75715e;
+        color: $th-muted;
     }
 
     DateNavigator .date-nav-arrow:hover {
-        color: #f8f8f2;
+        color: $th-text;
     }
 
     DateNavigator .date-nav-item {
         padding: 0 1;
-        color: #75715e;
+        color: $th-muted;
     }
 
     DateNavigator .date-nav-item:hover {
-        color: #f8f8f2;
+        color: $th-text;
     }
 
     DateNavigator .date-nav-item.current {
-        color: #66d9ef;
+        color: $th-accent;
         text-style: bold;
     }
     """
@@ -5229,32 +5268,32 @@ class BookmarkTabBar(Horizontal):
     BookmarkTabBar {
         height: auto;
         padding: 0 1;
-        background: #1e1e1e;
-        border-bottom: solid #3e3d32;
+        background: $th-panel;
+        border-bottom: solid $th-panel-alt;
     }
 
     BookmarkTabBar .bookmark-tab {
         padding: 0 2;
         margin-right: 1;
-        color: #75715e;
+        color: $th-muted;
     }
 
     BookmarkTabBar .bookmark-tab:hover {
-        color: #f8f8f2;
+        color: $th-text;
     }
 
     BookmarkTabBar .bookmark-tab.active {
-        color: #e6db74;
+        color: $th-accent-alt;
         text-style: bold;
     }
 
     BookmarkTabBar .bookmark-add {
-        color: #75715e;
+        color: $th-muted;
         padding: 0 1;
     }
 
     BookmarkTabBar .bookmark-add:hover {
-        color: #a6e22e;
+        color: $th-green;
     }
     """
 
@@ -5516,18 +5555,15 @@ class ArxivBrowser(App):
 
     TITLE = "arXiv Paper Browser"
 
-    # Monokai color theme - using hardcoded colors to avoid conflicts with Textual's theme system
-    # Colors: background=#272822, panel=#1e1e1e, panel-alt=#3e3d32, border=#75715e,
-    #         text=#f8f8f2, muted=#75715e, accent=#66d9ef, accent-alt=#e6db74,
-    #         highlight=#49483e, highlight-focus=#5a5950, selection=#3d4a32, selection-highlight=#4d5a42
+    # Theme-aware CSS — all colors reference $th-* custom variables from registered Textual themes
     CSS = """
     Screen {
-        background: #272822;
+        background: $th-background;
     }
 
     Header {
-        background: #3e3d32;
-        color: #f8f8f2;
+        background: $th-panel-alt;
+        color: $th-text;
     }
 
 
@@ -5541,36 +5577,36 @@ class ArxivBrowser(App):
         min-width: 50;
         max-width: 100;
         height: 100%;
-        border: tall #49483e;
-        background: #1e1e1e;
+        border: tall $th-highlight;
+        background: $th-panel;
     }
 
     #left-pane:focus-within {
-        border: tall #66d9ef;
+        border: tall $th-accent;
     }
 
     #right-pane {
         width: 3fr;
         height: 100%;
-        border: tall #49483e;
-        background: #1e1e1e;
+        border: tall $th-highlight;
+        background: $th-panel;
     }
 
     #right-pane:focus-within {
-        border: tall #66d9ef;
+        border: tall $th-accent;
     }
 
     #list-header {
         padding: 0 1;
-        background: #1e1e1e;
-        color: #66d9ef;
+        background: $th-panel;
+        color: $th-accent;
         text-style: bold;
     }
 
     #details-header {
         padding: 0 1;
-        background: #1e1e1e;
-        color: #e6db74;
+        background: $th-panel;
+        color: $th-accent-alt;
         text-style: bold;
     }
 
@@ -5587,7 +5623,7 @@ class ArxivBrowser(App):
     #search-container {
         height: auto;
         padding: 0 1;
-        background: #1e1e1e;
+        background: $th-panel;
         display: none;
     }
 
@@ -5597,24 +5633,24 @@ class ArxivBrowser(App):
 
     #search-input {
         width: 100%;
-        border: tall #66d9ef;
-        background: #272822;
+        border: tall $th-accent;
+        background: $th-background;
     }
 
     #search-input:focus {
-        border: tall #e6db74;
+        border: tall $th-accent-alt;
     }
 
     #paper-list > .option-list--option-highlighted {
-        background: #49483e;
+        background: $th-highlight;
     }
 
     #paper-list:focus > .option-list--option-highlighted {
-        background: #5a5950;
+        background: $th-highlight-focus;
     }
 
     #paper-list > .option-list--option-hover {
-        background: #3e3d32;
+        background: $th-panel-alt;
     }
 
     PaperDetails {
@@ -5622,15 +5658,15 @@ class ArxivBrowser(App):
     }
 
     VerticalScroll {
-        scrollbar-background: #3e3d32;
-        scrollbar-color: #75715e;
-        scrollbar-color-hover: #a8a8a2;
-        scrollbar-color-active: #66d9ef;
+        scrollbar-background: $th-scrollbar-bg;
+        scrollbar-color: $th-scrollbar-thumb;
+        scrollbar-color-hover: $th-scrollbar-hover;
+        scrollbar-color-active: $th-scrollbar-active;
     }
 
     #status-bar {
         padding: 0 1;
-        color: #75715e;
+        color: $th-muted;
     }
     """
 
@@ -5674,10 +5710,7 @@ class ArxivBrowser(App):
         # Phase 7: Vim-style marks
         Binding("m", "start_mark", "Mark", show=False),
         Binding("apostrophe", "start_goto_mark", "Goto Mark", show=False),
-        # Phase 8: Export features
-        Binding("b", "copy_bibtex", "BibTeX", show=False),
-        Binding("B", "export_bibtex_file", "Export BibTeX", show=False),
-        Binding("M", "export_markdown", "Markdown", show=False),
+        # Phase 8: Export features (b/B/M accessible via E → export menu)
         Binding("E", "export_menu", "Export...", show=False),
         Binding("d", "download_pdf", "Download", show=False),
         # Phase 9: Paper similarity
@@ -5715,6 +5748,9 @@ class ArxivBrowser(App):
         current_date_index: int = 0,
     ) -> None:
         super().__init__()
+        # Register all Textual themes so $th-* CSS variables resolve before compose()
+        for textual_theme in TEXTUAL_THEMES.values():
+            self.register_theme(textual_theme)
         self.all_papers = papers
         self.filtered_papers = papers.copy()
         # Build O(1) lookup dict for papers by arxiv_id
@@ -5970,17 +6006,27 @@ class ArxivBrowser(App):
         format_categories.cache_clear()
 
     def _apply_theme_overrides(self) -> None:
-        """Apply theme overrides from config to markup colors (THEME_COLORS dict).
+        """Apply theme overrides from config to both Rich markup and CSS variables.
 
         Layers: named base theme → per-key overrides from config.
         Also updates TAG_NAMESPACE_COLORS for per-theme tag styling.
-        Note: CSS variables are handled by Textual's built-in theme system.
-        THEME_COLORS is only used for Rich markup styling in the UI.
         """
         base = THEMES.get(self._config.theme_name, DEFAULT_THEME)
         THEME_COLORS.clear()
         THEME_COLORS.update(base)
         THEME_COLORS.update(self._config.theme)
+        # Rebuild and activate Textual theme for CSS variable resolution
+        if self._config.theme:
+            merged = dict(base)
+            merged.update(self._config.theme)
+            try:
+                self.register_theme(_build_textual_theme(self._config.theme_name, merged))
+            except Exception:
+                pass  # __new__() mock tests lack reactive infrastructure
+        try:
+            self.theme = self._config.theme_name
+        except Exception:
+            pass  # __new__() mock tests lack reactive infrastructure
         # Apply per-theme tag namespace colors
         TAG_NAMESPACE_COLORS.clear()
         TAG_NAMESPACE_COLORS.update(
@@ -8494,17 +8540,50 @@ class ArxivBrowser(App):
             bindings[0] = ("o", f"open({n})")
             return bindings
 
-        # Default browsing — dynamically add S2 and history keys
+        # Default browsing — dynamically show contextual hints
         bindings: list[tuple[str, str]] = [("/", "search"), ("o", "open"), ("s", "sort")]
         if self._s2_active:
             bindings.extend([("e", "S2"), ("G", "graph")])
         else:
             bindings.extend([("r", "read"), ("x", "star")])
-        bindings.extend([("n", "notes"), ("t", "tags")])
+            bindings.extend([("n", "notes"), ("t", "tags")])
+
+        # Feature discovery hints
+        has_starred = any(m.starred for m in self._config.paper_metadata.values())
+        llm_configured = bool(_resolve_llm_command(self._config))
+        if has_starred:
+            bindings.append(("V", "versions"))
+        if llm_configured:
+            bindings.append(("L", "relevance"))
         if self._history_files and len(self._history_files) > 1:
             bindings.append(("[/]", "dates"))
+        bindings.append(("E", "export"))
         bindings.append(("?", "help"))
         return bindings
+
+    def _get_footer_mode_badge(self) -> str:
+        """Return a Rich-markup mode badge string for the current state."""
+        pink = THEME_COLORS["pink"]
+        accent = THEME_COLORS["accent"]
+        orange = THEME_COLORS["orange"]
+        green = THEME_COLORS["green"]
+        panel_alt = THEME_COLORS["panel_alt"]
+        if self._relevance_scoring_active:
+            return f"[bold {pink} on {panel_alt}] SCORING [/]"
+        if self._version_checking:
+            return f"[bold {pink} on {panel_alt}] VERSIONS [/]"
+        try:
+            container = self.query_one("#search-container")
+            if container.has_class("visible"):
+                return f"[bold {accent} on {panel_alt}] SEARCH [/]"
+        except NoMatches:
+            pass
+        if self._in_arxiv_api_mode:
+            return f"[bold {orange} on {panel_alt}] API [/]"
+        if self.selected_ids:
+            n = len(self.selected_ids)
+            return f"[bold {green} on {panel_alt}] {n} SEL [/]"
+        return ""
 
     def _update_footer(self) -> None:
         """Update the context-sensitive footer based on current state."""
@@ -8513,7 +8592,7 @@ class ArxivBrowser(App):
         except (NoMatches, AttributeError):
             # AttributeError: app not fully composed (e.g. __new__ mock tests)
             return
-        footer.render_bindings(self._get_footer_bindings())
+        footer.render_bindings(self._get_footer_bindings(), self._get_footer_mode_badge())
 
     def _get_paper_by_id(self, arxiv_id: str) -> Paper | None:
         """Look up a paper by its arXiv ID. O(1) dict lookup."""

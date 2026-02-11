@@ -185,7 +185,6 @@ SectionToggleModal.action_toggle_s
 SectionToggleModal.action_toggle_e
 SectionToggleModal.action_toggle_h
 SectionToggleModal.action_toggle_v
-SectionToggleModal.action_toggle_u
 SectionToggleModal.action_save
 SectionToggleModal.action_cancel
 

@@ -307,11 +307,8 @@ A       - Search all arXiv (API mode)
 o       - Open selected paper(s) in browser
 P       - Open selected paper(s) as PDF
 c       - Copy selected paper(s) to clipboard
-b       - Copy as BibTeX
-B       - Export BibTeX to file (for Zotero import)
 d       - Download PDF(s) to local folder
-M       - Copy as Markdown
-E       - Export menu (RIS, CSV, Markdown table + more)
+E       - Export menu (BibTeX, Markdown, RIS, CSV + more)
 space   - Toggle selection
 a       - Select all visible
 u       - Clear selection

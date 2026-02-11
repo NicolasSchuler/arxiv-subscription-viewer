@@ -4909,7 +4909,9 @@ class TestHfAppState:
                     return MagicMock()
 
                 app._track_task = fake_track_task
-                with patch("arxiv_browser.load_hf_daily_cache", side_effect=fake_load_hf_daily_cache):
+                with patch(
+                    "arxiv_browser.load_hf_daily_cache", side_effect=fake_load_hf_daily_cache
+                ):
                     await asyncio.gather(app._fetch_hf_daily(), app._fetch_hf_daily())
                     await pilot.pause(0)
 
@@ -6958,18 +6960,18 @@ class TestCollapsibleSections:
     def test_collapsed_sections_roundtrip(self):
         from arxiv_browser import _config_to_dict, _dict_to_config
 
-        config = UserConfig(collapsed_sections=["authors", "url"])
+        config = UserConfig(collapsed_sections=["authors", "abstract"])
         data = _config_to_dict(config)
-        assert data["collapsed_sections"] == ["authors", "url"]
+        assert data["collapsed_sections"] == ["authors", "abstract"]
         restored = _dict_to_config(data)
-        assert restored.collapsed_sections == ["authors", "url"]
+        assert restored.collapsed_sections == ["authors", "abstract"]
 
     def test_invalid_sections_filtered(self):
         from arxiv_browser import _dict_to_config
 
-        data = {"collapsed_sections": ["authors", "invalid_key", "url", 42]}
+        data = {"collapsed_sections": ["authors", "invalid_key", "abstract", 42]}
         config = _dict_to_config(data)
-        assert config.collapsed_sections == ["authors", "url"]
+        assert config.collapsed_sections == ["authors", "abstract"]
 
     def test_missing_collapsed_sections_uses_defaults(self):
         from arxiv_browser import DEFAULT_COLLAPSED_SECTIONS, _dict_to_config
@@ -7062,20 +7064,22 @@ class TestCollapsibleSections:
         assert "Relevance (8/10)" in rendered
         assert "High quality" not in rendered
 
-    def test_collapsed_url_hides_link(self, make_paper):
+    def test_url_always_visible_despite_collapsed(self, make_paper):
+        """URL section is always visible — not collapsible."""
         from arxiv_browser import PaperDetails
 
         details = PaperDetails()
         paper = make_paper()
+        # Even if "url" appears in collapsed list (from old config), URL should show
         details.update_paper(paper, collapsed_sections=["url"])
         rendered = str(details.content)
-        assert "\u25b8 URL" in rendered
-        assert "arxiv.org" not in rendered
+        assert "URL" in rendered
+        assert "arxiv.org" in rendered
 
     def test_detail_section_keys_complete(self):
         from arxiv_browser import DETAIL_SECTION_KEYS, DETAIL_SECTION_NAMES
 
-        assert len(DETAIL_SECTION_KEYS) == 9
+        assert len(DETAIL_SECTION_KEYS) == 8
         for key in DETAIL_SECTION_KEYS:
             assert key in DETAIL_SECTION_NAMES
 
@@ -9393,13 +9397,6 @@ class TestSectionToggleModal:
         modal.action_toggle_v()
         assert "version" in modal._collapsed
 
-    def test_action_toggle_u_toggles_url(self):
-        from arxiv_browser import SectionToggleModal
-
-        modal = SectionToggleModal([])
-        modal.action_toggle_u()
-        assert "url" in modal._collapsed
-
     def test_action_save_returns_sorted_collapsed(self):
         from unittest.mock import MagicMock
 
@@ -9447,20 +9444,21 @@ class TestSectionToggleModal:
         assert "Semantic Scholar" in rendered
         assert "HuggingFace" in rendered
         assert "Version Update" in rendered
-        assert "URL" in rendered
+        # URL is no longer collapsible — should NOT be listed
+        assert "URL" not in rendered
 
     def test_render_list_indicates_collapsed_state(self):
         from arxiv_browser import SectionToggleModal
 
-        modal = SectionToggleModal(["authors", "url"])
+        modal = SectionToggleModal(["authors", "version"])
         rendered = modal._render_list()
         lines = rendered.split("\n")
         authors_line = next(line for line in lines if "Authors" in line)
-        url_line = next(line for line in lines if "URL" in line)
+        version_line = next(line for line in lines if "Version" in line)
         abstract_line = next(line for line in lines if "Abstract" in line)
         assert "\u25b8" in authors_line
         assert "collapsed" in authors_line
-        assert "\u25b8" in url_line
+        assert "\u25b8" in version_line
         assert "\u25be" in abstract_line
         assert "expanded" in abstract_line
 
@@ -9468,7 +9466,7 @@ class TestSectionToggleModal:
         from arxiv_browser import SectionToggleModal
 
         binding_keys = {b.key for b in SectionToggleModal.BINDINGS}
-        expected = {"escape", "enter", "a", "b", "t", "r", "s", "e", "h", "v", "u"}
+        expected = {"escape", "enter", "a", "b", "t", "r", "s", "e", "h", "v"}
         assert expected <= binding_keys
 
 
@@ -10216,6 +10214,239 @@ class TestPaperDetailsCacheIntegration:
         details.update_paper(paper, "abstract", version_update=(1, 3))
 
         assert len(details._detail_cache) == 2
+
+
+# ============================================================================
+# Theme-Aware CSS Tests
+# ============================================================================
+
+
+class TestTextualThemes:
+    """Tests for the Textual theme system with custom CSS variables."""
+
+    def test_build_textual_theme_maps_all_keys(self):
+        from arxiv_browser import DEFAULT_THEME, _build_textual_theme
+
+        theme = _build_textual_theme("test", DEFAULT_THEME)
+        assert theme.name == "test"
+        expected_vars = {
+            "th-background",
+            "th-panel",
+            "th-panel-alt",
+            "th-highlight",
+            "th-highlight-focus",
+            "th-accent",
+            "th-accent-alt",
+            "th-muted",
+            "th-text",
+            "th-green",
+            "th-orange",
+            "th-purple",
+            "th-scrollbar-bg",
+            "th-scrollbar-thumb",
+            "th-scrollbar-active",
+            "th-scrollbar-hover",
+        }
+        assert set(theme.variables.keys()) == expected_vars
+
+    def test_textual_themes_key_parity(self):
+        from arxiv_browser import TEXTUAL_THEMES
+
+        theme_names = list(TEXTUAL_THEMES.keys())
+        assert len(theme_names) == 3
+        keys_0 = set(TEXTUAL_THEMES[theme_names[0]].variables.keys())
+        for name in theme_names[1:]:
+            assert set(TEXTUAL_THEMES[name].variables.keys()) == keys_0
+
+    def test_textual_theme_values_are_hex_colors(self):
+        from arxiv_browser import TEXTUAL_THEMES
+
+        for name, theme in TEXTUAL_THEMES.items():
+            for var_name, value in theme.variables.items():
+                assert value.startswith("#"), (
+                    f"Theme '{name}' variable '{var_name}' has non-hex value: {value}"
+                )
+
+
+# ============================================================================
+# Footer Contrast & Mode Badge Tests
+# ============================================================================
+
+
+class TestFooterContrast:
+    """Tests for footer rendering with accent-colored keys."""
+
+    def test_footer_contrast_uses_accent_for_keys(self):
+        from arxiv_browser import THEME_COLORS, ContextFooter
+
+        footer = ContextFooter()
+        footer.render_bindings([("o", "open"), ("s", "sort")])
+        rendered = str(footer.content)
+        assert THEME_COLORS["accent"] in rendered
+
+    def test_footer_mode_badge_renders(self):
+        from arxiv_browser import THEME_COLORS, ContextFooter
+
+        footer = ContextFooter()
+        badge = f"[bold {THEME_COLORS['accent']}] SEARCH [/]"
+        footer.render_bindings([("Esc", "close")], mode_badge=badge)
+        rendered = str(footer.content)
+        assert "SEARCH" in rendered
+
+    def test_footer_mode_badge_default_empty(self):
+        """In default browsing state, mode badge should be empty string."""
+        from unittest.mock import MagicMock
+
+        from textual.css.query import NoMatches
+
+        from arxiv_browser import ArxivBrowser
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._http_client = None
+        app._relevance_scoring_active = False
+        app._version_checking = False
+        app._version_progress = None
+        app._in_arxiv_api_mode = False
+        app.selected_ids = set()
+        # Mock query_one to raise NoMatches for search container
+        app.query_one = MagicMock(side_effect=NoMatches())
+        badge = app._get_footer_mode_badge()
+        assert badge == ""
+
+    def test_footer_mode_badge_api(self):
+        from unittest.mock import MagicMock
+
+        from textual.css.query import NoMatches
+
+        from arxiv_browser import ArxivBrowser
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._http_client = None
+        app._relevance_scoring_active = False
+        app._version_checking = False
+        app._version_progress = None
+        app._in_arxiv_api_mode = True
+        app.selected_ids = set()
+        app.query_one = MagicMock(side_effect=NoMatches())
+        badge = app._get_footer_mode_badge()
+        assert "API" in badge
+
+    def test_footer_mode_badge_selection(self):
+        from unittest.mock import MagicMock
+
+        from textual.css.query import NoMatches
+
+        from arxiv_browser import ArxivBrowser
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._http_client = None
+        app._relevance_scoring_active = False
+        app._version_checking = False
+        app._version_progress = None
+        app._in_arxiv_api_mode = False
+        app.selected_ids = {"2401.00001", "2401.00002", "2401.00003"}
+        app.query_one = MagicMock(side_effect=NoMatches())
+        badge = app._get_footer_mode_badge()
+        assert "3 SEL" in badge
+
+
+# ============================================================================
+# Detail Pane Ordering Tests
+# ============================================================================
+
+
+class TestDetailPaneOrdering:
+    """Tests for the abstract-before-authors ordering in the detail pane."""
+
+    def test_abstract_before_authors_in_detail(self, make_paper):
+        from arxiv_browser import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(authors="Alice, Bob, Charlie")
+        details.update_paper(paper, "This is the abstract text")
+        rendered = str(details.content)
+        abstract_pos = rendered.find("Abstract")
+        authors_pos = rendered.find("Authors")
+        assert abstract_pos > 0 and authors_pos > 0
+        assert abstract_pos < authors_pos, "Abstract should appear before Authors"
+
+    def test_url_always_visible_without_collapse_option(self):
+        """URL should not appear in DETAIL_SECTION_KEYS (not collapsible)."""
+        from arxiv_browser import DETAIL_SECTION_KEYS, DETAIL_SECTION_NAMES
+
+        assert "url" not in DETAIL_SECTION_KEYS
+        assert "url" not in DETAIL_SECTION_NAMES
+
+
+# ============================================================================
+# Feature Discoverability Tests
+# ============================================================================
+
+
+class TestFooterDiscoverability:
+    """Tests for conditional feature hints in the footer."""
+
+    @staticmethod
+    def _make_footer_app(config):
+        """Helper to create a minimal ArxivBrowser mock for footer tests."""
+        from unittest.mock import MagicMock
+
+        from textual.css.query import NoMatches
+
+        from arxiv_browser import ArxivBrowser
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._http_client = None
+        app._relevance_scoring_active = False
+        app._scoring_progress = None
+        app._version_checking = False
+        app._version_progress = None
+        app._in_arxiv_api_mode = False
+        app.selected_ids = set()
+        app._s2_active = False
+        app._config = config
+        app._history_files = []
+        app.query_one = MagicMock(side_effect=NoMatches())
+        return app
+
+    def test_footer_shows_version_hint_when_starred(self, make_paper):
+        from arxiv_browser import PaperMetadata, UserConfig
+
+        config = UserConfig(
+            paper_metadata={"2401.00001": PaperMetadata(arxiv_id="2401.00001", starred=True)}
+        )
+        app = self._make_footer_app(config)
+        bindings = app._get_footer_bindings()
+        keys = [k for k, _ in bindings]
+        assert "V" in keys
+
+    def test_footer_shows_relevance_hint_when_llm(self):
+        from arxiv_browser import UserConfig
+
+        config = UserConfig(llm_preset="claude")
+        app = self._make_footer_app(config)
+        bindings = app._get_footer_bindings()
+        keys = [k for k, _ in bindings]
+        assert "L" in keys
+
+    def test_footer_hides_features_when_inactive(self):
+        from arxiv_browser import UserConfig
+
+        config = UserConfig()  # No starred papers, no LLM
+        app = self._make_footer_app(config)
+        bindings = app._get_footer_bindings()
+        keys = [k for k, _ in bindings]
+        assert "V" not in keys
+        assert "L" not in keys
+
+    def test_footer_shows_export_hint(self):
+        from arxiv_browser import UserConfig
+
+        config = UserConfig()
+        app = self._make_footer_app(config)
+        bindings = app._get_footer_bindings()
+        keys = [k for k, _ in bindings]
+        assert "E" in keys
 
 
 # ============================================================================
