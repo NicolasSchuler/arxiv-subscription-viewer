@@ -140,6 +140,45 @@ def highlight_text(text: str, terms: list[str], color: str) -> str:
 # ============================================================================
 
 
+_FIELD_NAMES = frozenset({"title", "author", "abstract", "cat", "tag"})
+
+
+def _parse_quoted_phrase(query: str, i: int, query_len: int) -> tuple[QueryToken, int]:
+    """Parse a quoted phrase starting after the opening quote."""
+    start = i
+    while i < query_len and query[i] != '"':
+        i += 1
+    value = query[start:i]
+    return QueryToken(kind="term", value=value, phrase=True), i + 1
+
+
+def _parse_field_value(query: str, i: int, query_len: int, field: str) -> tuple[QueryToken, int]:
+    """Parse the value after a field:colon, handling both quoted and unquoted."""
+    if i < query_len and query[i] == '"':
+        i += 1
+        value_start = i
+        while i < query_len and query[i] != '"':
+            i += 1
+        value = query[value_start:i]
+        return QueryToken(kind="term", value=value, field=field, phrase=True), i + 1
+    value_start = i
+    while i < query_len and not query[i].isspace():
+        i += 1
+    value = query[value_start:i]
+    return QueryToken(kind="term", value=value, field=field), i
+
+
+def _parse_plain_term(query: str, start: int, i: int, query_len: int) -> tuple[QueryToken, int]:
+    """Parse a plain term or boolean operator, advancing past it."""
+    while i < query_len and not query[i].isspace():
+        i += 1
+    raw = query[start:i]
+    upper = raw.upper()
+    if upper in {"AND", "OR", "NOT"}:
+        return QueryToken(kind="op", value=upper), i
+    return QueryToken(kind="term", value=raw), i
+
+
 def tokenize_query(query: str) -> list[QueryToken]:
     """Tokenize a query string into terms and operators."""
     tokens: list[QueryToken] = []
@@ -150,44 +189,20 @@ def tokenize_query(query: str) -> list[QueryToken]:
             i += 1
             continue
         if query[i] == '"':
-            i += 1
-            start = i
-            while i < query_len and query[i] != '"':
-                i += 1
-            value = query[start:i]
-            tokens.append(QueryToken(kind="term", value=value, phrase=True))
-            i += 1
+            token, i = _parse_quoted_phrase(query, i + 1, query_len)
+            tokens.append(token)
             continue
         start = i
         while i < query_len and not query[i].isspace() and query[i] != ":":
             i += 1
         if i < query_len and query[i] == ":":
             field = query[start:i].lower()
-            if field in {"title", "author", "abstract", "cat", "tag"}:
-                i += 1
-                if i < query_len and query[i] == '"':
-                    i += 1
-                    value_start = i
-                    while i < query_len and query[i] != '"':
-                        i += 1
-                    value = query[value_start:i]
-                    tokens.append(QueryToken(kind="term", value=value, field=field, phrase=True))
-                    i += 1
-                else:
-                    value_start = i
-                    while i < query_len and not query[i].isspace():
-                        i += 1
-                    value = query[value_start:i]
-                    tokens.append(QueryToken(kind="term", value=value, field=field))
+            if field in _FIELD_NAMES:
+                token, i = _parse_field_value(query, i + 1, query_len, field)
+                tokens.append(token)
                 continue
-        while i < query_len and not query[i].isspace():
-            i += 1
-        raw = query[start:i]
-        upper = raw.upper()
-        if upper in {"AND", "OR", "NOT"}:
-            tokens.append(QueryToken(kind="op", value=upper))
-        else:
-            tokens.append(QueryToken(kind="term", value=raw))
+        token, i = _parse_plain_term(query, start, i, query_len)
+        tokens.append(token)
     return tokens
 
 

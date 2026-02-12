@@ -139,14 +139,12 @@ def _parse_collapsed_sections(raw: Any) -> list[str]:
     return valid
 
 
-def _dict_to_config(data: dict[str, Any]) -> UserConfig:
-    """Deserialize a dictionary to UserConfig with type validation."""
-    # Parse session state with type validation
+def _parse_session_state(data: dict[str, Any]) -> SessionState:
+    """Parse the session state section from config data."""
     session_data = data.get("session", {})
     if not isinstance(session_data, dict):
         session_data = {}
 
-    # Handle current_date which can be str or None
     current_date_raw = session_data.get("current_date")
     current_date = current_date_raw if isinstance(current_date_raw, str) else None
 
@@ -154,7 +152,7 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
     if sort_index < 0 or sort_index >= len(SORT_OPTIONS):
         sort_index = 0
 
-    session = SessionState(
+    return SessionState(
         scroll_index=_safe_get(session_data, "scroll_index", 0, int),
         current_filter=_safe_get(session_data, "current_filter", "", str),
         sort_index=sort_index,
@@ -162,117 +160,122 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         current_date=current_date,
     )
 
-    # Parse paper metadata with type validation
-    paper_metadata = {}
+
+def _parse_paper_metadata_dict(data: dict[str, Any]) -> dict[str, PaperMetadata]:
+    """Parse the paper_metadata section from config data."""
+    result: dict[str, PaperMetadata] = {}
     raw_metadata = data.get("paper_metadata", {})
-    if isinstance(raw_metadata, dict):
-        for arxiv_id, meta_data in raw_metadata.items():
-            if not isinstance(meta_data, dict):
-                continue
-            # last_checked_version can be int or None
-            lcv_raw = meta_data.get("last_checked_version")
-            lcv = lcv_raw if isinstance(lcv_raw, int) else None
+    if not isinstance(raw_metadata, dict):
+        return result
+    for arxiv_id, meta_data in raw_metadata.items():
+        if not isinstance(meta_data, dict):
+            continue
+        lcv_raw = meta_data.get("last_checked_version")
+        result[arxiv_id] = PaperMetadata(
+            arxiv_id=arxiv_id,
+            notes=_safe_get(meta_data, "notes", "", str),
+            tags=_safe_get(meta_data, "tags", [], list),
+            is_read=_safe_get(meta_data, "is_read", False, bool),
+            starred=_safe_get(meta_data, "starred", False, bool),
+            last_checked_version=lcv_raw if isinstance(lcv_raw, int) else None,
+        )
+    return result
 
-            paper_metadata[arxiv_id] = PaperMetadata(
-                arxiv_id=arxiv_id,
-                notes=_safe_get(meta_data, "notes", "", str),
-                tags=_safe_get(meta_data, "tags", [], list),
-                is_read=_safe_get(meta_data, "is_read", False, bool),
-                starred=_safe_get(meta_data, "starred", False, bool),
-                last_checked_version=lcv,
-            )
 
-    # Parse watch list with type validation
-    watch_list = []
+def _parse_watch_list(data: dict[str, Any]) -> list[WatchListEntry]:
+    """Parse the watch_list section from config data."""
+    result: list[WatchListEntry] = []
     raw_watch_list = data.get("watch_list", [])
-    if isinstance(raw_watch_list, list):
-        for entry in raw_watch_list:
-            if not isinstance(entry, dict):
-                continue
-            match_type = _safe_get(entry, "match_type", "author", str)
-            if match_type not in WATCH_MATCH_TYPES:
-                logger.warning(
-                    "Invalid watch list match_type %r, defaulting to 'author'",
-                    match_type,
-                )
-                match_type = "author"
-            watch_list.append(
-                WatchListEntry(
-                    pattern=_safe_get(entry, "pattern", "", str),
-                    match_type=match_type,
-                    case_sensitive=_safe_get(entry, "case_sensitive", False, bool),
-                )
+    if not isinstance(raw_watch_list, list):
+        return result
+    for entry in raw_watch_list:
+        if not isinstance(entry, dict):
+            continue
+        match_type = _safe_get(entry, "match_type", "author", str)
+        if match_type not in WATCH_MATCH_TYPES:
+            logger.warning(
+                "Invalid watch list match_type %r, defaulting to 'author'",
+                match_type,
             )
+            match_type = "author"
+        result.append(
+            WatchListEntry(
+                pattern=_safe_get(entry, "pattern", "", str),
+                match_type=match_type,
+                case_sensitive=_safe_get(entry, "case_sensitive", False, bool),
+            )
+        )
+    return result
 
-    # Parse bookmarks with type validation
-    bookmarks = []
+
+def _parse_bookmarks(data: dict[str, Any]) -> list[SearchBookmark]:
+    """Parse the bookmarks section from config data."""
+    result: list[SearchBookmark] = []
     raw_bookmarks = data.get("bookmarks", [])
-    if isinstance(raw_bookmarks, list):
-        for b in raw_bookmarks:
-            if not isinstance(b, dict):
-                continue
-            bookmarks.append(
-                SearchBookmark(
-                    name=_safe_get(b, "name", "", str),
-                    query=_safe_get(b, "query", "", str),
-                )
+    if not isinstance(raw_bookmarks, list):
+        return result
+    for b in raw_bookmarks:
+        if not isinstance(b, dict):
+            continue
+        result.append(
+            SearchBookmark(
+                name=_safe_get(b, "name", "", str),
+                query=_safe_get(b, "query", "", str),
             )
+        )
+    return result
 
-    # Parse collections with type validation
-    collections: list[PaperCollection] = []
+
+def _parse_collections(data: dict[str, Any]) -> list[PaperCollection]:
+    """Parse the collections section from config data."""
+    result: list[PaperCollection] = []
     raw_collections = data.get("collections", [])
-    if isinstance(raw_collections, list):
-        for c in raw_collections[:MAX_COLLECTIONS]:
-            if not isinstance(c, dict):
-                continue
-            name = _safe_get(c, "name", "", str)
-            if not name:
-                continue
-            paper_ids = _safe_get(c, "paper_ids", [], list)
-            safe_ids = [pid for pid in paper_ids if isinstance(pid, str)][
-                :MAX_PAPERS_PER_COLLECTION
-            ]
-            collections.append(
-                PaperCollection(
-                    name=name,
-                    description=_safe_get(c, "description", "", str),
-                    paper_ids=safe_ids,
-                    created=_safe_get(c, "created", "", str),
-                )
+    if not isinstance(raw_collections, list):
+        return result
+    for c in raw_collections[:MAX_COLLECTIONS]:
+        if not isinstance(c, dict):
+            continue
+        name = _safe_get(c, "name", "", str)
+        if not name:
+            continue
+        paper_ids = _safe_get(c, "paper_ids", [], list)
+        safe_ids = [pid for pid in paper_ids if isinstance(pid, str)][:MAX_PAPERS_PER_COLLECTION]
+        result.append(
+            PaperCollection(
+                name=name,
+                description=_safe_get(c, "description", "", str),
+                paper_ids=safe_ids,
+                created=_safe_get(c, "created", "", str),
             )
+        )
+    return result
 
-    # Parse marks with type validation
+
+def _parse_str_dict(data: dict[str, Any], key: str) -> dict[str, str]:
+    """Parse a dict[str, str] field from config data with type validation."""
+    raw = _safe_get(data, key, {}, dict)
+    return {str(k): str(v) for k, v in raw.items() if isinstance(k, str) and isinstance(v, str)}
+
+
+def _dict_to_config(data: dict[str, Any]) -> UserConfig:
+    """Deserialize a dictionary to UserConfig with type validation."""
     marks = data.get("marks", {})
     if not isinstance(marks, dict):
         marks = {}
 
-    category_colors = _safe_get(data, "category_colors", {}, dict)
-    safe_category_colors = {
-        str(key): str(value)
-        for key, value in category_colors.items()
-        if isinstance(key, str) and isinstance(value, str)
-    }
-
-    theme = _safe_get(data, "theme", {}, dict)
-    safe_theme = {
-        str(key): str(value)
-        for key, value in theme.items()
-        if isinstance(key, str) and isinstance(value, str)
-    }
-
     return UserConfig(
-        paper_metadata=paper_metadata,
-        watch_list=watch_list,
-        bookmarks=bookmarks,
-        collections=collections,
+        paper_metadata=_parse_paper_metadata_dict(data),
+        watch_list=_parse_watch_list(data),
+        bookmarks=_parse_bookmarks(data),
+        collections=_parse_collections(data),
         marks=marks,
-        session=session,
+        session=_parse_session_state(data),
         show_abstract_preview=_safe_get(data, "show_abstract_preview", False, bool),
         bibtex_export_dir=_safe_get(data, "bibtex_export_dir", "", str),
         pdf_download_dir=_safe_get(data, "pdf_download_dir", "", str),
         prefer_pdf_url=_safe_get(data, "prefer_pdf_url", False, bool),
-        category_colors=safe_category_colors,
-        theme=safe_theme,
+        category_colors=_parse_str_dict(data, "category_colors"),
+        theme=_parse_str_dict(data, "theme"),
         theme_name=_safe_get(data, "theme_name", "monokai", str),
         llm_command=_safe_get(data, "llm_command", "", str),
         llm_prompt_template=_safe_get(data, "llm_prompt_template", "", str),
@@ -398,6 +401,136 @@ def export_metadata(config: UserConfig) -> dict[str, Any]:
     }
 
 
+def _merge_paper_metadata(existing: PaperMetadata, meta_dict: dict[str, Any]) -> None:
+    """Merge imported metadata into an existing PaperMetadata entry."""
+    import_tags = meta_dict.get("tags")
+    if import_tags and isinstance(import_tags, list):
+        valid_tags = [t for t in import_tags if isinstance(t, str)]
+        existing.tags = list(dict.fromkeys(existing.tags + valid_tags))
+    if not existing.notes and meta_dict.get("notes"):
+        existing.notes = str(meta_dict["notes"])
+    if meta_dict.get("is_read"):
+        existing.is_read = True
+    if meta_dict.get("starred"):
+        existing.starred = True
+
+
+def _create_paper_metadata(arxiv_id: str, meta_dict: dict[str, Any]) -> PaperMetadata:
+    """Create a new PaperMetadata from an import dict."""
+    lcv_raw = meta_dict.get("last_checked_version")
+    return PaperMetadata(
+        arxiv_id=arxiv_id,
+        notes=str(meta_dict.get("notes", "")),
+        tags=[t for t in meta_dict["tags"] if isinstance(t, str)]
+        if isinstance(meta_dict.get("tags"), list)
+        else [],
+        is_read=bool(meta_dict.get("is_read", False)),
+        starred=bool(meta_dict.get("starred", False)),
+        last_checked_version=lcv_raw if isinstance(lcv_raw, int) else None,
+    )
+
+
+def _import_paper_metadata(pm_data: Any, config: UserConfig, merge: bool) -> int:
+    """Import paper metadata entries into config. Returns count imported."""
+    if not isinstance(pm_data, dict):
+        return 0
+    count = 0
+    for arxiv_id, meta_dict in pm_data.items():
+        if not isinstance(meta_dict, dict):
+            continue
+        existing = config.paper_metadata.get(arxiv_id)
+        if existing and merge:
+            _merge_paper_metadata(existing, meta_dict)
+        else:
+            config.paper_metadata[arxiv_id] = _create_paper_metadata(arxiv_id, meta_dict)
+        count += 1
+    return count
+
+
+def _import_watch_entries(wl_data: Any, config: UserConfig) -> int:
+    """Import watch list entries into config with dedup. Returns count imported."""
+    if not isinstance(wl_data, list):
+        return 0
+    existing_patterns = {(e.pattern, e.match_type) for e in config.watch_list}
+    count = 0
+    for entry_dict in wl_data:
+        if not isinstance(entry_dict, dict):
+            continue
+        pattern = str(entry_dict.get("pattern", ""))
+        match_type = str(entry_dict.get("match_type", "keyword"))
+        if match_type not in WATCH_MATCH_TYPES:
+            logger.warning(
+                "Unknown watch match_type %r for pattern %r, defaulting to 'keyword'",
+                match_type,
+                pattern,
+            )
+            match_type = "keyword"
+        if not pattern or (pattern, match_type) in existing_patterns:
+            continue
+        config.watch_list.append(
+            WatchListEntry(
+                pattern=pattern,
+                match_type=match_type,
+                case_sensitive=bool(entry_dict.get("case_sensitive", False)),
+            )
+        )
+        count += 1
+    return count
+
+
+def _import_bookmarks(bk_data: Any, config: UserConfig, merge: bool) -> int:
+    """Import bookmarks into config with dedup and capacity check. Returns count imported."""
+    if not isinstance(bk_data, list) or not merge:
+        return 0
+    existing_queries = {b.query for b in config.bookmarks}
+    count = 0
+    for bk_dict in bk_data:
+        if not isinstance(bk_dict, dict):
+            continue
+        query = str(bk_dict.get("query", ""))
+        if not query or query in existing_queries:
+            continue
+        if len(config.bookmarks) >= 9:
+            break
+        config.bookmarks.append(
+            SearchBookmark(name=str(bk_dict.get("name", "Imported")), query=query)
+        )
+        count += 1
+    return count
+
+
+def _import_collections(col_data: Any, config: UserConfig, merge: bool) -> int:
+    """Import collections into config with dedup and capacity check. Returns count imported."""
+    if not isinstance(col_data, list) or not merge:
+        return 0
+    existing_names = {c.name for c in config.collections}
+    count = 0
+    for col_dict in col_data:
+        if not isinstance(col_dict, dict):
+            continue
+        name = str(col_dict.get("name", ""))
+        if not name or name in existing_names:
+            continue
+        if len(config.collections) >= MAX_COLLECTIONS:
+            break
+        paper_ids = col_dict.get("paper_ids", [])
+        safe_ids = (
+            [pid for pid in paper_ids if isinstance(pid, str)][:MAX_PAPERS_PER_COLLECTION]
+            if isinstance(paper_ids, list)
+            else []
+        )
+        config.collections.append(
+            PaperCollection(
+                name=name,
+                description=str(col_dict.get("description", "")),
+                paper_ids=safe_ids,
+                created=str(col_dict.get("created", "")),
+            )
+        )
+        count += 1
+    return count
+
+
 def import_metadata(
     data: dict[str, Any], config: UserConfig, merge: bool = True
 ) -> tuple[int, int, int, int]:
@@ -412,120 +545,15 @@ def import_metadata(
     if data.get("format") != "arxiv-browser-metadata":
         raise ValueError("Not a valid arxiv-browser metadata export")
 
-    papers_imported = 0
-    pm_data = data.get("paper_metadata", {})
-    if isinstance(pm_data, dict):
-        for arxiv_id, meta_dict in pm_data.items():
-            if not isinstance(meta_dict, dict):
-                continue
-            existing = config.paper_metadata.get(arxiv_id)
-            if existing and merge:
-                # Merge: keep existing, add new tags, overwrite notes only if empty
-                import_tags = meta_dict.get("tags")
-                if import_tags and isinstance(import_tags, list):
-                    valid_tags = [t for t in import_tags if isinstance(t, str)]
-                    merged_tags = list(dict.fromkeys(existing.tags + valid_tags))
-                    existing.tags = merged_tags
-                if not existing.notes and meta_dict.get("notes"):
-                    existing.notes = str(meta_dict["notes"])
-                if meta_dict.get("is_read"):
-                    existing.is_read = True
-                if meta_dict.get("starred"):
-                    existing.starred = True
-            else:
-                config.paper_metadata[arxiv_id] = PaperMetadata(
-                    arxiv_id=arxiv_id,
-                    notes=str(meta_dict.get("notes", "")),
-                    tags=[t for t in meta_dict["tags"] if isinstance(t, str)]
-                    if isinstance(meta_dict.get("tags"), list)
-                    else [],
-                    is_read=bool(meta_dict.get("is_read", False)),
-                    starred=bool(meta_dict.get("starred", False)),
-                    last_checked_version=(
-                        lcv
-                        if isinstance(lcv := meta_dict.get("last_checked_version"), int)
-                        else None
-                    ),
-                )
-            papers_imported += 1
+    papers = _import_paper_metadata(data.get("paper_metadata", {}), config, merge)
+    watch = _import_watch_entries(data.get("watch_list", []), config)
+    bookmarks = _import_bookmarks(data.get("bookmarks", []), config, merge)
+    collections = _import_collections(data.get("collections", []), config, merge)
 
-    watch_imported = 0
-    wl_data = data.get("watch_list", [])
-    if isinstance(wl_data, list):
-        existing_patterns = {(e.pattern, e.match_type) for e in config.watch_list}
-        for entry_dict in wl_data:
-            if not isinstance(entry_dict, dict):
-                continue
-            pattern = str(entry_dict.get("pattern", ""))
-            match_type = str(entry_dict.get("match_type", "keyword"))
-            if match_type not in WATCH_MATCH_TYPES:
-                logger.warning(
-                    "Unknown watch match_type %r for pattern %r, defaulting to 'keyword'",
-                    match_type,
-                    pattern,
-                )
-                match_type = "keyword"
-            if not pattern or (pattern, match_type) in existing_patterns:
-                continue
-            config.watch_list.append(
-                WatchListEntry(
-                    pattern=pattern,
-                    match_type=match_type,
-                    case_sensitive=bool(entry_dict.get("case_sensitive", False)),
-                )
-            )
-            watch_imported += 1
-
-    bookmarks_imported = 0
-    bk_data = data.get("bookmarks", [])
-    if isinstance(bk_data, list) and merge:
-        existing_queries = {b.query for b in config.bookmarks}
-        for bk_dict in bk_data:
-            if not isinstance(bk_dict, dict):
-                continue
-            query = str(bk_dict.get("query", ""))
-            if not query or query in existing_queries:
-                continue
-            if len(config.bookmarks) >= 9:
-                break
-            config.bookmarks.append(
-                SearchBookmark(name=str(bk_dict.get("name", "Imported")), query=query)
-            )
-            bookmarks_imported += 1
-
-    collections_imported = 0
-    col_data = data.get("collections", [])
-    if isinstance(col_data, list) and merge:
-        existing_names = {c.name for c in config.collections}
-        for col_dict in col_data:
-            if not isinstance(col_dict, dict):
-                continue
-            name = str(col_dict.get("name", ""))
-            if not name or name in existing_names:
-                continue
-            if len(config.collections) >= MAX_COLLECTIONS:
-                break
-            paper_ids = col_dict.get("paper_ids", [])
-            safe_ids = (
-                [pid for pid in paper_ids if isinstance(pid, str)][:MAX_PAPERS_PER_COLLECTION]
-                if isinstance(paper_ids, list)
-                else []
-            )
-            config.collections.append(
-                PaperCollection(
-                    name=name,
-                    description=str(col_dict.get("description", "")),
-                    paper_ids=safe_ids,
-                    created=str(col_dict.get("created", "")),
-                )
-            )
-            collections_imported += 1
-
-    # Import research interests if not already set
     if not config.research_interests and data.get("research_interests"):
         config.research_interests = str(data["research_interests"])
 
-    return (papers_imported, watch_imported, bookmarks_imported, collections_imported)
+    return (papers, watch, bookmarks, collections)
 
 
 __all__ = [

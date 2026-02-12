@@ -611,6 +611,82 @@ async def _fetch_paper_content_async(
     return f"Abstract:\n{abstract}" if abstract else ""
 
 
+def _render_title_line(
+    paper: Paper,
+    selected: bool,
+    metadata: PaperMetadata | None,
+    watched: bool,
+    ht: dict[str, list[str]],
+) -> str:
+    """Build the title line with selection/watch/star/read indicators."""
+    prefix_parts: list[str] = []
+    if selected:
+        prefix_parts.append(f"[{THEME_COLORS['green']}]●[/]")
+    if watched:
+        prefix_parts.append(f"[{THEME_COLORS['orange']}]👁[/]")
+    if metadata and metadata.starred:
+        prefix_parts.append(f"[{THEME_COLORS['yellow']}]⭐[/]")
+    if metadata and metadata.is_read:
+        prefix_parts.append(f"[{THEME_COLORS['muted']}]✓[/]")
+    prefix = " ".join(prefix_parts)
+
+    title_text = highlight_text(paper.title, ht.get("title", []), THEME_COLORS["accent"])
+    if metadata and metadata.is_read:
+        title_text = f"[dim]{title_text}[/]"
+    return f"{prefix} {title_text}" if prefix else title_text
+
+
+def _render_meta_badges(
+    paper: Paper,
+    metadata: PaperMetadata | None,
+    s2_data: "SemanticScholarPaper | None",
+    hf_data: "HuggingFacePaper | None",
+    version_update: tuple[int, int] | None,
+    relevance_score: tuple[int, str] | None,
+) -> str:
+    """Build the meta line with arxiv_id, categories, and badges."""
+    parts: list[str] = []
+    if paper.source == "api":
+        parts.append(f"[{THEME_COLORS['orange']}]API[/]")
+    parts.extend([f"[dim]{paper.arxiv_id}[/]", format_categories(paper.categories)])
+    if metadata and metadata.tags:
+        tag_str = " ".join(
+            f"[{get_tag_color(tag)}]#{escape_rich_text(tag)}[/]" for tag in metadata.tags
+        )
+        parts.append(tag_str)
+    if s2_data is not None:
+        parts.append(f"[{THEME_COLORS['green']}]C{s2_data.citation_count}[/]")
+    if hf_data is not None:
+        parts.append(f"[{THEME_COLORS['orange']}]\u2191{hf_data.upvotes}[/]")
+    if version_update is not None:
+        old_v, new_v = version_update
+        parts.append(f"[{THEME_COLORS['pink']}]v{old_v}\u2192v{new_v}[/]")
+    if relevance_score is not None:
+        score, _ = relevance_score
+        if score >= 8:
+            color = THEME_COLORS["green"]
+        elif score >= 5:
+            color = THEME_COLORS["yellow"]
+        else:
+            color = THEME_COLORS["muted"]
+        parts.append(f"[{color}]{score}/10[/]")
+    return "  ".join(parts)
+
+
+def _render_abstract_preview(abstract_text: str | None, ht: dict[str, list[str]]) -> str:
+    """Build the abstract preview line for the paper list."""
+    if abstract_text is None:
+        return "[dim italic]Loading abstract...[/]"
+    if not abstract_text:
+        return "[dim italic]No abstract available[/]"
+    if len(abstract_text) <= PREVIEW_ABSTRACT_MAX_LEN:
+        highlighted = highlight_text(abstract_text, ht.get("abstract", []), THEME_COLORS["accent"])
+        return f"[dim italic]{highlighted}[/]"
+    truncated = abstract_text[:PREVIEW_ABSTRACT_MAX_LEN].rsplit(" ", 1)[0]
+    highlighted = highlight_text(truncated, ht.get("abstract", []), THEME_COLORS["accent"])
+    return f"[dim italic]{highlighted}...[/]"
+
+
 def render_paper_option(
     paper: Paper,
     *,
@@ -628,74 +704,14 @@ def render_paper_option(
     """Render a paper as Rich markup for OptionList display."""
     ht = highlight_terms or {"title": [], "author": [], "abstract": []}
 
-    # ── Title line with indicators ──
-    prefix_parts: list[str] = []
-    if selected:
-        prefix_parts.append(f"[{THEME_COLORS['green']}]●[/]")
-    if watched:
-        prefix_parts.append(f"[{THEME_COLORS['orange']}]👁[/]")
-    if metadata and metadata.starred:
-        prefix_parts.append(f"[{THEME_COLORS['yellow']}]⭐[/]")
-    if metadata and metadata.is_read:
-        prefix_parts.append(f"[{THEME_COLORS['muted']}]✓[/]")
-    prefix = " ".join(prefix_parts)
+    lines = [
+        _render_title_line(paper, selected, metadata, watched, ht),
+        highlight_text(paper.authors, ht.get("author", []), THEME_COLORS["accent"]),
+        _render_meta_badges(paper, metadata, s2_data, hf_data, version_update, relevance_score),
+    ]
 
-    title_text = highlight_text(paper.title, ht.get("title", []), THEME_COLORS["accent"])
-    if metadata and metadata.is_read:
-        title_text = f"[dim]{title_text}[/]"
-    title_line = f"{prefix} {title_text}" if prefix else title_text
-
-    # ── Authors line ──
-    authors_line = highlight_text(paper.authors, ht.get("author", []), THEME_COLORS["accent"])
-
-    # ── Meta line (arxiv_id, categories, badges) ──
-    meta_parts: list[str] = []
-    if paper.source == "api":
-        meta_parts.append(f"[{THEME_COLORS['orange']}]API[/]")
-    meta_parts.extend([f"[dim]{paper.arxiv_id}[/]", format_categories(paper.categories)])
-    if metadata and metadata.tags:
-        tag_str = " ".join(
-            f"[{get_tag_color(tag)}]#{escape_rich_text(tag)}[/]" for tag in metadata.tags
-        )
-        meta_parts.append(tag_str)
-    if s2_data is not None:
-        meta_parts.append(f"[{THEME_COLORS['green']}]C{s2_data.citation_count}[/]")
-    if hf_data is not None:
-        meta_parts.append(f"[{THEME_COLORS['orange']}]\u2191{hf_data.upvotes}[/]")
-    if version_update is not None:
-        old_v, new_v = version_update
-        meta_parts.append(f"[{THEME_COLORS['pink']}]v{old_v}\u2192v{new_v}[/]")
-    if relevance_score is not None:
-        score, _ = relevance_score
-        if score >= 8:
-            color = THEME_COLORS["green"]
-        elif score >= 5:
-            color = THEME_COLORS["yellow"]
-        else:
-            color = THEME_COLORS["muted"]
-        meta_parts.append(f"[{color}]{score}/10[/]")
-    meta_line = "  ".join(meta_parts)
-
-    lines = [title_line, authors_line, meta_line]
-
-    # ── Optional abstract preview ──
     if show_preview:
-        if abstract_text is None:
-            lines.append("[dim italic]Loading abstract...[/]")
-        elif not abstract_text:
-            lines.append("[dim italic]No abstract available[/]")
-        else:
-            if len(abstract_text) <= PREVIEW_ABSTRACT_MAX_LEN:
-                highlighted = highlight_text(
-                    abstract_text, ht.get("abstract", []), THEME_COLORS["accent"]
-                )
-                lines.append(f"[dim italic]{highlighted}[/]")
-            else:
-                truncated = abstract_text[:PREVIEW_ABSTRACT_MAX_LEN].rsplit(" ", 1)[0]
-                highlighted = highlight_text(
-                    truncated, ht.get("abstract", []), THEME_COLORS["accent"]
-                )
-                lines.append(f"[dim italic]{highlighted}...[/]")
+        lines.append(_render_abstract_preview(abstract_text, ht))
 
     return "\n".join(lines)
 
@@ -8177,6 +8193,108 @@ class ArxivBrowser(App):
             )
 
 
+def _resolve_input_file(input_path: Path) -> list[Paper] | int:
+    """Validate and parse an explicit input file. Returns papers or exit code."""
+    arxiv_file = input_path.resolve()
+    if not arxiv_file.exists():
+        print(f"Error: {arxiv_file} not found", file=sys.stderr)
+        return 1
+    if arxiv_file.is_dir():
+        print(f"Error: {arxiv_file} is a directory, not a file", file=sys.stderr)
+        return 1
+    if not os.access(arxiv_file, os.R_OK):
+        print(f"Error: {arxiv_file} is not readable (permission denied)", file=sys.stderr)
+        return 1
+    try:
+        return parse_arxiv_file(arxiv_file)
+    except OSError as e:
+        print(f"Error: Failed to read {arxiv_file}: {e}", file=sys.stderr)
+        return 1
+
+
+def _resolve_history_date(history_files: list[tuple[date, Path]], date_str: str) -> int | None:
+    """Find the index for --date argument. Returns index or None on error."""
+    try:
+        target_date = datetime.strptime(date_str, HISTORY_DATE_FORMAT).date()
+    except ValueError:
+        print(
+            f"Error: Invalid date format '{date_str}', expected YYYY-MM-DD",
+            file=sys.stderr,
+        )
+        return None
+    for i, (d, _) in enumerate(history_files):
+        if d == target_date:
+            return i
+    print(f"Error: No file found for date {date_str}", file=sys.stderr)
+    return None
+
+
+def _resolve_legacy_fallback(base_dir: Path) -> list[Paper] | int:
+    """Find and parse arxiv.txt in the current directory. Returns papers or exit code."""
+    arxiv_file = base_dir / "arxiv.txt"
+    if not arxiv_file.exists():
+        print("Error: No papers found. Either:", file=sys.stderr)
+        print("  - Create history/YYYY-MM-DD.txt files, or", file=sys.stderr)
+        print("  - Create arxiv.txt in the current directory, or", file=sys.stderr)
+        print("  - Use -i to specify an input file", file=sys.stderr)
+        return 1
+    if not os.access(arxiv_file, os.R_OK):
+        print(f"Error: {arxiv_file} is not readable (permission denied)", file=sys.stderr)
+        return 1
+    try:
+        return parse_arxiv_file(arxiv_file)
+    except OSError as e:
+        print(f"Error: Failed to read {arxiv_file}: {e}", file=sys.stderr)
+        return 1
+
+
+def _resolve_papers(
+    args: argparse.Namespace,
+    base_dir: Path,
+    config: UserConfig,
+    history_files: list[tuple[date, Path]],
+) -> tuple[list[Paper], list[tuple[date, Path]], int] | int:
+    """Resolve which papers to load based on CLI args. Returns (papers, history_files, date_index) or exit code."""
+    if args.input is not None:
+        result = _resolve_input_file(args.input)
+        if isinstance(result, int):
+            return result
+        return (result, [], 0)
+
+    if history_files:
+        current_date_index = 0
+        if args.date:
+            idx = _resolve_history_date(history_files, args.date)
+            if idx is None:
+                return 1
+            current_date_index = idx
+        elif not args.no_restore and config.session.current_date:
+            try:
+                saved_date = datetime.strptime(
+                    config.session.current_date, HISTORY_DATE_FORMAT
+                ).date()
+                newest_date = history_files[0][0]
+                if saved_date >= newest_date:
+                    for i, (d, _) in enumerate(history_files):
+                        if d == saved_date:
+                            current_date_index = i
+                            break
+            except ValueError:
+                pass
+        _, arxiv_file = history_files[current_date_index]
+        try:
+            papers = parse_arxiv_file(arxiv_file)
+        except OSError as e:
+            print(f"Error: Failed to read {arxiv_file}: {e}", file=sys.stderr)
+            return 1
+        return (papers, history_files, current_date_index)
+
+    result = _resolve_legacy_fallback(base_dir)
+    if isinstance(result, int):
+        return result
+    return (result, [], 0)
+
+
 def main() -> int:
     """Main entry point. Returns exit code."""
     parser = argparse.ArgumentParser(description="Browse arXiv papers from a text file in a TUI")
@@ -8224,100 +8342,10 @@ def main() -> int:
         return 0
 
     # Determine which file(s) to load
-    current_date_index = 0
-
-    if args.input is not None:
-        # Explicit -i flag: use that file, disable history mode
-        # Resolve symlinks for security and normalize path
-        arxiv_file = args.input.resolve()
-        history_files = []  # Disable history mode
-
-        if not arxiv_file.exists():
-            print(f"Error: {arxiv_file} not found", file=sys.stderr)
-            return 1
-        if arxiv_file.is_dir():
-            print(f"Error: {arxiv_file} is a directory, not a file", file=sys.stderr)
-            return 1
-        if not os.access(arxiv_file, os.R_OK):
-            print(
-                f"Error: {arxiv_file} is not readable (permission denied)",
-                file=sys.stderr,
-            )
-            return 1
-
-        try:
-            papers = parse_arxiv_file(arxiv_file)
-        except OSError as e:
-            print(f"Error: Failed to read {arxiv_file}: {e}", file=sys.stderr)
-            return 1
-
-    elif history_files:
-        # History mode: use history directory
-        if args.date:
-            # Find specific date
-            try:
-                target_date = datetime.strptime(args.date, HISTORY_DATE_FORMAT).date()
-            except ValueError:
-                print(
-                    f"Error: Invalid date format '{args.date}', expected YYYY-MM-DD",
-                    file=sys.stderr,
-                )
-                return 1
-
-            found = False
-            for i, (d, _) in enumerate(history_files):
-                if d == target_date:
-                    current_date_index = i
-                    found = True
-                    break
-            if not found:
-                print(f"Error: No file found for date {args.date}", file=sys.stderr)
-                return 1
-        elif not args.no_restore and config.session.current_date:
-            # Restore saved date only if no newer file has appeared;
-            # otherwise load the newest so the user sees new papers.
-            try:
-                saved_date = datetime.strptime(
-                    config.session.current_date, HISTORY_DATE_FORMAT
-                ).date()
-                newest_date = history_files[0][0]
-                if saved_date >= newest_date:
-                    for i, (d, _) in enumerate(history_files):
-                        if d == saved_date:
-                            current_date_index = i
-                            break
-            except ValueError:
-                pass  # Invalid saved date, use newest
-
-        _, arxiv_file = history_files[current_date_index]
-        try:
-            papers = parse_arxiv_file(arxiv_file)
-        except OSError as e:
-            print(f"Error: Failed to read {arxiv_file}: {e}", file=sys.stderr)
-            return 1
-
-    else:
-        # Legacy fallback: use arxiv.txt in current directory
-        arxiv_file = base_dir / "arxiv.txt"
-
-        if not arxiv_file.exists():
-            print("Error: No papers found. Either:", file=sys.stderr)
-            print("  - Create history/YYYY-MM-DD.txt files, or", file=sys.stderr)
-            print("  - Create arxiv.txt in the current directory, or", file=sys.stderr)
-            print("  - Use -i to specify an input file", file=sys.stderr)
-            return 1
-        if not os.access(arxiv_file, os.R_OK):
-            print(
-                f"Error: {arxiv_file} is not readable (permission denied)",
-                file=sys.stderr,
-            )
-            return 1
-
-        try:
-            papers = parse_arxiv_file(arxiv_file)
-        except OSError as e:
-            print(f"Error: Failed to read {arxiv_file}: {e}", file=sys.stderr)
-            return 1
+    result = _resolve_papers(args, base_dir, config, history_files)
+    if isinstance(result, int):
+        return result
+    papers, history_files, current_date_index = result
 
     if not papers:
         print("No papers found in the file", file=sys.stderr)
