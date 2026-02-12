@@ -142,15 +142,22 @@ __all__ = [
     "DETAIL_SECTION_KEYS",
     "DETAIL_SECTION_NAMES",
     "LLM_PRESETS",
+    "MAX_COLLECTIONS",
+    "MAX_PAPERS_PER_COLLECTION",
     "RELEVANCE_PROMPT_TEMPLATE",
     "SUMMARY_MODES",
     "TAG_NAMESPACE_COLORS",
     "THEME_CATEGORY_COLORS",
     "THEME_TAG_NAMESPACE_COLORS",
+    "AddToCollectionModal",
     "ArxivBrowser",
+    "CollectionViewModal",
+    "CollectionsModal",
     "CommandPaletteModal",
+    "FilterPillBar",
     "Paper",
     "PaperChatScreen",
+    "PaperCollection",
     "PaperMetadata",
     "QueryToken",
     "RecommendationSourceModal",
@@ -176,6 +183,7 @@ __all__ = [
     "find_similar_papers",
     "format_authors_bibtex",
     "format_categories",
+    "format_collection_as_markdown",
     "format_paper_as_bibtex",
     "format_paper_as_markdown",
     "format_paper_as_ris",
@@ -205,6 +213,8 @@ __all__ = [
     "parse_arxiv_file",
     "parse_arxiv_version_map",
     "parse_tag_namespace",
+    "pill_label_for_token",
+    "reconstruct_query",
     "render_paper_option",
     "save_config",
     "sort_papers",
@@ -319,6 +329,9 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
     ("Similar Papers", "Find similar papers (local or S2)", "R", "show_similar"),
     # Bookmarks
     ("Add Bookmark", "Save current search as bookmark", "Ctrl+b", "add_bookmark"),
+    # Collections
+    ("Collections", "Manage paper reading lists", "Ctrl+k", "collections"),
+    ("Add to Collection", "Add papers to a reading list", "", "add_to_collection"),
     # UI
     ("Cycle Theme", "Switch between Monokai/Catppuccin/Solarized", "Ctrl+t", "cycle_theme"),
     ("Toggle Sections", "Show/hide detail pane sections", "Ctrl+d", "toggle_sections"),
@@ -816,6 +829,20 @@ class SearchBookmark:
 
 
 @dataclass(slots=True)
+class PaperCollection:
+    """A named, ordered collection of papers (reading list)."""
+
+    name: str
+    description: str = ""
+    paper_ids: list[str] = field(default_factory=list)
+    created: str = ""  # ISO 8601 timestamp, set on creation
+
+
+MAX_COLLECTIONS = 20
+MAX_PAPERS_PER_COLLECTION = 500
+
+
+@dataclass(slots=True)
 class SessionState:
     """State to restore on next run (scroll position, filters, etc.)."""
 
@@ -843,6 +870,7 @@ class UserConfig:
     paper_metadata: dict[str, PaperMetadata] = field(default_factory=dict)
     watch_list: list[WatchListEntry] = field(default_factory=list)
     bookmarks: list[SearchBookmark] = field(default_factory=list)
+    collections: list[PaperCollection] = field(default_factory=list)
     marks: dict[str, str] = field(default_factory=dict)  # letter -> arxiv_id
     session: SessionState = field(default_factory=SessionState)
     show_abstract_preview: bool = False
@@ -975,6 +1003,15 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
             for entry in config.watch_list
         ],
         "bookmarks": [{"name": b.name, "query": b.query} for b in config.bookmarks],
+        "collections": [
+            {
+                "name": c.name,
+                "description": c.description,
+                "paper_ids": c.paper_ids,
+                "created": c.created,
+            }
+            for c in config.collections
+        ],
         "marks": config.marks,
     }
 
@@ -1076,6 +1113,29 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
                 )
             )
 
+    # Parse collections with type validation
+    collections: list[PaperCollection] = []
+    raw_collections = data.get("collections", [])
+    if isinstance(raw_collections, list):
+        for c in raw_collections[:MAX_COLLECTIONS]:
+            if not isinstance(c, dict):
+                continue
+            name = _safe_get(c, "name", "", str)
+            if not name:
+                continue
+            paper_ids = _safe_get(c, "paper_ids", [], list)
+            safe_ids = [pid for pid in paper_ids if isinstance(pid, str)][
+                :MAX_PAPERS_PER_COLLECTION
+            ]
+            collections.append(
+                PaperCollection(
+                    name=name,
+                    description=_safe_get(c, "description", "", str),
+                    paper_ids=safe_ids,
+                    created=_safe_get(c, "created", "", str),
+                )
+            )
+
     # Parse marks with type validation
     marks = data.get("marks", {})
     if not isinstance(marks, dict):
@@ -1099,6 +1159,7 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         paper_metadata=paper_metadata,
         watch_list=watch_list,
         bookmarks=bookmarks,
+        collections=collections,
         marks=marks,
         session=session,
         show_abstract_preview=_safe_get(data, "show_abstract_preview", False, bool),
@@ -1227,19 +1288,29 @@ def export_metadata(config: UserConfig) -> dict[str, Any]:
             for entry in config.watch_list
         ],
         "bookmarks": [{"name": b.name, "query": b.query} for b in config.bookmarks],
+        "collections": [
+            {
+                "name": c.name,
+                "description": c.description,
+                "paper_ids": c.paper_ids,
+                "created": c.created,
+            }
+            for c in config.collections
+        ],
         "research_interests": config.research_interests,
     }
 
 
 def import_metadata(
     data: dict[str, Any], config: UserConfig, merge: bool = True
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, int]:
     """Import metadata from a previously exported dict into config.
 
     When merge=True (default), existing metadata is preserved and new data
     is merged. When merge=False, imported data replaces existing.
 
-    Returns (papers_imported, watch_entries_imported, bookmarks_imported).
+    Returns (papers_imported, watch_entries_imported, bookmarks_imported,
+    collections_imported).
     """
     if data.get("format") != "arxiv-browser-metadata":
         raise ValueError("Not a valid arxiv-browser metadata export")
@@ -1259,7 +1330,7 @@ def import_metadata(
                     merged_tags = list(dict.fromkeys(existing.tags + valid_tags))
                     existing.tags = merged_tags
                 if not existing.notes and meta_dict.get("notes"):
-                    existing.notes = meta_dict["notes"]
+                    existing.notes = str(meta_dict["notes"])
                 if meta_dict.get("is_read"):
                     existing.is_read = True
                 if meta_dict.get("starred"):
@@ -1325,11 +1396,39 @@ def import_metadata(
             )
             bookmarks_imported += 1
 
+    collections_imported = 0
+    col_data = data.get("collections", [])
+    if isinstance(col_data, list) and merge:
+        existing_names = {c.name for c in config.collections}
+        for col_dict in col_data:
+            if not isinstance(col_dict, dict):
+                continue
+            name = str(col_dict.get("name", ""))
+            if not name or name in existing_names:
+                continue
+            if len(config.collections) >= MAX_COLLECTIONS:
+                break
+            paper_ids = col_dict.get("paper_ids", [])
+            safe_ids = (
+                [pid for pid in paper_ids if isinstance(pid, str)][:MAX_PAPERS_PER_COLLECTION]
+                if isinstance(paper_ids, list)
+                else []
+            )
+            config.collections.append(
+                PaperCollection(
+                    name=name,
+                    description=str(col_dict.get("description", "")),
+                    paper_ids=safe_ids,
+                    created=str(col_dict.get("created", "")),
+                )
+            )
+            collections_imported += 1
+
     # Import research interests if not already set
     if not config.research_interests and data.get("research_interests"):
         config.research_interests = str(data["research_interests"])
 
-    return (papers_imported, watch_imported, bookmarks_imported)
+    return (papers_imported, watch_imported, bookmarks_imported, collections_imported)
 
 
 # ============================================================================
@@ -2498,6 +2597,60 @@ def tokenize_query(query: str) -> list[QueryToken]:
     return tokens
 
 
+def pill_label_for_token(token: QueryToken) -> str:
+    """Return a human-readable label for a query token pill.
+
+    Examples: cat:cs.AI, "exact phrase", author:"John Smith", transformer
+    """
+    value = token.value
+    if token.field and token.phrase:
+        return f'{token.field}:"{value}"'
+    if token.field:
+        return f"{token.field}:{value}"
+    if token.phrase:
+        return f'"{value}"'
+    return value
+
+
+def reconstruct_query(tokens: list[QueryToken], exclude_index: int) -> str:
+    """Rebuild query string omitting the token at exclude_index.
+
+    Cleans up orphaned boolean operators adjacent to the removed term.
+    Boolean operators (AND/OR/NOT) are structural and not directly removable.
+    """
+    if exclude_index < 0 or exclude_index >= len(tokens):
+        return " ".join(_token_to_str(t) for t in tokens)
+
+    remaining = [t for i, t in enumerate(tokens) if i != exclude_index]
+
+    # Clean up orphaned operators: strip leading/trailing ops and adjacent ops
+    cleaned: list[QueryToken] = []
+    for tok in remaining:
+        # Skip operators that would be leading or adjacent to another op
+        if tok.kind == "op" and (not cleaned or cleaned[-1].kind == "op"):
+            continue
+        cleaned.append(tok)
+
+    # Remove trailing operator
+    if cleaned and cleaned[-1].kind == "op":
+        cleaned.pop()
+
+    return " ".join(_token_to_str(t) for t in cleaned)
+
+
+def _token_to_str(token: QueryToken) -> str:
+    """Convert a QueryToken back to its query string representation."""
+    if token.kind == "op":
+        return token.value
+    if token.field and token.phrase:
+        return f'{token.field}:"{token.value}"'
+    if token.field:
+        return f"{token.field}:{token.value}"
+    if token.phrase:
+        return f'"{token.value}"'
+    return token.value
+
+
 def insert_implicit_and(tokens: list[QueryToken]) -> list[QueryToken]:
     """Insert implicit AND operators between adjacent terms."""
     result: list[QueryToken] = []
@@ -3502,181 +3655,20 @@ class PaperDetails(Static):
 
         collapsed = set(collapsed_sections) if collapsed_sections else set()
 
-        lines: list[str] = []
-        safe_title = escape_rich_text(paper.title)
-        safe_authors = escape_rich_text(paper.authors)
-        safe_date = escape_rich_text(paper.date)
-        safe_comments = escape_rich_text(paper.comments or "")
-        if highlight_terms:
-            safe_abstract = highlight_text(abstract_text, highlight_terms, THEME_COLORS["accent"])
-        else:
-            safe_abstract = escape_rich_text(abstract_text)
-        safe_url = escape_rich_text(paper.url)
-
-        # Title section (Monokai foreground)
-        lines.append(f"[bold {THEME_COLORS['text']}]{safe_title}[/]")
-
-        # Metadata section (Monokai blue for labels, purple for values)
-        lines.append(
-            f"  [bold {THEME_COLORS['accent']}]arXiv:[/] [{THEME_COLORS['purple']}]{paper.arxiv_id}[/]"
-        )
-        lines.append(f"  [bold {THEME_COLORS['accent']}]Date:[/] {safe_date}")
-        lines.append(
-            f"  [bold {THEME_COLORS['accent']}]Categories:[/] {format_categories(paper.categories)}"
-        )
-        if paper.comments:
-            lines.append(f"  [bold {THEME_COLORS['accent']}]Comments:[/] [dim]{safe_comments}[/]")
-
-        # Abstract section (shown before authors — most important for triage)
-        if "abstract" in collapsed:
-            lines.append("[dim]▸ Abstract[/]")
-        else:
-            lines.append(f"[bold {THEME_COLORS['orange']}]▾ Abstract[/]")
-            if loading:
-                lines.append("  [dim italic]Loading abstract...[/]")
-            elif abstract_text:
-                lines.append(f"  [{THEME_COLORS['text']}]{safe_abstract}[/]")
-            else:
-                lines.append("  [dim italic]No abstract available[/]")
-
-        # Authors section
-        if "authors" in collapsed:
-            lines.append("[dim]▸ Authors[/]")
-        else:
-            lines.append(f"[bold {THEME_COLORS['green']}]▾ Authors[/]")
-            lines.append(f"  [{THEME_COLORS['text']}]{safe_authors}[/]")
-
-        # Tags section (shown when tags present)
-        if tags:
-            if "tags" in collapsed:
-                lines.append(f"[dim]▸ Tags ({len(tags)})[/]")
-            else:
-                lines.append(f"[bold {THEME_COLORS['accent']}]▾ Tags[/]")
-                namespaced: dict[str, list[str]] = {}
-                unnamespaced: list[str] = []
-                for tag in tags:
-                    ns, val = parse_tag_namespace(tag)
-                    if ns:
-                        namespaced.setdefault(ns, []).append(val)
-                    else:
-                        unnamespaced.append(val)
-                for ns in sorted(namespaced):
-                    color = get_tag_color(f"{ns}:")
-                    vals = ", ".join(namespaced[ns])
-                    lines.append(f"  [{color}]{ns}:[/] {vals}")
-                if unnamespaced:
-                    color = get_tag_color("")
-                    lines.append(f"  [{color}]{', '.join(unnamespaced)}[/]")
-
-        # Relevance section (shown when score present)
-        if relevance is not None:
-            rel_score, rel_reason = relevance
-            if "relevance" in collapsed:
-                lines.append(f"[dim]▸ Relevance ({rel_score}/10)[/]")
-            else:
-                if rel_score >= 8:
-                    score_color = THEME_COLORS["green"]
-                elif rel_score >= 5:
-                    score_color = THEME_COLORS["yellow"]
-                else:
-                    score_color = THEME_COLORS["muted"]
-                lines.append(f"[bold {THEME_COLORS['accent']}]▾ Relevance[/]")
-                lines.append(
-                    f"  [bold {THEME_COLORS['accent']}]Score:[/] [{score_color}]{rel_score}/10[/]"
-                )
-                if rel_reason:
-                    safe_reason = escape_rich_text(rel_reason)
-                    lines.append(f"  [{THEME_COLORS['text']}]{safe_reason}[/]")
-
-        # AI Summary section (shown when available or loading)
-        summary_header = "AI Summary"
-        if summary_mode:
-            summary_header += f" ({summary_mode})"
-        if summary_loading or summary:
-            if "summary" in collapsed:
-                hint = " (loaded)" if summary else ""
-                lines.append(f"[dim]▸ {summary_header}{hint}[/]")
-            else:
-                if summary_loading:
-                    lines.append(f"[bold {THEME_COLORS['purple']}]▾ 🤖 {summary_header}[/]")
-                    lines.append("  [dim italic]⏳ Generating summary...[/]")
-                elif summary:
-                    rendered_summary = format_summary_as_rich(summary)
-                    lines.append(f"[bold {THEME_COLORS['purple']}]▾ 🤖 {summary_header}[/]")
-                    lines.append(rendered_summary)
-
-        # Semantic Scholar section (shown when available or loading)
-        if s2_loading or s2_data:
-            if "s2" in collapsed:
-                hint = ""
-                if s2_data:
-                    hint = f" ({s2_data.citation_count} cites)"
-                lines.append(f"[dim]▸ Semantic Scholar{hint}[/]")
-            else:
-                if s2_loading:
-                    lines.append(f"[bold {THEME_COLORS['green']}]▾ Semantic Scholar[/]")
-                    lines.append("  [dim italic]Fetching data...[/]")
-                elif s2_data:
-                    lines.append(f"[bold {THEME_COLORS['green']}]▾ Semantic Scholar[/]")
-                    lines.append(
-                        f"  [bold {THEME_COLORS['accent']}]Citations:[/] {s2_data.citation_count}"
-                        f"  [bold {THEME_COLORS['accent']}]Influential:[/] {s2_data.influential_citation_count}"
-                    )
-                    if s2_data.fields_of_study:
-                        fos = ", ".join(s2_data.fields_of_study)
-                        lines.append(f"  [bold {THEME_COLORS['accent']}]Fields:[/] {fos}")
-                    if s2_data.tldr:
-                        safe_tldr = escape_rich_text(s2_data.tldr)
-                        lines.append(
-                            f"  [bold {THEME_COLORS['accent']}]TLDR:[/] [{THEME_COLORS['text']}]{safe_tldr}[/]"
-                        )
-
-        # HuggingFace section (shown when data present)
-        if hf_data:
-            if "hf" in collapsed:
-                lines.append(f"[dim]\u25b8 HuggingFace (\u2191{hf_data.upvotes})[/]")
-            else:
-                lines.append(f"[bold {THEME_COLORS['orange']}]\u25be HuggingFace[/]")
-                hf_parts = [f"  [bold {THEME_COLORS['accent']}]Upvotes:[/] {hf_data.upvotes}"]
-                if hf_data.num_comments > 0:
-                    hf_parts.append(
-                        f"  [bold {THEME_COLORS['accent']}]Comments:[/] {hf_data.num_comments}"
-                    )
-                lines.append("".join(hf_parts))
-                if hf_data.github_repo:
-                    stars_str = f" ({hf_data.github_stars} stars)" if hf_data.github_stars else ""
-                    safe_repo = escape_rich_text(hf_data.github_repo)
-                    lines.append(
-                        f"  [bold {THEME_COLORS['accent']}]GitHub:[/] {safe_repo}{stars_str}"
-                    )
-                if hf_data.ai_keywords:
-                    kw = ", ".join(hf_data.ai_keywords)
-                    lines.append(f"  [bold {THEME_COLORS['accent']}]Keywords:[/] {kw}")
-                if hf_data.ai_summary:
-                    safe_summary = escape_rich_text(hf_data.ai_summary)
-                    lines.append(
-                        f"  [bold {THEME_COLORS['accent']}]AI Summary:[/] [{THEME_COLORS['text']}]{safe_summary}[/]"
-                    )
-
-        # Version update section (shown when update detected)
-        if version_update is not None:
-            old_v, new_v = version_update
-            if "version" in collapsed:
-                lines.append(f"[dim]\u25b8 Version Update (v{old_v}\u2192v{new_v})[/]")
-            else:
-                lines.append(f"[bold {THEME_COLORS['pink']}]\u25be Version Update[/]")
-                lines.append(
-                    f"  [bold {THEME_COLORS['accent']}]Updated:[/] [{THEME_COLORS['pink']}]v{old_v} \u2192 v{new_v}[/]"
-                )
-                lines.append(
-                    f"  [bold {THEME_COLORS['accent']}]View diff:[/] [{THEME_COLORS['accent']}]https://arxivdiff.org/abs/{paper.arxiv_id}[/]"
-                )
-
-        # URL section (always visible — not collapsible)
-        lines.append(f"[bold {THEME_COLORS['pink']}]URL[/]")
-        lines.append(f"  [{THEME_COLORS['accent']}]{safe_url}[/]")
-
-        markup = "\n".join(lines)
+        sections = [
+            self._render_title(paper),
+            self._render_metadata(paper),
+            self._render_abstract(abstract_text, loading, highlight_terms, "abstract" in collapsed),
+            self._render_authors(paper, "authors" in collapsed),
+            self._render_tags(tags, "tags" in collapsed),
+            self._render_relevance(relevance, "relevance" in collapsed),
+            self._render_summary(summary, summary_loading, summary_mode, "summary" in collapsed),
+            self._render_s2(s2_data, s2_loading, "s2" in collapsed),
+            self._render_hf(hf_data, "hf" in collapsed),
+            self._render_version(paper, version_update, "version" in collapsed),
+            self._render_url(paper),
+        ]
+        markup = "\n".join(s for s in sections if s)
 
         # Store in cache with FIFO eviction
         if len(self._detail_cache) >= DETAIL_CACHE_MAX:
@@ -3686,6 +3678,204 @@ class PaperDetails(Static):
         self._detail_cache_order.append(cache_key)
 
         self.update(markup)
+
+    def _render_title(self, paper: Paper) -> str:
+        safe_title = escape_rich_text(paper.title)
+        return f"[bold {THEME_COLORS['text']}]{safe_title}[/]"
+
+    def _render_metadata(self, paper: Paper) -> str:
+        safe_date = escape_rich_text(paper.date)
+        safe_comments = escape_rich_text(paper.comments or "")
+        lines = [
+            f"  [bold {THEME_COLORS['accent']}]arXiv:[/] [{THEME_COLORS['purple']}]{paper.arxiv_id}[/]",
+            f"  [bold {THEME_COLORS['accent']}]Date:[/] {safe_date}",
+            f"  [bold {THEME_COLORS['accent']}]Categories:[/] {format_categories(paper.categories)}",
+        ]
+        if paper.comments:
+            lines.append(f"  [bold {THEME_COLORS['accent']}]Comments:[/] [dim]{safe_comments}[/]")
+        return "\n".join(lines)
+
+    def _render_abstract(
+        self,
+        abstract_text: str,
+        loading: bool,
+        highlight_terms: list[str] | None,
+        is_collapsed: bool,
+    ) -> str:
+        if is_collapsed:
+            return "[dim]▸ Abstract[/]"
+        if highlight_terms:
+            safe_abstract = highlight_text(abstract_text, highlight_terms, THEME_COLORS["accent"])
+        else:
+            safe_abstract = escape_rich_text(abstract_text)
+        lines = [f"[bold {THEME_COLORS['orange']}]▾ Abstract[/]"]
+        if loading:
+            lines.append("  [dim italic]Loading abstract...[/]")
+        elif abstract_text:
+            lines.append(f"  [{THEME_COLORS['text']}]{safe_abstract}[/]")
+        else:
+            lines.append("  [dim italic]No abstract available[/]")
+        return "\n".join(lines)
+
+    def _render_authors(self, paper: Paper, is_collapsed: bool) -> str:
+        if is_collapsed:
+            return "[dim]▸ Authors[/]"
+        safe_authors = escape_rich_text(paper.authors)
+        return (
+            f"[bold {THEME_COLORS['green']}]▾ Authors[/]\n"
+            f"  [{THEME_COLORS['text']}]{safe_authors}[/]"
+        )
+
+    def _render_tags(self, tags: list[str] | None, is_collapsed: bool) -> str:
+        if not tags:
+            return ""
+        if is_collapsed:
+            return f"[dim]▸ Tags ({len(tags)})[/]"
+        lines = [f"[bold {THEME_COLORS['accent']}]▾ Tags[/]"]
+        namespaced: dict[str, list[str]] = {}
+        unnamespaced: list[str] = []
+        for tag in tags:
+            ns, val = parse_tag_namespace(tag)
+            if ns:
+                namespaced.setdefault(ns, []).append(val)
+            else:
+                unnamespaced.append(val)
+        for ns in sorted(namespaced):
+            color = get_tag_color(f"{ns}:")
+            vals = ", ".join(namespaced[ns])
+            lines.append(f"  [{color}]{ns}:[/] {vals}")
+        if unnamespaced:
+            color = get_tag_color("")
+            lines.append(f"  [{color}]{', '.join(unnamespaced)}[/]")
+        return "\n".join(lines)
+
+    def _render_relevance(self, relevance: tuple[int, str] | None, is_collapsed: bool) -> str:
+        if relevance is None:
+            return ""
+        rel_score, rel_reason = relevance
+        if is_collapsed:
+            return f"[dim]▸ Relevance ({rel_score}/10)[/]"
+        if rel_score >= 8:
+            score_color = THEME_COLORS["green"]
+        elif rel_score >= 5:
+            score_color = THEME_COLORS["yellow"]
+        else:
+            score_color = THEME_COLORS["muted"]
+        lines = [
+            f"[bold {THEME_COLORS['accent']}]▾ Relevance[/]",
+            f"  [bold {THEME_COLORS['accent']}]Score:[/] [{score_color}]{rel_score}/10[/]",
+        ]
+        if rel_reason:
+            safe_reason = escape_rich_text(rel_reason)
+            lines.append(f"  [{THEME_COLORS['text']}]{safe_reason}[/]")
+        return "\n".join(lines)
+
+    def _render_summary(
+        self,
+        summary: str | None,
+        summary_loading: bool,
+        summary_mode: str,
+        is_collapsed: bool,
+    ) -> str:
+        summary_header = "AI Summary"
+        if summary_mode:
+            summary_header += f" ({summary_mode})"
+        if not summary_loading and not summary:
+            return ""
+        if is_collapsed:
+            hint = " (loaded)" if summary else ""
+            return f"[dim]▸ {summary_header}{hint}[/]"
+        if summary_loading:
+            return (
+                f"[bold {THEME_COLORS['purple']}]▾ 🤖 {summary_header}[/]\n"
+                "  [dim italic]⏳ Generating summary...[/]"
+            )
+        if summary:
+            rendered_summary = format_summary_as_rich(summary)
+            return f"[bold {THEME_COLORS['purple']}]▾ 🤖 {summary_header}[/]\n{rendered_summary}"
+        return ""
+
+    def _render_s2(
+        self,
+        s2_data: SemanticScholarPaper | None,
+        s2_loading: bool,
+        is_collapsed: bool,
+    ) -> str:
+        if not s2_loading and not s2_data:
+            return ""
+        if is_collapsed:
+            hint = ""
+            if s2_data:
+                hint = f" ({s2_data.citation_count} cites)"
+            return f"[dim]▸ Semantic Scholar{hint}[/]"
+        if s2_loading:
+            return (
+                f"[bold {THEME_COLORS['green']}]▾ Semantic Scholar[/]\n"
+                "  [dim italic]Fetching data...[/]"
+            )
+        if s2_data:
+            lines = [
+                f"[bold {THEME_COLORS['green']}]▾ Semantic Scholar[/]",
+                (
+                    f"  [bold {THEME_COLORS['accent']}]Citations:[/] {s2_data.citation_count}"
+                    f"  [bold {THEME_COLORS['accent']}]Influential:[/] {s2_data.influential_citation_count}"
+                ),
+            ]
+            if s2_data.fields_of_study:
+                fos = ", ".join(s2_data.fields_of_study)
+                lines.append(f"  [bold {THEME_COLORS['accent']}]Fields:[/] {fos}")
+            if s2_data.tldr:
+                safe_tldr = escape_rich_text(s2_data.tldr)
+                lines.append(
+                    f"  [bold {THEME_COLORS['accent']}]TLDR:[/] [{THEME_COLORS['text']}]{safe_tldr}[/]"
+                )
+            return "\n".join(lines)
+        return ""
+
+    def _render_hf(self, hf_data: HuggingFacePaper | None, is_collapsed: bool) -> str:
+        if not hf_data:
+            return ""
+        if is_collapsed:
+            return f"[dim]\u25b8 HuggingFace (\u2191{hf_data.upvotes})[/]"
+        lines = [f"[bold {THEME_COLORS['orange']}]\u25be HuggingFace[/]"]
+        hf_parts = [f"  [bold {THEME_COLORS['accent']}]Upvotes:[/] {hf_data.upvotes}"]
+        if hf_data.num_comments > 0:
+            hf_parts.append(f"  [bold {THEME_COLORS['accent']}]Comments:[/] {hf_data.num_comments}")
+        lines.append("".join(hf_parts))
+        if hf_data.github_repo:
+            stars_str = f" ({hf_data.github_stars} stars)" if hf_data.github_stars else ""
+            safe_repo = escape_rich_text(hf_data.github_repo)
+            lines.append(f"  [bold {THEME_COLORS['accent']}]GitHub:[/] {safe_repo}{stars_str}")
+        if hf_data.ai_keywords:
+            kw = ", ".join(hf_data.ai_keywords)
+            lines.append(f"  [bold {THEME_COLORS['accent']}]Keywords:[/] {kw}")
+        if hf_data.ai_summary:
+            safe_summary = escape_rich_text(hf_data.ai_summary)
+            lines.append(
+                f"  [bold {THEME_COLORS['accent']}]AI Summary:[/] [{THEME_COLORS['text']}]{safe_summary}[/]"
+            )
+        return "\n".join(lines)
+
+    def _render_version(
+        self,
+        paper: Paper,
+        version_update: tuple[int, int] | None,
+        is_collapsed: bool,
+    ) -> str:
+        if version_update is None:
+            return ""
+        old_v, new_v = version_update
+        if is_collapsed:
+            return f"[dim]\u25b8 Version Update (v{old_v}\u2192v{new_v})[/]"
+        return (
+            f"[bold {THEME_COLORS['pink']}]\u25be Version Update[/]\n"
+            f"  [bold {THEME_COLORS['accent']}]Updated:[/] [{THEME_COLORS['pink']}]v{old_v} \u2192 v{new_v}[/]\n"
+            f"  [bold {THEME_COLORS['accent']}]View diff:[/] [{THEME_COLORS['accent']}]https://arxivdiff.org/abs/{paper.arxiv_id}[/]"
+        )
+
+    def _render_url(self, paper: Paper) -> str:
+        safe_url = escape_rich_text(paper.url)
+        return f"[bold {THEME_COLORS['pink']}]URL[/]\n  [{THEME_COLORS['accent']}]{safe_url}[/]"
 
     def clear_cache(self) -> None:
         """Clear the rendered markup cache."""
@@ -5527,16 +5717,16 @@ class PaperChatScreen(ModalScreen[None]):
         self._add_message("user", question)
         self._waiting = True
         self.query_one("#chat-status", Static).update("[dim]Thinking...[/]")
-        self.app._track_task(asyncio.create_task(self._ask_llm(question)))
+        self.app._track_task(self._ask_llm(question))
 
-    def _add_message(self, role: str, text: str) -> None:
+    def _add_message(self, role: str, text: str, *, markup: bool = False) -> None:
         self._history.append((role, text))
-        safe = escape_rich_text(text)
+        display = text if markup else escape_rich_text(text)
         messages = self.query_one("#chat-messages", VerticalScroll)
         if role == "user":
-            messages.mount(Static(f"[bold green]You:[/] {safe}", classes="chat-user"))
+            messages.mount(Static(f"[bold green]You:[/] {display}", classes="chat-user"))
         else:
-            messages.mount(Static(f"[bold cyan]AI:[/] {safe}", classes="chat-assistant"))
+            messages.mount(Static(f"[bold cyan]AI:[/] {display}", classes="chat-assistant"))
         messages.scroll_end(animate=False)
 
     async def _ask_llm(self, question: str) -> None:
@@ -5570,22 +5760,26 @@ class PaperChatScreen(ModalScreen[None]):
             except TimeoutError:
                 proc.kill()
                 await proc.wait()
-                self._add_message("assistant", "[red]Timed out waiting for response.[/]")
+                self._add_message(
+                    "assistant", "[red]Timed out waiting for response.[/]", markup=True
+                )
                 return
 
             if proc.returncode != 0:
-                err = (stderr or b"").decode("utf-8", errors="replace").strip()
-                self._add_message("assistant", f"[red]Error: {err[:200]}[/]")
+                err = escape_rich_text((stderr or b"").decode("utf-8", errors="replace").strip())
+                self._add_message("assistant", f"[red]Error: {err[:200]}[/]", markup=True)
                 return
 
             response = (stdout or b"").decode("utf-8", errors="replace").strip()
             if response:
                 self._add_message("assistant", response)
             else:
-                self._add_message("assistant", "[dim]Empty response from LLM.[/]")
+                self._add_message("assistant", "[dim]Empty response from LLM.[/]", markup=True)
         except Exception as e:
             logger.warning("Chat LLM call failed: %s", e, exc_info=True)
-            self._add_message("assistant", f"[red]Error: {e}[/]")
+            self._add_message(
+                "assistant", f"[red]Error: {escape_rich_text(str(e))}[/]", markup=True
+            )
         finally:
             self._waiting = False
             try:
@@ -5857,6 +6051,452 @@ class ContextFooter(Static):
         self.update("  ".join(parts))
 
 
+class CollectionsModal(ModalScreen[str | None]):
+    """Modal dialog for managing paper collections (reading lists)."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    CSS = """
+    CollectionsModal {
+        align: center middle;
+    }
+
+    #col-dialog {
+        width: 80%;
+        height: 70%;
+        min-width: 60;
+        min-height: 20;
+        background: $th-background;
+        border: tall $th-accent;
+        padding: 0 2;
+    }
+
+    #col-title {
+        text-style: bold;
+        color: $th-accent;
+        margin-bottom: 1;
+    }
+
+    #col-body {
+        height: 1fr;
+    }
+
+    #col-list {
+        width: 2fr;
+        height: 1fr;
+        background: $th-panel;
+        border: none;
+        margin-right: 2;
+    }
+
+    #col-form {
+        width: 1fr;
+        height: 1fr;
+    }
+
+    #col-form Label {
+        color: $th-muted;
+        margin-top: 1;
+    }
+
+    #col-name,
+    #col-desc {
+        width: 100%;
+        background: $th-panel;
+        border: none;
+    }
+
+    #col-name:focus,
+    #col-desc:focus {
+        border-left: tall $th-accent;
+    }
+
+    #col-actions {
+        height: auto;
+        margin-top: 1;
+        align: left middle;
+    }
+
+    #col-actions Button {
+        margin-right: 1;
+    }
+
+    #col-buttons {
+        height: auto;
+        margin-top: 1;
+        align: right middle;
+    }
+
+    #col-buttons Button {
+        margin-left: 1;
+    }
+    """
+
+    def __init__(
+        self,
+        collections: list[PaperCollection],
+        papers_by_id: dict[str, Paper] | None = None,
+    ) -> None:
+        super().__init__()
+        self._collections = [
+            PaperCollection(
+                name=c.name,
+                description=c.description,
+                paper_ids=list(c.paper_ids),
+                created=c.created,
+            )
+            for c in collections
+        ]
+        self._papers_by_id = papers_by_id or {}
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="col-dialog"):
+            yield Label("Collections Manager", id="col-title")
+            with Horizontal(id="col-body"):
+                yield ListView(id="col-list")
+                with Vertical(id="col-form"):
+                    yield Label("Name")
+                    yield Input(placeholder="e.g., ML Reading List", id="col-name")
+                    yield Label("Description")
+                    yield Input(placeholder="Optional description", id="col-desc")
+                    with Horizontal(id="col-actions"):
+                        yield Button("Create", variant="primary", id="col-create")
+                        yield Button("Rename", variant="default", id="col-rename")
+                        yield Button("Delete", variant="default", id="col-delete")
+                        yield Button("View", variant="default", id="col-view")
+            with Horizontal(id="col-buttons"):
+                yield Button("Close", variant="default", id="col-close")
+                yield Button("Save", variant="primary", id="col-save")
+
+    def on_mount(self) -> None:
+        self._refresh_list()
+        self.query_one("#col-name", Input).focus()
+
+    def _refresh_list(self) -> None:
+        list_view = self.query_one("#col-list", ListView)
+        list_view.clear()
+        for col in self._collections:
+            count = len(col.paper_ids)
+            label = f"{col.name} ({count} paper{'s' if count != 1 else ''})"
+            list_view.mount(ListItem(Label(label)))
+        if list_view.children:
+            list_view.index = 0
+            self._populate_form(0)
+
+    def _populate_form(self, index: int) -> None:
+        if index < 0 or index >= len(self._collections):
+            return
+        col = self._collections[index]
+        self.query_one("#col-name", Input).value = col.name
+        self.query_one("#col-desc", Input).value = col.description
+
+    def _get_selected_index(self) -> int | None:
+        list_view = self.query_one("#col-list", ListView)
+        idx = list_view.index
+        if idx is None or idx < 0 or idx >= len(self._collections):
+            return None
+        return idx
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    @on(ListView.Highlighted, "#col-list")
+    def on_list_highlighted(self, event: ListView.Highlighted) -> None:
+        list_view = self.query_one("#col-list", ListView)
+        idx = list_view.index
+        if idx is not None:
+            self._populate_form(idx)
+
+    @on(Button.Pressed, "#col-create")
+    def on_create_pressed(self) -> None:
+        name = self.query_one("#col-name", Input).value.strip()
+        if not name:
+            self.notify("Name cannot be empty", title="Collections", severity="warning")
+            return
+        if any(c.name == name for c in self._collections):
+            self.notify(
+                f"Collection '{name}' already exists", title="Collections", severity="warning"
+            )
+            return
+        if len(self._collections) >= MAX_COLLECTIONS:
+            self.notify(
+                f"Maximum {MAX_COLLECTIONS} collections", title="Collections", severity="warning"
+            )
+            return
+        desc = self.query_one("#col-desc", Input).value.strip()
+        self._collections.append(
+            PaperCollection(
+                name=name,
+                description=desc,
+                created=datetime.now().isoformat(),
+            )
+        )
+        self._refresh_list()
+
+    @on(Button.Pressed, "#col-rename")
+    def on_rename_pressed(self) -> None:
+        idx = self._get_selected_index()
+        if idx is None:
+            self.notify("Select a collection", title="Collections")
+            return
+        name = self.query_one("#col-name", Input).value.strip()
+        if not name:
+            self.notify("Name cannot be empty", title="Collections", severity="warning")
+            return
+        desc = self.query_one("#col-desc", Input).value.strip()
+        self._collections[idx].name = name
+        self._collections[idx].description = desc
+        self._refresh_list()
+
+    @on(Button.Pressed, "#col-delete")
+    def on_delete_pressed(self) -> None:
+        idx = self._get_selected_index()
+        if idx is None:
+            self.notify("Select a collection", title="Collections")
+            return
+        self._collections.pop(idx)
+        self._refresh_list()
+
+    @on(Button.Pressed, "#col-view")
+    def on_view_pressed(self) -> None:
+        idx = self._get_selected_index()
+        if idx is None:
+            self.notify("Select a collection", title="Collections")
+            return
+        col = self._collections[idx]
+        self.app.push_screen(
+            CollectionViewModal(col, self._papers_by_id),
+            callback=self._on_view_result,
+        )
+
+    def _on_view_result(self, result: PaperCollection | None) -> None:
+        if result is not None:
+            # Find and update the collection
+            for i, c in enumerate(self._collections):
+                if c.name == result.name:
+                    self._collections[i] = result
+                    break
+            self._refresh_list()
+
+    @on(Button.Pressed, "#col-save")
+    def on_save_pressed(self) -> None:
+        self.dismiss("save")
+
+    @on(Button.Pressed, "#col-close")
+    def on_close_pressed(self) -> None:
+        self.dismiss(None)
+
+    @property
+    def collections(self) -> list[PaperCollection]:
+        return self._collections
+
+
+class CollectionViewModal(ModalScreen[PaperCollection | None]):
+    """Modal for viewing and editing papers in a collection."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    CSS = """
+    CollectionViewModal {
+        align: center middle;
+    }
+
+    #colview-dialog {
+        width: 75%;
+        height: 65%;
+        min-width: 50;
+        min-height: 15;
+        background: $th-background;
+        border: tall $th-accent;
+        padding: 0 2;
+    }
+
+    #colview-title {
+        text-style: bold;
+        color: $th-accent;
+        margin-bottom: 1;
+    }
+
+    #colview-list {
+        height: 1fr;
+        background: $th-panel;
+        border: none;
+    }
+
+    #colview-buttons {
+        height: auto;
+        margin-top: 1;
+        align: right middle;
+    }
+
+    #colview-buttons Button {
+        margin-left: 1;
+    }
+    """
+
+    def __init__(
+        self,
+        collection: PaperCollection,
+        papers_by_id: dict[str, Paper] | None = None,
+    ) -> None:
+        super().__init__()
+        self._collection = PaperCollection(
+            name=collection.name,
+            description=collection.description,
+            paper_ids=list(collection.paper_ids),
+            created=collection.created,
+        )
+        self._papers_by_id = papers_by_id or {}
+
+    def compose(self) -> ComposeResult:
+        count = len(self._collection.paper_ids)
+        title = f"{self._collection.name} ({count} paper{'s' if count != 1 else ''})"
+        with Vertical(id="colview-dialog"):
+            yield Label(title, id="colview-title")
+            yield ListView(id="colview-list")
+            with Horizontal(id="colview-buttons"):
+                yield Button("Remove Selected", variant="default", id="colview-remove")
+                yield Button("Done", variant="primary", id="colview-done")
+
+    def on_mount(self) -> None:
+        self._refresh_list()
+
+    def _refresh_list(self) -> None:
+        list_view = self.query_one("#colview-list", ListView)
+        list_view.clear()
+        for pid in self._collection.paper_ids:
+            paper = self._papers_by_id.get(pid)
+            label = paper.title if paper else pid
+            list_view.mount(ListItem(Label(label)))
+        if list_view.children:
+            list_view.index = 0
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    @on(Button.Pressed, "#colview-remove")
+    def on_remove_pressed(self) -> None:
+        list_view = self.query_one("#colview-list", ListView)
+        idx = list_view.index
+        if idx is None or idx < 0 or idx >= len(self._collection.paper_ids):
+            self.notify("Select a paper to remove", title="Collection")
+            return
+        self._collection.paper_ids.pop(idx)
+        self._refresh_list()
+        # Update title
+        count = len(self._collection.paper_ids)
+        self.query_one("#colview-title", Label).update(
+            f"{self._collection.name} ({count} paper{'s' if count != 1 else ''})"
+        )
+
+    @on(Button.Pressed, "#colview-done")
+    def on_done_pressed(self) -> None:
+        self.dismiss(self._collection)
+
+
+class AddToCollectionModal(ModalScreen[str | None]):
+    """Quick picker to select a collection to add papers to."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    CSS = """
+    AddToCollectionModal {
+        align: center middle;
+    }
+
+    #addcol-dialog {
+        width: 50%;
+        height: 50%;
+        min-width: 40;
+        min-height: 12;
+        background: $th-background;
+        border: tall $th-accent;
+        padding: 0 2;
+    }
+
+    #addcol-title {
+        text-style: bold;
+        color: $th-accent;
+        margin-bottom: 1;
+    }
+
+    #addcol-list {
+        height: 1fr;
+        background: $th-panel;
+        border: none;
+    }
+
+    #addcol-buttons {
+        height: auto;
+        margin-top: 1;
+        align: right middle;
+    }
+
+    #addcol-buttons Button {
+        margin-left: 1;
+    }
+    """
+
+    def __init__(self, collections: list[PaperCollection]) -> None:
+        super().__init__()
+        self._collections = collections
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="addcol-dialog"):
+            yield Label("Add to Collection", id="addcol-title")
+            yield ListView(id="addcol-list")
+            with Horizontal(id="addcol-buttons"):
+                yield Button("Cancel", variant="default", id="addcol-cancel")
+
+    def on_mount(self) -> None:
+        list_view = self.query_one("#addcol-list", ListView)
+        for col in self._collections:
+            count = len(col.paper_ids)
+            label = f"{col.name} ({count} paper{'s' if count != 1 else ''})"
+            list_view.mount(ListItem(Label(label)))
+        if list_view.children:
+            list_view.index = 0
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    @on(ListView.Selected, "#addcol-list")
+    def on_list_selected(self, event: ListView.Selected) -> None:
+        list_view = self.query_one("#addcol-list", ListView)
+        idx = list_view.index
+        if idx is not None and 0 <= idx < len(self._collections):
+            self.dismiss(self._collections[idx].name)
+
+    @on(Button.Pressed, "#addcol-cancel")
+    def on_cancel_pressed(self) -> None:
+        self.dismiss(None)
+
+
+def format_collection_as_markdown(
+    collection: PaperCollection,
+    papers_by_id: dict[str, Paper],
+) -> str:
+    """Format a paper collection as Markdown."""
+    lines = [f"# {collection.name}"]
+    if collection.description:
+        lines.append(f"\n{collection.description}")
+    lines.append(f"\n*{len(collection.paper_ids)} papers*\n")
+    for pid in collection.paper_ids:
+        paper = papers_by_id.get(pid)
+        if paper:
+            lines.append(format_paper_as_markdown(paper))
+            lines.append("")
+        else:
+            lines.append(f"- {pid} (not loaded)\n")
+    return "\n".join(lines)
+
+
 DATE_NAV_WINDOW_SIZE = 5
 
 
@@ -6056,6 +6696,92 @@ class BookmarkTabBar(Horizontal):
             classes = "bookmark-tab active" if i == self._active_index else "bookmark-tab"
             self.mount(Label(f"{i + 1}: {bookmark.name}", classes=classes, id=f"bookmark-{i}"))
         self.mount(Label("[+]", classes="bookmark-add", id="bookmark-add"))
+
+
+class FilterPillBar(Horizontal):
+    """Horizontal bar displaying active search filters as removable pills."""
+
+    DEFAULT_CSS = """
+    FilterPillBar {
+        height: auto;
+        padding: 0 1;
+        background: $th-panel;
+        display: none;
+    }
+
+    FilterPillBar.visible {
+        display: block;
+    }
+
+    FilterPillBar .filter-pill {
+        padding: 0 1;
+        margin-right: 1;
+        color: $th-accent;
+    }
+
+    FilterPillBar .filter-pill:hover {
+        color: $th-text;
+        text-style: bold;
+    }
+
+    FilterPillBar .filter-pill-watch {
+        padding: 0 1;
+        margin-right: 1;
+        color: $th-orange;
+    }
+
+    FilterPillBar .filter-pill-watch:hover {
+        color: $th-text;
+        text-style: bold;
+    }
+    """
+
+    class RemoveFilter(Message):
+        """Message sent when a filter pill is clicked to remove it."""
+
+        def __init__(self, token_index: int) -> None:
+            super().__init__()
+            self.token_index = token_index
+
+    class RemoveWatchFilter(Message):
+        """Message sent when the watch filter pill is clicked to remove it."""
+
+    async def update_pills(self, tokens: list[QueryToken], watch_active: bool) -> None:
+        """Update the displayed filter pills."""
+        await self.remove_children()
+        has_pills = False
+        for i, token in enumerate(tokens):
+            if token.kind == "op":
+                continue
+            label_text = escape_rich_text(pill_label_for_token(token))
+            self.mount(Label(f"{label_text} \u00d7", classes="filter-pill", id=f"pill-{i}"))
+            has_pills = True
+        if watch_active:
+            self.mount(Label("watched \u00d7", classes="filter-pill-watch", id="pill-watch"))
+            has_pills = True
+        if has_pills:
+            self.add_class("visible")
+        else:
+            self.remove_class("visible")
+
+    def on_click(self, event: object) -> None:
+        """Handle click on a filter pill to remove it."""
+        from textual.events import Click
+
+        if not isinstance(event, Click):
+            return
+        widget = event.widget
+        if not isinstance(widget, Label):
+            return
+        widget_id = widget.id or ""
+        if widget_id == "pill-watch":
+            self.post_message(self.RemoveWatchFilter())
+        elif widget_id.startswith("pill-"):
+            try:
+                index = int(widget_id.split("-", 1)[1])
+                self.post_message(self.RemoveFilter(index))
+            except (ValueError, IndexError):
+                pass
 
 
 # ============================================================================
@@ -6478,6 +7204,8 @@ class ArxivBrowser(App):
         Binding("question_mark", "show_help", "Help (?)", show=False),
         # Command palette
         Binding("ctrl+p", "command_palette", "Commands", show=False),
+        # Collections
+        Binding("ctrl+k", "collections", "Collections", show=False),
     ]
 
     def __init__(
@@ -6502,8 +7230,6 @@ class ArxivBrowser(App):
         self._detail_timer: Timer | None = None
         self._pending_detail_paper: Paper | None = None
         self._badges_dirty: set[str] = set()
-        self._badge_dirty_indices: set[int] = set()  # empty = nothing; filled by callers
-        self._badge_dirty_all: bool = False  # True = refresh all papers
         self._badge_timer: Timer | None = None
         self._sort_index: int = 0  # Index into SORT_OPTIONS
 
@@ -6616,6 +7342,7 @@ class ArxivBrowser(App):
                 yield Label(f" Papers ({len(self.all_papers)} total)", id="list-header")
                 yield DateNavigator(self._history_files, self._current_date_index)
                 yield BookmarkTabBar(self._config.bookmarks, self._active_bookmark_index)
+                yield FilterPillBar()
                 with Vertical(id="search-container"):
                     yield Input(
                         placeholder=(
@@ -7248,18 +7975,12 @@ class ArxivBrowser(App):
         self,
         *badge_types: str,
         immediate: bool = False,
-        indices: set[int] | None = None,
     ) -> None:
         """Schedule a coalesced badge refresh for the given types.
 
         Use immediate=True for toggle-off cases where UX needs instant feedback.
-        Pass indices to limit refresh to specific paper indices (None = all).
         """
         self._badges_dirty.update(badge_types)
-        if indices is None:
-            self._badge_dirty_all = True  # Refresh all papers
-        elif not self._badge_dirty_all:
-            self._badge_dirty_indices.update(indices)
         if immediate:
             old = self._badge_timer
             self._badge_timer = None
@@ -7275,22 +7996,14 @@ class ArxivBrowser(App):
         self._badge_timer = self.set_timer(BADGE_COALESCE_DELAY, self._flush_badge_refresh)
 
     def _flush_badge_refresh(self) -> None:
-        """Single-pass badge refresh for dirty indices (or all if flagged)."""
+        """Single-pass badge refresh for all visible papers."""
         self._badge_timer = None
         dirty = self._badges_dirty.copy()
         self._badges_dirty.clear()
-        refresh_all = self._badge_dirty_all
-        dirty_indices = self._badge_dirty_indices.copy()
-        self._badge_dirty_all = False
-        self._badge_dirty_indices.clear()
         if not dirty:
             return
-        if refresh_all:
-            for i in range(len(self.filtered_papers)):
-                self._update_option_at_index(i)
-        else:
-            for i in sorted(dirty_indices):
-                self._update_option_at_index(i)
+        for i in range(len(self.filtered_papers)):
+            self._update_option_at_index(i)
 
     # ========================================================================
     # Version tracking
@@ -7814,6 +8527,37 @@ class ArxivBrowser(App):
         # Update header with current query context
         self.query_one("#list-header", Label).update(self._format_header_text(query))
         self._update_status_bar()
+        self._update_filter_pills(query)
+
+    def _update_filter_pills(self, query: str) -> None:
+        """Update the filter pill bar with current active filters."""
+        if self._in_arxiv_api_mode:
+            try:
+                self.query_one(FilterPillBar).remove_class("visible")
+            except NoMatches:
+                pass
+            return
+        tokens = tokenize_query(query) if query.strip() else []
+        try:
+            pill_bar = self.query_one(FilterPillBar)
+            self._track_task(pill_bar.update_pills(tokens, self._watch_filter_active))
+        except NoMatches:
+            pass
+
+    @on(FilterPillBar.RemoveFilter)
+    def on_remove_filter(self, event: FilterPillBar.RemoveFilter) -> None:
+        """Handle removal of a filter pill by reconstructing the query."""
+        search_input = self.query_one("#search-input", Input)
+        current_query = search_input.value.strip()
+        tokens = tokenize_query(current_query) if current_query else []
+        new_query = reconstruct_query(tokens, event.token_index)
+        search_input.value = new_query
+
+    @on(FilterPillBar.RemoveWatchFilter)
+    def on_remove_watch_filter(self, event: FilterPillBar.RemoveWatchFilter) -> None:
+        """Handle removal of the watch filter pill."""
+        self._watch_filter_active = False
+        self._apply_filter(self._pending_query)
 
     def action_toggle_select(self) -> None:
         """Toggle selection of the currently highlighted paper."""
@@ -8595,7 +9339,7 @@ class ArxivBrowser(App):
         try:
             raw = filepath.read_text(encoding="utf-8")
             data = _json.loads(raw)
-            papers_n, watch_n, bk_n = import_metadata(data, self._config)
+            papers_n, watch_n, bk_n, col_n = import_metadata(data, self._config)
         except (OSError, ValueError) as exc:
             self.notify(f"Import failed: {exc}", title="Import", severity="error")
             return
@@ -8614,6 +9358,8 @@ class ArxivBrowser(App):
             parts.append(f"{watch_n} watch entries")
         if bk_n:
             parts.append(f"{bk_n} bookmarks")
+        if col_n:
+            parts.append(f"{col_n} collections")
         summary = ", ".join(parts) or "nothing new"
         self.notify(f"Imported {summary} from {filepath.name}", title="Import")
 
@@ -8920,6 +9666,62 @@ class ArxivBrowser(App):
                 logger.warning("Unknown command palette action: %s", action_name)
 
         self.push_screen(CommandPaletteModal(), _on_command_selected)
+
+    # ========================================================================
+    # Paper Collections
+    # ========================================================================
+
+    def action_collections(self) -> None:
+        """Open the collections manager modal."""
+        modal = CollectionsModal(self._config.collections, self._papers_by_id)
+
+        def _save_collections(result: str | None) -> None:
+            if result != "save":
+                return
+            self._config.collections = modal.collections
+            save_config(self._config)
+            count = len(self._config.collections)
+            self.notify(
+                f"Saved {count} collection{'s' if count != 1 else ''}",
+                title="Collections",
+            )
+
+        self.push_screen(modal, _save_collections)
+
+    def action_add_to_collection(self) -> None:
+        """Add selected papers to a collection."""
+        if not self._config.collections:
+            self.notify(
+                "No collections. Press Ctrl+k to create one.",
+                title="Collections",
+                severity="warning",
+            )
+            return
+        papers = self._get_target_papers()
+        if not papers:
+            return
+        paper_ids = [p.arxiv_id for p in papers]
+
+        def _on_collection_selected(name: str | None) -> None:
+            if not name:
+                return
+            for col in self._config.collections:
+                if col.name == name:
+                    existing = set(col.paper_ids)
+                    added = 0
+                    for pid in paper_ids:
+                        if pid not in existing and len(col.paper_ids) < MAX_PAPERS_PER_COLLECTION:
+                            col.paper_ids.append(pid)
+                            existing.add(pid)
+                            added += 1
+                    save_config(self._config)
+                    self.notify(
+                        f"Added {added} paper{'s' if added != 1 else ''} to '{name}'",
+                        title="Collections",
+                    )
+                    break
+
+        self.push_screen(AddToCollectionModal(self._config.collections), _on_collection_selected)
 
     # ========================================================================
     # LLM Summary Generation

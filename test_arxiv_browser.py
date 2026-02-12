@@ -12,11 +12,14 @@ from arxiv_browser.app import (
     DEFAULT_CATEGORY_COLOR,
     DEFAULT_LLM_PROMPT,
     LLM_PRESETS,
+    MAX_COLLECTIONS,
+    MAX_PAPERS_PER_COLLECTION,
     SORT_OPTIONS,
     SUBPROCESS_TIMEOUT,
     SUMMARY_MODES,
     TAG_NAMESPACE_COLORS,
     Paper,
+    PaperCollection,
     PaperMetadata,
     QueryToken,
     SearchBookmark,
@@ -30,6 +33,7 @@ from arxiv_browser.app import (
     extract_text_from_html,
     extract_year,
     format_categories,
+    format_collection_as_markdown,
     format_paper_as_bibtex,
     format_paper_as_ris,
     format_papers_as_csv,
@@ -48,6 +52,8 @@ from arxiv_browser.app import (
     parse_arxiv_file,
     parse_arxiv_version_map,
     parse_tag_namespace,
+    pill_label_for_token,
+    reconstruct_query,
     save_config,
     to_rpn,
     tokenize_query,
@@ -4938,8 +4944,6 @@ class TestBadgeCoalescing:
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._http_client = None
         app._badges_dirty = set()
-        app._badge_dirty_indices = set()
-        app._badge_dirty_all = False
         app._badge_timer = None
         app._s2_active = True
         app._s2_cache = {}
@@ -4972,7 +4976,6 @@ class TestBadgeCoalescing:
 
         app = self._make_badge_app()
         app._badges_dirty = {"hf", "s2"}
-        app._badge_dirty_all = True  # simulate full-refresh scenario
         paper = make_paper(arxiv_id="2401.00001")
         app.filtered_papers = [paper]
         app._update_option_at_index = MagicMock()
@@ -4980,7 +4983,6 @@ class TestBadgeCoalescing:
         app._flush_badge_refresh()
 
         assert app._badges_dirty == set()
-        assert app._badge_dirty_all is False
         app._update_option_at_index.assert_called_once_with(0)
 
     def test_mark_badges_dirty_immediate_flushes(self, make_paper):
@@ -10737,7 +10739,7 @@ class TestExportMetadata:
 
         # Import into a fresh config
         fresh = UserConfig()
-        papers_n, watch_n, bk_n = import_metadata(exported, fresh)
+        papers_n, watch_n, bk_n, _ = import_metadata(exported, fresh)
         assert papers_n == 1
         assert watch_n == 1
         assert bk_n == 1
@@ -10771,7 +10773,7 @@ class TestImportMetadata:
                 "2401.0001": {"notes": "new notes", "tags": ["topic:new"], "is_read": True}
             },
         }
-        papers_n, _, _ = import_metadata(data, config)
+        papers_n, _, _, _ = import_metadata(data, config)
         assert papers_n == 1
         assert config.paper_metadata["2401.0001"].notes == "existing notes"
         assert "topic:new" in config.paper_metadata["2401.0001"].tags
@@ -10824,7 +10826,7 @@ class TestImportMetadata:
                 {"pattern": "BERT", "match_type": "keyword"},  # New
             ],
         }
-        _, watch_n, _ = import_metadata(data, config)
+        _, watch_n, _, _ = import_metadata(data, config)
         assert watch_n == 1
         assert len(config.watch_list) == 2
 
@@ -10839,7 +10841,7 @@ class TestImportMetadata:
                 {"name": "New3", "query": "new3"},
             ],
         }
-        _, _, bk_n = import_metadata(data, config)
+        _, _, bk_n, _ = import_metadata(data, config)
         assert bk_n == 1
         assert len(config.bookmarks) == 9
 
@@ -10871,7 +10873,7 @@ class TestImportMetadata:
                 "not a dict",
             ],
         }
-        papers_n, watch_n, _ = import_metadata(data, config)
+        papers_n, watch_n, _, _ = import_metadata(data, config)
         assert papers_n == 1
         assert watch_n == 1
 
@@ -10965,6 +10967,713 @@ class TestChatSystemPrompt:
         assert "User: Q1" in context
         assert "Assistant: A1" in context
         assert "User: Q2" in context
+
+
+class TestAskLlm:
+    """Tests for PaperChatScreen._ask_llm async method."""
+
+    @pytest.fixture
+    def chat_screen(self, make_paper):
+        from unittest.mock import MagicMock
+
+        from textual.css.query import NoMatches
+
+        from arxiv_browser.app import PaperChatScreen
+
+        paper = make_paper(
+            title="Test Paper",
+            authors="Alice",
+            categories="cs.AI",
+            abstract="An abstract.",
+        )
+        screen = PaperChatScreen(paper, "claude -p {prompt}", "Full paper text.")
+        # Mock _add_message since it requires DOM
+        screen._add_message = MagicMock()
+        # Simulate a question already in history (as on_question_submitted does)
+        screen._history.append(("user", "What is this about?"))
+        screen._waiting = True
+        # Mock query_one for the status update in finally block
+        screen.query_one = MagicMock(side_effect=NoMatches())
+        return screen
+
+    def _make_proc_mock(self, stdout=b"", stderr=b"", returncode=0):
+        from unittest.mock import AsyncMock, MagicMock
+
+        proc = AsyncMock()
+        proc.communicate.return_value = (stdout, stderr)
+        proc.returncode = returncode
+        proc.kill = MagicMock()
+        proc.wait = AsyncMock()
+        return proc
+
+    async def test_success_adds_response(self, chat_screen):
+        from unittest.mock import AsyncMock, patch
+
+        proc = self._make_proc_mock(stdout=b"This paper discusses transformers.")
+        with (
+            patch(
+                "arxiv_browser.app.asyncio.create_subprocess_shell",
+                new_callable=AsyncMock,
+                return_value=proc,
+            ),
+            patch(
+                "arxiv_browser.app.asyncio.wait_for",
+                new_callable=AsyncMock,
+                return_value=(b"This paper discusses transformers.", b""),
+            ),
+        ):
+            await chat_screen._ask_llm("What is this about?")
+
+        # Verify response was added without markup flag (escaped by default)
+        chat_screen._add_message.assert_called_once_with(
+            "assistant", "This paper discusses transformers."
+        )
+        assert chat_screen._waiting is False
+
+    async def test_timeout_kills_process_and_shows_error(self, chat_screen):
+        from unittest.mock import AsyncMock, patch
+
+        proc = self._make_proc_mock()
+        with (
+            patch(
+                "arxiv_browser.app.asyncio.create_subprocess_shell",
+                new_callable=AsyncMock,
+                return_value=proc,
+            ),
+            patch(
+                "arxiv_browser.app.asyncio.wait_for",
+                new_callable=AsyncMock,
+                side_effect=TimeoutError,
+            ),
+        ):
+            await chat_screen._ask_llm("question")
+
+        proc.kill.assert_called_once()
+        chat_screen._add_message.assert_called_once_with(
+            "assistant", "[red]Timed out waiting for response.[/]", markup=True
+        )
+        assert chat_screen._waiting is False
+
+    async def test_nonzero_exit_shows_stderr(self, chat_screen):
+        from unittest.mock import AsyncMock, patch
+
+        proc = self._make_proc_mock(stderr=b"model not found", returncode=1)
+        with (
+            patch(
+                "arxiv_browser.app.asyncio.create_subprocess_shell",
+                new_callable=AsyncMock,
+                return_value=proc,
+            ),
+            patch(
+                "arxiv_browser.app.asyncio.wait_for",
+                new_callable=AsyncMock,
+                return_value=(b"", b"model not found"),
+            ),
+        ):
+            await chat_screen._ask_llm("question")
+
+        chat_screen._add_message.assert_called_once_with(
+            "assistant", "[red]Error: model not found[/]", markup=True
+        )
+        assert chat_screen._waiting is False
+
+    async def test_empty_response_shows_dim_message(self, chat_screen):
+        from unittest.mock import AsyncMock, patch
+
+        proc = self._make_proc_mock(stdout=b"   ")
+        with (
+            patch(
+                "arxiv_browser.app.asyncio.create_subprocess_shell",
+                new_callable=AsyncMock,
+                return_value=proc,
+            ),
+            patch(
+                "arxiv_browser.app.asyncio.wait_for",
+                new_callable=AsyncMock,
+                return_value=(b"   ", b""),
+            ),
+        ):
+            await chat_screen._ask_llm("question")
+
+        chat_screen._add_message.assert_called_once_with(
+            "assistant", "[dim]Empty response from LLM.[/]", markup=True
+        )
+
+    async def test_exception_logged_and_shown(self, chat_screen):
+        from unittest.mock import AsyncMock, patch
+
+        with patch(
+            "arxiv_browser.app.asyncio.create_subprocess_shell",
+            new_callable=AsyncMock,
+            side_effect=OSError("command not found"),
+        ):
+            await chat_screen._ask_llm("question")
+
+        chat_screen._add_message.assert_called_once_with(
+            "assistant", "[red]Error: command not found[/]", markup=True
+        )
+        assert chat_screen._waiting is False
+
+    async def test_rich_markup_in_response_is_escaped(self, chat_screen):
+        """LLM response with brackets should not be interpreted as Rich markup."""
+        from unittest.mock import AsyncMock, patch
+
+        response_text = "See [1] and [Section 3] for details"
+        proc = self._make_proc_mock(stdout=response_text.encode())
+        with (
+            patch(
+                "arxiv_browser.app.asyncio.create_subprocess_shell",
+                new_callable=AsyncMock,
+                return_value=proc,
+            ),
+            patch(
+                "arxiv_browser.app.asyncio.wait_for",
+                new_callable=AsyncMock,
+                return_value=(response_text.encode(), b""),
+            ),
+        ):
+            await chat_screen._ask_llm("question")
+
+        # Response is passed WITHOUT markup=True, so _add_message will escape it
+        chat_screen._add_message.assert_called_once_with("assistant", response_text)
+
+    async def test_history_included_in_context(self, chat_screen):
+        """Conversation history should be sent to the LLM."""
+        from unittest.mock import AsyncMock, patch
+
+        # Add prior conversation
+        chat_screen._history = [
+            ("user", "First question"),
+            ("assistant", "First answer"),
+            ("user", "Follow up"),
+        ]
+
+        captured_command = []
+
+        async def capture_shell(cmd, **kwargs):
+            captured_command.append(cmd)
+            proc = self._make_proc_mock(stdout=b"response")
+            return proc
+
+        with (
+            patch(
+                "arxiv_browser.app.asyncio.create_subprocess_shell",
+                new_callable=AsyncMock,
+                side_effect=capture_shell,
+            ),
+            patch(
+                "arxiv_browser.app.asyncio.wait_for",
+                new_callable=AsyncMock,
+                return_value=(b"response", b""),
+            ),
+        ):
+            await chat_screen._ask_llm("Follow up")
+
+        # The shell command should contain prior history
+        assert len(captured_command) == 1
+        # _build_llm_shell_command embeds the context into the command
+        assert "First question" in captured_command[0]
+        assert "First answer" in captured_command[0]
+
+
+class TestAddMessageMarkup:
+    """Tests for _add_message markup parameter behavior."""
+
+    def test_add_message_escapes_by_default(self, make_paper):
+        from arxiv_browser.app import PaperChatScreen
+
+        screen = PaperChatScreen(make_paper(title="T"), "cmd")
+        # Just test the history tracking (no DOM)
+        screen._history = []
+        # Directly append to history to verify the parameter exists
+        screen._add_message.__func__  # verify method exists
+        # The method signature should accept markup kwarg
+        import inspect
+
+        sig = inspect.signature(PaperChatScreen._add_message)
+        assert "markup" in sig.parameters
+        assert sig.parameters["markup"].default is False
+
+
+# ============================================================================
+# Tests for PaperDetails section helpers (F1)
+# ============================================================================
+
+
+class TestPaperDetailsRenderHelpers:
+    """Tests for PaperDetails._render_* helper methods."""
+
+    def _make_details(self):
+        from arxiv_browser.app import PaperDetails
+
+        return PaperDetails()
+
+    def test_render_title(self, make_paper):
+        details = self._make_details()
+        paper = make_paper(title="Test Title")
+        result = details._render_title(paper)
+        assert "Test Title" in result
+        assert "bold" in result
+
+    def test_render_metadata_basic(self, make_paper):
+        details = self._make_details()
+        paper = make_paper(arxiv_id="2401.00001", date="2024-01-01", categories="cs.AI")
+        result = details._render_metadata(paper)
+        assert "2401.00001" in result
+        assert "2024-01-01" in result
+        assert "cs.AI" in result
+
+    def test_render_metadata_with_comments(self, make_paper):
+        details = self._make_details()
+        paper = make_paper(comments="10 pages, 5 figures")
+        result = details._render_metadata(paper)
+        assert "10 pages" in result
+
+    def test_render_abstract_collapsed(self, make_paper):
+        details = self._make_details()
+        result = details._render_abstract("Some text", False, None, True)
+        assert "▸ Abstract" in result
+        assert "Some text" not in result
+
+    def test_render_abstract_expanded(self, make_paper):
+        details = self._make_details()
+        result = details._render_abstract("Deep learning is great", False, None, False)
+        assert "▾ Abstract" in result
+        assert "Deep learning is great" in result
+
+    def test_render_abstract_loading(self, make_paper):
+        details = self._make_details()
+        result = details._render_abstract("", True, None, False)
+        assert "Loading abstract" in result
+
+    def test_render_abstract_empty(self, make_paper):
+        details = self._make_details()
+        result = details._render_abstract("", False, None, False)
+        assert "No abstract available" in result
+
+    def test_render_authors_collapsed(self, make_paper):
+        details = self._make_details()
+        paper = make_paper(authors="John Doe")
+        result = details._render_authors(paper, True)
+        assert "▸ Authors" in result
+        assert "John Doe" not in result
+
+    def test_render_authors_expanded(self, make_paper):
+        details = self._make_details()
+        paper = make_paper(authors="John Doe")
+        result = details._render_authors(paper, False)
+        assert "▾ Authors" in result
+        assert "John Doe" in result
+
+    def test_render_tags_empty(self):
+        details = self._make_details()
+        assert details._render_tags(None, False) == ""
+        assert details._render_tags([], False) == ""
+
+    def test_render_tags_collapsed(self):
+        details = self._make_details()
+        result = details._render_tags(["ml", "nlp"], True)
+        assert "▸ Tags (2)" in result
+
+    def test_render_tags_expanded(self):
+        details = self._make_details()
+        result = details._render_tags(["topic:ml", "flat-tag"], False)
+        assert "▾ Tags" in result
+        assert "topic:" in result
+        assert "flat-tag" in result
+
+    def test_render_relevance_none(self):
+        details = self._make_details()
+        assert details._render_relevance(None, False) == ""
+
+    def test_render_relevance_collapsed(self):
+        details = self._make_details()
+        result = details._render_relevance((8, "Good paper"), True)
+        assert "▸ Relevance (8/10)" in result
+
+    def test_render_relevance_high_score(self):
+        details = self._make_details()
+        result = details._render_relevance((9, "Excellent"), False)
+        assert "9/10" in result
+        assert "Excellent" in result
+
+    def test_render_summary_empty(self):
+        details = self._make_details()
+        assert details._render_summary(None, False, "", False) == ""
+
+    def test_render_summary_loading(self):
+        details = self._make_details()
+        result = details._render_summary(None, True, "tldr", False)
+        assert "Generating summary" in result
+        assert "tldr" in result
+
+    def test_render_summary_collapsed(self):
+        details = self._make_details()
+        result = details._render_summary("Some summary", False, "", True)
+        assert "▸ AI Summary" in result
+        assert "(loaded)" in result
+
+    def test_render_s2_empty(self):
+        details = self._make_details()
+        assert details._render_s2(None, False, False) == ""
+
+    def test_render_s2_loading(self):
+        details = self._make_details()
+        result = details._render_s2(None, True, False)
+        assert "Fetching data" in result
+
+    def test_render_s2_collapsed_with_data(self):
+        from arxiv_browser.semantic_scholar import SemanticScholarPaper
+
+        details = self._make_details()
+        s2 = SemanticScholarPaper(
+            arxiv_id="2401.00001",
+            s2_paper_id="abc",
+            title="Test",
+            citation_count=42,
+            influential_citation_count=5,
+            tldr="",
+            fields_of_study=(),
+            year=2024,
+            url="",
+        )
+        result = details._render_s2(s2, False, True)
+        assert "42 cites" in result
+
+    def test_render_hf_empty(self):
+        details = self._make_details()
+        assert details._render_hf(None, False) == ""
+
+    def test_render_hf_collapsed(self):
+        from arxiv_browser.huggingface import HuggingFacePaper
+
+        details = self._make_details()
+        hf = HuggingFacePaper(
+            arxiv_id="2401.00001",
+            title="T",
+            upvotes=15,
+            num_comments=3,
+            ai_summary="",
+            ai_keywords=(),
+            github_repo="",
+            github_stars=0,
+        )
+        result = details._render_hf(hf, True)
+        assert "15" in result
+
+    def test_render_version_none(self, make_paper):
+        details = self._make_details()
+        paper = make_paper()
+        assert details._render_version(paper, None, False) == ""
+
+    def test_render_version_collapsed(self, make_paper):
+        details = self._make_details()
+        paper = make_paper()
+        result = details._render_version(paper, (1, 3), True)
+        assert "v1" in result and "v3" in result
+
+    def test_render_version_expanded(self, make_paper):
+        details = self._make_details()
+        paper = make_paper(arxiv_id="2401.00001")
+        result = details._render_version(paper, (1, 3), False)
+        assert "arxivdiff.org" in result
+        assert "2401.00001" in result
+
+    def test_render_url(self, make_paper):
+        details = self._make_details()
+        paper = make_paper(url="https://arxiv.org/abs/2401.00001")
+        result = details._render_url(paper)
+        assert "URL" in result
+        assert "arxiv.org" in result
+
+
+class TestUpdatePaperParity:
+    """Verify update_paper() produces correct output via section helpers."""
+
+    def test_full_paper_all_sections(self, make_paper):
+        from arxiv_browser.app import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(
+            title="Attention Is All You Need",
+            authors="Vaswani et al.",
+            arxiv_id="1706.03762",
+            date="2017-06-12",
+            categories="cs.CL cs.LG",
+            url="https://arxiv.org/abs/1706.03762",
+            abstract="The dominant sequence transduction models...",
+        )
+        details.update_paper(paper, tags=["topic:transformers"])
+        output = details.content
+        assert "Attention Is All You Need" in output
+        assert "1706.03762" in output
+        assert "Vaswani" in output
+        assert "URL" in output
+        assert "▾ Abstract" in output
+        assert "▾ Authors" in output
+        assert "▾ Tags" in output
+
+    def test_none_paper(self):
+        from arxiv_browser.app import PaperDetails
+
+        details = PaperDetails()
+        details.update_paper(None)
+        assert "Select a paper" in details.content
+
+    def test_collapsed_sections(self, make_paper):
+        from arxiv_browser.app import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(abstract="Test abstract")
+        details.update_paper(paper, collapsed_sections=["abstract", "authors"])
+        output = details.content
+        assert "▸ Abstract" in output
+        assert "▸ Authors" in output
+        assert "Test abstract" not in output
+
+
+# ============================================================================
+# Tests for Filter Pills (D2)
+# ============================================================================
+
+
+class TestPillLabelForToken:
+    """Tests for pill_label_for_token()."""
+
+    def test_plain_term(self):
+        tok = QueryToken(kind="term", value="transformer")
+        assert pill_label_for_token(tok) == "transformer"
+
+    def test_field_term(self):
+        tok = QueryToken(kind="term", value="cs.AI", field="cat")
+        assert pill_label_for_token(tok) == "cat:cs.AI"
+
+    def test_phrase_term(self):
+        tok = QueryToken(kind="term", value="neural network", phrase=True)
+        assert pill_label_for_token(tok) == '"neural network"'
+
+    def test_field_and_phrase(self):
+        tok = QueryToken(kind="term", value="John Smith", field="author", phrase=True)
+        assert pill_label_for_token(tok) == 'author:"John Smith"'
+
+    def test_virtual_starred(self):
+        tok = QueryToken(kind="term", value="starred")
+        assert pill_label_for_token(tok) == "starred"
+
+    def test_virtual_unread(self):
+        tok = QueryToken(kind="term", value="unread")
+        assert pill_label_for_token(tok) == "unread"
+
+
+# ============================================================================
+# Tests for Paper Collections (A5)
+# ============================================================================
+
+
+class TestPaperCollectionSerialization:
+    """Tests for PaperCollection config round-trip."""
+
+    def test_roundtrip(self):
+        from arxiv_browser.app import _config_to_dict, _dict_to_config
+
+        config = UserConfig()
+        config.collections = [
+            PaperCollection(
+                name="ML Papers",
+                description="Top ML",
+                paper_ids=["2401.00001"],
+                created="2026-01-01",
+            ),
+            PaperCollection(name="NLP", paper_ids=["2401.00002", "2401.00003"]),
+        ]
+        data = _config_to_dict(config)
+        restored = _dict_to_config(data)
+        assert len(restored.collections) == 2
+        assert restored.collections[0].name == "ML Papers"
+        assert restored.collections[0].description == "Top ML"
+        assert restored.collections[0].paper_ids == ["2401.00001"]
+        assert restored.collections[1].name == "NLP"
+        assert len(restored.collections[1].paper_ids) == 2
+
+    def test_max_collections_enforced(self):
+        from arxiv_browser.app import _dict_to_config
+
+        data = {"collections": [{"name": f"col-{i}", "paper_ids": []} for i in range(30)]}
+        config = _dict_to_config(data)
+        assert len(config.collections) <= MAX_COLLECTIONS
+
+    def test_max_papers_per_collection_enforced(self):
+        from arxiv_browser.app import _dict_to_config
+
+        data = {"collections": [{"name": "big", "paper_ids": [f"id-{i}" for i in range(600)]}]}
+        config = _dict_to_config(data)
+        assert len(config.collections[0].paper_ids) <= MAX_PAPERS_PER_COLLECTION
+
+    def test_invalid_entries_skipped(self):
+        from arxiv_browser.app import _dict_to_config
+
+        data = {"collections": ["not-a-dict", {"name": ""}, {"name": "valid", "paper_ids": []}]}
+        config = _dict_to_config(data)
+        assert len(config.collections) == 1
+        assert config.collections[0].name == "valid"
+
+    def test_non_string_paper_ids_filtered(self):
+        from arxiv_browser.app import _dict_to_config
+
+        data = {"collections": [{"name": "test", "paper_ids": ["ok", 123, None, "also-ok"]}]}
+        config = _dict_to_config(data)
+        assert config.collections[0].paper_ids == ["ok", "also-ok"]
+
+
+class TestCollectionExportImport:
+    """Tests for collection export/import via metadata."""
+
+    def test_export_includes_collections(self):
+        config = UserConfig()
+        config.collections = [PaperCollection(name="Test", paper_ids=["id1"])]
+        exported = export_metadata(config)
+        assert "collections" in exported
+        assert len(exported["collections"]) == 1
+        assert exported["collections"][0]["name"] == "Test"
+
+    def test_import_merges_by_name(self):
+        config = UserConfig()
+        config.collections = [PaperCollection(name="Existing", paper_ids=["a"])]
+        data = {
+            "format": "arxiv-browser-metadata",
+            "collections": [
+                {"name": "Existing", "paper_ids": ["b"]},
+                {"name": "New", "paper_ids": ["c"]},
+            ],
+        }
+        _, _, _, col_n = import_metadata(data, config)
+        assert col_n == 1
+        assert len(config.collections) == 2
+        assert config.collections[0].name == "Existing"
+        assert config.collections[0].paper_ids == ["a"]  # unchanged
+        assert config.collections[1].name == "New"
+
+    def test_import_returns_4_tuple(self):
+        config = UserConfig()
+        data = {"format": "arxiv-browser-metadata"}
+        result = import_metadata(data, config)
+        assert len(result) == 4
+
+
+class TestFormatCollectionAsMarkdown:
+    """Tests for format_collection_as_markdown()."""
+
+    def test_basic_format(self, make_paper):
+        p = make_paper(title="My Paper", arxiv_id="2401.00001")
+        col = PaperCollection(
+            name="Reading List", description="Q1 papers", paper_ids=["2401.00001"]
+        )
+        md = format_collection_as_markdown(col, {"2401.00001": p})
+        assert "# Reading List" in md
+        assert "Q1 papers" in md
+        assert "My Paper" in md
+        assert "1 papers" in md
+
+    def test_missing_papers_handled(self, make_paper):
+        col = PaperCollection(name="Test", paper_ids=["unknown-id"])
+        md = format_collection_as_markdown(col, {})
+        assert "unknown-id" in md
+        assert "not loaded" in md
+
+    def test_empty_collection(self, make_paper):
+        col = PaperCollection(name="Empty")
+        md = format_collection_as_markdown(col, {})
+        assert "# Empty" in md
+        assert "0 papers" in md
+
+
+class TestCollectionActions:
+    """Tests for add_to_collection dedup and max enforcement."""
+
+    def test_add_dedup(self):
+        col = PaperCollection(name="Test", paper_ids=["a", "b"])
+        # Simulate add logic
+        existing = set(col.paper_ids)
+        for pid in ["b", "c"]:
+            if pid not in existing and len(col.paper_ids) < MAX_PAPERS_PER_COLLECTION:
+                col.paper_ids.append(pid)
+                existing.add(pid)
+        assert col.paper_ids == ["a", "b", "c"]
+
+    def test_max_papers_enforced(self):
+        col = PaperCollection(
+            name="Test", paper_ids=[f"p{i}" for i in range(MAX_PAPERS_PER_COLLECTION)]
+        )
+        existing = set(col.paper_ids)
+        for pid in ["new1", "new2"]:
+            if pid not in existing and len(col.paper_ids) < MAX_PAPERS_PER_COLLECTION:
+                col.paper_ids.append(pid)
+                existing.add(pid)
+        assert len(col.paper_ids) == MAX_PAPERS_PER_COLLECTION
+
+
+class TestReconstructQuery:
+    """Tests for reconstruct_query()."""
+
+    def test_remove_single_term(self):
+        tokens = tokenize_query("transformer")
+        result = reconstruct_query(tokens, 0)
+        assert result == ""
+
+    def test_remove_first_of_two(self):
+        tokens = tokenize_query("cat:cs.AI transformer")
+        result = reconstruct_query(tokens, 0)
+        assert result == "transformer"
+
+    def test_remove_last_of_two(self):
+        tokens = tokenize_query("cat:cs.AI transformer")
+        result = reconstruct_query(tokens, 1)
+        assert result == "cat:cs.AI"
+
+    def test_remove_middle_with_and(self):
+        tokens = tokenize_query("cat:cs.AI AND starred AND transformer")
+        # tokens: [cat:cs.AI, AND, starred, AND, transformer]
+        result = reconstruct_query(tokens, 2)  # remove "starred"
+        assert result == "cat:cs.AI AND transformer"
+
+    def test_remove_first_with_and(self):
+        tokens = tokenize_query("cat:cs.AI AND transformer")
+        result = reconstruct_query(tokens, 0)  # remove "cat:cs.AI"
+        assert result == "transformer"
+
+    def test_remove_last_with_or(self):
+        tokens = tokenize_query("cat:cs.AI OR transformer")
+        result = reconstruct_query(tokens, 2)  # remove "transformer"
+        assert result == "cat:cs.AI"
+
+    def test_remove_quoted_phrase(self):
+        tokens = tokenize_query('"neural network" transformer')
+        result = reconstruct_query(tokens, 0)
+        assert result == "transformer"
+
+    def test_remove_field_value(self):
+        tokens = tokenize_query("cat:cs.AI author:Smith")
+        result = reconstruct_query(tokens, 0)
+        assert result == "author:Smith"
+
+    def test_invalid_index_returns_full_query(self):
+        tokens = tokenize_query("transformer")
+        result = reconstruct_query(tokens, 99)
+        assert result == "transformer"
+
+    def test_negative_index_returns_full_query(self):
+        tokens = tokenize_query("transformer")
+        result = reconstruct_query(tokens, -1)
+        assert result == "transformer"
+
+    def test_empty_tokens(self):
+        result = reconstruct_query([], 0)
+        assert result == ""
+
+    def test_preserve_field_phrase(self):
+        tokens = tokenize_query('author:"John Smith" cat:cs.AI')
+        result = reconstruct_query(tokens, 1)
+        assert result == 'author:"John Smith"'
 
 
 # ============================================================================
