@@ -136,6 +136,7 @@ from arxiv_browser.semantic_scholar import (
 # Public API for this module
 __all__ = [
     "AUTO_TAG_PROMPT_TEMPLATE",
+    "CHAT_SYSTEM_PROMPT",
     "COMMAND_PALETTE_COMMANDS",
     "DEFAULT_COLLAPSED_SECTIONS",
     "DETAIL_SECTION_KEYS",
@@ -149,6 +150,7 @@ __all__ = [
     "ArxivBrowser",
     "CommandPaletteModal",
     "Paper",
+    "PaperChatScreen",
     "PaperMetadata",
     "QueryToken",
     "RecommendationSourceModal",
@@ -288,7 +290,12 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
     ("Clear Selection", "Deselect all papers", "u", "clear_selection"),
     ("Toggle Selection", "Toggle selection on current paper", "Space", "toggle_select"),
     # Sort & Filter
-    ("Cycle Sort", "Cycle sort: title/date/arxiv_id/citations/trending/relevance", "s", "cycle_sort"),
+    (
+        "Cycle Sort",
+        "Cycle sort: title/date/arxiv_id/citations/trending/relevance",
+        "s",
+        "cycle_sort",
+    ),
     ("Toggle Watch Filter", "Show only watched papers", "w", "toggle_watch_filter"),
     ("Manage Watch List", "Add/remove watch list patterns", "W", "manage_watch_list"),
     ("Toggle Preview", "Show/hide abstract preview in list", "p", "toggle_preview"),
@@ -304,6 +311,7 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
     ("Citation Graph", "Explore citation graph (S2-powered)", "G", "citation_graph"),
     # AI features
     ("AI Summary", "Generate LLM-powered paper summary", "Ctrl+s", "generate_summary"),
+    ("Chat with Paper", "Interactive Q&A about current paper", "C", "chat_with_paper"),
     ("Score Relevance", "LLM-score papers by research interests", "L", "score_relevance"),
     ("Edit Interests", "Edit research interests for relevance scoring", "Ctrl+l", "edit_interests"),
     ("Auto-Tag", "LLM-suggest tags for current or selected papers", "Ctrl+g", "auto_tag"),
@@ -2182,7 +2190,9 @@ def build_daily_digest(
 
     # Read/starred stats
     if metadata:
-        read = sum(1 for p in papers if metadata.get(p.arxiv_id, PaperMetadata(arxiv_id="")).is_read)
+        read = sum(
+            1 for p in papers if metadata.get(p.arxiv_id, PaperMetadata(arxiv_id="")).is_read
+        )
         starred = sum(
             1 for p in papers if metadata.get(p.arxiv_id, PaperMetadata(arxiv_id="")).starred
         )
@@ -5375,6 +5385,202 @@ class AutoTagSuggestModal(ModalScreen[list[str] | None]):
         self.action_cancel()
 
 
+CHAT_SYSTEM_PROMPT = (
+    "You are a helpful research assistant. Answer questions about this paper.\n"
+    "Be concise and specific. Reference paper details when relevant.\n\n"
+    "Paper: {title}\nAuthors: {authors}\nCategories: {categories}\n\n"
+    "{paper_content}"
+)
+
+
+class PaperChatScreen(ModalScreen[None]):
+    """Interactive chat modal for asking questions about a paper."""
+
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+    ]
+
+    CSS = """
+    PaperChatScreen {
+        align: center middle;
+    }
+
+    #chat-dialog {
+        width: 80%;
+        height: 85%;
+        min-width: 60;
+        min-height: 20;
+        background: $th-background;
+        border: tall $th-accent;
+        padding: 0 2;
+    }
+
+    #chat-title {
+        text-style: bold;
+        color: $th-accent;
+        margin-bottom: 1;
+        height: auto;
+    }
+
+    #chat-messages {
+        height: 1fr;
+        background: $th-panel;
+        padding: 1 1;
+    }
+
+    .chat-user {
+        color: $th-green;
+        margin-bottom: 1;
+    }
+
+    .chat-assistant {
+        color: $th-foreground;
+        margin-bottom: 1;
+    }
+
+    .chat-system {
+        color: $th-muted;
+        margin-bottom: 1;
+    }
+
+    #chat-input-row {
+        height: auto;
+        margin-top: 1;
+    }
+
+    #chat-input {
+        width: 1fr;
+        background: $th-panel;
+        border: none;
+    }
+
+    #chat-input:focus {
+        border-left: tall $th-accent;
+    }
+
+    #chat-status {
+        height: auto;
+        color: $th-muted;
+    }
+    """
+
+    def __init__(
+        self,
+        paper: "Paper",
+        command_template: str,
+        paper_content: str = "",
+    ) -> None:
+        super().__init__()
+        self._paper = paper
+        self._command_template = command_template
+        self._paper_content = paper_content
+        self._history: list[tuple[str, str]] = []  # (role, text)
+        self._waiting = False
+
+    def compose(self) -> ComposeResult:
+        title = self._paper.title[:70]
+        with Vertical(id="chat-dialog"):
+            yield Static(f"Chat: {title}", id="chat-title")
+            yield VerticalScroll(id="chat-messages")
+            yield Static("", id="chat-status")
+            with Horizontal(id="chat-input-row"):
+                yield Input(
+                    placeholder="Ask a question about this paper... (Enter to send, Esc to close)",
+                    id="chat-input",
+                )
+
+    def on_mount(self) -> None:
+        self.query_one("#chat-input", Input).focus()
+        messages = self.query_one("#chat-messages", VerticalScroll)
+        if self._paper_content:
+            messages.mount(
+                Static("[dim]Paper content loaded. Ask anything![/]", classes="chat-system")
+            )
+        else:
+            messages.mount(
+                Static(
+                    "[dim]Using abstract only (HTML not available). Ask anything![/]",
+                    classes="chat-system",
+                )
+            )
+
+    @on(Input.Submitted, "#chat-input")
+    def on_question_submitted(self, event: Input.Submitted) -> None:
+        question = event.value.strip()
+        if not question or self._waiting:
+            return
+        event.input.value = ""
+        self._add_message("user", question)
+        self._waiting = True
+        self.query_one("#chat-status", Static).update("[dim]Thinking...[/]")
+        self.app._track_task(asyncio.create_task(self._ask_llm(question)))
+
+    def _add_message(self, role: str, text: str) -> None:
+        self._history.append((role, text))
+        messages = self.query_one("#chat-messages", VerticalScroll)
+        if role == "user":
+            messages.mount(Static(f"[bold green]You:[/] {text}", classes="chat-user"))
+        else:
+            messages.mount(Static(f"[bold cyan]AI:[/] {text}", classes="chat-assistant"))
+        messages.scroll_end(animate=False)
+
+    async def _ask_llm(self, question: str) -> None:
+        try:
+            # Build context with conversation history
+            context = CHAT_SYSTEM_PROMPT.format(
+                title=self._paper.title,
+                authors=self._paper.authors,
+                categories=self._paper.categories,
+                paper_content=self._paper_content or self._paper.abstract or "",
+            )
+            # Append conversation history
+            history_text = ""
+            for role, text in self._history[:-1]:  # Exclude current question
+                prefix = "User" if role == "user" else "Assistant"
+                history_text += f"\n{prefix}: {text}"
+            if history_text:
+                context += f"\n\nConversation so far:{history_text}"
+            context += f"\n\nUser: {question}\nAssistant:"
+
+            shell_command = _build_llm_shell_command(self._command_template, context)
+            proc = await asyncio.create_subprocess_shell(  # nosec B602
+                shell_command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=LLM_COMMAND_TIMEOUT
+                )
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+                self._add_message("assistant", "[red]Timed out waiting for response.[/]")
+                return
+
+            if proc.returncode != 0:
+                err = (stderr or b"").decode("utf-8", errors="replace").strip()
+                self._add_message("assistant", f"[red]Error: {err[:200]}[/]")
+                return
+
+            response = (stdout or b"").decode("utf-8", errors="replace").strip()
+            if response:
+                self._add_message("assistant", response)
+            else:
+                self._add_message("assistant", "[dim]Empty response from LLM.[/]")
+        except Exception as e:
+            self._add_message("assistant", f"[red]Error: {e}[/]")
+        finally:
+            self._waiting = False
+            try:
+                self.query_one("#chat-status", Static).update("")
+            except NoMatches:
+                pass
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
 # Section toggle hotkeys: single key → section key
 _SECTION_TOGGLE_KEYS: dict[str, str] = {
     "a": "authors",
@@ -5578,10 +5784,7 @@ class CommandPaletteModal(ModalScreen[str]):
             safe_name = escape_rich_text(name)
             safe_desc = escape_rich_text(desc)
             safe_key = escape_rich_text(key_hint)
-            markup = (
-                f"[bold]{safe_name}[/]  [{muted}]{safe_desc}[/]"
-                f"\n  [{accent}]{safe_key}[/]"
-            )
+            markup = f"[bold]{safe_name}[/]  [{muted}]{safe_desc}[/]\n  [{accent}]{safe_key}[/]"
             option_list.add_option(Option(markup, id=action))
 
         if option_list.option_count > 0:
@@ -6233,8 +6436,9 @@ class ArxivBrowser(App):
         Binding("d", "download_pdf", "Download", show=False),
         # Phase 9: Paper similarity
         Binding("R", "show_similar", "Similar", show=False),
-        # LLM summary
+        # LLM summary & chat
         Binding("ctrl+s", "generate_summary", "AI Summary", show=False),
+        Binding("C", "chat_with_paper", "Chat", show=False),
         # Semantic Scholar enrichment
         Binding("e", "fetch_s2", "Enrich (S2)", show=False),
         # HuggingFace trending
@@ -7884,9 +8088,7 @@ class ArxivBrowser(App):
     def _collect_all_tags(self) -> list[str]:
         """Collect all unique tags across all paper metadata."""
         return list(
-            dict.fromkeys(
-                tag for meta in self._config.paper_metadata.values() for tag in meta.tags
-            )
+            dict.fromkeys(tag for meta in self._config.paper_metadata.values() for tag in meta.tags)
         )
 
     def _bulk_edit_tags(self) -> None:
@@ -8258,9 +8460,13 @@ class ArxivBrowser(App):
         if handler:
             handler()
 
+    def _get_export_dir(self) -> Path:
+        """Return the configured export directory path."""
+        return Path(self._config.bibtex_export_dir or Path.home() / DEFAULT_BIBTEX_EXPORT_DIR)
+
     def _export_to_file(self, content: str, extension: str, format_name: str) -> None:
         """Write content to a timestamped file using atomic write."""
-        export_dir = Path(self._config.bibtex_export_dir or Path.home() / DEFAULT_BIBTEX_EXPORT_DIR)
+        export_dir = self._get_export_dir()
         timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         filename = f"arxiv-{timestamp}.{extension}"
         filepath = export_dir / filename
@@ -8363,10 +8569,7 @@ class ArxivBrowser(App):
         """Import metadata from a JSON file in the export directory."""
         import json as _json
 
-        export_dir = Path(
-            self._config.bibtex_export_dir or Path.home() / DEFAULT_BIBTEX_EXPORT_DIR
-        )
-        # Find the most recent metadata JSON file
+        export_dir = self._get_export_dir()
         json_files = sorted(export_dir.glob("arxiv-*.json"), reverse=True)
         if not json_files:
             self.notify(
@@ -8386,14 +8589,16 @@ class ArxivBrowser(App):
         save_config(self._config)
         self._compute_watched_papers()
         self._refresh_list_view()
-        parts = []
-        if papers_n:
-            parts.append(f"{papers_n} papers")
-        if watch_n:
-            parts.append(f"{watch_n} watch entries")
-        if bk_n:
-            parts.append(f"{bk_n} bookmarks")
-        summary = ", ".join(parts) if parts else "nothing new"
+        parts = [
+            label
+            for count, label in [
+                (papers_n, f"{papers_n} papers"),
+                (watch_n, f"{watch_n} watch entries"),
+                (bk_n, f"{bk_n} bookmarks"),
+            ]
+            if count
+        ]
+        summary = ", ".join(parts) or "nothing new"
         self.notify(f"Imported {summary} from {filepath.name}", title="Import")
 
     def _get_target_papers(self) -> list[Paper]:
@@ -8839,6 +9044,27 @@ class ArxivBrowser(App):
             self._update_abstract_display(arxiv_id)
 
     # ========================================================================
+    # Chat with Paper
+    # ========================================================================
+
+    def action_chat_with_paper(self) -> None:
+        """Open an interactive chat session about the current paper."""
+        command_template = self._require_llm_command()
+        if not command_template:
+            return
+        paper = self._get_current_paper()
+        if not paper:
+            self.notify("No paper selected", title="Chat", severity="warning")
+            return
+        self.notify("Fetching paper content...", title="Chat")
+        self._track_task(self._open_chat_screen(paper, command_template))
+
+    async def _open_chat_screen(self, paper: Paper, command_template: str) -> None:
+        """Fetch paper content and open the chat modal."""
+        paper_content = await _fetch_paper_content_async(paper, self._http_client)
+        self.push_screen(PaperChatScreen(paper, command_template, paper_content))
+
+    # ========================================================================
     # Relevance Scoring
     # ========================================================================
 
@@ -9076,9 +9302,7 @@ class ArxivBrowser(App):
             self._auto_tag_active = True
             self._update_footer()
             taxonomy = self._collect_all_tags()
-            self._track_task(
-                self._auto_tag_batch_async(papers, command_template, taxonomy)
-            )
+            self._track_task(self._auto_tag_batch_async(papers, command_template, taxonomy))
         else:
             # Single paper auto-tag
             paper = self._get_current_paper()
@@ -9195,7 +9419,9 @@ class ArxivBrowser(App):
                 err_msg = (stderr or b"").decode("utf-8", errors="replace").strip()
                 logger.warning(
                     "Auto-tag failed for %s (exit %d): %s",
-                    paper.arxiv_id, proc.returncode, err_msg[:200],
+                    paper.arxiv_id,
+                    proc.returncode,
+                    err_msg[:200],
                 )
                 return None
 
@@ -9206,7 +9432,9 @@ class ArxivBrowser(App):
 
             tags = _parse_auto_tag_response(output)
             if tags is None:
-                logger.warning("Failed to parse auto-tag response for %s: %s", paper.arxiv_id, output[:200])
+                logger.warning(
+                    "Failed to parse auto-tag response for %s: %s", paper.arxiv_id, output[:200]
+                )
                 self.notify("Could not parse LLM response", title="Auto-Tag", severity="warning")
                 return None
 

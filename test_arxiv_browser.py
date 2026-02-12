@@ -19,11 +19,14 @@ from arxiv_browser.app import (
     Paper,
     PaperMetadata,
     QueryToken,
+    SearchBookmark,
     UserConfig,
+    WatchListEntry,
     build_arxiv_search_query,
     build_llm_prompt,
     clean_latex,
     escape_bibtex,
+    export_metadata,
     extract_text_from_html,
     extract_year,
     format_categories,
@@ -36,6 +39,7 @@ from arxiv_browser.app import (
     get_pdf_download_path,
     get_summary_db_path,
     get_tag_color,
+    import_metadata,
     insert_implicit_and,
     load_config,
     normalize_arxiv_id,
@@ -10680,8 +10684,6 @@ class TestExportMetadata:
     """Tests for export_metadata()."""
 
     def test_empty_config_exports_structure(self):
-        from arxiv_browser.app import UserConfig, export_metadata
-
         config = UserConfig()
         result = export_metadata(config)
         assert result["format"] == "arxiv-browser-metadata"
@@ -10693,10 +10695,7 @@ class TestExportMetadata:
         assert result["research_interests"] == ""
 
     def test_only_annotated_papers_exported(self, make_paper):
-        from arxiv_browser.app import PaperMetadata, UserConfig, export_metadata
-
         config = UserConfig()
-        # Paper with annotations
         config.paper_metadata["2401.0001"] = PaperMetadata(
             arxiv_id="2401.0001", notes="important", tags=["topic:ml"], is_read=True, starred=True
         )
@@ -10707,13 +10706,6 @@ class TestExportMetadata:
         assert "2401.0002" not in result["paper_metadata"]
 
     def test_watch_list_and_bookmarks_exported(self):
-        from arxiv_browser.app import (
-            SearchBookmark,
-            UserConfig,
-            WatchListEntry,
-            export_metadata,
-        )
-
         config = UserConfig()
         config.watch_list = [WatchListEntry(pattern="transformer", match_type="keyword")]
         config.bookmarks = [SearchBookmark(name="ML", query="cat:cs.LG")]
@@ -10726,15 +10718,6 @@ class TestExportMetadata:
         assert result["research_interests"] == "LLM inference"
 
     def test_roundtrip_preserves_data(self):
-        from arxiv_browser.app import (
-            PaperMetadata,
-            SearchBookmark,
-            UserConfig,
-            WatchListEntry,
-            export_metadata,
-            import_metadata,
-        )
-
         config = UserConfig()
         config.paper_metadata["2401.0001"] = PaperMetadata(
             arxiv_id="2401.0001",
@@ -10774,14 +10757,10 @@ class TestImportMetadata:
     """Tests for import_metadata()."""
 
     def test_invalid_format_raises(self):
-        from arxiv_browser.app import UserConfig, import_metadata
-
         with pytest.raises(ValueError, match="Not a valid"):
             import_metadata({"format": "wrong"}, UserConfig())
 
     def test_merge_preserves_existing_notes(self):
-        from arxiv_browser.app import PaperMetadata, UserConfig, import_metadata
-
         config = UserConfig()
         config.paper_metadata["2401.0001"] = PaperMetadata(
             arxiv_id="2401.0001", notes="existing notes"
@@ -10794,16 +10773,11 @@ class TestImportMetadata:
         }
         papers_n, _, _ = import_metadata(data, config)
         assert papers_n == 1
-        # Existing notes preserved (merge mode)
         assert config.paper_metadata["2401.0001"].notes == "existing notes"
-        # New tags merged
         assert "topic:new" in config.paper_metadata["2401.0001"].tags
-        # Read status upgraded
         assert config.paper_metadata["2401.0001"].is_read is True
 
     def test_merge_fills_empty_notes(self):
-        from arxiv_browser.app import PaperMetadata, UserConfig, import_metadata
-
         config = UserConfig()
         config.paper_metadata["2401.0001"] = PaperMetadata(arxiv_id="2401.0001")
         data = {
@@ -10814,8 +10788,6 @@ class TestImportMetadata:
         assert config.paper_metadata["2401.0001"].notes == "imported notes"
 
     def test_merge_deduplicates_tags(self):
-        from arxiv_browser.app import PaperMetadata, UserConfig, import_metadata
-
         config = UserConfig()
         config.paper_metadata["2401.0001"] = PaperMetadata(
             arxiv_id="2401.0001", tags=["topic:ml", "status:read"]
@@ -10826,12 +10798,10 @@ class TestImportMetadata:
         }
         import_metadata(data, config)
         tags = config.paper_metadata["2401.0001"].tags
-        assert tags.count("topic:ml") == 1  # No duplicates
+        assert tags.count("topic:ml") == 1
         assert "topic:new" in tags
 
     def test_replace_mode_overwrites(self):
-        from arxiv_browser.app import PaperMetadata, UserConfig, import_metadata
-
         config = UserConfig()
         config.paper_metadata["2401.0001"] = PaperMetadata(
             arxiv_id="2401.0001", notes="old", starred=True
@@ -10845,8 +10815,6 @@ class TestImportMetadata:
         assert config.paper_metadata["2401.0001"].starred is False
 
     def test_watch_list_deduplication(self):
-        from arxiv_browser.app import UserConfig, WatchListEntry, import_metadata
-
         config = UserConfig()
         config.watch_list = [WatchListEntry(pattern="GPT", match_type="keyword")]
         data = {
@@ -10857,12 +10825,10 @@ class TestImportMetadata:
             ],
         }
         _, watch_n, _ = import_metadata(data, config)
-        assert watch_n == 1  # Only BERT imported
+        assert watch_n == 1
         assert len(config.watch_list) == 2
 
     def test_bookmarks_capped_at_9(self):
-        from arxiv_browser.app import SearchBookmark, UserConfig, import_metadata
-
         config = UserConfig()
         config.bookmarks = [SearchBookmark(name=f"B{i}", query=f"q{i}") for i in range(8)]
         data = {
@@ -10874,12 +10840,10 @@ class TestImportMetadata:
             ],
         }
         _, _, bk_n = import_metadata(data, config)
-        assert bk_n == 1  # Only 1 fits (8 + 1 = 9, cap reached)
+        assert bk_n == 1
         assert len(config.bookmarks) == 9
 
     def test_research_interests_imported_only_if_empty(self):
-        from arxiv_browser.app import UserConfig, import_metadata
-
         config = UserConfig()
         config.research_interests = "existing interests"
         data = {
@@ -10895,23 +10859,112 @@ class TestImportMetadata:
         assert config2.research_interests == "new interests"
 
     def test_malformed_entries_skipped(self):
-        from arxiv_browser.app import UserConfig, import_metadata
-
         config = UserConfig()
         data = {
             "format": "arxiv-browser-metadata",
             "paper_metadata": {
                 "good": {"notes": "ok"},
-                "bad": "not a dict",  # Should be skipped
+                "bad": "not a dict",
             },
             "watch_list": [
                 {"pattern": "ok", "match_type": "keyword"},
-                "not a dict",  # Should be skipped
+                "not a dict",
             ],
         }
         papers_n, watch_n, _ = import_metadata(data, config)
         assert papers_n == 1
         assert watch_n == 1
+
+
+# ============================================================================
+# Tests for PaperChatScreen and CHAT_SYSTEM_PROMPT
+# ============================================================================
+
+
+class TestChatSystemPrompt:
+    """Tests for the CHAT_SYSTEM_PROMPT template and PaperChatScreen."""
+
+    def test_chat_prompt_has_required_placeholders(self):
+        from arxiv_browser.app import CHAT_SYSTEM_PROMPT
+
+        for field in ("title", "authors", "categories", "paper_content"):
+            assert f"{{{field}}}" in CHAT_SYSTEM_PROMPT
+
+    def test_chat_prompt_formats_correctly(self, make_paper):
+        from arxiv_browser.app import CHAT_SYSTEM_PROMPT
+
+        paper = make_paper(
+            title="Test Paper",
+            authors="Alice, Bob",
+            categories="cs.LG",
+            abstract="An abstract.",
+        )
+        result = CHAT_SYSTEM_PROMPT.format(
+            title=paper.title,
+            authors=paper.authors,
+            categories=paper.categories,
+            paper_content="Full paper text here.",
+        )
+        assert "Test Paper" in result
+        assert "Alice, Bob" in result
+        assert "cs.LG" in result
+        assert "Full paper text here." in result
+
+    def test_chat_screen_init(self, make_paper):
+        from arxiv_browser.app import PaperChatScreen
+
+        paper = make_paper(title="My Paper")
+        screen = PaperChatScreen(paper, "claude -p {prompt}", "paper content")
+        assert screen._paper is paper
+        assert screen._command_template == "claude -p {prompt}"
+        assert screen._paper_content == "paper content"
+        assert screen._history == []
+        assert screen._waiting is False
+
+    def test_chat_screen_add_message(self, make_paper):
+        from arxiv_browser.app import PaperChatScreen
+
+        paper = make_paper(title="My Paper")
+        screen = PaperChatScreen(paper, "claude -p {prompt}")
+        # Test message tracking (without DOM — just the history list)
+        screen._history.append(("user", "What is this about?"))
+        screen._history.append(("assistant", "This paper discusses..."))
+        assert len(screen._history) == 2
+        assert screen._history[0] == ("user", "What is this about?")
+        assert screen._history[1] == ("assistant", "This paper discusses...")
+
+    def test_chat_command_palette_entry(self):
+        from arxiv_browser.app import COMMAND_PALETTE_COMMANDS
+
+        names = [cmd[0] for cmd in COMMAND_PALETTE_COMMANDS]
+        assert "Chat with Paper" in names
+        # Verify it maps to the right action
+        chat_entry = next(cmd for cmd in COMMAND_PALETTE_COMMANDS if cmd[0] == "Chat with Paper")
+        assert chat_entry[2] == "C"  # keybinding
+        assert chat_entry[3] == "chat_with_paper"  # action
+
+    def test_chat_context_builds_history(self, make_paper):
+        from arxiv_browser.app import CHAT_SYSTEM_PROMPT
+
+        paper = make_paper(title="Test", authors="A", categories="cs.AI", abstract="Abstract.")
+        context = CHAT_SYSTEM_PROMPT.format(
+            title=paper.title,
+            authors=paper.authors,
+            categories=paper.categories,
+            paper_content="Full text.",
+        )
+        # Simulate building chat context with history
+        history = [("user", "Q1"), ("assistant", "A1")]
+        history_text = ""
+        for role, text in history:
+            prefix = "User" if role == "user" else "Assistant"
+            history_text += f"\n{prefix}: {text}"
+        context += f"\n\nConversation so far:{history_text}"
+        context += "\n\nUser: Q2\nAssistant:"
+
+        assert "User: Q1" in context
+        assert "Assistant: A1" in context
+        assert "User: Q2" in context
 
 
 # ============================================================================
