@@ -2439,7 +2439,9 @@ class TestTextualIntegration:
         ]
 
     @staticmethod
-    async def _wait_for_option_count(pilot, option_list, expected: int, timeout: float = 2.0) -> None:
+    async def _wait_for_option_count(
+        pilot, option_list, expected: int, timeout: float = 2.0
+    ) -> None:
         """Poll until OptionList reaches expected count or timeout."""
         import asyncio
 
@@ -2924,7 +2926,9 @@ class TestArxivApiErrorHandling:
         request = httpx.Request("GET", "https://export.arxiv.org/api/query")
         response = httpx.Response(status_code=503, request=request)
         app._fetch_arxiv_api_page = AsyncMock(
-            side_effect=httpx.HTTPStatusError("service unavailable", request=request, response=response)
+            side_effect=httpx.HTTPStatusError(
+                "service unavailable", request=request, response=response
+            )
         )
 
         await ArxivBrowser._run_arxiv_search(app, ArxivSearchRequest(query="test"), start=0)
@@ -2956,6 +2960,7 @@ class TestArxivApiErrorHandling:
         app._apply_arxiv_search_results.assert_not_called()
         app.notify.assert_called_once()
         assert "Search failed" in app.notify.call_args.args[0]
+
 
 # ============================================================================
 # Phase 7: Migrate Fragile Regressions to Integration Tests
@@ -3718,7 +3723,9 @@ class TestGenerateSummaryAsync:
         proc = self._make_proc_mock(stdout=b"Quick summary.")
 
         with (
-            patch("arxiv_browser.app._fetch_paper_content_async", new_callable=AsyncMock) as fetch_mock,
+            patch(
+                "arxiv_browser.app._fetch_paper_content_async", new_callable=AsyncMock
+            ) as fetch_mock,
             patch(
                 "arxiv_browser.app.asyncio.create_subprocess_shell",
                 new_callable=AsyncMock,
