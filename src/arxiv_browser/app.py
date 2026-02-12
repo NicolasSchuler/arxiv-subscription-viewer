@@ -5207,12 +5207,13 @@ class CommandPaletteModal(ModalScreen[str]):
         option_list.clear_options()
 
         if query:
+            q = query.lower()
             scored: list[tuple[float, tuple[str, str, str, str]]] = []
             for cmd in self._commands:
                 name, desc, _, _ = cmd
                 score = max(
-                    fuzz.partial_ratio(query.lower(), name.lower()),
-                    fuzz.partial_ratio(query.lower(), desc.lower()),
+                    fuzz.partial_ratio(q, name.lower()),
+                    fuzz.partial_ratio(q, desc.lower()),
                 )
                 if score >= 40:
                     scored.append((score, cmd))
@@ -7388,6 +7389,25 @@ class ArxivBrowser(App):
             return idx
         return None
 
+    def _apply_to_selected(
+        self,
+        fn: Callable[[str], None],
+        target_ids: set[str] | None = None,
+    ) -> None:
+        """Apply fn(arxiv_id) to all selected papers, refreshing visible list items.
+
+        Uses target_ids if provided, otherwise self.selected_ids.
+        """
+        ids = target_ids if target_ids is not None else self.selected_ids
+        visible_ids: set[str] = set()
+        for i, paper in enumerate(self.filtered_papers):
+            if paper.arxiv_id in ids:
+                fn(paper.arxiv_id)
+                self._update_option_at_index(i)
+                visible_ids.add(paper.arxiv_id)
+        for aid in ids - visible_ids:
+            fn(aid)
+
     def _bulk_toggle_bool(
         self,
         attr: str,
@@ -7400,26 +7420,16 @@ class ArxivBrowser(App):
         If any selected paper has the attribute False, sets all to True;
         otherwise sets all to False.
         """
-        any_off = any(
+        target = any(
             not getattr(
                 self._config.paper_metadata.get(aid, PaperMetadata(arxiv_id=aid)),
                 attr,
             )
             for aid in self.selected_ids
         )
-        target = any_off
-        # Update visible selected papers (with list refresh)
-        visible_ids: set[str] = set()
-        for i, paper in enumerate(self.filtered_papers):
-            if paper.arxiv_id in self.selected_ids:
-                meta = self._get_or_create_metadata(paper.arxiv_id)
-                setattr(meta, attr, target)
-                self._update_option_at_index(i)
-                visible_ids.add(paper.arxiv_id)
-        # Also update selected papers not currently visible
-        for aid in self.selected_ids - visible_ids:
-            meta = self._get_or_create_metadata(aid)
-            setattr(meta, attr, target)
+        self._apply_to_selected(
+            lambda aid: setattr(self._get_or_create_metadata(aid), attr, target)
+        )
         status = true_label if target else false_label
         self.notify(f"{len(self.selected_ids)} papers {status}", title=title)
 
@@ -7518,14 +7528,11 @@ class ArxivBrowser(App):
 
     def _collect_all_tags(self) -> list[str]:
         """Collect all unique tags across all paper metadata."""
-        all_tags: list[str] = []
-        seen: set[str] = set()
-        for meta in self._config.paper_metadata.values():
-            for tag in meta.tags:
-                if tag not in seen:
-                    seen.add(tag)
-                    all_tags.append(tag)
-        return all_tags
+        return list(
+            dict.fromkeys(
+                tag for meta in self._config.paper_metadata.values() for tag in meta.tags
+            )
+        )
 
     def _bulk_edit_tags(self) -> None:
         """Open tags editor for bulk-tagging all selected papers.
@@ -7551,16 +7558,10 @@ class ArxivBrowser(App):
             added = new_tag_set - old_common
             removed = old_common - new_tag_set
 
-            # Update ALL selected papers (including those not in current filter)
-            visible_ids: set[str] = set()
-            for i, paper in enumerate(self.filtered_papers):
-                if paper.arxiv_id in target_ids:
-                    self._apply_tag_diff(paper.arxiv_id, added, removed)
-                    self._update_option_at_index(i)
-                    visible_ids.add(paper.arxiv_id)
-            # Also update selected papers not currently visible
-            for aid in target_ids - visible_ids:
-                self._apply_tag_diff(aid, added, removed)
+            self._apply_to_selected(
+                lambda aid: self._apply_tag_diff(aid, added, removed),
+                target_ids=target_ids,
+            )
 
             parts = []
             if added:
