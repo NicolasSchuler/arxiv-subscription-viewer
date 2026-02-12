@@ -14,15 +14,40 @@ Published on PyPI as `arxiv-subscription-viewer`. Install with `pip install arxi
 src/arxiv_browser/
 ├── __init__.py           # Re-exports public API from app.py
 ├── __main__.py           # python -m arxiv_browser support
-├── app.py                # Main application (~8300 lines)
-├── semantic_scholar.py   # S2 API client (~630 lines)
-├── huggingface.py        # HF Daily Papers client (~300 lines)
+├── app.py                # Widgets, modals, ArxivBrowser App, CLI (~8300 lines)
+├── models.py             # Dataclasses: Paper, PaperMetadata, UserConfig, etc. (~330 lines)
+├── config.py             # Config persistence: load/save/export/import (~540 lines)
+├── parsing.py            # arXiv parsing, LaTeX cleaning, history (~570 lines)
+├── export.py             # BibTeX, RIS, CSV, Markdown export (~330 lines)
+├── query.py              # Query tokenizer, matching, sorting, text utils (~480 lines)
+├── llm.py                # LLM summary/relevance/auto-tag, SQLite cache (~540 lines)
+├── similarity.py         # TF-IDF index, cosine + Jaccard similarity (~320 lines)
+├── themes.py             # Color palettes, category colors, Textual themes (~270 lines)
+├── semantic_scholar.py   # S2 API client, SQLite cache (~820 lines)
+├── huggingface.py        # HF Daily Papers API client, SQLite cache (~350 lines)
 └── py.typed              # PEP 561 type marker
 ```
 
-### Main Application (`src/arxiv_browser/app.py`)
+### Module Dependency DAG (no cycles)
 
-**Data Models:**
+```
+models.py              ← 0 internal deps (leaf)
+themes.py              ← 0 internal deps (leaf)
+config.py              ← models
+parsing.py             ← models
+export.py              ← models
+query.py               ← models, themes
+llm.py                 ← models
+similarity.py          ← models
+semantic_scholar.py    ← models
+huggingface.py         ← models
+app.py                 ← all above
+```
+
+No module imports from `app.py` — this prevents circular dependencies. `app.py` re-exports all public symbols from sub-modules via `from arxiv_browser.X import *` for backward compatibility.
+
+### Data Models (`models.py`)
+
 - `Paper` - Core paper data (arXiv ID, title, authors, etc.) with `__slots__`
 - `PaperMetadata` - User annotations (notes, tags, read/star status, version tracking)
 - `WatchListEntry` - Author/keyword/title patterns to highlight
@@ -30,16 +55,18 @@ src/arxiv_browser/
 - `SessionState` - Scroll position, filters, sort order, current date
 - `UserConfig` - Complete user configuration container
 
-**Core Functions:**
-- `parse_arxiv_file()` - Parse arXiv email text files
-- `clean_latex()` - Remove LaTeX commands for readable display
-- `discover_history_files()` - Find YYYY-MM-DD.txt files in history/
-- `load_config()` / `save_config()` - JSON persistence via platformdirs
-- `find_similar_papers()` - Hybrid TF-IDF cosine + Jaccard similarity (text 50%, categories 30%, authors 20%)
-- `build_llm_prompt()` - Build LLM prompt from paper data and template
-- `get_summary_db_path()` - Path to SQLite summary cache
+### Core Functions (by module)
 
-**UI Components:**
+- **`parsing.py`**: `parse_arxiv_file()`, `clean_latex()`, `discover_history_files()`, `parse_arxiv_date()`
+- **`config.py`**: `load_config()`, `save_config()`, `export_metadata()`, `import_metadata()`
+- **`similarity.py`**: `find_similar_papers()`, `TfidfIndex`, `compute_paper_similarity()`
+- **`llm.py`**: `build_llm_prompt()`, `get_summary_db_path()`, `SUMMARY_MODES`, `LLM_PRESETS`
+- **`query.py`**: `tokenize_query()`, `sort_papers()`, `highlight_text()`, `format_categories()`
+- **`export.py`**: `format_paper_as_bibtex()`, `format_papers_as_csv()`, `format_paper_as_ris()`
+- **`themes.py`**: `get_tag_color()`, `parse_tag_namespace()`, `TEXTUAL_THEMES`
+
+### UI Components (`app.py`)
+
 - `ArxivBrowser` - Main Textual App class
 - `PaperListItem` - Custom ListItem with selection/metadata display
 - `PaperDetails` - Rich-formatted paper detail view
@@ -48,7 +75,8 @@ src/arxiv_browser/
 - `CitationGraphScreen` - Citation graph drill-down modal
 - `BookmarkTabBar` - Horizontal bookmark tabs widget
 
-**Performance Optimizations:**
+### Performance Optimizations
+
 - Pre-compiled regex patterns at module level (`_LATEX_PATTERNS`, `_ARXIV_ID_PATTERN`, etc.)
 - `@lru_cache` for `format_categories()`
 - O(1) paper lookup via `_papers_by_id` dictionary
@@ -57,12 +85,12 @@ src/arxiv_browser/
 - Batch DOM updates in `_refresh_list_view()`
 - History file discovery limited to 365 files
 
-### Supporting Modules
+### External Modules
 
-- **`src/arxiv_browser/semantic_scholar.py`** (~630 lines): S2 API client, `SemanticScholarPaper` / `CitationEntry` dataclasses, SQLite cache for papers, recommendations, and citation graphs
-- **`src/arxiv_browser/huggingface.py`** (~300 lines): HuggingFace Daily Papers API client, `HuggingFacePaper` dataclass, SQLite cache
+- **`semantic_scholar.py`** (~820 lines): S2 API client, `SemanticScholarPaper` / `CitationEntry` dataclasses, SQLite cache for papers, recommendations, and citation graphs
+- **`huggingface.py`** (~350 lines): HuggingFace Daily Papers API client, `HuggingFacePaper` dataclass, SQLite cache
 
-### Test Suite (~1027 tests across 3 files + conftest.py in `tests/`)
+### Test Suite (~1051 tests across 3 files + conftest.py in `tests/`)
 
 - **`tests/test_arxiv_browser.py`** (~5800 lines): Core parsing, similarity, export, config, UI integration
 - **`tests/test_semantic_scholar.py`** (~990 lines): S2 response parsing, serialization, cache CRUD, API fetch functions, citation graph
@@ -75,7 +103,7 @@ src/arxiv_browser/
 - Pre-compile regex patterns at module level (not inside functions)
 - Use `@lru_cache` for expensive repeated operations
 - Constants in SCREAMING_SNAKE_CASE at module level
-- `__all__` defines public API (85 exports)
+- `__all__` defines public API per module; `app.py` re-exports all for backward compat
 - Module-level logger for debug output
 
 ## Key Patterns
@@ -95,9 +123,13 @@ src/arxiv_browser/
 - **History mode**: Date navigation with `_history_files` list
 
 ### Import Patterns (src layout)
-- **Public API**: `from arxiv_browser import Paper, main` — via `__init__.py` re-exports
-- **Private/internal names**: `from arxiv_browser.app import _HIGHLIGHT_PATTERN_CACHE` — direct module import
-- **Mock paths in tests**: Always patch at `"arxiv_browser.app.X"`, not `"arxiv_browser.X"` — the `__init__` re-export doesn't affect `app.py`'s local namespace
+- **Public API**: `from arxiv_browser import Paper, main` — via `__init__.py` → `app.py` re-exports
+- **Canonical module import**: `from arxiv_browser.models import Paper` — preferred for new code
+- **Backward compat**: `from arxiv_browser.app import Paper` — still works via re-export bridge
+- **Mock paths in tests**: Patch at the module where the function is *resolved*, not where it's re-exported:
+  - Functions called by other functions in the same module: patch at the actual module (e.g., `"arxiv_browser.config.get_config_path"`)
+  - Functions called by `ArxivBrowser` (resolves from `app.py`): patch at `"arxiv_browser.app.X"`
+  - S2/HF modules: `"arxiv_browser.semantic_scholar.X"`, `"arxiv_browser.huggingface.X"`
 
 ### Error Handling
 - `NoMatches` exception handling for DOM queries during shutdown
@@ -168,23 +200,23 @@ uv run ruff format --check .
 # Type checking (basic mode — catches real errors without Textual framework noise)
 uv run pyright
 
-# Tests with coverage (fail_under=60, ratchet up over time)
+# Tests with coverage (fail_under=60; actual ~69%, ratchet up over time)
 uv run pytest --cov --cov-report=term-missing --cov-report=html
 
 # Dependency hygiene — detects unused, missing, and transitive deps
 uv run deptry .
 
 # Dead code detection (vulture_whitelist.py suppresses Textual framework false positives)
-uv run vulture src/arxiv_browser/app.py src/arxiv_browser/semantic_scholar.py src/arxiv_browser/huggingface.py vulture_whitelist.py --min-confidence 80
+uv run vulture src/arxiv_browser/ vulture_whitelist.py --min-confidence 80
 
 # Security scanning (B101/B311/B314/B404/B405 skipped in config)
 uv run bandit -c pyproject.toml -r src/arxiv_browser/
 
 # Complexity (show C+ rated functions, plus average)
-uv run radon cc src/arxiv_browser/app.py src/arxiv_browser/semantic_scholar.py src/arxiv_browser/huggingface.py -a -nc
+uv run radon cc src/arxiv_browser/ -a -nc
 
-# Complexity gate (max-absolute E baseline — update_paper is E-ranked; ratchet down)
-uv run xenon src/arxiv_browser/app.py src/arxiv_browser/semantic_scholar.py src/arxiv_browser/huggingface.py --max-absolute E --max-modules D --max-average B
+# Complexity gate (max-absolute F baseline — import_metadata is F-ranked; ratchet down)
+uv run xenon src/arxiv_browser/ --max-absolute F --max-modules D --max-average B
 
 # Coverage on changed lines only (80% threshold on diffs)
 uv run pytest --cov --cov-report=xml

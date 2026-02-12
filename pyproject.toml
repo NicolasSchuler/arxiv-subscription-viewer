@@ -123,7 +123,7 @@ directory = "htmlcov"
 extend_exclude = [".venv", "tests"]
 
 [tool.deptry.per_rule_ignores]
-DEP003 = ["rich"]  # rich is a transitive dep of textual, intentionally used directly
+DEP003 = ["rich", "arxiv_browser"]  # rich: transitive dep of textual; arxiv_browser: intra-package imports
 
 # ── Bandit ────────────────────────────────────────────────────────────
 [tool.bandit]
