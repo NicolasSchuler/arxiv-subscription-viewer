@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from huggingface import (
+from arxiv_browser.huggingface import (
     HF_DEFAULT_CACHE_TTL_HOURS,
     HuggingFacePaper,
     _hf_paper_to_json,
@@ -425,7 +425,7 @@ class TestFetchHfDailyPapers:
         assert result == []
 
     @pytest.mark.asyncio
-    @patch("huggingface.asyncio.sleep", new_callable=AsyncMock)
+    @patch("arxiv_browser.huggingface.asyncio.sleep", new_callable=AsyncMock)
     async def test_429_retries(self, mock_sleep) -> None:
         mock_429 = MagicMock()
         mock_429.status_code = 429
@@ -441,7 +441,7 @@ class TestFetchHfDailyPapers:
         assert mock_sleep.called
 
     @pytest.mark.asyncio
-    @patch("huggingface.asyncio.sleep", new_callable=AsyncMock)
+    @patch("arxiv_browser.huggingface.asyncio.sleep", new_callable=AsyncMock)
     async def test_timeout_retries(self, mock_sleep) -> None:
         mock_200 = MagicMock()
         mock_200.status_code = 200
@@ -462,7 +462,7 @@ class TestFetchHfDailyPapers:
         assert result == []
 
     @pytest.mark.asyncio
-    @patch("huggingface.asyncio.sleep", new_callable=AsyncMock)
+    @patch("arxiv_browser.huggingface.asyncio.sleep", new_callable=AsyncMock)
     async def test_exhausted_retries_returns_empty(self, mock_sleep) -> None:
         mock_500 = MagicMock()
         mock_500.status_code = 500

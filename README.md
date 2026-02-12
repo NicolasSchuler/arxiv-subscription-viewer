@@ -54,9 +54,21 @@ A terminal user interface (TUI) for browsing arXiv papers from email subscriptio
 
 Requires Python 3.13+
 
+### From PyPI (recommended)
+
+```bash
+# Install globally with uv
+uv tool install arxiv-subscription-viewer
+
+# Or with pip
+pip install arxiv-subscription-viewer
+```
+
+### From source (development)
+
 ```bash
 # Clone the repository
-git clone https://github.com/nschuler/arxiv-subscription-viewer.git
+git clone https://github.com/NicolasSchuler/arxiv-subscription-viewer.git
 cd arxiv-subscription-viewer
 
 # Install with uv
@@ -67,19 +79,22 @@ uv sync
 
 ```bash
 # History mode: auto-loads newest file from history/
-uv run python arxiv_browser.py
+arxiv-viewer
 
 # List available dates in history
-uv run python arxiv_browser.py --list-dates
+arxiv-viewer --list-dates
 
 # Open specific date
-uv run python arxiv_browser.py --date 2026-01-23
+arxiv-viewer --date 2026-01-23
 
 # Custom input file (disables history mode)
-uv run python arxiv_browser.py -i papers.txt
+arxiv-viewer -i papers.txt
 
 # Start fresh session (ignore saved state)
-uv run python arxiv_browser.py --no-restore
+arxiv-viewer --no-restore
+
+# Alternative: run as module (useful during development)
+uv run python -m arxiv_browser
 ```
 
 ## Keyboard Shortcuts
@@ -317,6 +332,9 @@ Press `L` to score all loaded papers, `Ctrl+l` to edit interests. Sort by releva
 ## Development
 
 ```bash
+# Install dev dependencies
+uv sync
+
 # Run tests
 uv run pytest
 
@@ -325,6 +343,9 @@ uv run pytest -v
 
 # Run specific test class
 uv run pytest -v test_arxiv_browser.py::TestCleanLatex
+
+# Lint + type check
+uv run ruff check . && uv run ruff format --check . && uv run pyright
 ```
 
 ## Dependencies

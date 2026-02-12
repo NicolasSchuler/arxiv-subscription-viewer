@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from semantic_scholar import (
+from arxiv_browser.semantic_scholar import (
     S2_CITATION_GRAPH_CACHE_TTL_DAYS,
     S2_CITATIONS_PAGE_SIZE,
     S2_DEFAULT_CACHE_TTL_DAYS,

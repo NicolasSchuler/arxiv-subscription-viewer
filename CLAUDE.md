@@ -4,9 +4,23 @@
 
 A Textual-based TUI application for browsing arXiv papers from email subscription text files. Features include fuzzy search, paper management (read/star/notes/tags), session persistence, watch lists, bookmarks, and multiple export formats.
 
+Published on PyPI as `arxiv-subscription-viewer`. Install with `pip install arxiv-subscription-viewer` or `uv tool install arxiv-subscription-viewer`.
+
 ## Architecture
 
-### Main Application (`arxiv_browser.py` ~8300 lines)
+### Package Layout (`src/arxiv_browser/`)
+
+```
+src/arxiv_browser/
+├── __init__.py           # Re-exports public API from app.py
+├── __main__.py           # python -m arxiv_browser support
+├── app.py                # Main application (~8300 lines)
+├── semantic_scholar.py   # S2 API client (~630 lines)
+├── huggingface.py        # HF Daily Papers client (~300 lines)
+└── py.typed              # PEP 561 type marker
+```
+
+### Main Application (`src/arxiv_browser/app.py`)
 
 **Data Models:**
 - `Paper` - Core paper data (arXiv ID, title, authors, etc.) with `__slots__`
@@ -45,8 +59,8 @@ A Textual-based TUI application for browsing arXiv papers from email subscriptio
 
 ### Supporting Modules
 
-- **`semantic_scholar.py`** (~630 lines): S2 API client, `SemanticScholarPaper` / `CitationEntry` dataclasses, SQLite cache for papers, recommendations, and citation graphs
-- **`huggingface.py`** (~300 lines): HuggingFace Daily Papers API client, `HuggingFacePaper` dataclass, SQLite cache
+- **`src/arxiv_browser/semantic_scholar.py`** (~630 lines): S2 API client, `SemanticScholarPaper` / `CitationEntry` dataclasses, SQLite cache for papers, recommendations, and citation graphs
+- **`src/arxiv_browser/huggingface.py`** (~300 lines): HuggingFace Daily Papers API client, `HuggingFacePaper` dataclass, SQLite cache
 
 ### Test Suite (~620 tests across 3 files)
 
@@ -79,6 +93,11 @@ A Textual-based TUI application for browsing arXiv papers from email subscriptio
 - **Session restore**: Load/save via `on_mount()` / `on_unmount()`
 - **Watch list**: Pre-compute matches at startup for O(1) lookup
 - **History mode**: Date navigation with `_history_files` list
+
+### Import Patterns (src layout)
+- **Public API**: `from arxiv_browser import Paper, main` — via `__init__.py` re-exports
+- **Private/internal names**: `from arxiv_browser.app import _HIGHLIGHT_PATTERN_CACHE` — direct module import
+- **Mock paths in tests**: Always patch at `"arxiv_browser.app.X"`, not `"arxiv_browser.X"` — the `__init__` re-export doesn't affect `app.py`'s local namespace
 
 ### Error Handling
 - `NoMatches` exception handling for DOM queries during shutdown
@@ -156,43 +175,46 @@ uv run pytest --cov --cov-report=term-missing --cov-report=html
 uv run deptry .
 
 # Dead code detection (vulture_whitelist.py suppresses Textual framework false positives)
-uv run vulture arxiv_browser.py semantic_scholar.py huggingface.py vulture_whitelist.py --min-confidence 80
+uv run vulture src/arxiv_browser/app.py src/arxiv_browser/semantic_scholar.py src/arxiv_browser/huggingface.py vulture_whitelist.py --min-confidence 80
 
 # Security scanning (B101/B311/B314/B404/B405 skipped in config)
-uv run bandit -c pyproject.toml -r arxiv_browser.py semantic_scholar.py huggingface.py
+uv run bandit -c pyproject.toml -r src/arxiv_browser/
 
 # Complexity (show C+ rated functions, plus average)
-uv run radon cc arxiv_browser.py semantic_scholar.py huggingface.py -a -nc
+uv run radon cc src/arxiv_browser/app.py src/arxiv_browser/semantic_scholar.py src/arxiv_browser/huggingface.py -a -nc
 
 # Complexity gate (max-absolute E baseline — update_paper is E-ranked; ratchet down)
-uv run xenon arxiv_browser.py semantic_scholar.py huggingface.py --max-absolute E --max-modules D --max-average B
+uv run xenon src/arxiv_browser/app.py src/arxiv_browser/semantic_scholar.py src/arxiv_browser/huggingface.py --max-absolute E --max-modules D --max-average B
 
 # Coverage on changed lines only (80% threshold on diffs)
 uv run pytest --cov --cov-report=xml
 uv run diff-cover coverage.xml --compare-branch=main --fail-under=80
 
-# Mutation testing (targeted — full arxiv_browser.py would take hours)
-uv run mutmut run --paths-to-mutate=semantic_scholar.py
-uv run mutmut run --paths-to-mutate=huggingface.py
+# Mutation testing (targeted — full app.py would take hours)
+uv run mutmut run --paths-to-mutate=src/arxiv_browser/semantic_scholar.py
+uv run mutmut run --paths-to-mutate=src/arxiv_browser/huggingface.py
 ```
 
 ## Running the Application
 
 ```bash
 # History mode: auto-loads newest file from history/
-uv run python arxiv_browser.py
+uv run arxiv-viewer
 
 # List available dates
-uv run python arxiv_browser.py --list-dates
+uv run arxiv-viewer --list-dates
 
 # Open specific date
-uv run python arxiv_browser.py --date 2026-01-23
+uv run arxiv-viewer --date 2026-01-23
 
 # Custom input file (disables history mode)
-uv run python arxiv_browser.py -i <file>
+uv run arxiv-viewer -i <file>
 
 # Start fresh session (no restore)
-uv run python arxiv_browser.py --no-restore
+uv run arxiv-viewer --no-restore
+
+# Alternative: run as module
+uv run python -m arxiv_browser
 ```
 
 ## History Mode
@@ -298,6 +320,23 @@ Add to `config.json`:
 ```
 
 Usage: Press `L` to score all loaded papers (prompts for interests on first use). Press `Ctrl+l` to edit interests (clears cached scores). Sort by relevance with `s`. Papers show colored score badges: green (8-10), yellow (5-7), dim (1-4).
+
+## CI/CD
+
+GitHub Actions workflow (`.github/workflows/ci-cd.yml`):
+- **CI job**: Runs on push to `main` and PRs — lint, format check, type check, tests with coverage
+- **Publish job**: Runs on `v*` tags after CI passes — builds and publishes to PyPI via Trusted Publishers (OIDC)
+
+### Release process
+
+```bash
+uv version --bump minor           # bumps in pyproject.toml
+uv sync                           # regenerates uv.lock
+git add pyproject.toml uv.lock
+git commit -m "release: v0.2.0"
+git tag v0.2.0
+git push origin main --tags       # CI runs → CD publishes to PyPI
+```
 
 ## Key Bindings Reference
 

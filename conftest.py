@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from arxiv_browser import (
+from arxiv_browser.app import (
     _HIGHLIGHT_PATTERN_CACHE,
     CATEGORY_COLORS,
     DEFAULT_CATEGORY_COLORS,

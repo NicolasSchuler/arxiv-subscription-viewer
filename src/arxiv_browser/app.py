@@ -107,14 +107,14 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option, OptionDoesNotExist
 
-from huggingface import (
+from arxiv_browser.huggingface import (
     HuggingFacePaper,
     fetch_hf_daily_papers,
     get_hf_db_path,
     load_hf_daily_cache,
     save_hf_daily_cache,
 )
-from semantic_scholar import (
+from arxiv_browser.semantic_scholar import (
     S2_CITATION_GRAPH_CACHE_TTL_DAYS,
     S2_REC_CACHE_TTL_DAYS,
     CitationEntry,
@@ -8919,7 +8919,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    base_dir = Path(__file__).parent
+    base_dir = Path.cwd()
 
     # Load user config early (needed for session restore)
     config = load_config()

@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "arxiv-subscription-viewer"
 version = "0.1.0"
@@ -8,6 +12,18 @@ authors = [
 license = "MIT"
 readme = "README.md"
 requires-python = ">=3.13"
+keywords = ["arxiv", "papers", "research", "tui", "terminal", "textual", "academic"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Terminals",
+    "Typing :: Typed",
+]
 # Only direct dependencies - transitive deps (rich, pygments, etc.) are handled automatically
 dependencies = [
     "textual>=7.3.0",
@@ -15,6 +31,15 @@ dependencies = [
     "httpx>=0.27.0",
     "platformdirs>=3.0",
 ]
+
+[project.scripts]
+arxiv-viewer = "arxiv_browser.app:main"
+
+[project.urls]
+Homepage = "https://github.com/NicolasSchuler/arxiv-subscription-viewer"
+Repository = "https://github.com/NicolasSchuler/arxiv-subscription-viewer"
+Issues = "https://github.com/NicolasSchuler/arxiv-subscription-viewer/issues"
+Changelog = "https://github.com/NicolasSchuler/arxiv-subscription-viewer/releases"
 
 [dependency-groups]
 dev = [
@@ -31,6 +56,9 @@ dev = [
     "diff-cover>=9.2",
     "mutmut>=3.2",
 ]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/arxiv_browser"]
 
 [tool.pytest.ini_options]
 testpaths = ["."]
@@ -59,7 +87,7 @@ ignore = [
 "vulture_whitelist.py" = ["E402", "F401", "F811", "B018"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["arxiv_browser", "semantic_scholar", "huggingface"]
+known-first-party = ["arxiv_browser"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -68,14 +96,14 @@ indent-style = "space"
 # ── Pyright ───────────────────────────────────────────────────────────
 [tool.pyright]
 typeCheckingMode = "basic"
-include = ["arxiv_browser.py", "semantic_scholar.py", "huggingface.py"]
+include = ["src/arxiv_browser"]
 exclude = ["test_*.py", "conftest.py", ".venv"]
 reportMissingTypeStubs = false
 reportUnusedImport = false
 
 # ── Coverage ──────────────────────────────────────────────────────────
 [tool.coverage.run]
-source = ["arxiv_browser", "semantic_scholar", "huggingface"]
+source = ["arxiv_browser"]
 
 [tool.coverage.report]
 fail_under = 60
@@ -103,5 +131,5 @@ skips = ["B101", "B311", "B314", "B404", "B405"]
 
 # ── Mutmut ────────────────────────────────────────────────────────────
 [tool.mutmut]
-paths_to_mutate = "semantic_scholar.py"
+paths_to_mutate = "src/arxiv_browser/semantic_scholar.py"
 tests_dir = "."

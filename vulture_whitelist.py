@@ -6,7 +6,7 @@ trace these, so we declare them here.
 """
 
 # ── ArxivBrowser (App) ────────────────────────────────────────────────
-from arxiv_browser import ArxivBrowser
+from arxiv_browser.app import ArxivBrowser
 
 ArxivBrowser.compose
 ArxivBrowser.on_mount
@@ -60,43 +60,43 @@ ArxivBrowser.on_paper_selected
 ArxivBrowser.on_paper_highlighted
 
 # ── PaperListItem (ListItem) ─────────────────────────────────────────
-from arxiv_browser import PaperListItem
+from arxiv_browser.app import PaperListItem
 
 PaperListItem.compose
 
 # ── PaperDetails (Static) ────────────────────────────────────────────
-from arxiv_browser import PaperDetails
+from arxiv_browser.app import PaperDetails
 
 PaperDetails.on_mount
 PaperDetails.clear_cache
 
 # ── HelpScreen (ModalScreen) ─────────────────────────────────────────
-from arxiv_browser import HelpScreen
+from arxiv_browser.app import HelpScreen
 
 HelpScreen.compose
 HelpScreen.action_dismiss
 
 # ── NotesModal (ModalScreen) ─────────────────────────────────────────
-from arxiv_browser import NotesModal
+from arxiv_browser.app import NotesModal
 
 NotesModal.compose
 NotesModal.action_save
 NotesModal.action_cancel
 
 # ── TagsModal (ModalScreen) ──────────────────────────────────────────
-from arxiv_browser import TagsModal
+from arxiv_browser.app import TagsModal
 
 TagsModal.compose
 TagsModal.action_save
 TagsModal.action_cancel
 
 # ── WatchListItem (ListItem) ─────────────────────────────────────────
-from arxiv_browser import WatchListItem
+from arxiv_browser.app import WatchListItem
 
 WatchListItem.compose
 
 # ── WatchListModal (ModalScreen) ──────────────────────────────────────
-from arxiv_browser import WatchListModal
+from arxiv_browser.app import WatchListModal
 
 WatchListModal.compose
 WatchListModal.on_mount
@@ -104,26 +104,26 @@ WatchListModal.action_save
 WatchListModal.action_cancel
 
 # ── ArxivSearchModal (ModalScreen) ────────────────────────────────────
-from arxiv_browser import ArxivSearchModal
+from arxiv_browser.app import ArxivSearchModal
 
 ArxivSearchModal.compose
 ArxivSearchModal.action_search
 ArxivSearchModal.action_cancel
 
 # ── RecommendationSourceModal (ModalScreen) ───────────────────────────
-from arxiv_browser import RecommendationSourceModal
+from arxiv_browser.app import RecommendationSourceModal
 
 RecommendationSourceModal.compose
 RecommendationSourceModal.action_local
 RecommendationSourceModal.action_s2
 
 # ── RecommendationListItem (ListItem) ─────────────────────────────────
-from arxiv_browser import RecommendationListItem
+from arxiv_browser.app import RecommendationListItem
 
 RecommendationListItem.compose
 
 # ── RecommendationsScreen (ModalScreen) ───────────────────────────────
-from arxiv_browser import RecommendationsScreen
+from arxiv_browser.app import RecommendationsScreen
 
 RecommendationsScreen.compose
 RecommendationsScreen.on_mount
@@ -133,12 +133,12 @@ RecommendationsScreen.action_cursor_down
 RecommendationsScreen.action_cursor_up
 
 # ── CitationGraphListItem (ListItem) ──────────────────────────────────
-from arxiv_browser import CitationGraphListItem
+from arxiv_browser.app import CitationGraphListItem
 
 CitationGraphListItem.compose
 
 # ── CitationGraphScreen (ModalScreen) ─────────────────────────────────
-from arxiv_browser import CitationGraphScreen
+from arxiv_browser.app import CitationGraphScreen
 
 CitationGraphScreen.compose
 CitationGraphScreen.on_mount
@@ -152,14 +152,14 @@ CitationGraphScreen.action_cursor_down
 CitationGraphScreen.action_cursor_up
 
 # ── ConfirmModal (ModalScreen) ────────────────────────────────────────
-from arxiv_browser import ConfirmModal
+from arxiv_browser.app import ConfirmModal
 
 ConfirmModal.compose
 ConfirmModal.action_confirm
 ConfirmModal.action_cancel
 
 # ── ExportMenuModal (ModalScreen) ─────────────────────────────────────
-from arxiv_browser import ExportMenuModal
+from arxiv_browser.app import ExportMenuModal
 
 ExportMenuModal.compose
 ExportMenuModal.action_do_clipboard_plain
@@ -174,7 +174,7 @@ ExportMenuModal.action_do_file_csv
 ExportMenuModal.action_dismiss
 
 # ── SectionToggleModal (ModalScreen) ──────────────────────────────────
-from arxiv_browser import SectionToggleModal
+from arxiv_browser.app import SectionToggleModal
 
 SectionToggleModal.compose
 SectionToggleModal.action_toggle_a
@@ -189,7 +189,7 @@ SectionToggleModal.action_save
 SectionToggleModal.action_cancel
 
 # ── SummaryModeModal (ModalScreen) ────────────────────────────────────
-from arxiv_browser import SummaryModeModal
+from arxiv_browser.app import SummaryModeModal
 
 SummaryModeModal.compose
 SummaryModeModal.action_mode_default
@@ -199,19 +199,19 @@ SummaryModeModal.action_mode_results
 SummaryModeModal.action_mode_comparison
 
 # ── ResearchInterestsModal (ModalScreen) ──────────────────────────────
-from arxiv_browser import ResearchInterestsModal
+from arxiv_browser.app import ResearchInterestsModal
 
 ResearchInterestsModal.compose
 ResearchInterestsModal.action_save
 ResearchInterestsModal.action_cancel
 
 # ── BookmarkTabBar (Horizontal) ───────────────────────────────────────
-from arxiv_browser import BookmarkTabBar
+from arxiv_browser.app import BookmarkTabBar
 
 BookmarkTabBar.compose
 
 # ── DateNavigator (Horizontal) ──────────────────────────────────────
-from arxiv_browser import DateNavigator
+from arxiv_browser.app import DateNavigator
 
 DateNavigator.compose
 DateNavigator.on_click
