@@ -47,13 +47,13 @@ from typing import Any, Literal, overload
 import httpx
 from platformdirs import user_config_dir
 
+from arxiv_browser.models import CONFIG_APP_NAME
+
 logger = logging.getLogger(__name__)
 
 # ============================================================================
 # Constants
 # ============================================================================
-
-CONFIG_APP_NAME = "arxiv-browser"
 
 S2_API_BASE = "https://api.semanticscholar.org/graph/v1"
 S2_REC_BASE = "https://api.semanticscholar.org/recommendations/v1"

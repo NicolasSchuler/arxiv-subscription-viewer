@@ -1043,7 +1043,7 @@ class TestConfigIO:
     def test_save_and_load_roundtrip(self, tmp_path, monkeypatch):
         """Config should survive save/load roundtrip."""
         config_file = tmp_path / "config.json"
-        monkeypatch.setattr("arxiv_browser.app.get_config_path", lambda: config_file)
+        monkeypatch.setattr("arxiv_browser.config.get_config_path", lambda: config_file)
 
         config = UserConfig(bibtex_export_dir="/custom/path")
         assert save_config(config) is True
@@ -1054,7 +1054,7 @@ class TestConfigIO:
     def test_load_missing_file(self, tmp_path, monkeypatch):
         """Missing config file should return default UserConfig."""
         config_file = tmp_path / "nonexistent" / "config.json"
-        monkeypatch.setattr("arxiv_browser.app.get_config_path", lambda: config_file)
+        monkeypatch.setattr("arxiv_browser.config.get_config_path", lambda: config_file)
 
         config = load_config()
         assert config.bibtex_export_dir == ""  # default
@@ -1063,7 +1063,7 @@ class TestConfigIO:
         """Corrupted JSON should return default UserConfig."""
         config_file = tmp_path / "config.json"
         config_file.write_text("not valid json {{{{", encoding="utf-8")
-        monkeypatch.setattr("arxiv_browser.app.get_config_path", lambda: config_file)
+        monkeypatch.setattr("arxiv_browser.config.get_config_path", lambda: config_file)
 
         config = load_config()
         assert isinstance(config, UserConfig)
@@ -1071,7 +1071,7 @@ class TestConfigIO:
     def test_save_creates_directory(self, tmp_path, monkeypatch):
         """save_config should create parent directories."""
         config_file = tmp_path / "deep" / "nested" / "config.json"
-        monkeypatch.setattr("arxiv_browser.app.get_config_path", lambda: config_file)
+        monkeypatch.setattr("arxiv_browser.config.get_config_path", lambda: config_file)
 
         assert save_config(UserConfig()) is True
         assert config_file.exists()
@@ -1081,7 +1081,7 @@ class TestConfigIO:
         import json
 
         config_file = tmp_path / "config.json"
-        monkeypatch.setattr("arxiv_browser.app.get_config_path", lambda: config_file)
+        monkeypatch.setattr("arxiv_browser.config.get_config_path", lambda: config_file)
 
         save_config(UserConfig(pdf_download_dir="/test/path"))
         data = json.loads(config_file.read_text(encoding="utf-8"))
@@ -5684,7 +5684,7 @@ class TestVersionMetadataSerialization:
     def test_round_trip_with_version(self, tmp_path, monkeypatch):
         """last_checked_version survives save/load cycle."""
         config_file = tmp_path / "config.json"
-        monkeypatch.setattr("arxiv_browser.app.get_config_path", lambda: config_file)
+        monkeypatch.setattr("arxiv_browser.config.get_config_path", lambda: config_file)
 
         config = UserConfig()
         config.paper_metadata["2401.12345"] = PaperMetadata(
@@ -5701,7 +5701,7 @@ class TestVersionMetadataSerialization:
     def test_defaults_when_absent(self, tmp_path, monkeypatch):
         """Old configs without last_checked_version default to None."""
         config_file = tmp_path / "config.json"
-        monkeypatch.setattr("arxiv_browser.app.get_config_path", lambda: config_file)
+        monkeypatch.setattr("arxiv_browser.config.get_config_path", lambda: config_file)
 
         config = UserConfig()
         config.paper_metadata["2401.12345"] = PaperMetadata(
@@ -5717,7 +5717,7 @@ class TestVersionMetadataSerialization:
         import json
 
         config_file = tmp_path / "config.json"
-        monkeypatch.setattr("arxiv_browser.app.get_config_path", lambda: config_file)
+        monkeypatch.setattr("arxiv_browser.config.get_config_path", lambda: config_file)
 
         config_data = {
             "version": 1,
@@ -6761,7 +6761,7 @@ class TestRelevanceConfigSerialization:
 
     def test_round_trip(self, tmp_path, monkeypatch):
         config_file = tmp_path / "config.json"
-        monkeypatch.setattr("arxiv_browser.app.get_config_path", lambda: config_file)
+        monkeypatch.setattr("arxiv_browser.config.get_config_path", lambda: config_file)
 
         config = UserConfig(research_interests="efficient LLM inference, quantization")
         assert save_config(config) is True
@@ -6772,7 +6772,7 @@ class TestRelevanceConfigSerialization:
         import json
 
         config_file = tmp_path / "config.json"
-        monkeypatch.setattr("arxiv_browser.app.get_config_path", lambda: config_file)
+        monkeypatch.setattr("arxiv_browser.config.get_config_path", lambda: config_file)
 
         config_file.write_text(json.dumps({"version": 1}))
         loaded = load_config()
@@ -6782,7 +6782,7 @@ class TestRelevanceConfigSerialization:
         import json
 
         config_file = tmp_path / "config.json"
-        monkeypatch.setattr("arxiv_browser.app.get_config_path", lambda: config_file)
+        monkeypatch.setattr("arxiv_browser.config.get_config_path", lambda: config_file)
 
         config_file.write_text(json.dumps({"version": 1, "research_interests": 42}))
         loaded = load_config()
@@ -7951,9 +7951,9 @@ class TestLoadConfigErrorPaths:
 
         config_file = tmp_path / "config.json"
         config_file.write_text('{"session": {}}', encoding="utf-8")
-        monkeypatch.setattr("arxiv_browser.app.get_config_path", lambda: config_file)
+        monkeypatch.setattr("arxiv_browser.config.get_config_path", lambda: config_file)
 
-        with patch("arxiv_browser.app._dict_to_config", side_effect=KeyError("bad_key")):
+        with patch("arxiv_browser.config._dict_to_config", side_effect=KeyError("bad_key")):
             config = load_config()
         assert isinstance(config, UserConfig)
         assert config.bibtex_export_dir == ""
@@ -7964,9 +7964,9 @@ class TestLoadConfigErrorPaths:
 
         config_file = tmp_path / "config.json"
         config_file.write_text('{"session": {}}', encoding="utf-8")
-        monkeypatch.setattr("arxiv_browser.app.get_config_path", lambda: config_file)
+        monkeypatch.setattr("arxiv_browser.config.get_config_path", lambda: config_file)
 
-        with patch("arxiv_browser.app._dict_to_config", side_effect=TypeError("bad_type")):
+        with patch("arxiv_browser.config._dict_to_config", side_effect=TypeError("bad_type")):
             config = load_config()
         assert isinstance(config, UserConfig)
 
@@ -7976,7 +7976,7 @@ class TestLoadConfigErrorPaths:
 
         config_file = tmp_path / "config.json"
         config_file.write_text("{}", encoding="utf-8")
-        monkeypatch.setattr("arxiv_browser.app.get_config_path", lambda: config_file)
+        monkeypatch.setattr("arxiv_browser.config.get_config_path", lambda: config_file)
 
         with patch.object(type(config_file), "read_text", side_effect=OSError("Permission denied")):
             config = load_config()
@@ -7996,7 +7996,7 @@ class TestSaveConfigErrorPaths:
         from unittest.mock import patch
 
         config_file = tmp_path / "readonly" / "config.json"
-        monkeypatch.setattr("arxiv_browser.app.get_config_path", lambda: config_file)
+        monkeypatch.setattr("arxiv_browser.config.get_config_path", lambda: config_file)
 
         with patch("pathlib.Path.mkdir", side_effect=OSError("Permission denied")):
             result = save_config(UserConfig())
@@ -8008,7 +8008,7 @@ class TestSaveConfigErrorPaths:
         from unittest.mock import patch
 
         config_file = tmp_path / "config.json"
-        monkeypatch.setattr("arxiv_browser.app.get_config_path", lambda: config_file)
+        monkeypatch.setattr("arxiv_browser.config.get_config_path", lambda: config_file)
 
         created_temps = []
         original_mkstemp = __import__("tempfile").mkstemp
@@ -8032,7 +8032,7 @@ class TestSaveConfigErrorPaths:
     def test_successful_save_returns_true(self, tmp_path, monkeypatch):
         """Successful save should return True."""
         config_file = tmp_path / "config.json"
-        monkeypatch.setattr("arxiv_browser.app.get_config_path", lambda: config_file)
+        monkeypatch.setattr("arxiv_browser.config.get_config_path", lambda: config_file)
 
         result = save_config(UserConfig())
         assert result is True
