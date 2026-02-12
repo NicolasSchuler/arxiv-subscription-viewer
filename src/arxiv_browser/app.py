@@ -675,7 +675,7 @@ def render_progress_bar(current: int, total: int, width: int = 10) -> str:
     """Render a Unicode progress bar like ████░░░░░░."""
     if total <= 0:
         return "░" * width
-    filled = min(width, round(current / total * width))
+    filled = max(0, min(width, round(current / total * width)))
     return "█" * filled + "░" * (width - filled)
 
 
