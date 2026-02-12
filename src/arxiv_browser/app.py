@@ -148,6 +148,8 @@ __all__ = [
     "THEME_TAG_NAMESPACE_COLORS",
     # Main application
     "ArxivBrowser",
+    "COMMAND_PALETTE_COMMANDS",
+    "CommandPaletteModal",
     # Core data models
     "Paper",
     "PaperMetadata",
@@ -248,12 +250,12 @@ FOOTER_CONTEXTS: dict[str, list[tuple[str, str]]] = {
     ],
     "selection": [
         ("o", "open"),
-        ("P", "pdf"),
+        ("r", "read"),
+        ("x", "star"),
+        ("t", "tags"),
         ("E", "export"),
         ("d", "download"),
         ("u", "clear"),
-        ("a", "all"),
-        ("space", "toggle"),
         ("?", "help"),
     ],
     "search": [
@@ -270,6 +272,58 @@ FOOTER_CONTEXTS: dict[str, list[tuple[str, str]]] = {
         ("?", "help"),
     ],
 }
+
+# Command palette registry: (name, description, key_hint, action_name)
+# action_name maps to ArxivBrowser.action_* methods (or "" for non-action commands)
+COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
+    # Navigation
+    ("Search Papers", "Filter papers by text, category, or tag", "/", "toggle_search"),
+    ("Search arXiv API", "Search all of arXiv online", "A", "arxiv_search"),
+    ("Previous Date", "Navigate to older date file", "[", "prev_date"),
+    ("Next Date", "Navigate to newer date file", "]", "next_date"),
+    # Paper actions
+    ("Open in Browser", "Open selected paper(s) in web browser", "o", "open_url"),
+    ("Open PDF", "Open selected paper(s) as PDF", "P", "open_pdf"),
+    ("Download PDF", "Download PDF(s) to local folder", "d", "download_pdf"),
+    ("Copy to Clipboard", "Copy paper info to clipboard", "c", "copy_selected"),
+    # Metadata
+    ("Toggle Read", "Mark paper(s) as read/unread", "r", "toggle_read"),
+    ("Toggle Star", "Star/unstar paper(s)", "x", "toggle_star"),
+    ("Edit Notes", "Add or edit notes for current paper", "n", "edit_notes"),
+    ("Edit Tags", "Add or edit tags (bulk when selected)", "t", "edit_tags"),
+    # Selection
+    ("Select All", "Select all visible papers", "a", "select_all"),
+    ("Clear Selection", "Deselect all papers", "u", "clear_selection"),
+    ("Toggle Selection", "Toggle selection on current paper", "Space", "toggle_select"),
+    # Sort & Filter
+    ("Cycle Sort", "Cycle sort: title/date/arxiv_id/citations/trending/relevance", "s", "cycle_sort"),
+    ("Toggle Watch Filter", "Show only watched papers", "w", "toggle_watch_filter"),
+    ("Manage Watch List", "Add/remove watch list patterns", "W", "manage_watch_list"),
+    ("Toggle Preview", "Show/hide abstract preview in list", "p", "toggle_preview"),
+    # Export
+    ("Export Menu", "Export as BibTeX, Markdown, RIS, or CSV", "E", "export_menu"),
+    # Enrichment
+    ("Fetch S2 Data", "Fetch Semantic Scholar data for current paper", "e", "fetch_s2"),
+    ("Toggle S2", "Enable/disable Semantic Scholar enrichment", "Ctrl+e", "toggle_s2"),
+    ("Toggle HuggingFace", "Enable/disable HuggingFace trending", "Ctrl+h", "toggle_hf"),
+    ("Check Versions", "Check starred papers for arXiv updates", "V", "check_versions"),
+    ("Citation Graph", "Explore citation graph (S2-powered)", "G", "citation_graph"),
+    # AI features
+    ("AI Summary", "Generate LLM-powered paper summary", "Ctrl+s", "generate_summary"),
+    ("Score Relevance", "LLM-score papers by research interests", "L", "score_relevance"),
+    ("Edit Interests", "Edit research interests for relevance scoring", "Ctrl+l", "edit_interests"),
+    # Recommendations
+    ("Similar Papers", "Find similar papers (local or S2)", "R", "show_similar"),
+    # Bookmarks
+    ("Add Bookmark", "Save current search as bookmark", "Ctrl+b", "add_bookmark"),
+    # UI
+    ("Cycle Theme", "Switch between Monokai/Catppuccin/Solarized", "Ctrl+t", "cycle_theme"),
+    ("Toggle Sections", "Show/hide detail pane sections", "Ctrl+d", "toggle_sections"),
+    ("Help", "Show all keyboard shortcuts", "?", "show_help"),
+    # Vim marks
+    ("Set Mark", "Set a named mark (a-z) at current position", "m", "start_mark"),
+    ("Jump to Mark", "Jump to a named mark (a-z)", "'", "start_goto_mark"),
+]
 
 # Default color for unknown categories (Monokai gray)
 DEFAULT_CATEGORY_COLOR = "#888888"
@@ -5091,6 +5145,106 @@ class SectionToggleModal(ModalScreen[list[str] | None]):
         self.dismiss(None)
 
 
+class CommandPaletteModal(ModalScreen[str]):
+    """Fuzzy-searchable command palette for discovering and executing actions."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Close"),
+    ]
+
+    DEFAULT_CSS = """
+    CommandPaletteModal {
+        align: center middle;
+    }
+
+    CommandPaletteModal > Vertical {
+        width: 70;
+        max-height: 28;
+        background: $th-panel;
+        border: thick $th-accent;
+        padding: 1 2;
+    }
+
+    CommandPaletteModal #palette-search {
+        margin-bottom: 1;
+    }
+
+    CommandPaletteModal #palette-results {
+        height: 1fr;
+    }
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._commands = COMMAND_PALETTE_COMMANDS
+        self._filtered: list[tuple[str, str, str, str]] = list(self._commands)
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label(f"[bold {THEME_COLORS['accent']}]Command Palette[/]")
+            yield Input(placeholder="Type to search commands...", id="palette-search")
+            yield OptionList(id="palette-results")
+
+    def on_mount(self) -> None:
+        self._populate_results("")
+        self.query_one("#palette-search", Input).focus()
+
+    @on(Input.Changed, "#palette-search")
+    def _on_search_changed(self, event: Input.Changed) -> None:
+        self._populate_results(event.value.strip())
+
+    def _populate_results(self, query: str) -> None:
+        """Populate the results list, optionally filtered by fuzzy query."""
+        option_list = self.query_one("#palette-results", OptionList)
+        option_list.clear_options()
+
+        if query:
+            scored: list[tuple[float, tuple[str, str, str, str]]] = []
+            for cmd in self._commands:
+                name, desc, _, _ = cmd
+                score = max(
+                    fuzz.partial_ratio(query.lower(), name.lower()),
+                    fuzz.partial_ratio(query.lower(), desc.lower()),
+                )
+                if score >= 40:
+                    scored.append((score, cmd))
+            scored.sort(key=lambda x: x[0], reverse=True)
+            self._filtered = [cmd for _, cmd in scored]
+        else:
+            self._filtered = list(self._commands)
+
+        accent = THEME_COLORS["accent"]
+        muted = THEME_COLORS["muted"]
+        for name, desc, key_hint, action in self._filtered:
+            safe_name = escape_rich_text(name)
+            safe_desc = escape_rich_text(desc)
+            safe_key = escape_rich_text(key_hint)
+            markup = (
+                f"[bold]{safe_name}[/]  [{muted}]{safe_desc}[/]"
+                f"\n  [{accent}]{safe_key}[/]"
+            )
+            option_list.add_option(Option(markup, id=action))
+
+        if option_list.option_count > 0:
+            option_list.highlighted = 0
+
+    @on(OptionList.OptionSelected, "#palette-results")
+    def _on_option_selected(self, event: OptionList.OptionSelected) -> None:
+        if event.option_id is not None:
+            self.dismiss(str(event.option_id))
+
+    def action_cancel(self) -> None:
+        self.dismiss("")
+
+    def key_enter(self) -> None:
+        """Execute the currently highlighted command."""
+        option_list = self.query_one("#palette-results", OptionList)
+        idx = option_list.highlighted
+        if idx is not None and 0 <= idx < len(self._filtered):
+            _, _, _, action = self._filtered[idx]
+            self.dismiss(action)
+
+
 class ContextFooter(Static):
     """Context-sensitive footer showing relevant keybindings."""
 
@@ -5742,6 +5896,8 @@ class ArxivBrowser(App):
         Binding("bracketright", "next_date", "Newer", show=False),
         # Help overlay
         Binding("question_mark", "show_help", "Help (?)", show=False),
+        # Command palette
+        Binding("ctrl+p", "command_palette", "Commands", show=False),
     ]
 
     def __init__(
@@ -8104,6 +8260,23 @@ class ArxivBrowser(App):
         """Show the help overlay with all keyboard shortcuts."""
         self.push_screen(HelpScreen())
 
+    def action_command_palette(self) -> None:
+        """Open the fuzzy-searchable command palette."""
+
+        def _on_command_selected(action_name: str | None) -> None:
+            if not action_name:
+                return
+            method = getattr(self, f"action_{action_name}", None)
+            if method is not None:
+                result = method()
+                # Support async action methods
+                if asyncio.iscoroutine(result):
+                    self._track_task(result)
+            else:
+                logger.warning("Unknown command palette action: %s", action_name)
+
+        self.push_screen(CommandPaletteModal(), _on_command_selected)
+
     # ========================================================================
     # LLM Summary Generation
     # ========================================================================
@@ -8705,6 +8878,7 @@ class ArxivBrowser(App):
         if self._history_files and len(self._history_files) > 1:
             bindings.append(("[/]", "dates"))
         bindings.append(("E", "export"))
+        bindings.append(("^p", "commands"))
         bindings.append(("?", "help"))
         return bindings
 
