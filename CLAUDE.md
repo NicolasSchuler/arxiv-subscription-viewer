@@ -329,13 +329,16 @@ GitHub Actions workflow (`.github/workflows/ci-cd.yml`):
 
 ### Release process
 
+**Important:** Push the commit and tag separately. If you push both at once (`git push origin main --tags`), GitHub may coalesce them into a single branch-triggered run and skip the tag-triggered publish job.
+
 ```bash
 uv version --bump minor           # bumps in pyproject.toml
 uv sync                           # regenerates uv.lock
 git add pyproject.toml uv.lock
 git commit -m "release: v0.2.0"
 git tag v0.2.0
-git push origin main --tags       # CI runs → CD publishes to PyPI
+git push origin main              # CI runs on branch push
+git push origin v0.2.0            # CD publishes to PyPI on tag push
 ```
 
 ## Key Bindings Reference
