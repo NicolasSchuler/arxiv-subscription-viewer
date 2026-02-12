@@ -62,7 +62,7 @@ src/arxiv_browser/
 - **`src/arxiv_browser/semantic_scholar.py`** (~630 lines): S2 API client, `SemanticScholarPaper` / `CitationEntry` dataclasses, SQLite cache for papers, recommendations, and citation graphs
 - **`src/arxiv_browser/huggingface.py`** (~300 lines): HuggingFace Daily Papers API client, `HuggingFacePaper` dataclass, SQLite cache
 
-### Test Suite (~620 tests across 3 files)
+### Test Suite (~920 tests across 3 files + conftest.py)
 
 - **`test_arxiv_browser.py`** (~5800 lines): Core parsing, similarity, export, config, UI integration
 - **`test_semantic_scholar.py`** (~990 lines): S2 response parsing, serialization, cache CRUD, API fetch functions, citation graph
@@ -75,7 +75,7 @@ src/arxiv_browser/
 - Pre-compile regex patterns at module level (not inside functions)
 - Use `@lru_cache` for expensive repeated operations
 - Constants in SCREAMING_SNAKE_CASE at module level
-- `__all__` defines public API (58 exports)
+- `__all__` defines public API (66 exports)
 - Module-level logger for debug output
 
 ## Key Patterns
@@ -373,7 +373,10 @@ L       - Score papers by relevance (LLM-powered)
 Ctrl+l  - Edit research interests
 1-9     - Jump to bookmark
 Ctrl+b  - Add current search as bookmark
+Ctrl+t  - Cycle color theme (Monokai / Catppuccin / Solarized)
+Ctrl+d  - Toggle detail pane sections
 [       - Go to previous (older) date (history mode)
 ]       - Go to next (newer) date (history mode)
+?       - Show help overlay
 q       - Quit
 ```

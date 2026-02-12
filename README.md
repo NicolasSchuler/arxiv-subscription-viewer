@@ -46,9 +46,10 @@ A terminal user interface (TUI) for browsing arXiv papers from email subscriptio
 - Date-aware session restore
 
 ### Visual
-- Monokai color theme with category-specific highlighting
+- Three color themes: Monokai (default), Catppuccin, Solarized Dark — cycle with `Ctrl+t`
+- Category-specific highlighting and watch list highlighting
 - LaTeX cleaning for readable display
-- Watch list highlighting for tracked authors/keywords
+- Collapsible detail pane sections (`Ctrl+d`)
 
 ## Installation
 
@@ -75,11 +76,28 @@ cd arxiv-subscription-viewer
 uv sync
 ```
 
+## Quick Start
+
+```bash
+# 1. Install
+pip install arxiv-subscription-viewer
+
+# 2. Place an arXiv email file in history/ (or use -i)
+mkdir -p history
+# Save your arXiv email as history/2026-02-12.txt
+
+# 3. Run
+arxiv-viewer
+```
+
 ## Usage
 
 ```bash
 # History mode: auto-loads newest file from history/
 arxiv-viewer
+
+# Show help
+arxiv-viewer --help
 
 # List available dates in history
 arxiv-viewer --list-dates
@@ -134,33 +152,33 @@ uv run python -m arxiv_browser
 | `W` | Manage watch list |
 | `p` | Toggle abstract preview |
 
-### Export
+### Export & Download
 | Key | Action |
 |-----|--------|
-| `b` | Copy as BibTeX |
-| `B` | Export BibTeX to file (for Zotero) |
+| `E` | Export menu (BibTeX, Markdown, RIS, CSV + clipboard/file) |
 | `d` | Download PDF(s) to local folder |
-| `M` | Copy as Markdown |
-| `E` | Export menu (RIS, CSV, Markdown table + more) |
 
-### Marks, Enrichment & Similar Papers
+### Marks & Enrichment
 | Key | Action |
 |-----|--------|
 | `m` | Set mark (then press a-z) |
 | `'` | Jump to mark (then press a-z) |
-| `R` | Show similar papers |
+| `R` | Show similar papers (local or S2-powered) |
 | `G` | Explore citation graph (S2-powered, drill-down) |
 | `V` | Check starred papers for version updates |
 | `e` | Fetch Semantic Scholar data for current paper |
 | `Ctrl+e` | Toggle Semantic Scholar enrichment on/off |
-| `Ctrl+s` | Generate AI summary |
-| `Ctrl+h` | Toggle HuggingFace trending |
+| `Ctrl+s` | Generate AI summary (mode selector) |
+| `Ctrl+h` | Toggle HuggingFace trending on/off |
 | `L` | Score papers by relevance (LLM-powered) |
 | `Ctrl+l` | Edit research interests |
 
 ### General
 | Key | Action |
 |-----|--------|
+| `Ctrl+t` | Cycle color theme (Monokai / Catppuccin / Solarized) |
+| `Ctrl+d` | Toggle detail pane sections |
+| `?` | Show help overlay |
 | `q` | Quit |
 
 ## Search Filters
@@ -171,9 +189,15 @@ Use these prefixes in the search box:
 |--------|---------|-------------|
 | `cat:` | `cat:cs.AI` | Filter by category |
 | `tag:` | `tag:to-read` | Filter by custom tag |
+| `author:` | `author:hinton` | Filter by author name |
+| `title:` | `title:transformer` | Filter by title substring |
+| `abstract:` | `abstract:attention` | Filter by abstract substring |
 | `unread` | `unread` | Show only unread papers |
 | `starred` | `starred` | Show only starred papers |
 | (text) | `transformer` | Fuzzy search title/authors |
+| `"..."` | `"large language"` | Match exact phrase |
+
+Combine terms with boolean operators: `cat:cs.AI AND author:hinton`, `unread OR starred`, `NOT cat:math`.
 
 ## History Mode
 
