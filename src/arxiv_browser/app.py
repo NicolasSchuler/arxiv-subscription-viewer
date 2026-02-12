@@ -1255,7 +1255,8 @@ def import_metadata(
                 # Merge: keep existing, add new tags, overwrite notes only if empty
                 import_tags = meta_dict.get("tags")
                 if import_tags and isinstance(import_tags, list):
-                    merged_tags = list(dict.fromkeys(existing.tags + import_tags))
+                    valid_tags = [t for t in import_tags if isinstance(t, str)]
+                    merged_tags = list(dict.fromkeys(existing.tags + valid_tags))
                     existing.tags = merged_tags
                 if not existing.notes and meta_dict.get("notes"):
                     existing.notes = meta_dict["notes"]
@@ -1267,11 +1268,15 @@ def import_metadata(
                 config.paper_metadata[arxiv_id] = PaperMetadata(
                     arxiv_id=arxiv_id,
                     notes=str(meta_dict.get("notes", "")),
-                    tags=list(meta_dict["tags"]) if isinstance(meta_dict.get("tags"), list) else [],
+                    tags=[t for t in meta_dict["tags"] if isinstance(t, str)]
+                    if isinstance(meta_dict.get("tags"), list)
+                    else [],
                     is_read=bool(meta_dict.get("is_read", False)),
                     starred=bool(meta_dict.get("starred", False)),
                     last_checked_version=(
-                        lcv if isinstance(lcv := meta_dict.get("last_checked_version"), int) else None
+                        lcv
+                        if isinstance(lcv := meta_dict.get("last_checked_version"), int)
+                        else None
                     ),
                 )
             papers_imported += 1
@@ -1286,6 +1291,11 @@ def import_metadata(
             pattern = str(entry_dict.get("pattern", ""))
             match_type = str(entry_dict.get("match_type", "keyword"))
             if match_type not in WATCH_MATCH_TYPES:
+                logger.warning(
+                    "Unknown watch match_type %r for pattern %r, defaulting to 'keyword'",
+                    match_type,
+                    pattern,
+                )
                 match_type = "keyword"
             if not pattern or (pattern, match_type) in existing_patterns:
                 continue
@@ -1567,6 +1577,19 @@ def build_auto_tag_prompt(paper: Paper, existing_tags: list[str]) -> str:
     )
 
 
+def _extract_tags_from_json(data: Any) -> list[str] | None:
+    """Extract and normalize tags from a parsed JSON object.
+
+    Returns lowercased, stripped tag strings if data contains a valid "tags" list,
+    or None otherwise.
+    """
+    if isinstance(data, dict) and "tags" in data:
+        tags = data["tags"]
+        if isinstance(tags, list):
+            return [str(t).strip().lower() for t in tags if str(t).strip()]
+    return None
+
+
 def _parse_auto_tag_response(text: str) -> list[str] | None:
     """Parse the LLM's auto-tag response.
 
@@ -1581,11 +1604,9 @@ def _parse_auto_tag_response(text: str) -> list[str] | None:
 
     # Strategy 1: direct JSON parse
     try:
-        data = json.loads(stripped)
-        if isinstance(data, dict) and "tags" in data:
-            tags = data["tags"]
-            if isinstance(tags, list):
-                return [str(t).strip().lower() for t in tags if str(t).strip()]
+        result = _extract_tags_from_json(json.loads(stripped))
+        if result is not None:
+            return result
     except (json.JSONDecodeError, ValueError, TypeError):
         pass
 
@@ -1593,11 +1614,9 @@ def _parse_auto_tag_response(text: str) -> list[str] | None:
     fence_match = _MARKDOWN_FENCE_RE.search(stripped)
     if fence_match:
         try:
-            data = json.loads(fence_match.group(1))
-            if isinstance(data, dict) and "tags" in data:
-                tags = data["tags"]
-                if isinstance(tags, list):
-                    return [str(t).strip().lower() for t in tags if str(t).strip()]
+            result = _extract_tags_from_json(json.loads(fence_match.group(1)))
+            if result is not None:
+                return result
         except (json.JSONDecodeError, ValueError, TypeError):
             pass
 
@@ -1605,7 +1624,6 @@ def _parse_auto_tag_response(text: str) -> list[str] | None:
     tags_match = _AUTO_TAG_TAGS_RE.search(stripped)
     if tags_match:
         raw_items = tags_match.group(1)
-        # Extract quoted strings
         items = re.findall(r'"([^"]*)"', raw_items)
         if items:
             return [t.strip().lower() for t in items if t.strip()]
@@ -2169,7 +2187,8 @@ def build_daily_digest(
 ) -> str:
     """Build a concise daily digest string summarizing the day's papers.
 
-    Returns a multi-line summary with category breakdown, watch matches, and read stats.
+    Returns a single-line summary with category breakdown, watch matches, and read stats
+    separated by " · ".
     """
     if not papers:
         return "No papers loaded"
@@ -2178,7 +2197,6 @@ def build_daily_digest(
     cat_counts: dict[str, int] = {}
     for paper in papers:
         primary = paper.categories.split()[0] if paper.categories else "unknown"
-        # Use top-level category (e.g., cs.AI → cs.AI)
         cat_counts[primary] = cat_counts.get(primary, 0) + 1
     top_cats = sorted(cat_counts.items(), key=lambda x: x[1], reverse=True)[:5]
     cat_parts = [f"{cat} ({n})" for cat, n in top_cats]
@@ -2195,12 +2213,8 @@ def build_daily_digest(
 
     # Read/starred stats
     if metadata:
-        read = sum(
-            1 for p in papers if metadata.get(p.arxiv_id, PaperMetadata(arxiv_id="")).is_read
-        )
-        starred = sum(
-            1 for p in papers if metadata.get(p.arxiv_id, PaperMetadata(arxiv_id="")).starred
-        )
+        read = sum(1 for p in papers if (m := metadata.get(p.arxiv_id)) and m.is_read)
+        starred = sum(1 for p in papers if (m := metadata.get(p.arxiv_id)) and m.starred)
         if read or starred:
             parts = []
             if read:
@@ -5496,18 +5510,13 @@ class PaperChatScreen(ModalScreen[None]):
 
     def on_mount(self) -> None:
         self.query_one("#chat-input", Input).focus()
+        hint = (
+            "Paper content loaded. Ask anything!"
+            if self._paper_content
+            else "Using abstract only (HTML not available). Ask anything!"
+        )
         messages = self.query_one("#chat-messages", VerticalScroll)
-        if self._paper_content:
-            messages.mount(
-                Static("[dim]Paper content loaded. Ask anything![/]", classes="chat-system")
-            )
-        else:
-            messages.mount(
-                Static(
-                    "[dim]Using abstract only (HTML not available). Ask anything![/]",
-                    classes="chat-system",
-                )
-            )
+        messages.mount(Static(f"[dim]{hint}[/]", classes="chat-system"))
 
     @on(Input.Submitted, "#chat-input")
     def on_question_submitted(self, event: Input.Submitted) -> None:
@@ -5522,11 +5531,12 @@ class PaperChatScreen(ModalScreen[None]):
 
     def _add_message(self, role: str, text: str) -> None:
         self._history.append((role, text))
+        safe = escape_rich_text(text)
         messages = self.query_one("#chat-messages", VerticalScroll)
         if role == "user":
-            messages.mount(Static(f"[bold green]You:[/] {text}", classes="chat-user"))
+            messages.mount(Static(f"[bold green]You:[/] {safe}", classes="chat-user"))
         else:
-            messages.mount(Static(f"[bold cyan]AI:[/] {text}", classes="chat-assistant"))
+            messages.mount(Static(f"[bold cyan]AI:[/] {safe}", classes="chat-assistant"))
         messages.scroll_end(animate=False)
 
     async def _ask_llm(self, question: str) -> None:
@@ -5538,13 +5548,13 @@ class PaperChatScreen(ModalScreen[None]):
                 categories=self._paper.categories,
                 paper_content=self._paper_content or self._paper.abstract or "",
             )
-            # Append conversation history
-            history_text = ""
-            for role, text in self._history[:-1]:  # Exclude current question
-                prefix = "User" if role == "user" else "Assistant"
-                history_text += f"\n{prefix}: {text}"
-            if history_text:
-                context += f"\n\nConversation so far:{history_text}"
+            # Append conversation history (exclude current question)
+            if self._history[:-1]:
+                history_lines = [
+                    f"{'User' if role == 'user' else 'Assistant'}: {text}"
+                    for role, text in self._history[:-1]
+                ]
+                context += "\n\nConversation so far:\n" + "\n".join(history_lines)
             context += f"\n\nUser: {question}\nAssistant:"
 
             shell_command = _build_llm_shell_command(self._command_template, context)
@@ -5574,6 +5584,7 @@ class PaperChatScreen(ModalScreen[None]):
             else:
                 self._add_message("assistant", "[dim]Empty response from LLM.[/]")
         except Exception as e:
+            logger.warning("Chat LLM call failed: %s", e, exc_info=True)
             self._add_message("assistant", f"[red]Error: {e}[/]")
         finally:
             self._waiting = False
@@ -6870,10 +6881,7 @@ class ArxivBrowser(App):
             pass
         # Update list option if showing preview
         if self._show_abstract_preview:
-            for i, paper in enumerate(self.filtered_papers):
-                if paper.arxiv_id == arxiv_id:
-                    self._update_option_at_index(i)
-                    break
+            self._update_option_for_paper(arxiv_id)
 
     def _save_session_state(self) -> None:
         """Save current session state to config.
@@ -8591,18 +8599,21 @@ class ArxivBrowser(App):
         except (OSError, ValueError) as exc:
             self.notify(f"Import failed: {exc}", title="Import", severity="error")
             return
-        save_config(self._config)
+        if not save_config(self._config):
+            self.notify(
+                "Import applied but failed to save to disk",
+                title="Import",
+                severity="warning",
+            )
         self._compute_watched_papers()
         self._refresh_list_view()
-        parts = [
-            label
-            for count, label in [
-                (papers_n, f"{papers_n} papers"),
-                (watch_n, f"{watch_n} watch entries"),
-                (bk_n, f"{bk_n} bookmarks"),
-            ]
-            if count
-        ]
+        parts = []
+        if papers_n:
+            parts.append(f"{papers_n} papers")
+        if watch_n:
+            parts.append(f"{watch_n} watch entries")
+        if bk_n:
+            parts.append(f"{bk_n} bookmarks")
         summary = ", ".join(parts) or "nothing new"
         self.notify(f"Imported {summary} from {filepath.name}", title="Import")
 
@@ -8898,10 +8909,13 @@ class ArxivBrowser(App):
                 return
             method = getattr(self, f"action_{action_name}", None)
             if method is not None:
-                result = method()
-                # Support async action methods
-                if asyncio.iscoroutine(result):
-                    self._track_task(result)
+                try:
+                    result = method()
+                    if asyncio.iscoroutine(result):
+                        self._track_task(result)
+                except Exception:
+                    logger.warning("Command palette action %s failed", action_name, exc_info=True)
+                    self.notify(f"Command failed: {action_name}", title="Error", severity="error")
             else:
                 logger.warning("Unknown command palette action: %s", action_name)
 
@@ -9277,12 +9291,16 @@ class ArxivBrowser(App):
             self._scoring_progress = None
             self._update_footer()
 
-    def _update_relevance_badge(self, arxiv_id: str) -> None:
-        """Update a single list item's relevance badge."""
+    def _update_option_for_paper(self, arxiv_id: str) -> None:
+        """Update the list option display for a specific paper by arXiv ID."""
         for i, paper in enumerate(self.filtered_papers):
             if paper.arxiv_id == arxiv_id:
                 self._update_option_at_index(i)
                 break
+
+    def _update_relevance_badge(self, arxiv_id: str) -> None:
+        """Update a single list item's relevance badge."""
+        self._update_option_for_paper(arxiv_id)
 
     # ========================================================================
     # Auto-Tagging
@@ -9298,25 +9316,24 @@ class ArxivBrowser(App):
             self.notify("Auto-tagging already in progress", title="Auto-Tag")
             return
 
+        taxonomy = self._collect_all_tags()
+        self._auto_tag_active = True
+
         if self.selected_ids:
-            # Batch auto-tag selected papers
             papers = [p for p in self.all_papers if p.arxiv_id in self.selected_ids]
             if not papers:
+                self._auto_tag_active = False
                 self.notify("No selected papers found", title="Auto-Tag", severity="warning")
                 return
-            self._auto_tag_active = True
             self._update_footer()
-            taxonomy = self._collect_all_tags()
             self._track_task(self._auto_tag_batch_async(papers, command_template, taxonomy))
         else:
-            # Single paper auto-tag
             paper = self._get_current_paper()
             if not paper:
+                self._auto_tag_active = False
                 self.notify("No paper selected", title="Auto-Tag", severity="warning")
                 return
-            taxonomy = self._collect_all_tags()
             current_tags = (self._tags_for(paper.arxiv_id) or [])[:]
-            self._auto_tag_active = True
             self._track_task(
                 self._auto_tag_single_async(paper, command_template, taxonomy, current_tags)
             )
@@ -9332,6 +9349,7 @@ class ArxivBrowser(App):
         try:
             suggested = await self._call_auto_tag_llm(paper, command_template, taxonomy)
             if suggested is None:
+                self.notify("Auto-tagging failed", title="Auto-Tag", severity="warning")
                 return
 
             # Show modal for user to accept/modify
@@ -9339,6 +9357,9 @@ class ArxivBrowser(App):
                 AutoTagSuggestModal(paper.title, suggested, current_tags),
                 lambda tags: self._on_auto_tag_accepted(tags, paper.arxiv_id),
             )
+        except Exception:
+            logger.warning("Auto-tag single failed for %s", paper.arxiv_id, exc_info=True)
+            self.notify("Auto-tagging failed", title="Auto-Tag", severity="error")
         finally:
             self._auto_tag_active = False
             self._update_footer()
@@ -9385,8 +9406,16 @@ class ArxivBrowser(App):
             self.notify(msg, title="Auto-Tag")
 
         except Exception:
-            logger.warning("Auto-tag batch failed", exc_info=True)
-            self.notify("Auto-tagging failed", title="Auto-Tag", severity="error")
+            logger.error("Auto-tag batch failed after tagging %d papers", tagged, exc_info=True)
+            if tagged > 0:
+                save_config(self._config)
+            self.notify(
+                f"Auto-tagging failed ({tagged} tagged before error)"
+                if tagged
+                else "Auto-tagging failed",
+                title="Auto-Tag",
+                severity="error",
+            )
         finally:
             self._auto_tag_active = False
             self._auto_tag_progress = None
@@ -9457,11 +9486,7 @@ class ArxivBrowser(App):
         meta.tags = tags
         save_config(self._config)
 
-        # Refresh display
-        for i, paper in enumerate(self.filtered_papers):
-            if paper.arxiv_id == arxiv_id:
-                self._update_option_at_index(i)
-                break
+        self._update_option_for_paper(arxiv_id)
         self._refresh_detail_pane()
         self.notify(f"Tags updated: {', '.join(tags)}", title="Auto-Tag")
 
