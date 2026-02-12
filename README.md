@@ -8,7 +8,7 @@
   A terminal user interface (TUI) for browsing arXiv papers from email subscription archives.
 </p>
 
-![arXiv Subscription Viewer Screenshot](screenshot.svg)
+![arXiv Subscription Viewer Screenshot](docs/screenshot.svg)
 
 ## Features
 

@@ -62,11 +62,11 @@ src/arxiv_browser/
 - **`src/arxiv_browser/semantic_scholar.py`** (~630 lines): S2 API client, `SemanticScholarPaper` / `CitationEntry` dataclasses, SQLite cache for papers, recommendations, and citation graphs
 - **`src/arxiv_browser/huggingface.py`** (~300 lines): HuggingFace Daily Papers API client, `HuggingFacePaper` dataclass, SQLite cache
 
-### Test Suite (~1027 tests across 3 files + conftest.py)
+### Test Suite (~1027 tests across 3 files + conftest.py in `tests/`)
 
-- **`test_arxiv_browser.py`** (~5800 lines): Core parsing, similarity, export, config, UI integration
-- **`test_semantic_scholar.py`** (~990 lines): S2 response parsing, serialization, cache CRUD, API fetch functions, citation graph
-- **`test_huggingface.py`** (~460 lines): HF response parsing, cache, API fetch functions
+- **`tests/test_arxiv_browser.py`** (~5800 lines): Core parsing, similarity, export, config, UI integration
+- **`tests/test_semantic_scholar.py`** (~990 lines): S2 response parsing, serialization, cache CRUD, API fetch functions, citation graph
+- **`tests/test_huggingface.py`** (~460 lines): HF response parsing, cache, API fetch functions
 
 ## Code Style
 
@@ -138,7 +138,7 @@ uv run pytest -v
 uv run pytest --cov --cov-report=term-missing
 
 # Run specific test class
-uv run pytest -v test_arxiv_browser.py::TestCleanLatex
+uv run pytest -v tests/test_arxiv_browser.py::TestCleanLatex
 
 # Run tests matching pattern
 uv run pytest -k "bibtex"

@@ -61,7 +61,7 @@ dev = [
 packages = ["src/arxiv_browser"]
 
 [tool.pytest.ini_options]
-testpaths = ["."]
+testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
@@ -97,7 +97,7 @@ indent-style = "space"
 [tool.pyright]
 typeCheckingMode = "basic"
 include = ["src/arxiv_browser"]
-exclude = ["test_*.py", "conftest.py", ".venv"]
+exclude = ["tests", ".venv"]
 reportMissingTypeStubs = false
 reportUnusedImport = false
 
@@ -120,7 +120,7 @@ directory = "htmlcov"
 
 # ── Deptry ────────────────────────────────────────────────────────────
 [tool.deptry]
-extend_exclude = [".venv", "test_.*", "conftest\\.py"]
+extend_exclude = [".venv", "tests"]
 
 [tool.deptry.per_rule_ignores]
 DEP003 = ["rich"]  # rich is a transitive dep of textual, intentionally used directly
