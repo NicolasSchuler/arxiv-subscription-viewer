@@ -1253,8 +1253,9 @@ def import_metadata(
             existing = config.paper_metadata.get(arxiv_id)
             if existing and merge:
                 # Merge: keep existing, add new tags, overwrite notes only if empty
-                if meta_dict.get("tags"):
-                    merged_tags = list(dict.fromkeys(existing.tags + meta_dict["tags"]))
+                import_tags = meta_dict.get("tags")
+                if import_tags and isinstance(import_tags, list):
+                    merged_tags = list(dict.fromkeys(existing.tags + import_tags))
                     existing.tags = merged_tags
                 if not existing.notes and meta_dict.get("notes"):
                     existing.notes = meta_dict["notes"]
@@ -1266,10 +1267,12 @@ def import_metadata(
                 config.paper_metadata[arxiv_id] = PaperMetadata(
                     arxiv_id=arxiv_id,
                     notes=str(meta_dict.get("notes", "")),
-                    tags=list(meta_dict.get("tags", [])),
+                    tags=list(meta_dict["tags"]) if isinstance(meta_dict.get("tags"), list) else [],
                     is_read=bool(meta_dict.get("is_read", False)),
                     starred=bool(meta_dict.get("starred", False)),
-                    last_checked_version=meta_dict.get("last_checked_version"),
+                    last_checked_version=(
+                        lcv if isinstance(lcv := meta_dict.get("last_checked_version"), int) else None
+                    ),
                 )
             papers_imported += 1
 
@@ -1282,6 +1285,8 @@ def import_metadata(
                 continue
             pattern = str(entry_dict.get("pattern", ""))
             match_type = str(entry_dict.get("match_type", "keyword"))
+            if match_type not in WATCH_MATCH_TYPES:
+                match_type = "keyword"
             if not pattern or (pattern, match_type) in existing_patterns:
                 continue
             config.watch_list.append(
