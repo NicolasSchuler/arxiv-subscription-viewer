@@ -160,6 +160,7 @@ __all__ = [
     "WatchListEntry",
     "build_arxiv_search_query",
     "build_auto_tag_prompt",
+    "build_daily_digest",
     "build_highlight_terms",
     "build_llm_prompt",
     "build_relevance_prompt",
@@ -2023,6 +2024,54 @@ def count_papers_in_file(path: Path) -> int:
         return len(_ARXIV_ID_PATTERN.findall(content))
     except OSError:
         return 0
+
+
+def build_daily_digest(
+    papers: list[Paper],
+    watched_ids: set[str] | None = None,
+    metadata: dict[str, PaperMetadata] | None = None,
+) -> str:
+    """Build a concise daily digest string summarizing the day's papers.
+
+    Returns a multi-line summary with category breakdown, watch matches, and read stats.
+    """
+    if not papers:
+        return "No papers loaded"
+
+    # Category breakdown (top 5)
+    cat_counts: dict[str, int] = {}
+    for paper in papers:
+        primary = paper.categories.split()[0] if paper.categories else "unknown"
+        # Use top-level category (e.g., cs.AI → cs.AI)
+        cat_counts[primary] = cat_counts.get(primary, 0) + 1
+    top_cats = sorted(cat_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+    cat_parts = [f"{cat} ({n})" for cat, n in top_cats]
+
+    lines = [f"{len(papers)} papers"]
+
+    if cat_parts:
+        lines.append("Top: " + ", ".join(cat_parts))
+
+    # Watch list matches
+    if watched_ids:
+        n = len(watched_ids)
+        lines.append(f"{n} match{'es' if n != 1 else ''} your watch list")
+
+    # Read/starred stats
+    if metadata:
+        read = sum(1 for p in papers if metadata.get(p.arxiv_id, PaperMetadata(arxiv_id="")).is_read)
+        starred = sum(
+            1 for p in papers if metadata.get(p.arxiv_id, PaperMetadata(arxiv_id="")).starred
+        )
+        if read or starred:
+            parts = []
+            if read:
+                parts.append(f"{read} read")
+            if starred:
+                parts.append(f"{starred} starred")
+            lines.append(", ".join(parts))
+
+    return " · ".join(lines)
 
 
 def get_pdf_download_path(paper: Paper, config: UserConfig) -> Path:
@@ -7798,6 +7847,17 @@ class ArxivBrowser(App):
             title="Watch List",
         )
 
+    def _show_daily_digest(self) -> None:
+        """Show a brief digest notification summarizing the day's papers."""
+        if not self.all_papers:
+            return
+        digest = build_daily_digest(
+            self.all_papers,
+            watched_ids=self._watched_paper_ids,
+            metadata=self._config.paper_metadata,
+        )
+        self.notify(digest, title="Daily Digest", timeout=8)
+
     def is_paper_watched(self, arxiv_id: str) -> bool:
         """Check if a paper is on the watch list. O(1) lookup."""
         return arxiv_id in self._watched_paper_ids
@@ -9063,6 +9123,7 @@ class ArxivBrowser(App):
         self._compute_watched_papers()
 
         self._notify_watch_list_matches()
+        self._show_daily_digest()
 
         # Apply current filter and sort
         query = self.query_one("#search-input", Input).value.strip()

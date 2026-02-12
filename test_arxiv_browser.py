@@ -6897,6 +6897,60 @@ class TestProgressIndicators:
 
 
 # ============================================================================
+# Daily Digest Tests
+# ============================================================================
+
+
+class TestDailyDigest:
+    """Tests for build_daily_digest function."""
+
+    def test_empty_papers(self):
+        from arxiv_browser.app import build_daily_digest
+
+        assert build_daily_digest([]) == "No papers loaded"
+
+    def test_basic_digest(self, make_paper):
+        from arxiv_browser.app import build_daily_digest
+
+        papers = [
+            make_paper(categories="cs.AI cs.LG"),
+            make_paper(categories="cs.AI"),
+            make_paper(categories="cs.CL"),
+        ]
+        digest = build_daily_digest(papers)
+        assert "3 papers" in digest
+        assert "cs.AI (2)" in digest
+
+    def test_digest_with_watch_matches(self, make_paper):
+        from arxiv_browser.app import build_daily_digest
+
+        papers = [make_paper(arxiv_id="2401.00001"), make_paper(arxiv_id="2401.00002")]
+        digest = build_daily_digest(papers, watched_ids={"2401.00001"})
+        assert "1 match" in digest
+        assert "watch list" in digest
+
+    def test_digest_with_metadata(self, make_paper):
+        from arxiv_browser.app import PaperMetadata, build_daily_digest
+
+        papers = [make_paper(arxiv_id="2401.00001"), make_paper(arxiv_id="2401.00002")]
+        meta = {
+            "2401.00001": PaperMetadata(arxiv_id="2401.00001", is_read=True),
+            "2401.00002": PaperMetadata(arxiv_id="2401.00002", starred=True),
+        }
+        digest = build_daily_digest(papers, metadata=meta)
+        assert "1 read" in digest
+        assert "1 starred" in digest
+
+    def test_digest_top_categories_capped_at_5(self, make_paper):
+        from arxiv_browser.app import build_daily_digest
+
+        papers = [make_paper(categories=f"cs.{chr(65 + i)}") for i in range(10)]
+        digest = build_daily_digest(papers)
+        # Should only show top 5
+        assert digest.count("(1)") <= 5
+
+
+# ============================================================================
 # Auto-Tagging Tests
 # ============================================================================
 
