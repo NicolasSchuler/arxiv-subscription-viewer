@@ -4934,6 +4934,8 @@ class TestBadgeCoalescing:
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._http_client = None
         app._badges_dirty = set()
+        app._badge_dirty_indices = set()
+        app._badge_dirty_all = False
         app._badge_timer = None
         app._s2_active = True
         app._s2_cache = {}
@@ -4966,6 +4968,7 @@ class TestBadgeCoalescing:
 
         app = self._make_badge_app()
         app._badges_dirty = {"hf", "s2"}
+        app._badge_dirty_all = True  # simulate full-refresh scenario
         paper = make_paper(arxiv_id="2401.00001")
         app.filtered_papers = [paper]
         app._update_option_at_index = MagicMock()
@@ -4973,6 +4976,7 @@ class TestBadgeCoalescing:
         app._flush_badge_refresh()
 
         assert app._badges_dirty == set()
+        assert app._badge_dirty_all is False
         app._update_option_at_index.assert_called_once_with(0)
 
     def test_mark_badges_dirty_immediate_flushes(self, make_paper):
@@ -5030,6 +5034,7 @@ class TestBadgeCoalescing:
 
         app = self._make_badge_app()
         app._badges_dirty = {"hf"}
+        app._badge_dirty_all = True
         app.filtered_papers = [
             make_paper(arxiv_id="2401.00001"),
             make_paper(arxiv_id="2401.00002"),
@@ -9610,6 +9615,7 @@ class TestToggleReadStar:
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._http_client = None
         app._config = UserConfig()
+        app.selected_ids = set()
 
         if papers is None:
             papers = [make_paper()]

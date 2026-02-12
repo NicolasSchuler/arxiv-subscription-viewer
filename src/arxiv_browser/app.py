@@ -782,6 +782,9 @@ class UserConfig:
     hf_cache_ttl_hours: int = 6  # Hours to cache HF daily data
     research_interests: str = ""  # Free-text research interest description for relevance scoring
     collapsed_sections: list[str] = field(default_factory=lambda: list(DEFAULT_COLLAPSED_SECTIONS))
+    pdf_viewer: str = (
+        ""  # External PDF viewer command, e.g. "zathura {path}" or "open -a Skim {path}"
+    )
     version: int = 1
 
 
@@ -864,6 +867,7 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
         "hf_cache_ttl_hours": config.hf_cache_ttl_hours,
         "research_interests": config.research_interests,
         "collapsed_sections": config.collapsed_sections,
+        "pdf_viewer": config.pdf_viewer,
         "session": {
             "scroll_index": config.session.scroll_index,
             "current_filter": config.session.current_filter,
@@ -1036,6 +1040,7 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         hf_cache_ttl_hours=_safe_get(data, "hf_cache_ttl_hours", 6, int),
         research_interests=_safe_get(data, "research_interests", "", str),
         collapsed_sections=_parse_collapsed_sections(data.get("collapsed_sections")),
+        pdf_viewer=_safe_get(data, "pdf_viewer", "", str),
         version=_safe_get(data, "version", 1, int),
     )
 
@@ -5761,6 +5766,8 @@ class ArxivBrowser(App):
         self._detail_timer: Timer | None = None
         self._pending_detail_paper: Paper | None = None
         self._badges_dirty: set[str] = set()
+        self._badge_dirty_indices: set[int] = set()  # empty = nothing; filled by callers
+        self._badge_dirty_all: bool = False  # True = refresh all papers
         self._badge_timer: Timer | None = None
         self._sort_index: int = 0  # Index into SORT_OPTIONS
 
@@ -5941,6 +5948,9 @@ class ArxivBrowser(App):
             if option_list.option_count > 0:
                 option_list.highlighted = 0
         self._update_status_bar()
+
+        self._notify_watch_list_matches()
+
         # Focus the paper list so key bindings work
         self.query_one("#paper-list", OptionList).focus()
 
@@ -6497,12 +6507,22 @@ class ArxivBrowser(App):
             return None
         return self._hf_cache.get(arxiv_id)
 
-    def _mark_badges_dirty(self, *badge_types: str, immediate: bool = False) -> None:
+    def _mark_badges_dirty(
+        self,
+        *badge_types: str,
+        immediate: bool = False,
+        indices: set[int] | None = None,
+    ) -> None:
         """Schedule a coalesced badge refresh for the given types.
 
         Use immediate=True for toggle-off cases where UX needs instant feedback.
+        Pass indices to limit refresh to specific paper indices (None = all).
         """
         self._badges_dirty.update(badge_types)
+        if indices is None:
+            self._badge_dirty_all = True  # Refresh all papers
+        elif not self._badge_dirty_all:
+            self._badge_dirty_indices.update(indices)
         if immediate:
             old = self._badge_timer
             self._badge_timer = None
@@ -6518,14 +6538,22 @@ class ArxivBrowser(App):
         self._badge_timer = self.set_timer(BADGE_COALESCE_DELAY, self._flush_badge_refresh)
 
     def _flush_badge_refresh(self) -> None:
-        """Single-pass badge refresh for all dirty types."""
+        """Single-pass badge refresh for dirty indices (or all if flagged)."""
         self._badge_timer = None
         dirty = self._badges_dirty.copy()
         self._badges_dirty.clear()
+        refresh_all = self._badge_dirty_all
+        dirty_indices = self._badge_dirty_indices.copy()
+        self._badge_dirty_all = False
+        self._badge_dirty_indices.clear()
         if not dirty:
             return
-        for i in range(len(self.filtered_papers)):
-            self._update_option_at_index(i)
+        if refresh_all:
+            for i in range(len(self.filtered_papers)):
+                self._update_option_at_index(i)
+        else:
+            for i in sorted(dirty_indices):
+                self._update_option_at_index(i)
 
     # ========================================================================
     # Version tracking
@@ -6938,33 +6966,36 @@ class ArxivBrowser(App):
 
     def _format_header_text(self, query: str = "") -> str:
         """Format the header text with paper count, date info, and filter indicator."""
+        # Paper count: filtered/total when searching, total otherwise
+        if query:
+            count = f"{len(self.filtered_papers)}/{len(self.all_papers)}"
+        else:
+            count = f"{len(self.all_papers)} total"
+
+        # Context suffix: API mode info or history date
+        suffix = ""
         if self._in_arxiv_api_mode and self._arxiv_search_state is not None:
             state = self._arxiv_search_state
             page = (state.start // state.max_results) + 1
             mode_query = self._format_arxiv_search_label(state.request)
             mode_query = truncate_text(mode_query, 28)
-            mode_info = (
+            suffix = (
                 f" · [{THEME_COLORS['orange']}]API[/]"
                 f" [dim]({escape_rich_text(mode_query)} · page {page})[/]"
             )
-            if query:
-                return f" [bold]Papers[/] ({len(self.filtered_papers)}/{len(self.all_papers)}){mode_info}"
-            return f" [bold]Papers[/] ({len(self.all_papers)} total){mode_info}"
-
-        # Date info for history mode
-        date_info = ""
-        if self._is_history_mode():
+        elif self._is_history_mode():
             current_date = self._get_current_date()
             if current_date:
                 pos = self._current_date_index + 1
                 total = len(self._history_files)
-                date_info = f" · [{THEME_COLORS['accent']}]{current_date.strftime(HISTORY_DATE_FORMAT)}[/] [dim]({pos}/{total})[/]"
+                suffix = f" · [{THEME_COLORS['accent']}]{current_date.strftime(HISTORY_DATE_FORMAT)}[/] [dim]({pos}/{total})[/]"
 
-        if query:
-            return (
-                f" [bold]Papers[/] ({len(self.filtered_papers)}/{len(self.all_papers)}){date_info}"
-            )
-        return f" [bold]Papers[/] ({len(self.all_papers)} total){date_info}"
+        # Selection badge
+        if self.selected_ids:
+            n = len(self.selected_ids)
+            suffix += f" · [{THEME_COLORS['green']}]{n} selected[/]"
+
+        return f" [bold]Papers[/] ({count}){suffix}"
 
     def _matches_advanced_query(self, paper: Paper, rpn: list[QueryToken]) -> bool:
         metadata = self._config.paper_metadata.get(paper.arxiv_id)
@@ -7193,33 +7224,72 @@ class ArxivBrowser(App):
             return idx
         return None
 
+    def _bulk_toggle_bool(
+        self,
+        attr: str,
+        true_label: str,
+        false_label: str,
+        title: str,
+    ) -> None:
+        """Toggle a boolean metadata attribute for all selected papers.
+
+        If any selected paper has the attribute False, sets all to True;
+        otherwise sets all to False.
+        """
+        any_off = any(
+            not getattr(
+                self._config.paper_metadata.get(aid, PaperMetadata(arxiv_id=aid)),
+                attr,
+            )
+            for aid in self.selected_ids
+        )
+        target = any_off
+        # Update visible selected papers (with list refresh)
+        visible_ids: set[str] = set()
+        for i, paper in enumerate(self.filtered_papers):
+            if paper.arxiv_id in self.selected_ids:
+                meta = self._get_or_create_metadata(paper.arxiv_id)
+                setattr(meta, attr, target)
+                self._update_option_at_index(i)
+                visible_ids.add(paper.arxiv_id)
+        # Also update selected papers not currently visible
+        for aid in self.selected_ids - visible_ids:
+            meta = self._get_or_create_metadata(aid)
+            setattr(meta, attr, target)
+        status = true_label if target else false_label
+        self.notify(f"{len(self.selected_ids)} papers {status}", title=title)
+
     def action_toggle_read(self) -> None:
-        """Toggle read status of the currently highlighted paper."""
+        """Toggle read status of highlighted paper, or bulk toggle for selected papers."""
+        if self.selected_ids:
+            self._bulk_toggle_bool("is_read", "marked read", "marked unread", "Read Status")
+            return
+
         paper = self._get_current_paper()
         if not paper:
             return
-
         metadata = self._get_or_create_metadata(paper.arxiv_id)
         metadata.is_read = not metadata.is_read
         idx = self._get_current_index()
         if idx is not None:
             self._update_option_at_index(idx)
-
         status = "read" if metadata.is_read else "unread"
         self.notify(f"Marked as {status}", title="Read Status")
 
     def action_toggle_star(self) -> None:
-        """Toggle star status of the currently highlighted paper."""
+        """Toggle star status of highlighted paper, or bulk toggle for selected papers."""
+        if self.selected_ids:
+            self._bulk_toggle_bool("starred", "starred", "unstarred", "Star")
+            return
+
         paper = self._get_current_paper()
         if not paper:
             return
-
         metadata = self._get_or_create_metadata(paper.arxiv_id)
         metadata.starred = not metadata.starred
         idx = self._get_current_index()
         if idx is not None:
             self._update_option_at_index(idx)
-
         status = "starred" if metadata.starred else "unstarred"
         self.notify(f"Paper {status}", title="Star")
 
@@ -7250,7 +7320,11 @@ class ArxivBrowser(App):
         self.push_screen(NotesModal(arxiv_id, current_notes), on_notes_saved)
 
     def action_edit_tags(self) -> None:
-        """Open tags editor for the currently highlighted paper."""
+        """Open tags editor for the current paper, or bulk-tag selected papers."""
+        if self.selected_ids:
+            self._bulk_edit_tags()
+            return
+
         paper = self._get_current_paper()
         if not paper:
             return
@@ -7261,13 +7335,7 @@ class ArxivBrowser(App):
             current_tags = self._config.paper_metadata[arxiv_id].tags.copy()
 
         # Collect all unique tags across all paper metadata for suggestions
-        all_tags: list[str] = []
-        seen: set[str] = set()
-        for meta in self._config.paper_metadata.values():
-            for tag in meta.tags:
-                if tag not in seen:
-                    seen.add(tag)
-                    all_tags.append(tag)
+        all_tags = self._collect_all_tags()
 
         def on_tags_saved(tags: list[str] | None) -> None:
             if tags is None:
@@ -7283,6 +7351,73 @@ class ArxivBrowser(App):
             self.notify(f"Tags: {', '.join(tags) if tags else 'none'}", title="Tags")
 
         self.push_screen(TagsModal(arxiv_id, current_tags, all_tags=all_tags), on_tags_saved)
+
+    def _collect_all_tags(self) -> list[str]:
+        """Collect all unique tags across all paper metadata."""
+        all_tags: list[str] = []
+        seen: set[str] = set()
+        for meta in self._config.paper_metadata.values():
+            for tag in meta.tags:
+                if tag not in seen:
+                    seen.add(tag)
+                    all_tags.append(tag)
+        return all_tags
+
+    def _bulk_edit_tags(self) -> None:
+        """Open tags editor for bulk-tagging all selected papers.
+
+        Shows tags common to ALL selected papers as current tags.
+        New tags are added to all; removed tags are removed from all.
+        """
+        n = len(self.selected_ids)
+        # Find tags common to ALL selected papers (empty tags → empty intersection)
+        tag_sets = [
+            set(self._config.paper_metadata.get(aid, PaperMetadata(arxiv_id=aid)).tags)
+            for aid in self.selected_ids
+        ]
+        common_tags = sorted(set.intersection(*tag_sets)) if tag_sets else []
+        all_tags = self._collect_all_tags()
+        target_ids = set(self.selected_ids)  # snapshot
+
+        def on_bulk_tags_saved(tags: list[str] | None) -> None:
+            if tags is None:
+                return
+            new_tag_set = set(tags)
+            old_common = set(common_tags)
+            added = new_tag_set - old_common
+            removed = old_common - new_tag_set
+
+            # Update ALL selected papers (including those not in current filter)
+            visible_ids: set[str] = set()
+            for i, paper in enumerate(self.filtered_papers):
+                if paper.arxiv_id in target_ids:
+                    self._apply_tag_diff(paper.arxiv_id, added, removed)
+                    self._update_option_at_index(i)
+                    visible_ids.add(paper.arxiv_id)
+            # Also update selected papers not currently visible
+            for aid in target_ids - visible_ids:
+                self._apply_tag_diff(aid, added, removed)
+
+            parts = []
+            if added:
+                parts.append(f"Added {', '.join(sorted(added))}")
+            if removed:
+                parts.append(f"Removed {', '.join(sorted(removed))}")
+            msg = " / ".join(parts) if parts else "Tags unchanged"
+            self.notify(f"{msg} on {len(target_ids)} papers", title="Bulk Tags")
+
+        self.push_screen(
+            TagsModal(f"bulk:{n}", common_tags, all_tags=all_tags),
+            on_bulk_tags_saved,
+        )
+
+    def _apply_tag_diff(self, arxiv_id: str, added: set[str], removed: set[str]) -> None:
+        """Apply tag additions and removals to a single paper's metadata."""
+        meta = self._get_or_create_metadata(arxiv_id)
+        tag_set = set(meta.tags)
+        tag_set |= added
+        tag_set -= removed
+        meta.tags = sorted(tag_set)
 
     # ========================================================================
     # Phase 3: Watch List
@@ -7304,6 +7439,16 @@ class ArxivBrowser(App):
                 if paper_matches_watch_entry(paper, entry):
                     self._watched_paper_ids.add(paper.arxiv_id)
                     break  # Paper already matched, no need to check more entries
+
+    def _notify_watch_list_matches(self) -> None:
+        """Show a notification if any papers match the watch list."""
+        if not self._watched_paper_ids:
+            return
+        n = len(self._watched_paper_ids)
+        self.notify(
+            f"{n} paper{'s' if n != 1 else ''} match your watch list",
+            title="Watch List",
+        )
 
     def is_paper_watched(self, arxiv_id: str) -> bool:
         """Check if a paper is on the watch list. O(1) lookup."""
@@ -8373,6 +8518,8 @@ class ArxivBrowser(App):
         # Recompute watched papers for new paper set
         self._compute_watched_papers()
 
+        self._notify_watch_list_matches()
+
         # Apply current filter and sort
         query = self.query_one("#search-input", Input).value.strip()
         self._apply_filter(query)
@@ -8749,11 +8896,41 @@ class ArxivBrowser(App):
             self._do_open_pdfs(papers)
 
     def _do_open_pdfs(self, papers: list[Paper]) -> None:
-        """Open the given papers' PDF URLs in the browser."""
+        """Open the given papers' PDF URLs in the browser or configured viewer."""
+        viewer = self._config.pdf_viewer.strip()
         for paper in papers:
-            self._safe_browser_open(get_pdf_url(paper))
+            url = get_pdf_url(paper)
+            if viewer:
+                self._open_with_viewer(viewer, url)
+            else:
+                self._safe_browser_open(url)
         count = len(papers)
         self.notify(f"Opening {count} PDF{'s' if count > 1 else ''}", title="PDF")
+
+    def _open_with_viewer(self, viewer_cmd: str, url_or_path: str) -> bool:
+        """Open a URL/path with a configured external viewer command.
+
+        The command template can use {url} or {path} as placeholders.
+        If no placeholder is found, the URL is appended as an argument.
+        The URL/path is always shell-quoted to prevent injection.
+        """
+        try:
+            quoted = shlex.quote(url_or_path)
+            if "{url}" in viewer_cmd or "{path}" in viewer_cmd:
+                cmd = viewer_cmd.replace("{url}", quoted).replace("{path}", quoted)
+            else:
+                cmd = f"{viewer_cmd} {quoted}"
+            subprocess.Popen(
+                cmd,
+                shell=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return True
+        except Exception as e:
+            logger.warning("Failed to open with viewer %r: %s", viewer_cmd, e)
+            self.notify("Failed to open PDF viewer", title="Error", severity="error")
+            return False
 
     def action_download_pdf(self) -> None:
         """Download PDFs for selected papers (or current paper)."""
