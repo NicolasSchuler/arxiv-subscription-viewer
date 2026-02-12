@@ -1011,6 +1011,23 @@ class TestFetchS2References:
         result = await fetch_s2_references("s2paper1", mock_client)
         assert result == []
 
+    @pytest.mark.asyncio
+    async def test_include_status_reports_failure(self) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"data": "not-a-list"}
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get.return_value = mock_response
+
+        entries, complete = await fetch_s2_references(
+            "s2paper1",
+            mock_client,
+            include_status=True,
+        )
+        assert entries == []
+        assert complete is False
+
 
 class TestFetchS2Citations:
     """Tests for fetch_s2_citations() with mocked HTTP."""
@@ -1127,7 +1144,7 @@ class TestFetchS2Citations:
         result = await fetch_s2_citations("s2paper1", mock_client, limit=3)
         assert len(result) == 3
         assert result[0].citation_count == 10_000
-        assert mock_client.get.call_count == 3
+        assert mock_client.get.call_count == 2
         assert mock_client.get.call_args_list[0].kwargs["params"]["offset"] == "0"
         assert mock_client.get.call_args_list[1].kwargs["params"]["offset"] == str(
             S2_CITATIONS_PAGE_SIZE
@@ -1175,3 +1192,20 @@ class TestFetchS2Citations:
         result = await fetch_s2_citations("s2paper1", mock_client, limit=0)
         assert result == []
         mock_client.get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_include_status_reports_incomplete_fetch(self) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.side_effect = ValueError("bad json")
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get.return_value = mock_response
+
+        entries, complete = await fetch_s2_citations(
+            "s2paper1",
+            mock_client,
+            include_status=True,
+        )
+        assert entries == []
+        assert complete is False

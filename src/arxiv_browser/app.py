@@ -372,7 +372,7 @@ MAX_ABSTRACT_LOADS = 32  # Maximum concurrent abstract loads
 DEFAULT_BIBTEX_EXPORT_DIR = "arxiv-exports"  # Default subdirectory in home folder
 
 # History file discovery limit
-MAX_HISTORY_FILES = 365  # Limit to ~1 year of history to prevent memory issues
+MAX_HISTORY_FILES = 365  # Optional caller-provided cap for history discovery.
 
 # arXiv API search settings
 ARXIV_API_URL = "https://export.arxiv.org/api/query"
@@ -394,6 +394,7 @@ LLM_COMMAND_TIMEOUT = 120  # Seconds to wait for LLM CLI response
 SUMMARY_DB_FILENAME = "summaries.db"
 MAX_PAPER_CONTENT_LENGTH = 60_000  # ~15k tokens; truncate fetched paper content
 ARXIV_HTML_TIMEOUT = 30  # Seconds to wait for arXiv HTML fetch
+SUMMARY_HTML_TIMEOUT = 10  # Faster timeout for summary generation path
 DEFAULT_LLM_PROMPT = (
     "You are an expert science communicator who makes complex research accessible. "
     "Summarize the following arXiv paper for a Computer Science university student "
@@ -432,6 +433,13 @@ SUMMARY_MODES: dict[str, tuple[str, str]] = {
     "default": (
         "Full summary (Problem / Approach / Results)",
         DEFAULT_LLM_PROMPT,
+    ),
+    "quick": (
+        "Quick abstract-only summary",
+        "Provide a concise 3-5 sentence summary focused on key contribution, method, "
+        "and main result. Keep it direct and easy to scan.\n\n"
+        "Paper: {title}\nAuthors: {authors}\nCategories: {categories}\n\n"
+        "{paper_content}",
     ),
     "tldr": (
         "1-2 sentence TLDR",
@@ -1787,7 +1795,11 @@ def extract_text_from_html(html: str) -> str:
     return parser.get_text()
 
 
-async def _fetch_paper_content_async(paper: Paper, client: httpx.AsyncClient | None = None) -> str:
+async def _fetch_paper_content_async(
+    paper: Paper,
+    client: httpx.AsyncClient | None = None,
+    timeout: int = ARXIV_HTML_TIMEOUT,
+) -> str:
     """Fetch the full paper content from the arXiv HTML version.
 
     Falls back to the abstract if the HTML version is not available.
@@ -1796,12 +1808,10 @@ async def _fetch_paper_content_async(paper: Paper, client: httpx.AsyncClient | N
     html_url = f"https://arxiv.org/html/{paper.arxiv_id}"
     try:
         if client is not None:
-            response = await client.get(html_url, timeout=ARXIV_HTML_TIMEOUT, follow_redirects=True)
+            response = await client.get(html_url, timeout=timeout, follow_redirects=True)
         else:
             async with httpx.AsyncClient() as tmp_client:
-                response = await tmp_client.get(
-                    html_url, timeout=ARXIV_HTML_TIMEOUT, follow_redirects=True
-                )
+                response = await tmp_client.get(html_url, timeout=timeout, follow_redirects=True)
         if response.status_code == 200:
             text = await asyncio.to_thread(extract_text_from_html, response.text)
             if text:
@@ -2239,7 +2249,7 @@ HISTORY_DATE_FORMAT = "%Y-%m-%d"
 
 def discover_history_files(
     base_dir: Path,
-    limit: int = MAX_HISTORY_FILES,
+    limit: int | None = None,
 ) -> list[tuple[date, Path]]:
     """Discover and sort history files by date.
 
@@ -2247,11 +2257,11 @@ def discover_history_files(
 
     Args:
         base_dir: Base directory containing the history/ folder.
-        limit: Maximum number of history files to return (default: MAX_HISTORY_FILES).
-               Prevents memory issues with very large history directories.
+        limit: Maximum number of history files to return. If None, returns all
+               matching files.
 
     Returns:
-        List of (date, path) tuples, sorted newest first, limited to `limit` entries.
+        List of (date, path) tuples, sorted newest first.
         Empty list if history/ doesn't exist or has no matching files.
     """
     history_dir = base_dir / "history"
@@ -2259,15 +2269,24 @@ def discover_history_files(
         return []
 
     files: list[tuple[date, Path]] = []
-    for path in history_dir.glob("*.txt"):
+    try:
+        paths = list(history_dir.glob("*.txt"))
+    except OSError:
+        logger.warning("Failed to enumerate history files in %s", history_dir, exc_info=True)
+        return []
+
+    for path in paths:
         try:
             d = datetime.strptime(path.stem, HISTORY_DATE_FORMAT).date()
             files.append((d, path))
         except ValueError:
             continue  # Skip files that don't match YYYY-MM-DD pattern
 
-    # Sort newest first and limit to prevent memory issues
-    return sorted(files, key=lambda x: x[0], reverse=True)[:limit]
+    # Sort newest first and optionally limit.
+    sorted_files = sorted(files, key=lambda x: x[0], reverse=True)
+    if limit is None:
+        return sorted_files
+    return sorted_files[: max(limit, 0)]
 
 
 def count_papers_in_file(path: Path) -> int:
@@ -3742,11 +3761,13 @@ class PaperDetails(Static):
                 unnamespaced.append(val)
         for ns in sorted(namespaced):
             color = get_tag_color(f"{ns}:")
-            vals = ", ".join(namespaced[ns])
-            lines.append(f"  [{color}]{ns}:[/] {vals}")
+            safe_ns = escape_rich_text(ns)
+            vals = ", ".join(escape_rich_text(v) for v in namespaced[ns])
+            lines.append(f"  [{color}]{safe_ns}:[/] {vals}")
         if unnamespaced:
             color = get_tag_color("")
-            lines.append(f"  [{color}]{', '.join(unnamespaced)}[/]")
+            safe_unnamespaced = ", ".join(escape_rich_text(v) for v in unnamespaced)
+            lines.append(f"  [{color}]{safe_unnamespaced}[/]")
         return "\n".join(lines)
 
     def _render_relevance(self, relevance: tuple[int, str] | None, is_collapsed: bool) -> str:
@@ -3822,7 +3843,7 @@ class PaperDetails(Static):
                 ),
             ]
             if s2_data.fields_of_study:
-                fos = ", ".join(s2_data.fields_of_study)
+                fos = ", ".join(escape_rich_text(field) for field in s2_data.fields_of_study)
                 lines.append(f"  [bold {THEME_COLORS['accent']}]Fields:[/] {fos}")
             if s2_data.tldr:
                 safe_tldr = escape_rich_text(s2_data.tldr)
@@ -3847,7 +3868,7 @@ class PaperDetails(Static):
             safe_repo = escape_rich_text(hf_data.github_repo)
             lines.append(f"  [bold {THEME_COLORS['accent']}]GitHub:[/] {safe_repo}{stars_str}")
         if hf_data.ai_keywords:
-            kw = ", ".join(hf_data.ai_keywords)
+            kw = ", ".join(escape_rich_text(keyword) for keyword in hf_data.ai_keywords)
             lines.append(f"  [bold {THEME_COLORS['accent']}]Keywords:[/] {kw}")
         if hf_data.ai_summary:
             safe_summary = escape_rich_text(hf_data.ai_summary)
@@ -5332,6 +5353,7 @@ class SummaryModeModal(ModalScreen[str]):
     BINDINGS = [
         Binding("escape", "cancel", "Cancel"),
         Binding("d", "mode_default", "Default", show=False),
+        Binding("q", "mode_quick", "Quick", show=False),
         Binding("t", "mode_tldr", "TLDR", show=False),
         Binding("m", "mode_methods", "Methods", show=False),
         Binding("r", "mode_results", "Results", show=False),
@@ -5374,6 +5396,7 @@ class SummaryModeModal(ModalScreen[str]):
             g = THEME_COLORS["green"]
             yield Static(
                 f"  [{g}]d[/]  Default  [dim]— Full summary (Problem / Approach / Results)[/]\n"
+                f"  [{g}]q[/]  Quick    [dim]— Fast abstract-only summary[/]\n"
                 f"  [{g}]t[/]  TLDR     [dim]— 1-2 sentence summary[/]\n"
                 f"  [{g}]m[/]  Methods  [dim]— Technical methodology deep-dive[/]\n"
                 f"  [{g}]r[/]  Results  [dim]— Key experimental results with numbers[/]\n"
@@ -5387,6 +5410,9 @@ class SummaryModeModal(ModalScreen[str]):
 
     def action_mode_default(self) -> None:
         self.dismiss("default")
+
+    def action_mode_quick(self) -> None:
+        self.dismiss("quick")
 
     def action_mode_tldr(self) -> None:
         self.dismiss("tldr")
@@ -6595,7 +6621,7 @@ class DateNavigator(Horizontal):
         # Remove old date labels (keep arrows)
         for child in list(self.children):
             if "date-nav-item" in child.classes:
-                child.remove()
+                await child.remove()
 
         # Compute sliding window centered on current
         total = len(history_files)
@@ -7292,6 +7318,7 @@ class ArxivBrowser(App):
         self._summary_loading: set[str] = set()  # arxiv_ids with generation in progress
         self._summary_db_path: Path = get_summary_db_path()
         self._summary_mode_label: dict[str, str] = {}  # arxiv_id -> mode display name
+        self._summary_command_hash: dict[str, str] = {}  # arxiv_id -> command+prompt hash
 
         # arXiv API mode state
         self._in_arxiv_api_mode: bool = False
@@ -7373,10 +7400,7 @@ class ArxivBrowser(App):
 
         # Initialize date navigator if in history mode
         if self._is_history_mode() and len(self._history_files) > 1:
-            date_nav = self.query_one(DateNavigator)
-            self.call_after_refresh(
-                date_nav.update_dates, self._history_files, self._current_date_index
-            )
+            self.call_after_refresh(self._refresh_date_navigator)
 
         # Set subtitle with date info if in history mode
         current_date = self._get_current_date()
@@ -7451,6 +7475,14 @@ class ArxivBrowser(App):
                 asyncio.get_event_loop().create_task(client.aclose())
             except RuntimeError:
                 pass  # Event loop already closed
+
+    def _refresh_date_navigator(self) -> None:
+        """Refresh date navigator labels after DOM updates settle."""
+        try:
+            date_nav = self.query_one(DateNavigator)
+        except NoMatches:
+            return
+        self._track_task(date_nav.update_dates(self._history_files, self._current_date_index))
 
     def _track_task(self, coro: Any) -> asyncio.Task[None]:
         """Create an asyncio task and track it to prevent garbage collection."""
@@ -7816,8 +7848,19 @@ class ArxivBrowser(App):
             self.action_toggle_s2()
 
     def action_toggle_s2(self) -> None:
-        """Toggle Semantic Scholar enrichment on/off for this session."""
+        """Toggle Semantic Scholar enrichment and persist the setting."""
+        prev_state = self._s2_active
         self._s2_active = not self._s2_active
+        self._config.s2_enabled = self._s2_active
+        if not save_config(self._config):
+            self._s2_active = prev_state
+            self._config.s2_enabled = prev_state
+            self.notify(
+                "Failed to save Semantic Scholar setting",
+                title="S2",
+                severity="error",
+            )
+            return
         state = "enabled" if self._s2_active else "disabled"
         self.notify(f"Semantic Scholar {state}", title="S2")
         self._update_status_bar()
@@ -7896,8 +7939,19 @@ class ArxivBrowser(App):
     # ========================================================================
 
     async def action_toggle_hf(self) -> None:
-        """Toggle HuggingFace trending on/off. Auto-fetches on enable."""
+        """Toggle HuggingFace trending on/off and persist the setting."""
+        prev_state = self._hf_active
         self._hf_active = not self._hf_active
+        self._config.hf_enabled = self._hf_active
+        if not save_config(self._config):
+            self._hf_active = prev_state
+            self._config.hf_enabled = prev_state
+            self.notify(
+                "Failed to save HuggingFace setting",
+                title="HF",
+                severity="error",
+            )
+            return
         if self._hf_active:
             self.notify("HuggingFace trending enabled", title="HF")
             if not self._hf_cache:
@@ -8396,8 +8450,7 @@ class ArxivBrowser(App):
     def on_date_jump(self, event: DateNavigator.JumpToDate) -> None:
         """Handle click on a date in the navigator."""
         if 0 <= event.index < len(self._history_files):
-            self._current_date_index = event.index
-            self._load_current_date()
+            self._set_history_index(event.index)
 
     @on(DateNavigator.NavigateDate)
     def on_date_navigate(self, event: DateNavigator.NavigateDate) -> None:
@@ -8967,7 +9020,16 @@ class ArxivBrowser(App):
         def on_watch_list_updated(entries: list[WatchListEntry] | None) -> None:
             if entries is None:
                 return
+            old_entries = list(self._config.watch_list)
             self._config.watch_list = entries
+            if not save_config(self._config):
+                self._config.watch_list = old_entries
+                self.notify(
+                    "Failed to save watch list",
+                    title="Watch",
+                    severity="error",
+                )
+                return
             self._compute_watched_papers()
             if self._watch_filter_active and not self._watched_paper_ids:
                 self._watch_filter_active = False
@@ -9587,24 +9649,43 @@ class ArxivBrowser(App):
         if client is None:
             return [], []
         api_key = self._config.s2_api_key
-        refs = await fetch_s2_references(paper_id, client, api_key=api_key)
-        cites = await fetch_s2_citations(paper_id, client, api_key=api_key)
+        refs, refs_ok = await fetch_s2_references(
+            paper_id,
+            client,
+            api_key=api_key,
+            include_status=True,
+        )
+        cites, cites_ok = await fetch_s2_citations(
+            paper_id,
+            client,
+            api_key=api_key,
+            include_status=True,
+        )
 
-        # Always cache both directions together (even if empty)
-        await asyncio.to_thread(
-            save_s2_citation_graph,
-            self._s2_db_path,
-            paper_id,
-            "references",
-            refs,
-        )
-        await asyncio.to_thread(
-            save_s2_citation_graph,
-            self._s2_db_path,
-            paper_id,
-            "citations",
-            cites,
-        )
+        # Cache only when both directions completed cleanly.
+        if refs_ok and cites_ok:
+            await asyncio.to_thread(
+                save_s2_citation_graph,
+                self._s2_db_path,
+                paper_id,
+                "references",
+                refs,
+            )
+            await asyncio.to_thread(
+                save_s2_citation_graph,
+                self._s2_db_path,
+                paper_id,
+                "citations",
+                cites,
+            )
+        else:
+            logger.info(
+                "Skipping citation graph cache write for %s due to fetch error "
+                "(refs_ok=%s cites_ok=%s)",
+                paper_id,
+                refs_ok,
+                cites_ok,
+            )
         return refs, cites
 
     def _on_citation_graph_selected(self, arxiv_id: str | None) -> None:
@@ -9767,6 +9848,9 @@ class ArxivBrowser(App):
         """Handle the mode chosen from SummaryModeModal."""
         if not mode:
             return
+        if mode not in SUMMARY_MODES:
+            self.notify(f"Unknown summary mode: {mode}", title="AI Summary", severity="error")
+            return
 
         arxiv_id = paper.arxiv_id
         if arxiv_id in self._summary_loading:
@@ -9780,33 +9864,61 @@ class ArxivBrowser(App):
 
         cmd_hash = _compute_command_hash(command_template, prompt_template)
         mode_label = mode.upper() if mode != "default" else ""
+        use_full_paper_content = mode != "quick"
 
         # Check SQLite cache first
         cached = _load_summary(self._summary_db_path, arxiv_id, cmd_hash)
         if cached:
             self._paper_summaries[arxiv_id] = cached
             self._summary_mode_label[arxiv_id] = mode_label
+            self._summary_command_hash[arxiv_id] = cmd_hash
             self._update_abstract_display(arxiv_id)
             self.notify("Summary loaded from cache", title="AI Summary")
             return
+
+        # Avoid showing stale content under a newly selected mode.
+        if self._summary_command_hash.get(arxiv_id) != cmd_hash:
+            self._paper_summaries.pop(arxiv_id, None)
+            self._summary_command_hash.pop(arxiv_id, None)
 
         # Start async generation
         self._summary_loading.add(arxiv_id)
         self._summary_mode_label[arxiv_id] = mode_label
         self._update_abstract_display(arxiv_id)
         self._track_task(
-            self._generate_summary_async(paper, command_template, prompt_template, cmd_hash)
+            self._generate_summary_async(
+                paper,
+                command_template,
+                prompt_template,
+                cmd_hash,
+                mode_label=mode_label,
+                use_full_paper_content=use_full_paper_content,
+            )
         )
 
     async def _generate_summary_async(
-        self, paper: Paper, command_template: str, prompt_template: str, cmd_hash: str
+        self,
+        paper: Paper,
+        command_template: str,
+        prompt_template: str,
+        cmd_hash: str,
+        mode_label: str = "",
+        use_full_paper_content: bool = True,
     ) -> None:
         """Run the LLM CLI tool asynchronously and update the UI."""
         arxiv_id = paper.arxiv_id
+        generated_summary = False
         try:
-            # Fetch full paper content from arXiv HTML (falls back to abstract)
-            self.notify("Fetching paper content...", title="AI Summary")
-            paper_content = await _fetch_paper_content_async(paper, self._http_client)
+            if use_full_paper_content:
+                # Fetch full paper content from arXiv HTML (falls back to abstract).
+                # Use a shorter timeout for summary flow to keep interactions snappy.
+                self.notify("Fetching paper content...", title="AI Summary")
+                paper_content = await _fetch_paper_content_async(
+                    paper, self._http_client, timeout=SUMMARY_HTML_TIMEOUT
+                )
+            else:
+                abstract = paper.abstract or paper.abstract_raw or ""
+                paper_content = f"Abstract:\n{abstract}" if abstract else ""
 
             prompt = build_llm_prompt(paper, prompt_template, paper_content)
             shell_command = _build_llm_shell_command(command_template, prompt)
@@ -9848,9 +9960,12 @@ class ArxivBrowser(App):
 
             # Cache in memory and persist to SQLite
             self._paper_summaries[arxiv_id] = summary
+            self._summary_mode_label[arxiv_id] = mode_label
+            self._summary_command_hash[arxiv_id] = cmd_hash
             await asyncio.to_thread(
                 _save_summary, self._summary_db_path, arxiv_id, summary, cmd_hash
             )
+            generated_summary = True
             self.notify("Summary generated", title="AI Summary")
 
         except ValueError as e:
@@ -9862,6 +9977,9 @@ class ArxivBrowser(App):
             self.notify(f"Summary failed: {e}", title="AI Summary", severity="error")
         finally:
             self._summary_loading.discard(arxiv_id)
+            if not generated_summary and arxiv_id not in self._paper_summaries:
+                self._summary_mode_label.pop(arxiv_id, None)
+                self._summary_command_hash.pop(arxiv_id, None)
             self._update_abstract_display(arxiv_id)
 
     # ========================================================================
@@ -10306,10 +10424,10 @@ class ArxivBrowser(App):
             return None
         return self._history_files[self._current_date_index][0]
 
-    def _load_current_date(self) -> None:
+    def _load_current_date(self) -> bool:
         """Load papers from the current date file and refresh UI."""
         if not self._is_history_mode():
-            return
+            return False
 
         current_date, path = self._history_files[self._current_date_index]
         try:
@@ -10320,7 +10438,7 @@ class ArxivBrowser(App):
                 title="Load Error",
                 severity="error",
             )
-            return
+            return False
         self._papers_by_id = {p.arxiv_id: p for p in self.all_papers}
         self.filtered_papers = self.all_papers.copy()
 
@@ -10335,6 +10453,7 @@ class ArxivBrowser(App):
         self._paper_summaries.clear()
         self._summary_loading.clear()
         self._summary_mode_label.clear()
+        self._summary_command_hash.clear()
         self._s2_cache.clear()
         self._s2_loading.clear()
         self._hf_cache.clear()
@@ -10367,13 +10486,21 @@ class ArxivBrowser(App):
         )
 
         # Update date navigator
-        try:
-            date_nav = self.query_one(DateNavigator)
-            self.call_after_refresh(
-                date_nav.update_dates, self._history_files, self._current_date_index
-            )
-        except NoMatches:
-            pass
+        self.call_after_refresh(self._refresh_date_navigator)
+        return True
+
+    def _set_history_index(self, target_index: int) -> bool:
+        """Set and load a history index, rolling back on load failure."""
+        if not (0 <= target_index < len(self._history_files)):
+            return False
+        old_index = self._current_date_index
+        if target_index == old_index:
+            return True
+        self._current_date_index = target_index
+        if self._load_current_date():
+            return True
+        self._current_date_index = old_index
+        return False
 
     def action_prev_date(self) -> None:
         """Navigate to previous (older) date file."""
@@ -10389,8 +10516,8 @@ class ArxivBrowser(App):
             self.notify("Already at oldest", title="Navigate")
             return
 
-        self._current_date_index += 1
-        self._load_current_date()
+        if not self._set_history_index(self._current_date_index + 1):
+            return
         current_date = self._get_current_date()
         if current_date:
             self.notify(f"Loaded {current_date.strftime(HISTORY_DATE_FORMAT)}", title="Navigate")
@@ -10409,8 +10536,8 @@ class ArxivBrowser(App):
             self.notify("Already at newest", title="Navigate")
             return
 
-        self._current_date_index -= 1
-        self._load_current_date()
+        if not self._set_history_index(self._current_date_index - 1):
+            return
         current_date = self._get_current_date()
         if current_date:
             self.notify(f"Loaded {current_date.strftime(HISTORY_DATE_FORMAT)}", title="Navigate")
@@ -10984,7 +11111,11 @@ def main() -> int:
             )
             return 1
 
-        papers = parse_arxiv_file(arxiv_file)
+        try:
+            papers = parse_arxiv_file(arxiv_file)
+        except OSError as e:
+            print(f"Error: Failed to read {arxiv_file}: {e}", file=sys.stderr)
+            return 1
 
     elif history_files:
         # History mode: use history directory
@@ -11025,7 +11156,11 @@ def main() -> int:
                 pass  # Invalid saved date, use newest
 
         _, arxiv_file = history_files[current_date_index]
-        papers = parse_arxiv_file(arxiv_file)
+        try:
+            papers = parse_arxiv_file(arxiv_file)
+        except OSError as e:
+            print(f"Error: Failed to read {arxiv_file}: {e}", file=sys.stderr)
+            return 1
 
     else:
         # Legacy fallback: use arxiv.txt in current directory
@@ -11044,7 +11179,11 @@ def main() -> int:
             )
             return 1
 
-        papers = parse_arxiv_file(arxiv_file)
+        try:
+            papers = parse_arxiv_file(arxiv_file)
+        except OSError as e:
+            print(f"Error: Failed to read {arxiv_file}: {e}", file=sys.stderr)
+            return 1
 
     if not papers:
         print("No papers found in the file", file=sys.stderr)

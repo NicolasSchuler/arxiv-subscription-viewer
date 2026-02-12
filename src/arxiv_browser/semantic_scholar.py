@@ -324,8 +324,13 @@ async def fetch_s2_references(
     limit: int = S2_MAX_REFERENCES,
     api_key: str = "",
     timeout: int = S2_REQUEST_TIMEOUT,
-) -> list[CitationEntry]:
-    """Fetch papers cited by the given paper. Sorted by citation_count desc."""
+    include_status: bool = False,
+) -> list[CitationEntry] | tuple[list[CitationEntry], bool]:
+    """Fetch papers cited by the given paper. Sorted by citation_count desc.
+
+    When include_status=True, returns (entries, complete) where complete=False
+    means the request/parse path failed and callers should avoid caching.
+    """
     response = await _s2_get_with_retry(
         client,
         url=f"{S2_API_BASE}/paper/{paper_id}/references",
@@ -335,14 +340,14 @@ async def fetch_s2_references(
         label=f"S2 refs {paper_id}",
     )
     if response is None:
-        return []
+        return ([], False) if include_status else []
     payload = _parse_json_object(response, f"S2 refs {paper_id}")
     if payload is None:
-        return []
+        return ([], False) if include_status else []
     data = payload.get("data")
     if not isinstance(data, list):
         logger.warning("S2 refs %s returned non-list data", paper_id)
-        return []
+        return ([], False) if include_status else []
     entries: list[CitationEntry] = []
     for item in data:
         if not isinstance(item, dict):
@@ -351,6 +356,8 @@ async def fetch_s2_references(
         if entry:
             entries.append(entry)
     entries.sort(key=lambda e: e.citation_count, reverse=True)
+    if include_status:
+        return entries, True
     return entries
 
 
@@ -360,15 +367,28 @@ async def fetch_s2_citations(
     limit: int = S2_MAX_CITATIONS,
     api_key: str = "",
     timeout: int = S2_REQUEST_TIMEOUT,
-) -> list[CitationEntry]:
-    """Fetch papers citing the given paper. Top N by citation_count."""
+    include_status: bool = False,
+) -> list[CitationEntry] | tuple[list[CitationEntry], bool]:
+    """Fetch papers citing the given paper. Top N by citation_count.
+
+    Uses an adaptive scan cap based on limit to avoid unnecessary API calls.
+    When include_status=True, returns (entries, complete) where complete=False
+    means at least one page fetch/parse failed.
+    """
     if limit <= 0:
-        return []
+        empty: list[CitationEntry] = []
+        return (empty, True) if include_status else empty
 
     entries: list[CitationEntry] = []
     offset = 0
-    while offset < S2_CITATIONS_SCAN_CAP:
-        page_limit = min(S2_CITATIONS_PAGE_SIZE, S2_CITATIONS_SCAN_CAP - offset)
+    scan_cap = min(
+        S2_CITATIONS_SCAN_CAP,
+        max(S2_CITATIONS_PAGE_SIZE * 2, limit * 4),
+    )
+    complete = True
+    while offset < scan_cap:
+        remaining = scan_cap - offset
+        page_limit = min(S2_CITATIONS_PAGE_SIZE, remaining)
         label = f"S2 cites {paper_id}"
         response = await _s2_get_with_retry(
             client,
@@ -383,15 +403,18 @@ async def fetch_s2_citations(
             label=label,
         )
         if response is None:
+            complete = False
             break
 
         payload = _parse_json_object(response, label)
         if payload is None:
+            complete = False
             break
 
         data = payload.get("data")
         if not isinstance(data, list):
             logger.warning("S2 cites %s returned non-list data", paper_id)
+            complete = False
             break
         if not data:
             break
@@ -408,7 +431,10 @@ async def fetch_s2_citations(
         offset += page_limit
 
     entries.sort(key=lambda e: e.citation_count, reverse=True)
-    return entries[:limit]
+    trimmed = entries[:limit]
+    if include_status:
+        return trimmed, complete
+    return trimmed
 
 
 # ============================================================================

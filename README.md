@@ -1,6 +1,12 @@
-# arXiv Subscription Viewer
+<p align="center">
+  <img src="docs/logo.png" alt="arXiv Subscription Viewer" width="200">
+</p>
 
-A terminal user interface (TUI) for browsing arXiv papers from email subscription archives.
+<h1 align="center">arXiv Subscription Viewer</h1>
+
+<p align="center">
+  A terminal user interface (TUI) for browsing arXiv papers from email subscription archives.
+</p>
 
 ![arXiv Subscription Viewer Screenshot](screenshot.svg)
 
@@ -214,7 +220,6 @@ history/
 - Use `[` and `]` keys to navigate between dates
 - Session state (including current date) persists across runs
 - Falls back to `arxiv.txt` if no history directory exists
-- Limited to 365 most recent files to prevent memory issues
 
 ## PDF Downloads
 

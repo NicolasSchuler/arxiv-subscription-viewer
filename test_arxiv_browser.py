@@ -1318,6 +1318,19 @@ class TestHistoryFileDiscovery:
         dates = [d for d, _ in result]
         assert dates == sorted(dates, reverse=True)
 
+    def test_discover_history_files_default_is_unbounded(self, tmp_path):
+        """discover_history_files should return all files when limit is omitted."""
+        from arxiv_browser.app import discover_history_files
+
+        history_dir = tmp_path / "history"
+        history_dir.mkdir()
+
+        for i in range(10):
+            (history_dir / f"2024-01-{i + 10:02d}.txt").write_text("test")
+
+        result = discover_history_files(tmp_path)
+        assert len(result) == 10
+
     def test_max_history_files_constant_is_positive(self):
         """MAX_HISTORY_FILES constant should be positive."""
         from arxiv_browser.app import MAX_HISTORY_FILES
@@ -1339,6 +1352,29 @@ class TestHistoryFileDiscovery:
         result = discover_history_files(tmp_path)
         assert len(result) == 1
         assert result[0][0].isoformat() == "2024-01-15"
+
+    def test_discover_history_files_handles_glob_oserror(self, tmp_path, monkeypatch, caplog):
+        """discover_history_files should return [] when history directory can't be read."""
+        import logging
+
+        from arxiv_browser.app import discover_history_files
+
+        history_dir = tmp_path / "history"
+        history_dir.mkdir()
+
+        original_glob = Path.glob
+
+        def fake_glob(path_obj: Path, pattern: str):
+            if path_obj == history_dir and pattern == "*.txt":
+                msg = "permission denied"
+                raise OSError(msg)
+            return original_glob(path_obj, pattern)
+
+        monkeypatch.setattr(Path, "glob", fake_glob)
+        with caplog.at_level(logging.WARNING):
+            result = discover_history_files(tmp_path)
+        assert result == []
+        assert "Failed to enumerate history files" in caplog.text
 
 
 # ============================================================================
@@ -2295,6 +2331,34 @@ class TestMainCLI:
         assert result == 1
         assert "directory" in captured.err
 
+    def test_history_file_read_error_returns_1(self, tmp_path, monkeypatch, capsys):
+        """Unreadable selected history file should return 1 instead of crashing."""
+        from datetime import date as datemod
+
+        from arxiv_browser.app import main
+
+        history_dir = tmp_path / "history"
+        history_dir.mkdir()
+        history_file = history_dir / "2024-01-15.txt"
+        history_file.write_text("dummy")
+
+        def raise_read_error(_path):
+            msg = "boom"
+            raise OSError(msg)
+
+        monkeypatch.setattr("sys.argv", ["arxiv_browser"])
+        monkeypatch.setattr(
+            "arxiv_browser.app.discover_history_files",
+            lambda base_dir: [(datemod(2024, 1, 15), history_file)],
+        )
+        monkeypatch.setattr("arxiv_browser.app.parse_arxiv_file", raise_read_error)
+        monkeypatch.setattr("arxiv_browser.app.load_config", lambda: UserConfig())
+
+        result = main()
+        captured = capsys.readouterr()
+        assert result == 1
+        assert "Failed to read" in captured.err
+
     def test_no_papers_exits_with_error(self, tmp_path, monkeypatch, capsys):
         """Empty file should return 1 with 'No papers'."""
         from arxiv_browser.app import main
@@ -2374,6 +2438,16 @@ class TestTextualIntegration:
             for i in range(count)
         ]
 
+    @staticmethod
+    async def _wait_for_option_count(pilot, option_list, expected: int, timeout: float = 2.0) -> None:
+        """Poll until OptionList reaches expected count or timeout."""
+        import asyncio
+
+        deadline = asyncio.get_running_loop().time() + timeout
+        while option_list.option_count != expected and asyncio.get_running_loop().time() < deadline:
+            await pilot.pause(0.05)
+        assert option_list.option_count == expected
+
     async def test_app_renders_paper_list(self, make_paper):
         """App should mount and render all papers in the option list."""
         from unittest.mock import patch
@@ -2413,10 +2487,8 @@ class TestTextualIntegration:
                 await pilot.press("slash")
                 # Type a query that matches only the quantum paper
                 await pilot.press("Q", "u", "a", "n", "t", "u", "m")
-                # Wait for debounce (0.3s) + margin for DOM update
-                await pilot.pause(0.7)
                 option_list = app.query_one("#paper-list", OptionList)
-                assert option_list.option_count == 1
+                await self._wait_for_option_count(pilot, option_list, expected=1)
 
     async def test_search_clear_restores_all(self, make_paper):
         """Pressing escape on search should restore all papers."""
@@ -2435,15 +2507,13 @@ class TestTextualIntegration:
                 await pilot.press("slash")
                 for ch in "cat:nonexistent":
                     await pilot.press(ch)
-                await pilot.pause(0.7)
                 option_list = app.query_one("#paper-list", OptionList)
                 # Empty state shows a single placeholder option
-                assert option_list.option_count == 1
+                await self._wait_for_option_count(pilot, option_list, expected=1)
 
                 # Cancel search with escape
                 await pilot.press("escape")
-                await pilot.pause(0.4)
-                assert option_list.option_count == 3
+                await self._wait_for_option_count(pilot, option_list, expected=3)
 
     async def test_filter_to_empty_cancels_pending_detail_update(self, make_paper):
         """Filtering to an empty list must not allow stale debounced detail updates."""
@@ -2767,6 +2837,125 @@ class TestArxivApiModeIntegration:
                 assert app._in_arxiv_api_mode is False
                 assert app.all_papers[0].arxiv_id == "2401.00001"
 
+
+# ============================================================================
+# Tests for arXiv API error and rate-limit paths
+# ============================================================================
+
+
+class TestArxivApiErrorHandling:
+    """Unit tests for arXiv API rate limiting and exception cleanup paths."""
+
+    @staticmethod
+    def _make_minimal_app():
+        from unittest.mock import MagicMock
+
+        from arxiv_browser.app import ArxivBrowser, UserConfig
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._config = UserConfig()
+        app._arxiv_api_fetch_inflight = False
+        app._arxiv_api_loading = False
+        app._arxiv_api_request_token = 0
+        app._last_arxiv_api_request_at = 0.0
+        app.notify = MagicMock()
+        app._update_status_bar = MagicMock()
+        app._apply_arxiv_search_results = MagicMock()
+        return app
+
+    @pytest.mark.asyncio
+    async def test_apply_arxiv_rate_limit_waits_when_too_soon(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from arxiv_browser.app import ArxivBrowser
+
+        app = self._make_minimal_app()
+        app.notify = MagicMock()
+        app._last_arxiv_api_request_at = 100.0
+
+        class FakeLoop:
+            def __init__(self) -> None:
+                self._calls = 0
+
+            def time(self) -> float:
+                self._calls += 1
+                if self._calls == 1:
+                    return 101.0
+                return 104.5
+
+        fake_loop = FakeLoop()
+        with (
+            patch("arxiv_browser.app.asyncio.get_running_loop", return_value=fake_loop),
+            patch("arxiv_browser.app.asyncio.sleep", new_callable=AsyncMock) as sleep_mock,
+        ):
+            await ArxivBrowser._apply_arxiv_rate_limit(app)
+
+        sleep_mock.assert_awaited_once()
+        assert sleep_mock.await_args.args[0] == pytest.approx(2.0)
+        app.notify.assert_called_once()
+        assert app._last_arxiv_api_request_at == pytest.approx(104.5)
+
+    @pytest.mark.asyncio
+    async def test_run_arxiv_search_value_error_cleans_loading_state(self):
+        from unittest.mock import AsyncMock
+
+        from arxiv_browser.app import ArxivBrowser, ArxivSearchRequest
+
+        app = self._make_minimal_app()
+        app._fetch_arxiv_api_page = AsyncMock(side_effect=ValueError("bad query"))
+
+        await ArxivBrowser._run_arxiv_search(app, ArxivSearchRequest(query="bad"), start=0)
+
+        assert app._arxiv_api_fetch_inflight is False
+        assert app._arxiv_api_loading is False
+        app._apply_arxiv_search_results.assert_not_called()
+        app.notify.assert_called_once()
+        assert "bad query" in app.notify.call_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_run_arxiv_search_http_status_error_cleans_loading_state(self):
+        from unittest.mock import AsyncMock
+
+        import httpx
+
+        from arxiv_browser.app import ArxivBrowser, ArxivSearchRequest
+
+        app = self._make_minimal_app()
+        request = httpx.Request("GET", "https://export.arxiv.org/api/query")
+        response = httpx.Response(status_code=503, request=request)
+        app._fetch_arxiv_api_page = AsyncMock(
+            side_effect=httpx.HTTPStatusError("service unavailable", request=request, response=response)
+        )
+
+        await ArxivBrowser._run_arxiv_search(app, ArxivSearchRequest(query="test"), start=0)
+
+        assert app._arxiv_api_fetch_inflight is False
+        assert app._arxiv_api_loading is False
+        app._apply_arxiv_search_results.assert_not_called()
+        app.notify.assert_called_once()
+        assert "HTTP 503" in app.notify.call_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_run_arxiv_search_http_error_cleans_loading_state(self):
+        from unittest.mock import AsyncMock
+
+        import httpx
+
+        from arxiv_browser.app import ArxivBrowser, ArxivSearchRequest
+
+        app = self._make_minimal_app()
+        request = httpx.Request("GET", "https://export.arxiv.org/api/query")
+        app._fetch_arxiv_api_page = AsyncMock(
+            side_effect=httpx.ConnectError("network down", request=request)
+        )
+
+        await ArxivBrowser._run_arxiv_search(app, ArxivSearchRequest(query="test"), start=0)
+
+        assert app._arxiv_api_fetch_inflight is False
+        assert app._arxiv_api_loading is False
+        app._apply_arxiv_search_results.assert_not_called()
+        app.notify.assert_called_once()
+        assert "Search failed" in app.notify.call_args.args[0]
 
 # ============================================================================
 # Phase 7: Migrate Fragile Regressions to Integration Tests
@@ -3337,6 +3526,8 @@ class TestGenerateSummaryAsync:
         app._paper_summaries = {}
         app._summary_loading = set()
         app._summary_db_path = tmp_path / "test_summaries.db"
+        app._summary_mode_label = {}
+        app._summary_command_hash = {}
         app._http_client = None
         app.notify = MagicMock()
         app._update_abstract_display = MagicMock()
@@ -3371,11 +3562,6 @@ class TestGenerateSummaryAsync:
                 new_callable=AsyncMock,
                 return_value=proc,
             ),
-            patch(
-                "arxiv_browser.app.asyncio.wait_for",
-                new_callable=AsyncMock,
-                return_value=(b"Great paper about transformers.", b""),
-            ),
             patch("arxiv_browser.app._save_summary"),
         ):
             await ArxivBrowser._generate_summary_async(
@@ -3397,6 +3583,7 @@ class TestGenerateSummaryAsync:
         from arxiv_browser.app import ArxivBrowser
 
         proc = self._make_proc_mock()
+        proc.communicate.side_effect = TimeoutError()
 
         with (
             patch(
@@ -3408,11 +3595,6 @@ class TestGenerateSummaryAsync:
                 "arxiv_browser.app.asyncio.create_subprocess_shell",
                 new_callable=AsyncMock,
                 return_value=proc,
-            ),
-            patch(
-                "arxiv_browser.app.asyncio.wait_for",
-                new_callable=AsyncMock,
-                side_effect=TimeoutError(),
             ),
         ):
             await ArxivBrowser._generate_summary_async(
@@ -3445,11 +3627,6 @@ class TestGenerateSummaryAsync:
                 new_callable=AsyncMock,
                 return_value=proc,
             ),
-            patch(
-                "arxiv_browser.app.asyncio.wait_for",
-                new_callable=AsyncMock,
-                return_value=(b"", b"Model not found"),
-            ),
         ):
             await ArxivBrowser._generate_summary_async(
                 mock_app, paper, "claude -p {prompt}", "", "hash123"
@@ -3476,11 +3653,6 @@ class TestGenerateSummaryAsync:
                 "arxiv_browser.app.asyncio.create_subprocess_shell",
                 new_callable=AsyncMock,
                 return_value=proc,
-            ),
-            patch(
-                "arxiv_browser.app.asyncio.wait_for",
-                new_callable=AsyncMock,
-                return_value=(b"", b""),
             ),
         ):
             await ArxivBrowser._generate_summary_async(
@@ -3537,6 +3709,97 @@ class TestGenerateSummaryAsync:
         # finally block must have cleaned up
         assert "2401.12345" not in mock_app._summary_loading
         mock_app._update_abstract_display.assert_called_with("2401.12345")
+
+    async def test_quick_mode_skips_html_fetch(self, paper, mock_app):
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser.app import ArxivBrowser
+
+        proc = self._make_proc_mock(stdout=b"Quick summary.")
+
+        with (
+            patch("arxiv_browser.app._fetch_paper_content_async", new_callable=AsyncMock) as fetch_mock,
+            patch(
+                "arxiv_browser.app.asyncio.create_subprocess_shell",
+                new_callable=AsyncMock,
+                return_value=proc,
+            ),
+            patch("arxiv_browser.app._save_summary"),
+        ):
+            await ArxivBrowser._generate_summary_async(
+                mock_app,
+                paper,
+                "claude -p {prompt}",
+                "",
+                "hash123",
+                mode_label="QUICK",
+                use_full_paper_content=False,
+            )
+
+        fetch_mock.assert_not_called()
+        assert mock_app._paper_summaries["2401.12345"] == "Quick summary."
+        assert mock_app._summary_mode_label["2401.12345"] == "QUICK"
+
+    async def test_failure_clears_mode_label_without_summary(self, paper, mock_app):
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser.app import ArxivBrowser
+
+        mock_app._summary_mode_label["2401.12345"] = "TLDR"
+        mock_app._summary_command_hash["2401.12345"] = "old-hash"
+        mock_app._summary_loading.add("2401.12345")
+
+        with patch(
+            "arxiv_browser.app._fetch_paper_content_async",
+            new_callable=AsyncMock,
+            side_effect=Exception("boom"),
+        ):
+            await ArxivBrowser._generate_summary_async(
+                mock_app,
+                paper,
+                "claude -p {prompt}",
+                "",
+                "new-hash",
+                mode_label="TLDR",
+                use_full_paper_content=True,
+            )
+
+        assert "2401.12345" not in mock_app._paper_summaries
+        assert "2401.12345" not in mock_app._summary_mode_label
+        assert "2401.12345" not in mock_app._summary_command_hash
+
+
+class TestSummaryModeSelection:
+    """Tests for summary mode selection state transitions."""
+
+    def test_mode_switch_clears_stale_summary_before_generation(self, make_paper, tmp_path):
+        from unittest.mock import MagicMock, patch
+
+        from arxiv_browser.app import ArxivBrowser
+
+        paper = make_paper(arxiv_id="2401.12345")
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._config = type("Config", (), {"llm_prompt_template": ""})()
+        app._summary_loading = set()
+        app._summary_db_path = tmp_path / "test_summaries.db"
+        app._paper_summaries = {"2401.12345": "stale summary"}
+        app._summary_mode_label = {"2401.12345": "OLD"}
+        app._summary_command_hash = {"2401.12345": "old-hash"}
+        app._update_abstract_display = MagicMock()
+        app.notify = MagicMock()
+
+        def fake_track_task(coro):
+            coro.close()
+            return MagicMock()
+
+        app._track_task = fake_track_task
+
+        with patch("arxiv_browser.app._load_summary", return_value=None):
+            app._on_summary_mode_selected("methods", paper, "claude -p {prompt}")
+
+        assert "2401.12345" not in app._paper_summaries
+        assert "2401.12345" in app._summary_loading
+        assert app._summary_mode_label["2401.12345"] == "METHODS"
 
 
 class TestLlmSummaryDb:
@@ -4493,7 +4756,7 @@ class TestS2AppActions:
         return app
 
     def test_toggle_s2_flips_state(self):
-        from unittest.mock import MagicMock
+        from unittest.mock import MagicMock, patch
 
         app = self._make_mock_app()
         app.notify = MagicMock()
@@ -4502,16 +4765,38 @@ class TestS2AppActions:
         app._mark_badges_dirty = MagicMock()
 
         assert app._s2_active is False
-        app.action_toggle_s2()
+        with patch("arxiv_browser.app.save_config", return_value=True) as save_mock:
+            app.action_toggle_s2()
         assert app._s2_active is True
+        assert app._config.s2_enabled is True
+        save_mock.assert_called_once_with(app._config)
         app.notify.assert_called_once()
         assert "enabled" in app.notify.call_args[0][0]
         app._mark_badges_dirty.assert_called_once_with("s2", immediate=True)
 
-        app.action_toggle_s2()
+        with patch("arxiv_browser.app.save_config", return_value=True):
+            app.action_toggle_s2()
         assert app._s2_active is False
+        assert app._config.s2_enabled is False
         assert "disabled" in app.notify.call_args[0][0]
         assert app._mark_badges_dirty.call_count == 2
+
+    def test_toggle_s2_reverts_when_save_fails(self):
+        from unittest.mock import MagicMock, patch
+
+        app = self._make_mock_app()
+        app.notify = MagicMock()
+        app._update_status_bar = MagicMock()
+        app._refresh_detail_pane = MagicMock()
+        app._mark_badges_dirty = MagicMock()
+
+        with patch("arxiv_browser.app.save_config", return_value=False):
+            app.action_toggle_s2()
+
+        assert app._s2_active is False
+        assert app._config.s2_enabled is False
+        app._mark_badges_dirty.assert_not_called()
+        assert "Failed to save Semantic Scholar setting" in app.notify.call_args[0][0]
 
     @pytest.mark.asyncio
     async def test_action_fetch_s2_dedupes_concurrent_calls(self, make_paper):
@@ -4706,6 +4991,31 @@ class TestCitationGraphCaching:
         fetch_refs.assert_not_called()
         fetch_cites.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_fetch_does_not_cache_when_fetch_incomplete(self, tmp_path):
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser.app import ArxivBrowser
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._s2_db_path = tmp_path / "s2.db"
+        app._http_client = AsyncMock()
+        app._config = type("Config", (), {"s2_api_key": ""})()
+
+        with (
+            patch("arxiv_browser.app.has_s2_citation_graph_cache", return_value=False),
+            patch("arxiv_browser.app.fetch_s2_references", new_callable=AsyncMock) as fetch_refs,
+            patch("arxiv_browser.app.fetch_s2_citations", new_callable=AsyncMock) as fetch_cites,
+            patch("arxiv_browser.app.save_s2_citation_graph") as save_graph,
+        ):
+            fetch_refs.return_value = ([], False)
+            fetch_cites.return_value = ([], True)
+            refs, cites = await app._fetch_citation_graph("paper1")
+
+        assert refs == []
+        assert cites == []
+        save_graph.assert_not_called()
+
 
 # ============================================================================
 # HuggingFace Integration Tests
@@ -4876,6 +5186,11 @@ class TestHfAppState:
         app._hf_cache = {}
         app._hf_loading = False
         app._http_client = None
+        app._config = type("Config", (), {"hf_enabled": False, "hf_cache_ttl_hours": 6})()
+        app.notify = MagicMock()
+        app._update_status_bar = MagicMock()
+        app._refresh_detail_pane = MagicMock()
+        app._mark_badges_dirty = MagicMock()
         return app
 
     def test_hf_state_for_inactive(self):
@@ -4895,6 +5210,35 @@ class TestHfAppState:
         app = self._make_mock_app()
         app._hf_active = True
         assert app._hf_state_for("unknown") is None
+
+    @pytest.mark.asyncio
+    async def test_action_toggle_hf_persists_state(self):
+        from unittest.mock import AsyncMock, patch
+
+        app = self._make_mock_app()
+        app._fetch_hf_daily = AsyncMock()
+
+        with patch("arxiv_browser.app.save_config", return_value=True):
+            await app.action_toggle_hf()
+
+        assert app._hf_active is True
+        assert app._config.hf_enabled is True
+        app._fetch_hf_daily.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_action_toggle_hf_reverts_when_save_fails(self):
+        from unittest.mock import AsyncMock, patch
+
+        app = self._make_mock_app()
+        app._fetch_hf_daily = AsyncMock()
+
+        with patch("arxiv_browser.app.save_config", return_value=False):
+            await app.action_toggle_hf()
+
+        assert app._hf_active is False
+        assert app._config.hf_enabled is False
+        app._fetch_hf_daily.assert_not_called()
+        assert "Failed to save HuggingFace setting" in app.notify.call_args[0][0]
 
     @pytest.mark.asyncio
     async def test_fetch_hf_daily_dedupes_concurrent_calls(self, make_paper):
@@ -5814,7 +6158,7 @@ class TestSummaryModes:
     """Tests for SUMMARY_MODES constant and mode templates."""
 
     def test_summary_modes_has_expected_keys(self):
-        expected = {"default", "tldr", "methods", "results", "comparison"}
+        expected = {"default", "quick", "tldr", "methods", "results", "comparison"}
         assert set(SUMMARY_MODES.keys()) == expected
 
     def test_each_mode_has_description_and_template(self):
@@ -5848,6 +6192,7 @@ class TestSummaryModeModal:
         modal = SummaryModeModal()
         # Each action should produce the correct mode name
         assert hasattr(modal, "action_mode_default")
+        assert hasattr(modal, "action_mode_quick")
         assert hasattr(modal, "action_mode_tldr")
         assert hasattr(modal, "action_mode_methods")
         assert hasattr(modal, "action_mode_results")
@@ -5859,7 +6204,7 @@ class TestSummaryModeModal:
 
         modal = SummaryModeModal()
         binding_keys = {b.key for b in modal.BINDINGS}
-        assert {"d", "t", "m", "r", "c", "escape"} <= binding_keys
+        assert {"d", "q", "t", "m", "r", "c", "escape"} <= binding_keys
 
 
 class TestSummaryDbMigration:
@@ -6764,6 +7109,49 @@ class TestDateNavigator:
         # Replace index 0 with a different file; count should update accordingly.
         nav._history_files = [(dt_date(2026, 1, 3), replacement), (dt_date(2026, 1, 2), second)]
         assert nav._get_paper_count(0) == 3
+
+    @pytest.mark.asyncio
+    async def test_update_dates_does_not_create_duplicate_ids(self, tmp_path, make_paper):
+        from datetime import date as dt_date
+        from unittest.mock import patch
+
+        from arxiv_browser.app import ArxivBrowser, DateNavigator
+
+        f1 = tmp_path / "2026-01-01.txt"
+        f2 = tmp_path / "2026-01-02.txt"
+        f3 = tmp_path / "2026-01-03.txt"
+        f1.write_text("arXiv:2401.00001\n", encoding="utf-8")
+        f2.write_text("arXiv:2401.00002\n", encoding="utf-8")
+        f3.write_text("arXiv:2401.00003\n", encoding="utf-8")
+
+        first = [
+            (dt_date(2026, 1, 3), f3),
+            (dt_date(2026, 1, 2), f2),
+            (dt_date(2026, 1, 1), f1),
+        ]
+        second = [
+            (dt_date(2026, 1, 4), f3),
+            (dt_date(2026, 1, 3), f2),
+            (dt_date(2026, 1, 2), f1),
+        ]
+
+        app = ArxivBrowser(
+            [make_paper(arxiv_id="2401.00003", title="Paper for 2026-01-03")],
+            restore_session=False,
+            history_files=first,
+            current_date_index=0,
+        )
+        with patch("arxiv_browser.app.save_config", return_value=True):
+            async with app.run_test():
+                nav = app.query_one(DateNavigator)
+                await nav.update_dates(first, 0)
+                await nav.update_dates(second, 1)
+                date_item_ids = [
+                    child.id
+                    for child in nav.children
+                    if "date-nav-item" in child.classes and child.id is not None
+                ]
+                assert len(date_item_ids) == len(set(date_item_ids))
 
 
 class TestThemeSwitcher:
@@ -8791,6 +9179,63 @@ class TestAbstractPreviewIntegration:
 # ============================================================================
 
 
+class TestWatchListActions:
+    """Unit tests for watch list management action behavior."""
+
+    @staticmethod
+    def _make_mock_app():
+        from unittest.mock import MagicMock
+
+        from arxiv_browser.app import ArxivBrowser
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._config = UserConfig(watch_list=[WatchListEntry(pattern="old", match_type="title")])
+        app._compute_watched_papers = MagicMock()
+        app._watch_filter_active = False
+        app._watched_paper_ids = set()
+        app._apply_filter = MagicMock()
+        app.notify = MagicMock()
+        app.query_one = MagicMock(return_value=type("SearchInput", (), {"value": "cat:cs.AI"})())
+        return app
+
+    def test_manage_watch_list_persists_updates(self):
+        from unittest.mock import patch
+
+        app = self._make_mock_app()
+        new_entries = [WatchListEntry(pattern="new", match_type="author")]
+
+        def fake_push_screen(_screen, callback):
+            callback(new_entries)
+
+        app.push_screen = fake_push_screen
+        with patch("arxiv_browser.app.save_config", return_value=True) as save_mock:
+            app.action_manage_watch_list()
+
+        assert app._config.watch_list == new_entries
+        save_mock.assert_called_once_with(app._config)
+        app._compute_watched_papers.assert_called_once()
+        app._apply_filter.assert_called_once_with("cat:cs.AI")
+
+    def test_manage_watch_list_reverts_on_save_failure(self):
+        from unittest.mock import patch
+
+        app = self._make_mock_app()
+        old_entries = list(app._config.watch_list)
+        new_entries = [WatchListEntry(pattern="new", match_type="author")]
+
+        def fake_push_screen(_screen, callback):
+            callback(new_entries)
+
+        app.push_screen = fake_push_screen
+        with patch("arxiv_browser.app.save_config", return_value=False):
+            app.action_manage_watch_list()
+
+        assert app._config.watch_list == old_entries
+        app._compute_watched_papers.assert_not_called()
+        app._apply_filter.assert_not_called()
+        assert "Failed to save watch list" in app.notify.call_args[0][0]
+
+
 @pytest.mark.integration
 class TestWatchFilterIntegration:
     """Integration tests for watch filter toggle via 'w' key."""
@@ -9229,6 +9674,47 @@ class TestHistoryNavigationIntegration:
                 # Selection should be cleared
                 assert len(app.selected_ids) == 0
 
+    async def test_prev_date_load_error_rolls_back_index(self, make_paper, tmp_path):
+        """Failed date load should keep index on the last successfully loaded date."""
+        from datetime import date as dt_date
+        from unittest.mock import AsyncMock, patch
+
+        from arxiv_browser.app import ArxivBrowser, DateNavigator
+
+        f1 = self._make_history_file(tmp_path, "2024-01-17", "2401.00003")
+        f2 = self._make_history_file(tmp_path, "2024-01-16", "2401.00002")
+
+        history_files = [
+            (dt_date(2024, 1, 17), f1),
+            (dt_date(2024, 1, 16), f2),
+        ]
+
+        papers = [make_paper(arxiv_id="2401.00003", title="Paper for 2024-01-17")]
+        app = ArxivBrowser(
+            papers,
+            restore_session=False,
+            history_files=history_files,
+            current_date_index=0,
+        )
+
+        def parse_with_error(path: Path):
+            if path == f2:
+                msg = "broken file"
+                raise OSError(msg)
+            return [make_paper(arxiv_id="2401.00003", title="Paper for 2024-01-17")]
+
+        with (
+            patch("arxiv_browser.app.save_config", return_value=True),
+            patch.object(DateNavigator, "update_dates", new_callable=AsyncMock),
+            patch("arxiv_browser.app.parse_arxiv_file", side_effect=parse_with_error),
+        ):
+            async with app.run_test() as pilot:
+                assert app._current_date_index == 0
+                await pilot.press("bracketleft")
+                await pilot.pause(0.2)
+                assert app._current_date_index == 0
+                assert app.all_papers[0].arxiv_id == "2401.00003"
+
 
 # ============================================================================
 # Tests for ExportMenuModal
@@ -9417,6 +9903,16 @@ class TestSummaryModeModalDismiss:
         modal.action_mode_tldr()
         modal.dismiss.assert_called_once_with("tldr")
 
+    def test_action_mode_quick_dismisses_quick(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser.app import SummaryModeModal
+
+        modal = SummaryModeModal()
+        modal.dismiss = MagicMock()
+        modal.action_mode_quick()
+        modal.dismiss.assert_called_once_with("quick")
+
     def test_action_mode_methods_dismisses_methods(self):
         from unittest.mock import MagicMock
 
@@ -9468,6 +9964,7 @@ class TestSummaryModeModalDismiss:
 
         mode_actions = {
             "default": modal.action_mode_default,
+            "quick": modal.action_mode_quick,
             "tldr": modal.action_mode_tldr,
             "methods": modal.action_mode_methods,
             "results": modal.action_mode_results,
@@ -11016,11 +11513,6 @@ class TestAskLlm:
                 new_callable=AsyncMock,
                 return_value=proc,
             ),
-            patch(
-                "arxiv_browser.app.asyncio.wait_for",
-                new_callable=AsyncMock,
-                return_value=(b"This paper discusses transformers.", b""),
-            ),
         ):
             await chat_screen._ask_llm("What is this about?")
 
@@ -11034,16 +11526,12 @@ class TestAskLlm:
         from unittest.mock import AsyncMock, patch
 
         proc = self._make_proc_mock()
+        proc.communicate.side_effect = TimeoutError()
         with (
             patch(
                 "arxiv_browser.app.asyncio.create_subprocess_shell",
                 new_callable=AsyncMock,
                 return_value=proc,
-            ),
-            patch(
-                "arxiv_browser.app.asyncio.wait_for",
-                new_callable=AsyncMock,
-                side_effect=TimeoutError,
             ),
         ):
             await chat_screen._ask_llm("question")
@@ -11064,11 +11552,6 @@ class TestAskLlm:
                 new_callable=AsyncMock,
                 return_value=proc,
             ),
-            patch(
-                "arxiv_browser.app.asyncio.wait_for",
-                new_callable=AsyncMock,
-                return_value=(b"", b"model not found"),
-            ),
         ):
             await chat_screen._ask_llm("question")
 
@@ -11086,11 +11569,6 @@ class TestAskLlm:
                 "arxiv_browser.app.asyncio.create_subprocess_shell",
                 new_callable=AsyncMock,
                 return_value=proc,
-            ),
-            patch(
-                "arxiv_browser.app.asyncio.wait_for",
-                new_callable=AsyncMock,
-                return_value=(b"   ", b""),
             ),
         ):
             await chat_screen._ask_llm("question")
@@ -11126,11 +11604,6 @@ class TestAskLlm:
                 new_callable=AsyncMock,
                 return_value=proc,
             ),
-            patch(
-                "arxiv_browser.app.asyncio.wait_for",
-                new_callable=AsyncMock,
-                return_value=(response_text.encode(), b""),
-            ),
         ):
             await chat_screen._ask_llm("question")
 
@@ -11161,11 +11634,6 @@ class TestAskLlm:
                 new_callable=AsyncMock,
                 side_effect=capture_shell,
             ),
-            patch(
-                "arxiv_browser.app.asyncio.wait_for",
-                new_callable=AsyncMock,
-                return_value=(b"response", b""),
-            ),
         ):
             await chat_screen._ask_llm("Follow up")
 
@@ -11185,8 +11653,7 @@ class TestAddMessageMarkup:
         screen = PaperChatScreen(make_paper(title="T"), "cmd")
         # Just test the history tracking (no DOM)
         screen._history = []
-        # Directly append to history to verify the parameter exists
-        screen._add_message.__func__  # verify method exists
+        assert callable(screen._add_message)
         # The method signature should accept markup kwarg
         import inspect
 
@@ -11282,6 +11749,14 @@ class TestPaperDetailsRenderHelpers:
         assert "topic:" in result
         assert "flat-tag" in result
 
+    def test_render_tags_escapes_markup(self):
+        details = self._make_details()
+        result = details._render_tags(["topic:[red]ml[/]", "[bold]flat[/]"], False)
+        assert "[red]ml[/]" not in result
+        assert "[bold]flat[/]" not in result
+        assert "\\[red]ml\\[/]" in result
+        assert "\\[bold]flat\\[/]" in result
+
     def test_render_relevance_none(self):
         details = self._make_details()
         assert details._render_relevance(None, False) == ""
@@ -11340,6 +11815,25 @@ class TestPaperDetailsRenderHelpers:
         result = details._render_s2(s2, False, True)
         assert "42 cites" in result
 
+    def test_render_s2_escapes_fields(self):
+        from arxiv_browser.semantic_scholar import SemanticScholarPaper
+
+        details = self._make_details()
+        s2 = SemanticScholarPaper(
+            arxiv_id="2401.00001",
+            s2_paper_id="abc",
+            title="Test",
+            citation_count=42,
+            influential_citation_count=5,
+            tldr="",
+            fields_of_study=("[red]ML[/]",),
+            year=2024,
+            url="",
+        )
+        result = details._render_s2(s2, False, False)
+        assert "[red]ML[/]" not in result
+        assert "\\[red]ML\\[/]" in result
+
     def test_render_hf_empty(self):
         details = self._make_details()
         assert details._render_hf(None, False) == ""
@@ -11360,6 +11854,24 @@ class TestPaperDetailsRenderHelpers:
         )
         result = details._render_hf(hf, True)
         assert "15" in result
+
+    def test_render_hf_escapes_keywords(self):
+        from arxiv_browser.huggingface import HuggingFacePaper
+
+        details = self._make_details()
+        hf = HuggingFacePaper(
+            arxiv_id="2401.00001",
+            title="T",
+            upvotes=15,
+            num_comments=3,
+            ai_summary="",
+            ai_keywords=("[bold]unsafe[/]",),
+            github_repo="",
+            github_stars=0,
+        )
+        result = details._render_hf(hf, False)
+        assert "[bold]unsafe[/]" not in result
+        assert "\\[bold]unsafe\\[/]" in result
 
     def test_render_version_none(self, make_paper):
         details = self._make_details()
