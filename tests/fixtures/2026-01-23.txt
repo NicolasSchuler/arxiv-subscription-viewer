@@ -1,0 +1,174 @@
+------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+Send any comments regarding submissions directly to submitter.
+------------------------------------------------------------------------------
+Archives at http://arxiv.org/
+To unsubscribe, e-mail To: cs@arXiv.org, Subject: cancel
+------------------------------------------------------------------------------
+ Submissions to:
+Artificial Intelligence
+Machine Learning
+Software Engineering
+ received from  Wed 21 Jan 26 19:00:00 GMT  to  Thu 22 Jan 26 19:00:00 GMT
+------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+\\
+arXiv:2601.15305
+Date: Mon, 12 Jan 2026 20:33:39 GMT   (215kb)
+
+Title: Gated Sparse Attention: Combining Computational Efficiency with Training
+  Stability for Long-Context Language Models
+Authors: Alfred Shen, Aaron Shen
+Categories: cs.AI
+Comments: 15 pages, 1 figure, attention mechanism, sparse attention, gating,
+  long-context
+\\
+  The computational burden of attention in long-context language models has
+motivated two largely independent lines of work: sparse attention mechanisms
+that reduce complexity by attending to selected tokens, and gated attention
+variants that improve training sta-bility while mitigating the attention sink
+phenomenon. We observe that these approaches address complementary weaknesses
+and propose Gated Sparse Attention (GSA), an architecture that realizes the
+benefits of both. GSA incorporates a gated lightning indexer with sigmoid
+activations that produce bounded, interpretable selection scores, an adaptive
+sparsity controller that modulates the number of attended tokens based on local
+uncertainty, and dual gating at the value and output stages. We establish
+theoretical foundations for the approach, including complexity analysis,
+expressiveness results, and convergence guarantees. In experiments with 1.7B
+parameter models trained on 400B tokens, GSA matches the efficiency of
+sparse-only baselines (12-16x speedup at 128K context) while achieving the
+quality gains associated with gated attention: perplexity improves from 6.03 to
+5.70, RULER scores at 128K context nearly double, and attention to the first
+token, a proxy for attention sinks, drops from 47% to under 4%. Training
+stability improves markedly, with loss spikes reduced by 98%.
+\\ ( https://arxiv.org/abs/2601.15305 ,  215kb)
+------------------------------------------------------------------------------
+\\
+arXiv:2601.15306
+Date: Tue, 13 Jan 2026 07:49:41 GMT   (276kb)
+
+Title: Uncovering Latent Bias in LLM-Based Emergency Department Triage Through
+  Proxy Variables
+Authors: Ethan Zhang
+Categories: cs.AI
+Comments: 15 pages, 3 figures
+\\
+  Recent advances in large language models (LLMs) have enabled their
+integration into clinical decision-making; however, hidden biases against
+patients across racial, social, economic, and clinical backgrounds persist. In
+this study, we investigate bias in LLM-based medical AI systems applied to
+emergency department (ED) triage. We employ 32 patient-level proxy variables,
+each represented by paired positive and negative qualifiers, and evaluate their
+effects using both public (MIMIC-IV-ED Demo, MIMIC-IV Demo) and
+restricted-access credentialed (MIMIC-IV-ED and MIMIC-IV) datasets as
+appropriate~\cite{mimiciv_ed_demo,mimiciv_ed,mimiciv}. Our results reveal
+discriminatory behavior mediated through proxy variables in ED triage
+scenarios, as well as a systematic tendency for LLMs to modify perceived
+patient severity when specific tokens appear in the input context, regardless
+of whether they are framed positively or negatively. These findings indicate
+that AI systems is still imperfectly trained on noisy, sometimes non-causal
+signals that do not reliably reflect true patient acuity. Consequently, more
+needs to be done to ensure the safe and responsible deployment of AI
+technologies in clinical settings.
+\\ ( https://arxiv.org/abs/2601.15306 ,  276kb)
+------------------------------------------------------------------------------
+\\
+arXiv:2601.15307
+Date: Tue, 13 Jan 2026 14:42:56 GMT   (7450kb)
+
+Title: DeepSurvey-Bench: Evaluating Academic Value of Automatically Generated
+  Scientific Survey
+Authors: Guo-Biao Zhang, Ding-Yuan Liu, Da-Yi Wu, Tian Lan, Heyan Huang,
+  Zhijing Wu, Xian-Ling Mao
+Categories: cs.AI cs.CL
+\\
+  The rapid development of automated scientific survey generation technology
+has made it increasingly important to establish a comprehensive benchmark to
+evaluate the quality of generated surveys.Nearly all existing evaluation
+benchmarks rely on flawed selection criteria such as citation counts and
+structural coherence to select human-written surveys as the ground truth survey
+datasets, and then use surface-level metrics such as structural quality and
+reference relevance to evaluate generated surveys.However, these benchmarks
+have two key issues: (1) the ground truth survey datasets are unreliable
+because of a lack academic dimension annotations; (2) the evaluation metrics
+only focus on the surface quality of the survey such as logical coherence. Both
+issues lead to existing benchmarks cannot assess to evaluate their deep
+"academic value", such as the core research objectives and the critical
+analysis of different studies. To address the above problems, we propose
+DeepSurvey-Bench, a novel benchmark designed to comprehensively evaluate the
+academic value of generated surveys. Specifically, our benchmark propose a
+comprehensive academic value evaluation criteria covering three dimensions:
+informational value, scholarly communication value, and research guidance
+value. Based on this criteria, we construct a reliable dataset with academic
+value annotations, and evaluate the deep academic value of the generated
+surveys. Extensive experimental results demonstrate that our benchmark is
+highly consistent with human performance in assessing the academic value of
+generated surveys.
+\\ ( https://arxiv.org/abs/2601.15307 ,  7450kb)
+------------------------------------------------------------------------------
+\\
+arXiv:2601.15311
+Date: Wed, 14 Jan 2026 15:23:22 GMT   (463kb)
+
+Title: Aeon: High-Performance Neuro-Symbolic Memory Management for Long-Horizon
+  LLM Agents
+Authors: Mustafa Arslan
+Categories: cs.AI
+\\
+  Large Language Models (LLMs) are fundamentally constrained by the quadratic
+computational cost of self-attention and the "Lost in the Middle" phenomenon,
+where reasoning capabilities degrade as context windows expand. Existing
+solutions, primarily "Flat RAG" architectures relying on vector databases,
+treat memory as an unstructured bag of embeddings. This approach fails to
+capture the hierarchical and temporal structure of long-horizon interactions,
+leading to "Vector Haze", the retrieval of disjointed facts lacking episodic
+continuity. We propose Aeon, a Neuro-Symbolic Cognitive Operating System that
+redefines memory not as a static store, but as a managed OS resource. Aeon
+structures memory into a Memory Palace (a spatial index implemented via Atlas,
+a SIMD-accelerated Page-Clustered Vector Index that combines small-world graph
+navigation with B+ Tree-style disk locality to minimize read amplification) and
+a Trace (a neuro-symbolic episodic graph). We introduce the Semantic Lookaside
+Buffer (SLB), a predictive caching mechanism that exploits conversational
+locality to achieve sub-millisecond retrieval latencies. Benchmarks demonstrate
+that Aeon achieves < 1ms retrieval latency on conversational workloads while
+ensuring state consistency via a zero-copy C++/Python bridge, effectively
+enabling persistent, structured memory for autonomous agents.
+\\ ( https://arxiv.org/abs/2601.15311 ,  463kb)
+------------------------------------------------------------------------------
+\\
+arXiv:2601.15316
+Date: Fri, 16 Jan 2026 02:40:16 GMT   (1152kb)
+
+Title: The Paradigm Shift: A Comprehensive Survey on Large Vision Language
+  Models for Multimodal Fake News Detection
+Authors: Wei Ai, Yilong Tan, Yuntao Shou, Tao Meng, Haowen Chen, Zhixiong He,
+  and Keqin Li
+Categories: cs.AI cs.CV
+DOI: 10.1016/j.cosrev.2026.100893
+\\
+  In recent years, the rapid evolution of large vision-language models (LVLMs)
+has driven a paradigm shift in multimodal fake news detection (MFND),
+transforming it from traditional feature-engineering approaches to unified,
+end-to-end multimodal reasoning frameworks. Early methods primarily relied on
+shallow fusion techniques to capture correlations between text and images, but
+they struggled with high-level semantic understanding and complex cross-modal
+interactions. The emergence of LVLMs has fundamentally changed this landscape
+by enabling joint modeling of vision and language with powerful representation
+learning, thereby enhancing the ability to detect misinformation that leverages
+both textual narratives and visual content. Despite these advances, the field
+lacks a systematic survey that traces this transition and consolidates recent
+developments. To address this gap, this paper provides a comprehensive review
+of MFND through the lens of LVLMs. We first present a historical perspective,
+mapping the evolution from conventional multimodal detection pipelines to
+foundation model-driven paradigms. Next, we establish a structured taxonomy
+covering model architectures, datasets, and performance benchmarks.
+Furthermore, we analyze the remaining technical challenges, including
+interpretability, temporal reasoning, and domain generalization. Finally, we
+outline future research directions to guide the next stage of this paradigm
+shift. To the best of our knowledge, this is the first comprehensive survey to
+systematically document and analyze the transformative role of LVLMs in
+combating multimodal fake news. The summary of existing methods mentioned is in
+our Github:
+\href{https://github.com/Tan-YiLong/Overview-of-Fake-News-Detection}{https://github.com/Tan-YiLong/Overview-of-Fake-News-Detection}.
+\\ ( https://arxiv.org/abs/2601.15316 ,  1152kb)
+------------------------------------------------------------------------------

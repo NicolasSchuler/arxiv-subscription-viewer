@@ -55,6 +55,7 @@ import argparse
 import asyncio
 import hashlib
 import logging
+import logging.handlers
 import os
 import platform
 import shlex
@@ -69,6 +70,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from platformdirs import user_config_dir
 from rapidfuzz import fuzz
 from textual import on
 from textual.app import App, ComposeResult, ScreenStackError
@@ -354,6 +356,7 @@ __all__ = [
     "TfidfIndex",
     "UserConfig",
     "WatchListEntry",
+    "_configure_logging",
     "build_arxiv_search_query",
     "build_auto_tag_prompt",
     "build_daily_digest",
@@ -4592,10 +4595,18 @@ class ArxivBrowser(App):
 
         self._notify_watch_list_matches()
 
+        logger.debug(
+            "App mounted: %d papers, history_mode=%s, s2=%s, hf=%s",
+            len(self.all_papers),
+            self._is_history_mode(),
+            self._s2_active,
+            self._hf_active,
+        )
+
         # Focus the paper list so key bindings work
         self.query_one("#paper-list", OptionList).focus()
 
-    def on_unmount(self) -> None:
+    async def on_unmount(self) -> None:
         """Called when app is unmounted. Saves session state and cleans up timers.
 
         Uses atomic swap pattern to avoid race conditions with timer callbacks.
@@ -4622,9 +4633,9 @@ class ArxivBrowser(App):
         self._http_client = None
         if client is not None:
             try:
-                asyncio.get_event_loop().create_task(client.aclose())
-            except RuntimeError:
-                pass  # Event loop already closed
+                await client.aclose()
+            except Exception:
+                pass  # Best-effort cleanup during shutdown
 
     def _refresh_date_navigator(self) -> None:
         """Refresh date navigator labels after DOM updates settle."""
@@ -5726,6 +5737,13 @@ class ArxivBrowser(App):
         # Apply current sort order and refresh the list view
         self._sort_papers()
         self._refresh_list_view()
+
+        logger.debug(
+            "Filter applied: query=%r, matched=%d/%d papers",
+            query,
+            len(self.filtered_papers),
+            len(self.all_papers),
+        )
 
         # Update header with current query context
         self.query_one("#list-header", Label).update(self._format_header_text(query))
@@ -8295,6 +8313,33 @@ def _resolve_papers(
     return (result, [], 0)
 
 
+def _configure_logging(debug: bool) -> None:
+    """Configure logging. When debug=True, logs to file at DEBUG level."""
+    if not debug:
+        # Default: suppress all logging (TUI captures stderr)
+        logging.disable(logging.CRITICAL)
+        return
+
+    log_dir = Path(user_config_dir(CONFIG_APP_NAME))
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "debug.log"
+
+    handler = logging.handlers.RotatingFileHandler(
+        log_file,
+        maxBytes=5 * 1024 * 1024,
+        backupCount=3,
+        encoding="utf-8",
+    )
+    handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s %(name)s %(levelname)s %(message)s",
+            datefmt="%H:%M:%S",
+        )
+    )
+    logging.root.addHandler(handler)
+    logging.root.setLevel(logging.DEBUG)
+
+
 def main() -> int:
     """Main entry point. Returns exit code."""
     parser = argparse.ArgumentParser(description="Browse arXiv papers from a text file in a TUI")
@@ -8321,7 +8366,15 @@ def main() -> int:
         action="store_true",
         help="List available dates in history/ and exit",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging to file (~/.config/arxiv-browser/debug.log)",
+    )
     args = parser.parse_args()
+
+    _configure_logging(args.debug)
+    logger.debug("arxiv-viewer starting, cwd=%s", Path.cwd())
 
     base_dir = Path.cwd()
 

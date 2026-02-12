@@ -5367,7 +5367,7 @@ class TestBadgeCoalescing:
 
         app._update_option_at_index.assert_not_called()
 
-    def test_badge_timer_cleanup_on_unmount(self):
+    async def test_badge_timer_cleanup_on_unmount(self):
         """Verify _badge_timer is stopped during on_unmount."""
         from unittest.mock import MagicMock
 
@@ -5379,8 +5379,9 @@ class TestBadgeCoalescing:
         mock_timer = MagicMock()
         app._badge_timer = mock_timer
         app._save_session_state = MagicMock()
+        app._http_client = None
 
-        app.on_unmount()
+        await app.on_unmount()
 
         mock_timer.stop.assert_called_once()
         assert app._badge_timer is None

@@ -1,0 +1,327 @@
+------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+Send any comments regarding submissions directly to submitter.
+------------------------------------------------------------------------------
+Archives at http://arxiv.org/
+To unsubscribe, e-mail To: cs@arXiv.org, Subject: cancel
+------------------------------------------------------------------------------
+ Submissions to:
+Artificial Intelligence
+Machine Learning
+Software Engineering
+ received from  Thu 22 Jan 26 19:00:00 GMT  to  Fri 23 Jan 26 19:00:00 GMT
+------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+\\
+arXiv:2601.16280
+Date: Thu, 22 Jan 2026 19:24:21 GMT   (415kb)
+
+Title: When Agents Fail to Act: A Diagnostic Framework for Tool Invocation
+  Reliability in Multi-Agent LLM Systems
+Authors: Donghao Huang, Gauri Malwe, Zhaoxia Wang
+Categories: cs.AI
+Comments: Accepted for publication in 2026 The 9th International Conference on
+  Artificial Intelligence and Big Data (ICAIBD 2026)
+\\
+  Multi-agent systems powered by large language models (LLMs) are transforming
+enterprise automation, yet systematic evaluation methodologies for assessing
+tool-use reliability remain underdeveloped. We introduce a comprehensive
+diagnostic framework that leverages big data analytics to evaluate procedural
+reliability in intelligent agent systems, addressing critical needs for
+SME-centric deployment in privacy-sensitive environments. Our approach features
+a 12-category error taxonomy capturing failure modes across tool
+initialization, parameter handling, execution, and result interpretation.
+Through systematic evaluation of 1,980 deterministic test instances spanning
+both open-weight models (Qwen2.5 series, Functionary) and proprietary
+alternatives (GPT-4, Claude 3.5/3.7) across diverse edge hardware
+configurations, we identify actionable reliability thresholds for production
+deployment. Our analysis reveals that procedural reliability, particularly tool
+initialization failures, constitutes the primary bottleneck for smaller models,
+while qwen2.5:32b achieves flawless performance matching GPT-4.1. The framework
+demonstrates that mid-sized models (qwen2.5:14b) offer practical
+accuracy-efficiency trade-offs on commodity hardware (96.6\% success rate, 7.3
+s latency), enabling cost-effective intelligent agent deployment for
+resource-constrained organizations. This work establishes foundational
+infrastructure for systematic reliability evaluation of tool-augmented
+multi-agent AI systems.
+\\ ( https://arxiv.org/abs/2601.16280 ,  415kb)
+------------------------------------------------------------------------------
+\\
+arXiv:2601.16286
+Date: Thu, 22 Jan 2026 19:42:21 GMT   (525kb)
+
+Title: SemanticALLI: Caching Reasoning, Not Just Responses, in Agentic Systems
+Authors: Varun Chillara, Dylan Kline, Christopher Alvares, Evan Wooten, Huan
+  Yang, Shlok Khetan, Cade Bauer, Tr\'e Guillory, Tanishka Shah, Yashodhara
+  Dhariwal, Volodymyr Pavlov, George Popstefanov
+Categories: cs.AI cs.MA
+\\
+  Agentic AI pipelines suffer from a hidden inefficiency: they frequently
+reconstruct identical intermediate logic, such as metric normalization or chart
+scaffolding, even when the user's natural language phrasing is entirely novel.
+Conventional boundary caching fails to capture this inefficiency because it
+treats inference as a monolithic black box.
+  We introduce SemanticALLI, a pipeline-aware architecture within Alli (PMG's
+marketing intelligence platform), designed to operationalize redundant
+reasoning. By decomposing generation into Analytic Intent Resolution (AIR) and
+Visualization Synthesis (VS), SemanticALLI elevates structured intermediate
+representations (IRs) to first-class, cacheable artifacts.
+  The impact of caching within the agentic loop is substantial. In our
+evaluation, baseline monolithic caching caps at a 38.7% hit rate due to
+linguistic variance. In contrast, our structured approach allows for an
+additional stage, the Visualization Synthesis stage, to achieve an 83.10% hit
+rate, bypassing 4,023 LLM calls with a median latency of just 2.66 ms. This
+internal reuse reduces total token consumption, offering a practical lesson for
+AI system design: even when users rarely repeat themselves, the pipeline often
+does, at stable, structured checkpoints where caching is most reliable.
+\\ ( https://arxiv.org/abs/2601.16286 ,  525kb)
+------------------------------------------------------------------------------
+\\
+arXiv:2601.16344
+Date: Thu, 22 Jan 2026 22:03:29 GMT   (3420kb)
+
+Title: DSGym: A Holistic Framework for Evaluating and Training Data Science
+  Agents
+Authors: Fan Nie, Junlin Wang, Harper Hua, Federico Bianchi, Yongchan Kwon,
+  Zhenting Qi, Owen Queen, Shang Zhu, James Zou
+Categories: cs.AI
+\\
+  Data science agents promise to accelerate discovery and insight-generation by
+turning data into executable analyses and findings. Yet existing data science
+benchmarks fall short due to fragmented evaluation interfaces that make
+cross-benchmark comparison difficult, narrow task coverage and a lack of
+rigorous data grounding. In particular, we show that a substantial portion of
+tasks in current benchmarks can be solved without using the actual data. To
+address these limitations, we introduce DSGym, a standardized framework for
+evaluating and training data science agents in self-contained execution
+environments. Unlike static benchmarks, DSGym provides a modular architecture
+that makes it easy to add tasks, agent scaffolds, and tools, positioning it as
+a live, extensible testbed. We curate DSGym-Tasks, a holistic task suite that
+standardizes and refines existing benchmarks via quality and shortcut
+solvability filtering. We further expand coverage with (1) DSBio:
+expert-derived bioinformatics tasks grounded in literature and (2) DSPredict:
+challenging prediction tasks spanning domains such as computer vision,
+molecular prediction, and single-cell perturbation. Beyond evaluation, DSGym
+enables agent training via execution-verified data synthesis pipeline. As a
+case study, we build a 2,000-example training set and trained a 4B model in
+DSGym that outperforms GPT-4o on standardized analysis benchmarks. Overall,
+DSGym enables rigorous end-to-end measurement of whether agents can plan,
+implement, and validate data analyses in realistic scientific context.
+\\ ( https://arxiv.org/abs/2601.16344 ,  3420kb)
+------------------------------------------------------------------------------
+\\
+arXiv:2601.16479
+Date: Fri, 23 Jan 2026 06:20:23 GMT   (353kb)
+
+Title: Doc2AHP: Inferring Structured Multi-Criteria Decision Models via
+  Semantic Trees with LLMs
+Authors: Hongjia Wu, Shuai Zhou, Hongxin Zhang, Wei Chen
+Categories: cs.AI
+\\
+  While Large Language Models (LLMs) demonstrate remarkable proficiency in
+semantic understanding, they often struggle to ensure structural consistency
+and reasoning reliability in complex decision-making tasks that demand rigorous
+logic. Although classical decision theories, such as the Analytic Hierarchy
+Process (AHP), offer systematic rational frameworks, their construction relies
+heavily on labor-intensive domain expertise, creating an "expert bottleneck"
+that hinders scalability in general scenarios. To bridge the gap between the
+generalization capabilities of LLMs and the rigor of decision theory, we
+propose Doc2AHP, a novel structured inference framework guided by AHP
+principles. Eliminating the need for extensive annotated data or manual
+intervention, our approach leverages the structural principles of AHP as
+constraints to direct the LLM in a constrained search within the unstructured
+document space, thereby enforcing the logical entailment between parent and
+child nodes. Furthermore, we introduce a multi-agent weighting mechanism
+coupled with an adaptive consistency optimization strategy to ensure the
+numerical consistency of weight allocation. Empirical results demonstrate that
+Doc2AHP not only empowers non-expert users to construct high-quality decision
+models from scratch but also significantly outperforms direct generative
+baselines in both logical completeness and downstream task accuracy.
+\\ ( https://arxiv.org/abs/2601.16479 ,  353kb)
+------------------------------------------------------------------------------
+\\
+arXiv:2601.16529
+Date: Fri, 23 Jan 2026 08:01:39 GMT   (2933kb)
+
+Title: SycoEval-EM: Sycophancy Evaluation of Large Language Models in Simulated
+  Clinical Encounters for Emergency Care
+Authors: Dongshen Peng, Yi Wang, Carl Preiksaitis and Christian Rose
+Categories: cs.AI cs.HC
+Comments: 11 pages, 5 figures
+\\
+  Large language models (LLMs) show promise in clinical decision support yet
+risk acquiescing to patient pressure for inappropriate care. We introduce
+SycoEval-EM, a multi-agent simulation framework evaluating LLM robustness
+through adversarial patient persuasion in emergency medicine. Across 20 LLMs
+and 1,875 encounters spanning three Choosing Wisely scenarios, acquiescence
+rates ranged from 0-100\%. Models showed higher vulnerability to imaging
+requests (38.8\%) than opioid prescriptions (25.0\%), with model capability
+poorly predicting robustness. All persuasion tactics proved equally effective
+(30.0-36.0\%), indicating general susceptibility rather than tactic-specific
+weakness. Our findings demonstrate that static benchmarks inadequately predict
+safety under social pressure, necessitating multi-turn adversarial testing for
+clinical AI certification.
+\\ ( https://arxiv.org/abs/2601.16529 ,  2933kb)
+------------------------------------------------------------------------------
+\\
+arXiv:2601.16549
+Date: Fri, 23 Jan 2026 08:35:53 GMT   (506kb)
+
+Title: LLM is Not All You Need: A Systematic Evaluation of ML vs. Foundation
+  Models for text and image based Medical Classification
+Authors: Meet Raval, Tejul Pandit, Dhvani Upadhyay
+Categories: cs.AI
+Comments: 9 pages, 5 figures, 3 tables, paper accepted in AAIML'26 conference
+\\
+  The combination of multimodal Vision-Language Models (VLMs) and Large
+Language Models (LLMs) opens up new possibilities for medical classification.
+This work offers a rigorous, unified benchmark by using four publicly available
+datasets covering text and image modalities (binary and multiclass complexity)
+that contrasts traditional Machine Learning (ML) with contemporary
+transformer-based techniques. We evaluated three model classes for each task:
+Classical ML (LR, LightGBM, ResNet-50), Prompt-Based LLMs/VLMs (Gemini 2.5),
+and Fine-Tuned PEFT Models (LoRA-adapted Gemma3 variants). All experiments used
+consistent data splits and aligned metrics. According to our results,
+traditional machine learning (ML) models set a high standard by consistently
+achieving the best overall performance across most medical categorization
+tasks. This was especially true for structured text-based datasets, where the
+classical models performed exceptionally well. In stark contrast, the
+LoRA-tuned Gemma variants consistently showed the worst performance across all
+text and image experiments, failing to generalize from the minimal fine-tuning
+provided. However, the zero-shot LLM/VLM pipelines (Gemini 2.5) had mixed
+results; they performed poorly on text-based tasks, but demonstrated
+competitive performance on the multiclass image task, matching the classical
+ResNet-50 baseline. These results demonstrate that in many medical
+categorization scenarios, established machine learning models continue to be
+the most reliable option. The experiment suggests that foundation models are
+not universally superior and that the effectiveness of Parameter-Efficient
+Fine-Tuning (PEFT) is highly dependent on the adaptation strategy, as minimal
+fine-tuning proved detrimental in this study.
+\\ ( https://arxiv.org/abs/2601.16549 ,  506kb)
+------------------------------------------------------------------------------
+\\
+arXiv:2601.16649
+Date: Fri, 23 Jan 2026 11:13:12 GMT   (738kb)
+
+Title: LUMINA: Long-horizon Understanding for Multi-turn Interactive Agents
+Authors: Amin Rakhsha, Thomas Hehn, Pietro Mazzaglia, Fabio Valerio Massoli,
+  Arash Behboodi, Tribhuvanesh Orekondy
+Categories: cs.AI
+\\
+  Large language models can perform well on many isolated tasks, yet they
+continue to struggle on multi-turn, long-horizon agentic problems that require
+skills such as planning, state tracking, and long context processing. In this
+work, we aim to better understand the relative importance of advancing these
+underlying capabilities for success on such tasks. We develop an oracle
+counterfactual framework for multi-turn problems that asks: how would an agent
+perform if it could leverage an oracle to perfectly perform a specific task?
+The change in the agent's performance due to this oracle assistance allows us
+to measure the criticality of such oracle skill in the future advancement of AI
+agents. We introduce a suite of procedurally generated, game-like tasks with
+tunable complexity. These controlled environments allow us to provide precise
+oracle interventions, such as perfect planning or flawless state tracking, and
+make it possible to isolate the contribution of each oracle without confounding
+effects present in real-world benchmarks. Our results show that while some
+interventions (e.g., planning) consistently improve performance across
+settings, the usefulness of other skills is dependent on the properties of the
+environment and language model. Our work sheds light on the challenges of
+multi-turn agentic environments to guide the future efforts in the development
+of AI agents and language models.
+\\ ( https://arxiv.org/abs/2601.16649 ,  738kb)
+------------------------------------------------------------------------------
+\\
+arXiv:2601.16685
+Date: Fri, 23 Jan 2026 11:59:13 GMT   (18921kb)
+
+Title: AgentsEval: Clinically Faithful Evaluation of Medical Imaging Reports
+  via Multi-Agent Reasoning
+Authors: Suzhong Fu, Jingqi Dong, Xuan Ding, Rui Sun, Yiming Yang, Shuguang
+  Cui, Zhen Li
+Categories: cs.AI
+\\
+  Evaluating the clinical correctness and reasoning fidelity of automatically
+generated medical imaging reports remains a critical yet unresolved challenge.
+Existing evaluation methods often fail to capture the structured diagnostic
+logic that underlies radiological interpretation, resulting in unreliable
+judgments and limited clinical relevance. We introduce AgentsEval, a
+multi-agent stream reasoning framework that emulates the collaborative
+diagnostic workflow of radiologists. By dividing the evaluation process into
+interpretable steps including criteria definition, evidence extraction,
+alignment, and consistency scoring, AgentsEval provides explicit reasoning
+traces and structured clinical feedback. We also construct a multi-domain
+perturbation-based benchmark covering five medical report datasets with diverse
+imaging modalities and controlled semantic variations. Experimental results
+demonstrate that AgentsEval delivers clinically aligned, semantically faithful,
+and interpretable evaluations that remain robust under paraphrastic, semantic,
+and stylistic perturbations. This framework represents a step toward
+transparent and clinically grounded assessment of medical report generation
+systems, fostering trustworthy integration of large language models into
+clinical practice.
+\\ ( https://arxiv.org/abs/2601.16685 ,  18921kb)
+------------------------------------------------------------------------------
+\\
+arXiv:2601.16725
+Date: Fri, 23 Jan 2026 13:20:09 GMT   (2412kb)
+
+Title: LongCat-Flash-Thinking-2601 Technical Report
+Authors: Meituan LongCat Team, Anchun Gui, Bei Li, Bingyang Tao, Bole Zhou,
+  Borun Chen, Chao Zhang, Chao Zhang, Chen Gao, Chen Zhang, Chengcheng Han,
+  Chenhui Yang, Chuyu Zhang, Cong Chen, Cunguang Wang, Daoru Pan, Defei Bu,
+  Dengchang Zhao, Di Xiu, Dishan Liu, Dongyu Ru, Dunwei Tu, Fan Wu, Fengcheng
+  Yuan, Fengcun Li, Gang Xu, Guanyu Wu, Guoyuan Lin, Haibin Wang, Hansi Yang,
+  Hao Yang, Haonan Yan, Haoxiang Ma, Haoxing Wen, Hongyan Hao, Hongyin Tang,
+  Hongyu Zang, Hongzhi Ni, Hui Su, Jiacheng Zhang, Jiahong Zhou, Jiahuan Li,
+  Jiaming Wang, Jian Yang, Jianfei Zhang, Jianhao Xu, Jianing Wang, Jiapeng
+  Zhu, Jiaqi Sun, Jiarong Shi, Jiarui Zhao, Jingang Wang, Jinluan Yang, Jinrui
+  Ding, Jinwei Xiao, Jiyuan He, Juncan Xu, Kefeng Zhang, Keheng Wang, Li Wei,
+  Lianhui Ma, Lin Qiu, Lingbing Kong, Lingchuan Liu, Linsen Guo, et al. (97
+  additional authors not shown)
+Categories: cs.AI
+\\
+  We introduce LongCat-Flash-Thinking-2601, a 560-billion-parameter open-source
+Mixture-of-Experts (MoE) reasoning model with superior agentic reasoning
+capability. LongCat-Flash-Thinking-2601 achieves state-of-the-art performance
+among open-source models on a wide range of agentic benchmarks, including
+agentic search, agentic tool use, and tool-integrated reasoning. Beyond
+benchmark performance, the model demonstrates strong generalization to complex
+tool interactions and robust behavior under noisy real-world environments. Its
+advanced capability stems from a unified training framework that combines
+domain-parallel expert training with subsequent fusion, together with an
+end-to-end co-design of data construction, environments, algorithms, and
+infrastructure spanning from pre-training to post-training. In particular, the
+model's strong generalization capability in complex tool-use are driven by our
+in-depth exploration of environment scaling and principled task construction.
+To optimize long-tailed, skewed generation and multi-turn agentic interactions,
+and to enable stable training across over 10,000 environments spanning more
+than 20 domains, we systematically extend our asynchronous reinforcement
+learning framework, DORA, for stable and efficient large-scale
+multi-environment training. Furthermore, recognizing that real-world tasks are
+inherently noisy, we conduct a systematic analysis and decomposition of
+real-world noise patterns, and design targeted training procedures to
+explicitly incorporate such imperfections into the training process, resulting
+in improved robustness for real-world applications. To further enhance
+performance on complex reasoning tasks, we introduce a Heavy Thinking mode that
+enables effective test-time scaling by jointly expanding reasoning depth and
+width through intensive parallel thinking.
+\\ ( https://arxiv.org/abs/2601.16725 ,  2412kb)
+------------------------------------------------------------------------------
+\\
+arXiv:2601.16806
+Date: Fri, 23 Jan 2026 14:57:04 GMT   (2295kb)
+
+Title: An Efficient Insect-inspired Approach for Visual Point-goal Navigation
+Authors: Lu Yihe, Barbara Webb
+Categories: cs.AI cs.RO
+\\
+  In this work we develop a novel insect-inspired agent for visual point-goal
+navigation. This combines abstracted models of two insect brain structures that
+have been implicated, respectively, in associative learning and path
+integration. We draw an analogy between the formal benchmark of the Habitat
+point-goal navigation task and the ability of insects to learn and refine
+visually guided paths around obstacles between a discovered food location and
+their nest. We demonstrate that the simple insect-inspired agent exhibits
+performance comparable to recent SOTA models at many orders of magnitude less
+computational cost. Testing in a more realistic simulated environment shows the
+approach is robust to perturbations.
+\\ ( https://arxiv.org/abs/2601.16806 ,  2295kb)
+------------------------------------------------------------------------------

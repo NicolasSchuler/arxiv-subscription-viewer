@@ -1,0 +1,69 @@
+------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+Send any comments regarding submissions directly to submitter.
+------------------------------------------------------------------------------
+Archives at http://arxiv.org/
+To unsubscribe, e-mail To: cs@arXiv.org, Subject: cancel
+------------------------------------------------------------------------------
+ Submissions to:
+Artificial Intelligence
+ received from  Mon 20 Jan 26 19:00:00 GMT  to  Tue 21 Jan 26 19:00:00 GMT
+------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+\\
+arXiv:2601.99001
+Date: Mon, 20 Jan 2026 10:00:00 GMT   (100kb)
+
+Title: A Valid Paper That Should Parse Correctly
+Authors: Alice Smith, Bob Jones
+Categories: cs.AI
+\\
+  This paper has a proper abstract and all required fields.
+It should parse without any issues.
+\\ ( https://arxiv.org/abs/2601.99001 ,  100kb)
+------------------------------------------------------------------------------
+\\
+Date: Mon, 20 Jan 2026 11:00:00 GMT   (50kb)
+
+Title: Paper Missing arXiv ID
+Authors: Missing ID Author
+Categories: cs.LG
+\\
+  This entry has no arXiv ID line and should be skipped or handled gracefully.
+\\ ( https://arxiv.org/abs/missing ,  50kb)
+------------------------------------------------------------------------------
+\\
+arXiv:2601.99002
+Date: Mon, 20 Jan 2026 12:00:00 GMT   (200kb)
+
+Title: Paper With Truncated Abstract
+Authors: Jane Doe
+Categories: cs.CV cs.AI
+\\
+  This paper's abstract is intentionally cut short without
+------------------------------------------------------------------------------
+\\
+arXiv:2601.99001
+Date: Mon, 20 Jan 2026 10:00:00 GMT   (100kb)
+
+Title: Duplicate of First Paper (Same arXiv ID)
+Authors: Alice Smith, Bob Jones
+Categories: cs.AI
+\\
+  This is a duplicate entry with the same arXiv ID as the first paper.
+The parser should skip this duplicate.
+\\ ( https://arxiv.org/abs/2601.99001 ,  100kb)
+------------------------------------------------------------------------------
+\\
+arXiv:2601.99003
+Date: Mon, 20 Jan 2026 14:00:00 GMT   (300kb)
+
+Title: Valid Paper After Bad Entries
+Authors: Charlie Brown, Lucy Van Pelt
+Categories: cs.SE cs.AI
+Comments: 10 pages, submitted to ICSE 2026
+\\
+  This is another valid paper that appears after the malformed entries.
+The parser should still be able to extract this one correctly.
+\\ ( https://arxiv.org/abs/2601.99003 ,  300kb)
+------------------------------------------------------------------------------

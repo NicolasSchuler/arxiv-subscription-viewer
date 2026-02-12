@@ -90,9 +90,10 @@ No module imports from `app.py` — this prevents circular dependencies. `app.py
 - **`semantic_scholar.py`** (~820 lines): S2 API client, `SemanticScholarPaper` / `CitationEntry` dataclasses, SQLite cache for papers, recommendations, and citation graphs
 - **`huggingface.py`** (~350 lines): HuggingFace Daily Papers API client, `HuggingFacePaper` dataclass, SQLite cache
 
-### Test Suite (~1051 tests across 3 files + conftest.py in `tests/`)
+### Test Suite (~1078 tests across 4 files + conftest.py in `tests/`)
 
 - **`tests/test_arxiv_browser.py`** (~5800 lines): Core parsing, similarity, export, config, UI integration
+- **`tests/test_integration.py`** (~400 lines): End-to-end workflows with real arXiv email fixtures, export validation, resource cleanup, debug logging
 - **`tests/test_semantic_scholar.py`** (~990 lines): S2 response parsing, serialization, cache CRUD, API fetch functions, citation graph
 - **`tests/test_huggingface.py`** (~460 lines): HF response parsing, cache, API fetch functions
 
@@ -160,14 +161,11 @@ No module imports from `app.py` — this prevents circular dependencies. `app.py
 ## Testing
 
 ```bash
-# Run all tests
-uv run pytest
+# Run all tests with coverage
+just test
 
-# Run with verbose output
-uv run pytest -v
-
-# Run with coverage
-uv run pytest --cov --cov-report=term-missing
+# Quick test (no coverage, stop on first failure)
+just test-quick
 
 # Run specific test class
 uv run pytest -v tests/test_arxiv_browser.py::TestCleanLatex
@@ -180,41 +178,43 @@ All tests must pass before commits.
 
 ## Code Quality Checks
 
-All tool configurations live in `pyproject.toml`. The vulture whitelist is in `vulture_whitelist.py`.
+All tool configurations live in `pyproject.toml`. The vulture whitelist is in `vulture_whitelist.py`. The `justfile` provides unified commands for all quality checks — run `just` to list available recipes.
 
 ### Quick check (before committing)
 
 ```bash
-uv run ruff check . && uv run ruff format --check .
-uv run pyright
-uv run pytest --cov --cov-report=term-missing
+just check              # lint + typecheck + tests with coverage
 ```
 
 ### Full suite
 
 ```bash
-# Lint + format
-uv run ruff check .
-uv run ruff format --check .
+just quality            # all checks: lint, types, tests, complexity, security, dead-code, deps
+```
 
-# Type checking (basic mode — catches real errors without Textual framework noise)
-uv run pyright
+### Quality report (comprehensive dashboard)
 
-# Tests with coverage (fail_under=60; actual ~69%, ratchet up over time)
-uv run pytest --cov --cov-report=term-missing --cov-report=html
+```bash
+just report             # lines of code, coverage, complexity, maintainability, lint, types, security, dead code, deps
+```
 
-# Dependency hygiene — detects unused, missing, and transitive deps
-uv run deptry .
+### Individual tools
 
-# Dead code detection (vulture_whitelist.py suppresses Textual framework false positives)
-uv run vulture src/arxiv_browser/ vulture_whitelist.py --min-confidence 80
+```bash
+just lint               # ruff check + format check
+just format             # auto-fix lint and formatting issues
+just typecheck          # pyright
+just complexity         # radon cyclomatic complexity + maintainability index
+just security           # bandit security scanner
+just dead-code          # vulture dead code detection
+just deps               # deptry dependency hygiene
+just ci                 # CI-equivalent checks locally
+just clean              # remove build artifacts and caches
+```
 
-# Security scanning (B101/B311/B314/B404/B405 skipped in config)
-uv run bandit -c pyproject.toml -r src/arxiv_browser/
+### Advanced checks (not in justfile — run manually)
 
-# Complexity (show C+ rated functions, plus average)
-uv run radon cc src/arxiv_browser/ -a -nc
-
+```bash
 # Complexity gate (max-absolute F baseline — import_metadata is F-ranked; ratchet down)
 uv run xenon src/arxiv_browser/ --max-absolute F --max-modules D --max-average B
 
@@ -244,6 +244,9 @@ uv run arxiv-viewer -i <file>
 
 # Start fresh session (no restore)
 uv run arxiv-viewer --no-restore
+
+# Enable debug logging (writes to ~/.config/arxiv-browser/debug.log)
+uv run arxiv-viewer --debug
 
 # Alternative: run as module
 uv run python -m arxiv_browser

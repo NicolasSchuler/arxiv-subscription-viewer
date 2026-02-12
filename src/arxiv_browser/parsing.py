@@ -149,6 +149,9 @@ def parse_arxiv_file(filepath: Path) -> list[Paper]:
 
     Duplicate arXiv IDs are skipped (first occurrence is kept).
     """
+    import time
+
+    t0 = time.monotonic()
     # Use errors="replace" to handle any non-UTF-8 characters gracefully
     content = filepath.read_text(encoding="utf-8", errors="replace")
     papers = []
@@ -215,6 +218,8 @@ def parse_arxiv_file(filepath: Path) -> list[Paper]:
             )
         )
 
+    elapsed = time.monotonic() - t0
+    logger.debug("Parsed %d papers from %s in %.3fs", len(papers), filepath.name, elapsed)
     return papers
 
 
