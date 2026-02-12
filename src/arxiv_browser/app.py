@@ -665,6 +665,14 @@ def escape_rich_text(text: str) -> str:
     return escape_markup(text) if text else ""
 
 
+def render_progress_bar(current: int, total: int, width: int = 10) -> str:
+    """Render a Unicode progress bar like ████░░░░░░."""
+    if total <= 0:
+        return "░" * width
+    filled = min(width, round(current / total * width))
+    return "█" * filled + "░" * (width - filled)
+
+
 # Pre-compiled patterns for lightweight markdown → Rich markup conversion
 _MD_HEADING_RE = re.compile(r"^(#{1,3})\s+(.+)$", re.MULTILINE)
 _MD_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
@@ -8829,17 +8837,24 @@ class ArxivBrowser(App):
 
     def _get_footer_bindings(self) -> list[tuple[str, str]]:
         """Return context-sensitive binding hints for the footer."""
-        # Progress operations take highest priority (X/Y counters preferred)
+        # Progress operations take highest priority (visual progress bar)
         if self._scoring_progress is not None:
             current, total = self._scoring_progress
-            return [("", f"Scoring {current}/{total}"), ("?", "help")]
+            bar = render_progress_bar(current, total)
+            return [("", f"Scoring {bar} {current}/{total}"), ("?", "help")]
         if self._relevance_scoring_active:
             return [("", "Scoring papers…"), ("?", "help")]
         if self._version_progress is not None:
             batch, total = self._version_progress
-            return [("", f"Versions {batch}/{total}"), ("?", "help")]
+            bar = render_progress_bar(batch, total)
+            return [("", f"Versions {bar} {batch}/{total}"), ("?", "help")]
         if self._version_checking:
             return [("", "Checking versions…"), ("?", "help")]
+        if self._is_download_batch_active():
+            completed = len(self._download_results)
+            total = self._download_total
+            bar = render_progress_bar(completed, total)
+            return [("", f"Downloading {bar} {completed}/{total}"), ("?", "help")]
 
         # Search mode — search container visible
         try:
@@ -8991,12 +9006,13 @@ class ArxivBrowser(App):
                 self._finish_download_batch()
 
     def _update_download_progress(self, completed: int, total: int) -> None:
-        """Update status bar with download progress."""
+        """Update status bar and footer with download progress."""
         try:
             status_bar = self.query_one("#status-bar", Label)
             status_bar.update(f"Downloading: {completed}/{total} complete")
         except NoMatches:
             pass
+        self._update_footer()
 
     def _finish_download_batch(self) -> None:
         """Handle completion of a download batch."""

@@ -6844,19 +6844,23 @@ class TestProgressIndicators:
         app.selected_ids = set()
         app._s2_active = False
         app._history_files = []
+        app._download_queue = []
+        app._downloading = set()
+        app._download_total = 0
+        app._download_results = {}
         return app
 
     def test_scoring_progress_in_footer(self):
         app = self._make_app()
         app._scoring_progress = (3, 50)
         bindings = app._get_footer_bindings()
-        assert any("Scoring 3/50" in label for _, label in bindings)
+        assert any("Scoring" in label and "3/50" in label for _, label in bindings)
 
     def test_version_progress_in_footer(self):
         app = self._make_app()
         app._version_progress = (2, 5)
         bindings = app._get_footer_bindings()
-        assert any("Versions 2/5" in label for _, label in bindings)
+        assert any("Versions" in label and "2/5" in label for _, label in bindings)
 
     def test_scoring_progress_overrides_boolean(self):
         """Tuple progress takes priority over boolean flag."""
@@ -6864,9 +6868,9 @@ class TestProgressIndicators:
         app._relevance_scoring_active = True
         app._scoring_progress = (7, 20)
         bindings = app._get_footer_bindings()
-        # Should show X/Y, not static text
+        # Should show X/Y with progress bar, not static text
         labels = [label for _, label in bindings]
-        assert any("Scoring 7/20" in lbl for lbl in labels)
+        assert any("Scoring" in lbl and "7/20" in lbl for lbl in labels)
         assert not any("Scoring papers" in lbl for lbl in labels)
 
     def test_version_progress_overrides_boolean(self):
@@ -6876,7 +6880,7 @@ class TestProgressIndicators:
         app._version_progress = (1, 3)
         bindings = app._get_footer_bindings()
         labels = [label for _, label in bindings]
-        assert any("Versions 1/3" in lbl for lbl in labels)
+        assert any("Versions" in lbl and "1/3" in lbl for lbl in labels)
         assert not any("Checking versions" in lbl for lbl in labels)
 
     def test_scoring_progress_cleared_is_none(self):
@@ -10430,6 +10434,10 @@ class TestFooterDiscoverability:
         app._s2_active = False
         app._config = config
         app._history_files = []
+        app._download_queue = []
+        app._downloading = set()
+        app._download_total = 0
+        app._download_results = {}
         app.query_one = MagicMock(side_effect=NoMatches())
         return app
 
