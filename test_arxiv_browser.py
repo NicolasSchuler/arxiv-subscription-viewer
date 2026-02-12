@@ -6848,6 +6848,8 @@ class TestProgressIndicators:
         app._downloading = set()
         app._download_total = 0
         app._download_results = {}
+        app._auto_tag_active = False
+        app._auto_tag_progress = None
         return app
 
     def test_scoring_progress_in_footer(self):
@@ -6892,6 +6894,138 @@ class TestProgressIndicators:
         # Falls back to boolean text
         labels = [label for _, label in bindings]
         assert any("Scoring papers" in lbl for lbl in labels)
+
+
+# ============================================================================
+# Auto-Tagging Tests
+# ============================================================================
+
+
+class TestAutoTagPrompt:
+    """Tests for build_auto_tag_prompt and _parse_auto_tag_response."""
+
+    def test_build_prompt_with_taxonomy(self, make_paper):
+        from arxiv_browser.app import build_auto_tag_prompt
+
+        paper = make_paper(
+            title="Attention Is All You Need",
+            authors="Vaswani et al.",
+            categories="cs.CL, cs.LG",
+            abstract="We propose transformer architecture...",
+        )
+        taxonomy = ["topic:nlp", "method:attention", "status:to-read"]
+        prompt = build_auto_tag_prompt(paper, taxonomy)
+        assert "topic:nlp" in prompt
+        assert "method:attention" in prompt
+        assert "Attention Is All You Need" in prompt
+        assert "Vaswani et al." in prompt
+
+    def test_build_prompt_empty_taxonomy(self, make_paper):
+        from arxiv_browser.app import build_auto_tag_prompt
+
+        paper = make_paper(title="Test Paper")
+        prompt = build_auto_tag_prompt(paper, [])
+        assert "no existing tags" in prompt
+
+    def test_parse_response_json(self):
+        from arxiv_browser.app import _parse_auto_tag_response
+
+        result = _parse_auto_tag_response('{"tags": ["topic:nlp", "method:transformer"]}')
+        assert result == ["topic:nlp", "method:transformer"]
+
+    def test_parse_response_markdown_fence(self):
+        from arxiv_browser.app import _parse_auto_tag_response
+
+        result = _parse_auto_tag_response('```json\n{"tags": ["topic:cv"]}\n```')
+        assert result == ["topic:cv"]
+
+    def test_parse_response_regex_fallback(self):
+        from arxiv_browser.app import _parse_auto_tag_response
+
+        result = _parse_auto_tag_response(
+            'Here are my suggestions:\n"tags": ["topic:ml", "status:important"]'
+        )
+        assert result == ["topic:ml", "status:important"]
+
+    def test_parse_response_lowercases(self):
+        from arxiv_browser.app import _parse_auto_tag_response
+
+        result = _parse_auto_tag_response('{"tags": ["Topic:NLP", "METHOD:CNN"]}')
+        assert result == ["topic:nlp", "method:cnn"]
+
+    def test_parse_response_strips_whitespace(self):
+        from arxiv_browser.app import _parse_auto_tag_response
+
+        result = _parse_auto_tag_response('{"tags": ["  topic:ml  ", " status:done "]}')
+        assert result == ["topic:ml", "status:done"]
+
+    def test_parse_response_invalid_returns_none(self):
+        from arxiv_browser.app import _parse_auto_tag_response
+
+        assert _parse_auto_tag_response("I don't understand") is None
+
+    def test_parse_response_empty_tags_list(self):
+        from arxiv_browser.app import _parse_auto_tag_response
+
+        result = _parse_auto_tag_response('{"tags": []}')
+        assert result == []
+
+    def test_parse_response_filters_empty_strings(self):
+        from arxiv_browser.app import _parse_auto_tag_response
+
+        result = _parse_auto_tag_response('{"tags": ["topic:ml", "", "  "]}')
+        assert result == ["topic:ml"]
+
+
+class TestAutoTagFooterProgress:
+    """Tests for auto-tag progress in footer."""
+
+    def _make_app(self):
+        from arxiv_browser.app import ArxivBrowser, UserConfig
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._http_client = None
+        app._config = UserConfig()
+        app._relevance_scoring_active = False
+        app._version_checking = False
+        app._scoring_progress = None
+        app._version_progress = None
+        app._in_arxiv_api_mode = False
+        app.selected_ids = set()
+        app._s2_active = False
+        app._history_files = []
+        app._download_queue = []
+        app._downloading = set()
+        app._download_total = 0
+        app._download_results = {}
+        app._auto_tag_active = False
+        app._auto_tag_progress = None
+        return app
+
+    def test_auto_tag_progress_in_footer(self):
+        from unittest.mock import MagicMock
+
+        from textual.css.query import NoMatches
+
+        app = self._make_app()
+        app._auto_tag_progress = (3, 10)
+        app._auto_tag_active = True
+        app.query_one = MagicMock(side_effect=NoMatches())
+        bindings = app._get_footer_bindings()
+        labels = [label for _, label in bindings]
+        assert any("Auto-tagging" in lbl and "3/10" in lbl for lbl in labels)
+
+    def test_auto_tag_active_without_progress(self):
+        from unittest.mock import MagicMock
+
+        from textual.css.query import NoMatches
+
+        app = self._make_app()
+        app._auto_tag_active = True
+        app.query_one = MagicMock(side_effect=NoMatches())
+        bindings = app._get_footer_bindings()
+        labels = [label for _, label in bindings]
+        assert any("Auto-tagging" in lbl for lbl in labels)
 
 
 # ============================================================================
@@ -10438,6 +10572,8 @@ class TestFooterDiscoverability:
         app._downloading = set()
         app._download_total = 0
         app._download_results = {}
+        app._auto_tag_active = False
+        app._auto_tag_progress = None
         app.query_one = MagicMock(side_effect=NoMatches())
         return app
 

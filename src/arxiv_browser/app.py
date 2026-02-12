@@ -135,27 +135,22 @@ from arxiv_browser.semantic_scholar import (
 
 # Public API for this module
 __all__ = [
+    "AUTO_TAG_PROMPT_TEMPLATE",
+    "COMMAND_PALETTE_COMMANDS",
     "DEFAULT_COLLAPSED_SECTIONS",
     "DETAIL_SECTION_KEYS",
     "DETAIL_SECTION_NAMES",
     "LLM_PRESETS",
-    # Relevance scoring helpers
     "RELEVANCE_PROMPT_TEMPLATE",
     "SUMMARY_MODES",
-    # Tag namespace helpers
     "TAG_NAMESPACE_COLORS",
     "THEME_CATEGORY_COLORS",
     "THEME_TAG_NAMESPACE_COLORS",
-    # Main application
     "ArxivBrowser",
-    "COMMAND_PALETTE_COMMANDS",
     "CommandPaletteModal",
-    # Core data models
     "Paper",
     "PaperMetadata",
-    # Query parser (extracted pure functions)
     "QueryToken",
-    # Recommendation source modal
     "RecommendationSourceModal",
     "SearchBookmark",
     "SectionToggleModal",
@@ -164,24 +159,21 @@ __all__ = [
     "UserConfig",
     "WatchListEntry",
     "build_arxiv_search_query",
+    "build_auto_tag_prompt",
     "build_highlight_terms",
-    # LLM summary helpers
     "build_llm_prompt",
     "build_relevance_prompt",
     "clean_latex",
     "count_papers_in_file",
     "discover_history_files",
-    # BibTeX formatting (extracted pure functions)
     "escape_bibtex",
     "extract_text_from_html",
     "extract_year",
     "find_similar_papers",
     "format_authors_bibtex",
-    # Utility functions
     "format_categories",
     "format_paper_as_bibtex",
     "format_paper_as_markdown",
-    # Additional export formats
     "format_paper_as_ris",
     "format_paper_for_clipboard",
     "format_papers_as_csv",
@@ -196,9 +188,7 @@ __all__ = [
     "get_summary_db_path",
     "get_tag_color",
     "insert_implicit_and",
-    # ArxivBrowser extracted pure functions
     "is_advanced_query",
-    # Configuration
     "load_config",
     "main",
     "match_query_term",
@@ -207,7 +197,6 @@ __all__ = [
     "paper_matches_watch_entry",
     "parse_arxiv_api_feed",
     "parse_arxiv_date",
-    # Parsing functions
     "parse_arxiv_file",
     "parse_arxiv_version_map",
     "parse_tag_namespace",
@@ -312,6 +301,7 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
     ("AI Summary", "Generate LLM-powered paper summary", "Ctrl+s", "generate_summary"),
     ("Score Relevance", "LLM-score papers by research interests", "L", "score_relevance"),
     ("Edit Interests", "Edit research interests for relevance scoring", "Ctrl+l", "edit_interests"),
+    ("Auto-Tag", "LLM-suggest tags for current or selected papers", "Ctrl+g", "auto_tag"),
     # Recommendations
     ("Similar Papers", "Find similar papers (local or S2)", "R", "show_similar"),
     # Bookmarks
@@ -471,6 +461,22 @@ RELEVANCE_PROMPT_TEMPLATE = (
 )
 RELEVANCE_SCORE_TIMEOUT = 30  # Seconds to wait for relevance scoring LLM response
 RELEVANCE_DB_FILENAME = "relevance.db"
+
+# Auto-tagging settings
+AUTO_TAG_PROMPT_TEMPLATE = (
+    "Suggest tags for this academic paper based on the taxonomy below.\n"
+    'Return ONLY valid JSON: {{"tags": ["tag1", "tag2", ...]}}\n'
+    "- Use the namespace:value format (e.g. topic:llm, method:quantization)\n"
+    "- Prefer existing tags from the taxonomy when they fit\n"
+    "- Suggest 2-5 tags total\n"
+    "- Tags should be lowercase, concise (1-3 words), and use hyphens for multi-word values\n\n"
+    "Existing taxonomy: {taxonomy}\n\n"
+    "Title: {title}\n"
+    "Authors: {authors}\n"
+    "Categories: {categories}\n"
+    "Abstract: {abstract}\n"
+)
+AUTO_TAG_TIMEOUT = 30  # Seconds to wait for auto-tag LLM response
 
 # Search debounce delay in seconds
 SEARCH_DEBOUNCE_DELAY = 0.3
@@ -1397,6 +1403,75 @@ def _parse_relevance_response(text: str) -> tuple[int, str] | None:
         score = max(1, min(10, int(score_match.group(1))))
         reason = reason_match.group(1) if reason_match else ""
         return (score, reason)
+
+    return None
+
+
+# ============================================================================
+# Auto-Tagging Prompt & Response Parsing
+# ============================================================================
+
+_AUTO_TAG_TAGS_RE = re.compile(r'"tags"\s*:\s*\[([^\]]*)\]')
+
+
+def build_auto_tag_prompt(paper: Paper, existing_tags: list[str]) -> str:
+    """Build an auto-tagging prompt for a paper.
+
+    Uses AUTO_TAG_PROMPT_TEMPLATE, substituting paper fields and existing taxonomy.
+    """
+    abstract = paper.abstract or paper.abstract_raw or "(no abstract)"
+    taxonomy = ", ".join(existing_tags) if existing_tags else "(no existing tags — create new ones)"
+    return AUTO_TAG_PROMPT_TEMPLATE.format(
+        title=paper.title,
+        authors=paper.authors,
+        categories=paper.categories,
+        abstract=abstract,
+        taxonomy=taxonomy,
+    )
+
+
+def _parse_auto_tag_response(text: str) -> list[str] | None:
+    """Parse the LLM's auto-tag response.
+
+    Tries multiple strategies:
+    1. Direct JSON parse
+    2. Strip markdown fences then JSON parse
+    3. Regex fallback for tags array
+
+    Returns list of tag strings or None if parsing fails.
+    """
+    stripped = text.strip()
+
+    # Strategy 1: direct JSON parse
+    try:
+        data = json.loads(stripped)
+        if isinstance(data, dict) and "tags" in data:
+            tags = data["tags"]
+            if isinstance(tags, list):
+                return [str(t).strip().lower() for t in tags if str(t).strip()]
+    except (json.JSONDecodeError, ValueError, TypeError):
+        pass
+
+    # Strategy 2: strip markdown fences
+    fence_match = _MARKDOWN_FENCE_RE.search(stripped)
+    if fence_match:
+        try:
+            data = json.loads(fence_match.group(1))
+            if isinstance(data, dict) and "tags" in data:
+                tags = data["tags"]
+                if isinstance(tags, list):
+                    return [str(t).strip().lower() for t in tags if str(t).strip()]
+        except (json.JSONDecodeError, ValueError, TypeError):
+            pass
+
+    # Strategy 3: regex fallback
+    tags_match = _AUTO_TAG_TAGS_RE.search(stripped)
+    if tags_match:
+        raw_items = tags_match.group(1)
+        # Extract quoted strings
+        items = re.findall(r'"([^"]*)"', raw_items)
+        if items:
+            return [t.strip().lower() for t in items if t.strip()]
 
     return None
 
@@ -5025,6 +5100,109 @@ class ResearchInterestsModal(ModalScreen[str]):
         self.action_cancel()
 
 
+class AutoTagSuggestModal(ModalScreen[list[str] | None]):
+    """Modal showing LLM-suggested tags for user to accept or modify."""
+
+    BINDINGS = [
+        Binding("ctrl+s", "accept", "Accept"),
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    CSS = """
+    AutoTagSuggestModal {
+        align: center middle;
+    }
+
+    #autotag-dialog {
+        width: 55%;
+        height: auto;
+        min-width: 45;
+        max-height: 80%;
+        background: $th-background;
+        border: tall $th-green;
+        padding: 0 2;
+    }
+
+    #autotag-title {
+        text-style: bold;
+        color: $th-green;
+        margin-bottom: 1;
+    }
+
+    #autotag-current {
+        color: $th-muted;
+        margin-bottom: 1;
+    }
+
+    #autotag-input {
+        width: 100%;
+        background: $th-panel;
+        border: none;
+    }
+
+    #autotag-input:focus {
+        border-left: tall $th-green;
+    }
+
+    #autotag-buttons {
+        height: auto;
+        margin-top: 1;
+        align: right middle;
+    }
+
+    #autotag-buttons Button {
+        margin-left: 1;
+    }
+    """
+
+    def __init__(
+        self,
+        paper_title: str,
+        suggested_tags: list[str],
+        current_tags: list[str] | None = None,
+    ) -> None:
+        super().__init__()
+        self._paper_title = paper_title
+        self._suggested = suggested_tags
+        self._current = current_tags or []
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="autotag-dialog"):
+            yield Static(f"Auto-Tag: {self._paper_title[:60]}", id="autotag-title")
+            if self._current:
+                yield Static(
+                    f"Current: [bold]{', '.join(self._current)}[/bold]",
+                    id="autotag-current",
+                )
+            # Merge current + suggested, dedup
+            merged = list(dict.fromkeys(self._current + self._suggested))
+            yield Input(
+                value=", ".join(merged),
+                placeholder="Edit tags (comma-separated)",
+                id="autotag-input",
+            )
+            with Horizontal(id="autotag-buttons"):
+                yield Button("Accept [Ctrl+s]", id="accept-btn", variant="success")
+                yield Button("Cancel [Esc]", id="cancel-btn")
+
+    def action_accept(self) -> None:
+        text_input = self.query_one("#autotag-input", Input)
+        raw = text_input.value
+        tags = [t.strip().lower() for t in raw.split(",") if t.strip()]
+        self.dismiss(tags)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    @on(Button.Pressed, "#accept-btn")
+    def on_accept_pressed(self) -> None:
+        self.action_accept()
+
+    @on(Button.Pressed, "#cancel-btn")
+    def on_cancel_pressed(self) -> None:
+        self.action_cancel()
+
+
 # Section toggle hotkeys: single key → section key
 _SECTION_TOGGLE_KEYS: dict[str, str] = {
     "a": "authors",
@@ -5896,6 +6074,7 @@ class ArxivBrowser(App):
         # Relevance scoring
         Binding("L", "score_relevance", "Score Relevance", show=False),
         Binding("ctrl+l", "edit_interests", "Edit Interests", show=False),
+        Binding("ctrl+g", "auto_tag", "Auto-Tag", show=False),
         # Theme cycling
         Binding("ctrl+t", "cycle_theme", "Theme", show=False),
         # Collapsible sections
@@ -6030,6 +6209,10 @@ class ArxivBrowser(App):
         self._relevance_scoring_active: bool = False
         self._scoring_progress: tuple[int, int] | None = None  # (current, total)
         self._relevance_db_path: Path = get_relevance_db_path()
+
+        # Auto-tagging state
+        self._auto_tag_active: bool = False
+        self._auto_tag_progress: tuple[int, int] | None = None  # (current, total)
 
         # TF-IDF index for similarity (lazy-built on first use)
         self._tfidf_index: TfidfIndex | None = None
@@ -8643,6 +8826,185 @@ class ArxivBrowser(App):
                 break
 
     # ========================================================================
+    # Auto-Tagging
+    # ========================================================================
+
+    def action_auto_tag(self) -> None:
+        """Auto-tag current or selected papers using the configured LLM."""
+        command_template = self._require_llm_command()
+        if not command_template:
+            return
+
+        if self._auto_tag_active:
+            self.notify("Auto-tagging already in progress", title="Auto-Tag")
+            return
+
+        if self.selected_ids:
+            # Batch auto-tag selected papers
+            papers = [p for p in self.all_papers if p.arxiv_id in self.selected_ids]
+            if not papers:
+                self.notify("No selected papers found", title="Auto-Tag", severity="warning")
+                return
+            self._auto_tag_active = True
+            self._update_footer()
+            taxonomy = self._collect_all_tags()
+            self._track_task(
+                self._auto_tag_batch_async(papers, command_template, taxonomy)
+            )
+        else:
+            # Single paper auto-tag
+            paper = self._get_current_paper()
+            if not paper:
+                self.notify("No paper selected", title="Auto-Tag", severity="warning")
+                return
+            taxonomy = self._collect_all_tags()
+            current_tags = (self._tags_for(paper.arxiv_id) or [])[:]
+            self._auto_tag_active = True
+            self._track_task(
+                self._auto_tag_single_async(paper, command_template, taxonomy, current_tags)
+            )
+
+    async def _auto_tag_single_async(
+        self,
+        paper: Paper,
+        command_template: str,
+        taxonomy: list[str],
+        current_tags: list[str],
+    ) -> None:
+        """Auto-tag a single paper: call LLM, show suggestion modal."""
+        try:
+            suggested = await self._call_auto_tag_llm(paper, command_template, taxonomy)
+            if suggested is None:
+                return
+
+            # Show modal for user to accept/modify
+            self.push_screen(
+                AutoTagSuggestModal(paper.title, suggested, current_tags),
+                lambda tags: self._on_auto_tag_accepted(tags, paper.arxiv_id),
+            )
+        finally:
+            self._auto_tag_active = False
+            self._update_footer()
+
+    async def _auto_tag_batch_async(
+        self,
+        papers: list[Paper],
+        command_template: str,
+        taxonomy: list[str],
+    ) -> None:
+        """Batch auto-tag: call LLM for each paper, apply directly."""
+        try:
+            total = len(papers)
+            tagged = 0
+            failed = 0
+
+            for i, paper in enumerate(papers):
+                self._auto_tag_progress = (i + 1, total)
+                self._update_footer()
+
+                suggested = await self._call_auto_tag_llm(paper, command_template, taxonomy)
+                if suggested is None:
+                    failed += 1
+                    continue
+
+                # Apply tags directly in batch mode (merge with existing)
+                meta = self._get_or_create_metadata(paper.arxiv_id)
+                merged = list(dict.fromkeys(meta.tags + suggested))
+                meta.tags = merged
+                tagged += 1
+
+                # Update taxonomy for subsequent papers
+                for tag in suggested:
+                    if tag not in taxonomy:
+                        taxonomy.append(tag)
+
+            save_config(self._config)
+            self._mark_badges_dirty("tags", immediate=True)
+            self._refresh_detail_pane()
+
+            msg = f"Auto-tagged {tagged} paper{'s' if tagged != 1 else ''}"
+            if failed:
+                msg += f" ({failed} failed)"
+            self.notify(msg, title="Auto-Tag")
+
+        except Exception:
+            logger.warning("Auto-tag batch failed", exc_info=True)
+            self.notify("Auto-tagging failed", title="Auto-Tag", severity="error")
+        finally:
+            self._auto_tag_active = False
+            self._auto_tag_progress = None
+            self._update_footer()
+
+    async def _call_auto_tag_llm(
+        self, paper: Paper, command_template: str, taxonomy: list[str]
+    ) -> list[str] | None:
+        """Call the LLM to get tag suggestions for a paper. Returns tags or None on failure."""
+        prompt = build_auto_tag_prompt(paper, taxonomy)
+        try:
+            shell_command = _build_llm_shell_command(command_template, prompt)
+        except ValueError as e:
+            logger.warning("Auto-tag prompt error: %s", e)
+            self.notify(str(e), title="Auto-Tag", severity="error", timeout=10)
+            return None
+
+        try:
+            proc = await asyncio.create_subprocess_shell(  # nosec B602
+                shell_command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=AUTO_TAG_TIMEOUT
+                )
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+                logger.warning("Auto-tag timed out for %s", paper.arxiv_id)
+                return None
+
+            if proc.returncode != 0:
+                err_msg = (stderr or b"").decode("utf-8", errors="replace").strip()
+                logger.warning(
+                    "Auto-tag failed for %s (exit %d): %s",
+                    paper.arxiv_id, proc.returncode, err_msg[:200],
+                )
+                return None
+
+            output = (stdout or b"").decode("utf-8", errors="replace").strip()
+            if not output:
+                logger.warning("Auto-tag returned empty output for %s", paper.arxiv_id)
+                return None
+
+            tags = _parse_auto_tag_response(output)
+            if tags is None:
+                logger.warning("Failed to parse auto-tag response for %s: %s", paper.arxiv_id, output[:200])
+                self.notify("Could not parse LLM response", title="Auto-Tag", severity="warning")
+                return None
+
+            return tags
+
+        except Exception:
+            logger.warning("Auto-tag LLM call failed for %s", paper.arxiv_id, exc_info=True)
+            return None
+
+    def _on_auto_tag_accepted(self, tags: list[str] | None, arxiv_id: str) -> None:
+        """Callback when user accepts auto-tag suggestions."""
+        if tags is None:
+            return
+        meta = self._get_or_create_metadata(arxiv_id)
+        meta.tags = tags
+        save_config(self._config)
+
+        # Refresh display
+        for i, paper in enumerate(self.filtered_papers):
+            if paper.arxiv_id == arxiv_id:
+                self._update_option_at_index(i)
+                break
+        self._refresh_detail_pane()
+        self.notify(f"Tags updated: {', '.join(tags)}", title="Auto-Tag")
+
+    # ========================================================================
     # History Mode: Date Navigation
     # ========================================================================
 
@@ -8856,6 +9218,12 @@ class ArxivBrowser(App):
             total = self._download_total
             bar = render_progress_bar(completed, total)
             return [("", f"Downloading {bar} {completed}/{total}"), ("?", "help")]
+        if self._auto_tag_progress is not None:
+            current, total = self._auto_tag_progress
+            bar = render_progress_bar(current, total)
+            return [("", f"Auto-tagging {bar} {current}/{total}"), ("?", "help")]
+        if self._auto_tag_active:
+            return [("", "Auto-tagging…"), ("?", "help")]
 
         # Search mode — search container visible
         try:
