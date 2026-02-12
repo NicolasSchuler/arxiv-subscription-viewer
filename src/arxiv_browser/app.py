@@ -168,6 +168,7 @@ __all__ = [
     "count_papers_in_file",
     "discover_history_files",
     "escape_bibtex",
+    "export_metadata",
     "extract_text_from_html",
     "extract_year",
     "find_similar_papers",
@@ -188,6 +189,7 @@ __all__ = [
     "get_relevance_db_path",
     "get_summary_db_path",
     "get_tag_color",
+    "import_metadata",
     "insert_implicit_and",
     "is_advanced_query",
     "load_config",
@@ -292,6 +294,8 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
     ("Toggle Preview", "Show/hide abstract preview in list", "p", "toggle_preview"),
     # Export
     ("Export Menu", "Export as BibTeX, Markdown, RIS, or CSV", "E", "export_menu"),
+    ("Export Metadata", "Export all annotations to portable JSON file", "", "export_metadata"),
+    ("Import Metadata", "Import annotations from JSON file", "", "import_metadata"),
     # Enrichment
     ("Fetch S2 Data", "Fetch Semantic Scholar data for current paper", "e", "fetch_s2"),
     ("Toggle S2", "Enable/disable Semantic Scholar enrichment", "Ctrl+e", "toggle_s2"),
@@ -1184,6 +1188,125 @@ def save_config(config: UserConfig) -> bool:
     except OSError as e:
         logger.error("Failed to save config: %s", e)
         return False
+
+
+def export_metadata(config: UserConfig) -> dict[str, Any]:
+    """Export user metadata (read/star/notes/tags/watch list) as a portable dict.
+
+    The exported data can be loaded on another machine via import_metadata().
+    """
+    return {
+        "format": "arxiv-browser-metadata",
+        "version": 1,
+        "exported_at": datetime.now().isoformat(),
+        "paper_metadata": {
+            arxiv_id: {
+                "notes": meta.notes,
+                "tags": meta.tags,
+                "is_read": meta.is_read,
+                "starred": meta.starred,
+                "last_checked_version": meta.last_checked_version,
+            }
+            for arxiv_id, meta in config.paper_metadata.items()
+            if meta.notes or meta.tags or meta.is_read or meta.starred
+        },
+        "watch_list": [
+            {
+                "pattern": entry.pattern,
+                "match_type": entry.match_type,
+                "case_sensitive": entry.case_sensitive,
+            }
+            for entry in config.watch_list
+        ],
+        "bookmarks": [{"name": b.name, "query": b.query} for b in config.bookmarks],
+        "research_interests": config.research_interests,
+    }
+
+
+def import_metadata(
+    data: dict[str, Any], config: UserConfig, merge: bool = True
+) -> tuple[int, int, int]:
+    """Import metadata from a previously exported dict into config.
+
+    When merge=True (default), existing metadata is preserved and new data
+    is merged. When merge=False, imported data replaces existing.
+
+    Returns (papers_imported, watch_entries_imported, bookmarks_imported).
+    """
+    if data.get("format") != "arxiv-browser-metadata":
+        raise ValueError("Not a valid arxiv-browser metadata export")
+
+    papers_imported = 0
+    pm_data = data.get("paper_metadata", {})
+    if isinstance(pm_data, dict):
+        for arxiv_id, meta_dict in pm_data.items():
+            if not isinstance(meta_dict, dict):
+                continue
+            existing = config.paper_metadata.get(arxiv_id)
+            if existing and merge:
+                # Merge: keep existing, add new tags, overwrite notes only if empty
+                if meta_dict.get("tags"):
+                    merged_tags = list(dict.fromkeys(existing.tags + meta_dict["tags"]))
+                    existing.tags = merged_tags
+                if not existing.notes and meta_dict.get("notes"):
+                    existing.notes = meta_dict["notes"]
+                if meta_dict.get("is_read"):
+                    existing.is_read = True
+                if meta_dict.get("starred"):
+                    existing.starred = True
+            else:
+                config.paper_metadata[arxiv_id] = PaperMetadata(
+                    arxiv_id=arxiv_id,
+                    notes=str(meta_dict.get("notes", "")),
+                    tags=list(meta_dict.get("tags", [])),
+                    is_read=bool(meta_dict.get("is_read", False)),
+                    starred=bool(meta_dict.get("starred", False)),
+                    last_checked_version=meta_dict.get("last_checked_version"),
+                )
+            papers_imported += 1
+
+    watch_imported = 0
+    wl_data = data.get("watch_list", [])
+    if isinstance(wl_data, list):
+        existing_patterns = {(e.pattern, e.match_type) for e in config.watch_list}
+        for entry_dict in wl_data:
+            if not isinstance(entry_dict, dict):
+                continue
+            pattern = str(entry_dict.get("pattern", ""))
+            match_type = str(entry_dict.get("match_type", "keyword"))
+            if not pattern or (pattern, match_type) in existing_patterns:
+                continue
+            config.watch_list.append(
+                WatchListEntry(
+                    pattern=pattern,
+                    match_type=match_type,
+                    case_sensitive=bool(entry_dict.get("case_sensitive", False)),
+                )
+            )
+            watch_imported += 1
+
+    bookmarks_imported = 0
+    bk_data = data.get("bookmarks", [])
+    if isinstance(bk_data, list) and merge:
+        existing_queries = {b.query for b in config.bookmarks}
+        for bk_dict in bk_data:
+            if not isinstance(bk_dict, dict):
+                continue
+            query = str(bk_dict.get("query", ""))
+            if not query or query in existing_queries:
+                continue
+            if len(config.bookmarks) >= 9:
+                break
+            config.bookmarks.append(
+                SearchBookmark(name=str(bk_dict.get("name", "Imported")), query=query)
+            )
+            bookmarks_imported += 1
+
+    # Import research interests if not already set
+    if not config.research_interests and data.get("research_interests"):
+        config.research_interests = str(data["research_interests"])
+
+    return (papers_imported, watch_imported, bookmarks_imported)
 
 
 # ============================================================================
@@ -8227,6 +8350,51 @@ class ArxivBrowser(App):
         """Export selected papers to a CSV file."""
         content = format_papers_as_csv(papers, self._config.paper_metadata)
         self._export_to_file(content, "csv", "CSV")
+
+    def action_export_metadata(self) -> None:
+        """Export all user metadata to a portable JSON file."""
+        import json as _json
+
+        data = export_metadata(self._config)
+        content = _json.dumps(data, indent=2, ensure_ascii=False)
+        self._export_to_file(content, "json", "Metadata")
+
+    def action_import_metadata(self) -> None:
+        """Import metadata from a JSON file in the export directory."""
+        import json as _json
+
+        export_dir = Path(
+            self._config.bibtex_export_dir or Path.home() / DEFAULT_BIBTEX_EXPORT_DIR
+        )
+        # Find the most recent metadata JSON file
+        json_files = sorted(export_dir.glob("arxiv-*.json"), reverse=True)
+        if not json_files:
+            self.notify(
+                f"No metadata files found in {export_dir}",
+                title="Import",
+                severity="warning",
+            )
+            return
+        filepath = json_files[0]
+        try:
+            raw = filepath.read_text(encoding="utf-8")
+            data = _json.loads(raw)
+            papers_n, watch_n, bk_n = import_metadata(data, self._config)
+        except (OSError, ValueError) as exc:
+            self.notify(f"Import failed: {exc}", title="Import", severity="error")
+            return
+        save_config(self._config)
+        self._compute_watched_papers()
+        self._refresh_list_view()
+        parts = []
+        if papers_n:
+            parts.append(f"{papers_n} papers")
+        if watch_n:
+            parts.append(f"{watch_n} watch entries")
+        if bk_n:
+            parts.append(f"{bk_n} bookmarks")
+        summary = ", ".join(parts) if parts else "nothing new"
+        self.notify(f"Imported {summary} from {filepath.name}", title="Import")
 
     def _get_target_papers(self) -> list[Paper]:
         """Get papers to export (selected or current)."""

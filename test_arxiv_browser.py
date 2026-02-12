@@ -10672,6 +10672,249 @@ class TestFooterDiscoverability:
 
 
 # ============================================================================
+# Tests for metadata export/import
+# ============================================================================
+
+
+class TestExportMetadata:
+    """Tests for export_metadata()."""
+
+    def test_empty_config_exports_structure(self):
+        from arxiv_browser.app import UserConfig, export_metadata
+
+        config = UserConfig()
+        result = export_metadata(config)
+        assert result["format"] == "arxiv-browser-metadata"
+        assert result["version"] == 1
+        assert "exported_at" in result
+        assert result["paper_metadata"] == {}
+        assert result["watch_list"] == []
+        assert result["bookmarks"] == []
+        assert result["research_interests"] == ""
+
+    def test_only_annotated_papers_exported(self, make_paper):
+        from arxiv_browser.app import PaperMetadata, UserConfig, export_metadata
+
+        config = UserConfig()
+        # Paper with annotations
+        config.paper_metadata["2401.0001"] = PaperMetadata(
+            arxiv_id="2401.0001", notes="important", tags=["topic:ml"], is_read=True, starred=True
+        )
+        # Paper with no annotations (default state) — should be excluded
+        config.paper_metadata["2401.0002"] = PaperMetadata(arxiv_id="2401.0002")
+        result = export_metadata(config)
+        assert "2401.0001" in result["paper_metadata"]
+        assert "2401.0002" not in result["paper_metadata"]
+
+    def test_watch_list_and_bookmarks_exported(self):
+        from arxiv_browser.app import (
+            SearchBookmark,
+            UserConfig,
+            WatchListEntry,
+            export_metadata,
+        )
+
+        config = UserConfig()
+        config.watch_list = [WatchListEntry(pattern="transformer", match_type="keyword")]
+        config.bookmarks = [SearchBookmark(name="ML", query="cat:cs.LG")]
+        config.research_interests = "LLM inference"
+        result = export_metadata(config)
+        assert len(result["watch_list"]) == 1
+        assert result["watch_list"][0]["pattern"] == "transformer"
+        assert len(result["bookmarks"]) == 1
+        assert result["bookmarks"][0]["query"] == "cat:cs.LG"
+        assert result["research_interests"] == "LLM inference"
+
+    def test_roundtrip_preserves_data(self):
+        from arxiv_browser.app import (
+            PaperMetadata,
+            SearchBookmark,
+            UserConfig,
+            WatchListEntry,
+            export_metadata,
+            import_metadata,
+        )
+
+        config = UserConfig()
+        config.paper_metadata["2401.0001"] = PaperMetadata(
+            arxiv_id="2401.0001",
+            notes="my notes",
+            tags=["topic:ml", "status:read"],
+            is_read=True,
+            starred=True,
+            last_checked_version=3,
+        )
+        config.watch_list = [
+            WatchListEntry(pattern="GPT", match_type="keyword", case_sensitive=True)
+        ]
+        config.bookmarks = [SearchBookmark(name="AI", query="cat:cs.AI")]
+        config.research_interests = "quantization"
+
+        exported = export_metadata(config)
+
+        # Import into a fresh config
+        fresh = UserConfig()
+        papers_n, watch_n, bk_n = import_metadata(exported, fresh)
+        assert papers_n == 1
+        assert watch_n == 1
+        assert bk_n == 1
+        meta = fresh.paper_metadata["2401.0001"]
+        assert meta.notes == "my notes"
+        assert meta.tags == ["topic:ml", "status:read"]
+        assert meta.is_read is True
+        assert meta.starred is True
+        assert meta.last_checked_version == 3
+        assert fresh.watch_list[0].pattern == "GPT"
+        assert fresh.watch_list[0].case_sensitive is True
+        assert fresh.bookmarks[0].query == "cat:cs.AI"
+        assert fresh.research_interests == "quantization"
+
+
+class TestImportMetadata:
+    """Tests for import_metadata()."""
+
+    def test_invalid_format_raises(self):
+        from arxiv_browser.app import UserConfig, import_metadata
+
+        with pytest.raises(ValueError, match="Not a valid"):
+            import_metadata({"format": "wrong"}, UserConfig())
+
+    def test_merge_preserves_existing_notes(self):
+        from arxiv_browser.app import PaperMetadata, UserConfig, import_metadata
+
+        config = UserConfig()
+        config.paper_metadata["2401.0001"] = PaperMetadata(
+            arxiv_id="2401.0001", notes="existing notes"
+        )
+        data = {
+            "format": "arxiv-browser-metadata",
+            "paper_metadata": {
+                "2401.0001": {"notes": "new notes", "tags": ["topic:new"], "is_read": True}
+            },
+        }
+        papers_n, _, _ = import_metadata(data, config)
+        assert papers_n == 1
+        # Existing notes preserved (merge mode)
+        assert config.paper_metadata["2401.0001"].notes == "existing notes"
+        # New tags merged
+        assert "topic:new" in config.paper_metadata["2401.0001"].tags
+        # Read status upgraded
+        assert config.paper_metadata["2401.0001"].is_read is True
+
+    def test_merge_fills_empty_notes(self):
+        from arxiv_browser.app import PaperMetadata, UserConfig, import_metadata
+
+        config = UserConfig()
+        config.paper_metadata["2401.0001"] = PaperMetadata(arxiv_id="2401.0001")
+        data = {
+            "format": "arxiv-browser-metadata",
+            "paper_metadata": {"2401.0001": {"notes": "imported notes"}},
+        }
+        import_metadata(data, config)
+        assert config.paper_metadata["2401.0001"].notes == "imported notes"
+
+    def test_merge_deduplicates_tags(self):
+        from arxiv_browser.app import PaperMetadata, UserConfig, import_metadata
+
+        config = UserConfig()
+        config.paper_metadata["2401.0001"] = PaperMetadata(
+            arxiv_id="2401.0001", tags=["topic:ml", "status:read"]
+        )
+        data = {
+            "format": "arxiv-browser-metadata",
+            "paper_metadata": {"2401.0001": {"tags": ["topic:ml", "topic:new"]}},
+        }
+        import_metadata(data, config)
+        tags = config.paper_metadata["2401.0001"].tags
+        assert tags.count("topic:ml") == 1  # No duplicates
+        assert "topic:new" in tags
+
+    def test_replace_mode_overwrites(self):
+        from arxiv_browser.app import PaperMetadata, UserConfig, import_metadata
+
+        config = UserConfig()
+        config.paper_metadata["2401.0001"] = PaperMetadata(
+            arxiv_id="2401.0001", notes="old", starred=True
+        )
+        data = {
+            "format": "arxiv-browser-metadata",
+            "paper_metadata": {"2401.0001": {"notes": "new", "starred": False}},
+        }
+        import_metadata(data, config, merge=False)
+        assert config.paper_metadata["2401.0001"].notes == "new"
+        assert config.paper_metadata["2401.0001"].starred is False
+
+    def test_watch_list_deduplication(self):
+        from arxiv_browser.app import UserConfig, WatchListEntry, import_metadata
+
+        config = UserConfig()
+        config.watch_list = [WatchListEntry(pattern="GPT", match_type="keyword")]
+        data = {
+            "format": "arxiv-browser-metadata",
+            "watch_list": [
+                {"pattern": "GPT", "match_type": "keyword"},  # Duplicate
+                {"pattern": "BERT", "match_type": "keyword"},  # New
+            ],
+        }
+        _, watch_n, _ = import_metadata(data, config)
+        assert watch_n == 1  # Only BERT imported
+        assert len(config.watch_list) == 2
+
+    def test_bookmarks_capped_at_9(self):
+        from arxiv_browser.app import SearchBookmark, UserConfig, import_metadata
+
+        config = UserConfig()
+        config.bookmarks = [SearchBookmark(name=f"B{i}", query=f"q{i}") for i in range(8)]
+        data = {
+            "format": "arxiv-browser-metadata",
+            "bookmarks": [
+                {"name": "New1", "query": "new1"},
+                {"name": "New2", "query": "new2"},
+                {"name": "New3", "query": "new3"},
+            ],
+        }
+        _, _, bk_n = import_metadata(data, config)
+        assert bk_n == 1  # Only 1 fits (8 + 1 = 9, cap reached)
+        assert len(config.bookmarks) == 9
+
+    def test_research_interests_imported_only_if_empty(self):
+        from arxiv_browser.app import UserConfig, import_metadata
+
+        config = UserConfig()
+        config.research_interests = "existing interests"
+        data = {
+            "format": "arxiv-browser-metadata",
+            "research_interests": "new interests",
+        }
+        import_metadata(data, config)
+        assert config.research_interests == "existing interests"
+
+        # But imports into empty
+        config2 = UserConfig()
+        import_metadata(data, config2)
+        assert config2.research_interests == "new interests"
+
+    def test_malformed_entries_skipped(self):
+        from arxiv_browser.app import UserConfig, import_metadata
+
+        config = UserConfig()
+        data = {
+            "format": "arxiv-browser-metadata",
+            "paper_metadata": {
+                "good": {"notes": "ok"},
+                "bad": "not a dict",  # Should be skipped
+            },
+            "watch_list": [
+                {"pattern": "ok", "match_type": "keyword"},
+                "not a dict",  # Should be skipped
+            ],
+        }
+        papers_n, watch_n, _ = import_metadata(data, config)
+        assert papers_n == 1
+        assert watch_n == 1
+
+
+# ============================================================================
 # Run tests
 # ============================================================================
 
