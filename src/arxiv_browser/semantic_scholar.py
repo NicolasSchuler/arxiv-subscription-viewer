@@ -42,7 +42,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, overload
 
 import httpx
 from platformdirs import user_config_dir
@@ -318,6 +318,28 @@ async def fetch_s2_recommendations(
     return papers
 
 
+@overload
+async def fetch_s2_references(
+    paper_id: str,
+    client: httpx.AsyncClient,
+    limit: int = ...,
+    api_key: str = ...,
+    timeout: int = ...,
+    include_status: Literal[False] = ...,
+) -> list[CitationEntry]: ...
+
+
+@overload
+async def fetch_s2_references(
+    paper_id: str,
+    client: httpx.AsyncClient,
+    limit: int = ...,
+    api_key: str = ...,
+    timeout: int = ...,
+    include_status: Literal[True] = ...,
+) -> tuple[list[CitationEntry], bool]: ...
+
+
 async def fetch_s2_references(
     paper_id: str,
     client: httpx.AsyncClient,
@@ -359,6 +381,28 @@ async def fetch_s2_references(
     if include_status:
         return entries, True
     return entries
+
+
+@overload
+async def fetch_s2_citations(
+    paper_id: str,
+    client: httpx.AsyncClient,
+    limit: int = ...,
+    api_key: str = ...,
+    timeout: int = ...,
+    include_status: Literal[False] = ...,
+) -> list[CitationEntry]: ...
+
+
+@overload
+async def fetch_s2_citations(
+    paper_id: str,
+    client: httpx.AsyncClient,
+    limit: int = ...,
+    api_key: str = ...,
+    timeout: int = ...,
+    include_status: Literal[True] = ...,
+) -> tuple[list[CitationEntry], bool]: ...
 
 
 async def fetch_s2_citations(

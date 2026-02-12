@@ -5743,7 +5743,8 @@ class PaperChatScreen(ModalScreen[None]):
         self._add_message("user", question)
         self._waiting = True
         self.query_one("#chat-status", Static).update("[dim]Thinking...[/]")
-        self.app._track_task(self._ask_llm(question))
+        app: ArxivBrowser = self.app  # type: ignore[assignment]
+        app._track_task(self._ask_llm(question))
 
     def _add_message(self, role: str, text: str, *, markup: bool = False) -> None:
         self._history.append((role, text))
