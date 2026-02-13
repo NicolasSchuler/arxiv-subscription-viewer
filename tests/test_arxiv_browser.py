@@ -1518,7 +1518,7 @@ class TestStatusFilterRegressions:
         """Help text should reference the actual history key names."""
         import inspect
 
-        from arxiv_browser.app import HelpScreen
+        from arxiv_browser.modals import HelpScreen
 
         source = inspect.getsource(HelpScreen.compose)
         assert "bracketleft / bracketright" in source
@@ -2605,7 +2605,8 @@ class TestTextualIntegration:
         """Pressing '?' should open help, 'escape' should close it."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser, HelpScreen
+        from arxiv_browser.app import ArxivBrowser
+        from arxiv_browser.modals import HelpScreen
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
@@ -4261,7 +4262,7 @@ class TestBatchConfirmationThreshold:
         assert BATCH_CONFIRM_THRESHOLD == 10
 
     def test_confirm_modal_class_exists(self):
-        from arxiv_browser.app import ConfirmModal
+        from arxiv_browser.modals import ConfirmModal
 
         modal = ConfirmModal("Test message?")
         assert modal._message == "Test message?"
@@ -4298,7 +4299,8 @@ class TestBatchConfirmationIntegration:
         """Opening many papers should show confirmation modal."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import BATCH_CONFIRM_THRESHOLD, ArxivBrowser, ConfirmModal
+        from arxiv_browser.app import BATCH_CONFIRM_THRESHOLD, ArxivBrowser
+        from arxiv_browser.modals import ConfirmModal
 
         papers = [make_paper(arxiv_id=f"2401.{i:05d}") for i in range(BATCH_CONFIRM_THRESHOLD + 1)]
         app = ArxivBrowser(papers, restore_session=False)
@@ -9009,7 +9011,8 @@ class TestExportMenuIntegration:
         """Pressing 'E' with selected papers should open the ExportMenuModal."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser, ExportMenuModal
+        from arxiv_browser.app import ArxivBrowser
+        from arxiv_browser.modals import ExportMenuModal
 
         papers = self._make_papers(make_paper, count=2)
         app = ArxivBrowser(papers, restore_session=False)
@@ -9028,7 +9031,8 @@ class TestExportMenuIntegration:
         """Pressing Escape should close the ExportMenuModal."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser, ExportMenuModal
+        from arxiv_browser.app import ArxivBrowser
+        from arxiv_browser.modals import ExportMenuModal
 
         papers = self._make_papers(make_paper, count=2)
         app = ArxivBrowser(papers, restore_session=False)
@@ -9048,7 +9052,8 @@ class TestExportMenuIntegration:
         """Export menu should open when detail pane has a paper (no explicit selection)."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser, ExportMenuModal
+        from arxiv_browser.app import ArxivBrowser
+        from arxiv_browser.modals import ExportMenuModal
 
         papers = self._make_papers(make_paper, count=2)
         app = ArxivBrowser(papers, restore_session=False)
@@ -9692,7 +9697,7 @@ class TestExportMenuModal:
     """Tests for ExportMenuModal action methods and structure."""
 
     def test_bindings_cover_all_formats(self):
-        from arxiv_browser.app import ExportMenuModal
+        from arxiv_browser.modals import ExportMenuModal
 
         binding_keys = {b.key for b in ExportMenuModal.BINDINGS}
         expected = {"escape", "c", "b", "m", "r", "v", "t", "B", "R", "C"}
@@ -9701,7 +9706,7 @@ class TestExportMenuModal:
     def test_action_cancel_dismisses_empty_string(self):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import ExportMenuModal
+        from arxiv_browser.modals import ExportMenuModal
 
         modal = ExportMenuModal(paper_count=3)
         modal.dismiss = MagicMock()
@@ -9711,7 +9716,7 @@ class TestExportMenuModal:
     def test_action_do_clipboard_plain(self):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import ExportMenuModal
+        from arxiv_browser.modals import ExportMenuModal
 
         modal = ExportMenuModal(paper_count=1)
         modal.dismiss = MagicMock()
@@ -9721,7 +9726,7 @@ class TestExportMenuModal:
     def test_action_do_clipboard_bibtex(self):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import ExportMenuModal
+        from arxiv_browser.modals import ExportMenuModal
 
         modal = ExportMenuModal(paper_count=1)
         modal.dismiss = MagicMock()
@@ -9731,7 +9736,7 @@ class TestExportMenuModal:
     def test_action_do_clipboard_markdown(self):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import ExportMenuModal
+        from arxiv_browser.modals import ExportMenuModal
 
         modal = ExportMenuModal(paper_count=1)
         modal.dismiss = MagicMock()
@@ -9741,7 +9746,7 @@ class TestExportMenuModal:
     def test_action_do_clipboard_ris(self):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import ExportMenuModal
+        from arxiv_browser.modals import ExportMenuModal
 
         modal = ExportMenuModal(paper_count=1)
         modal.dismiss = MagicMock()
@@ -9751,7 +9756,7 @@ class TestExportMenuModal:
     def test_action_do_clipboard_csv(self):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import ExportMenuModal
+        from arxiv_browser.modals import ExportMenuModal
 
         modal = ExportMenuModal(paper_count=1)
         modal.dismiss = MagicMock()
@@ -9761,7 +9766,7 @@ class TestExportMenuModal:
     def test_action_do_clipboard_mdtable(self):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import ExportMenuModal
+        from arxiv_browser.modals import ExportMenuModal
 
         modal = ExportMenuModal(paper_count=1)
         modal.dismiss = MagicMock()
@@ -9771,7 +9776,7 @@ class TestExportMenuModal:
     def test_action_do_file_bibtex(self):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import ExportMenuModal
+        from arxiv_browser.modals import ExportMenuModal
 
         modal = ExportMenuModal(paper_count=1)
         modal.dismiss = MagicMock()
@@ -9781,7 +9786,7 @@ class TestExportMenuModal:
     def test_action_do_file_ris(self):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import ExportMenuModal
+        from arxiv_browser.modals import ExportMenuModal
 
         modal = ExportMenuModal(paper_count=1)
         modal.dismiss = MagicMock()
@@ -9791,7 +9796,7 @@ class TestExportMenuModal:
     def test_action_do_file_csv(self):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import ExportMenuModal
+        from arxiv_browser.modals import ExportMenuModal
 
         modal = ExportMenuModal(paper_count=1)
         modal.dismiss = MagicMock()
@@ -9799,13 +9804,13 @@ class TestExportMenuModal:
         modal.dismiss.assert_called_once_with("file-csv")
 
     def test_paper_count_stored(self):
-        from arxiv_browser.app import ExportMenuModal
+        from arxiv_browser.modals import ExportMenuModal
 
         modal = ExportMenuModal(paper_count=5)
         assert modal._paper_count == 5
 
     def test_paper_count_plural_suffix(self):
-        from arxiv_browser.app import ExportMenuModal
+        from arxiv_browser.modals import ExportMenuModal
 
         modal_one = ExportMenuModal(paper_count=1)
         assert modal_one._paper_count == 1
@@ -9817,7 +9822,7 @@ class TestExportMenuModal:
         """Ensure each export action produces a distinct format string."""
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import ExportMenuModal
+        from arxiv_browser.modals import ExportMenuModal
 
         modal = ExportMenuModal(paper_count=1)
         modal.dismiss = MagicMock()
@@ -9985,33 +9990,33 @@ class TestSectionToggleModal:
     """Tests for SectionToggleModal toggle and save/cancel behavior."""
 
     def test_init_stores_collapsed_as_set(self):
-        from arxiv_browser.app import SectionToggleModal
+        from arxiv_browser.modals import SectionToggleModal
 
         modal = SectionToggleModal(["authors", "abstract"])
         assert modal._collapsed == {"authors", "abstract"}
 
     def test_init_empty_collapsed(self):
-        from arxiv_browser.app import SectionToggleModal
+        from arxiv_browser.modals import SectionToggleModal
 
         modal = SectionToggleModal([])
         assert modal._collapsed == set()
 
     def test_toggle_adds_section_when_not_collapsed(self):
-        from arxiv_browser.app import SectionToggleModal
+        from arxiv_browser.modals import SectionToggleModal
 
         modal = SectionToggleModal([])
         modal._toggle("a")
         assert "authors" in modal._collapsed
 
     def test_toggle_removes_section_when_collapsed(self):
-        from arxiv_browser.app import SectionToggleModal
+        from arxiv_browser.modals import SectionToggleModal
 
         modal = SectionToggleModal(["authors"])
         modal._toggle("a")
         assert "authors" not in modal._collapsed
 
     def test_toggle_idempotent_double_toggle(self):
-        from arxiv_browser.app import SectionToggleModal
+        from arxiv_browser.modals import SectionToggleModal
 
         modal = SectionToggleModal([])
         modal._toggle("a")
@@ -10020,63 +10025,63 @@ class TestSectionToggleModal:
         assert "authors" not in modal._collapsed
 
     def test_toggle_invalid_key_ignored(self):
-        from arxiv_browser.app import SectionToggleModal
+        from arxiv_browser.modals import SectionToggleModal
 
         modal = SectionToggleModal([])
         modal._toggle("z")
         assert modal._collapsed == set()
 
     def test_action_toggle_a_toggles_authors(self):
-        from arxiv_browser.app import SectionToggleModal
+        from arxiv_browser.modals import SectionToggleModal
 
         modal = SectionToggleModal([])
         modal.action_toggle_a()
         assert "authors" in modal._collapsed
 
     def test_action_toggle_b_toggles_abstract(self):
-        from arxiv_browser.app import SectionToggleModal
+        from arxiv_browser.modals import SectionToggleModal
 
         modal = SectionToggleModal([])
         modal.action_toggle_b()
         assert "abstract" in modal._collapsed
 
     def test_action_toggle_t_toggles_tags(self):
-        from arxiv_browser.app import SectionToggleModal
+        from arxiv_browser.modals import SectionToggleModal
 
         modal = SectionToggleModal([])
         modal.action_toggle_t()
         assert "tags" in modal._collapsed
 
     def test_action_toggle_r_toggles_relevance(self):
-        from arxiv_browser.app import SectionToggleModal
+        from arxiv_browser.modals import SectionToggleModal
 
         modal = SectionToggleModal([])
         modal.action_toggle_r()
         assert "relevance" in modal._collapsed
 
     def test_action_toggle_s_toggles_summary(self):
-        from arxiv_browser.app import SectionToggleModal
+        from arxiv_browser.modals import SectionToggleModal
 
         modal = SectionToggleModal([])
         modal.action_toggle_s()
         assert "summary" in modal._collapsed
 
     def test_action_toggle_e_toggles_s2(self):
-        from arxiv_browser.app import SectionToggleModal
+        from arxiv_browser.modals import SectionToggleModal
 
         modal = SectionToggleModal([])
         modal.action_toggle_e()
         assert "s2" in modal._collapsed
 
     def test_action_toggle_h_toggles_hf(self):
-        from arxiv_browser.app import SectionToggleModal
+        from arxiv_browser.modals import SectionToggleModal
 
         modal = SectionToggleModal([])
         modal.action_toggle_h()
         assert "hf" in modal._collapsed
 
     def test_action_toggle_v_toggles_version(self):
-        from arxiv_browser.app import SectionToggleModal
+        from arxiv_browser.modals import SectionToggleModal
 
         modal = SectionToggleModal([])
         modal.action_toggle_v()
@@ -10085,7 +10090,7 @@ class TestSectionToggleModal:
     def test_action_save_returns_sorted_collapsed(self):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import SectionToggleModal
+        from arxiv_browser.modals import SectionToggleModal
 
         modal = SectionToggleModal(["url", "authors", "hf"])
         modal.dismiss = MagicMock()
@@ -10095,7 +10100,7 @@ class TestSectionToggleModal:
     def test_action_save_after_toggle_reflects_changes(self):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import SectionToggleModal
+        from arxiv_browser.modals import SectionToggleModal
 
         modal = SectionToggleModal(["authors"])
         modal.action_toggle_a()
@@ -10109,7 +10114,7 @@ class TestSectionToggleModal:
     def test_action_cancel_returns_none(self):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import SectionToggleModal
+        from arxiv_browser.modals import SectionToggleModal
 
         modal = SectionToggleModal(["authors"])
         modal.dismiss = MagicMock()
@@ -10117,7 +10122,7 @@ class TestSectionToggleModal:
         modal.dismiss.assert_called_once_with(None)
 
     def test_render_list_shows_all_sections(self):
-        from arxiv_browser.app import SectionToggleModal
+        from arxiv_browser.modals import SectionToggleModal
 
         modal = SectionToggleModal([])
         rendered = modal._render_list()
@@ -10133,7 +10138,7 @@ class TestSectionToggleModal:
         assert "URL" not in rendered
 
     def test_render_list_indicates_collapsed_state(self):
-        from arxiv_browser.app import SectionToggleModal
+        from arxiv_browser.modals import SectionToggleModal
 
         modal = SectionToggleModal(["authors", "version"])
         rendered = modal._render_list()
@@ -10148,7 +10153,7 @@ class TestSectionToggleModal:
         assert "expanded" in abstract_line
 
     def test_bindings_have_all_toggle_keys(self):
-        from arxiv_browser.app import SectionToggleModal
+        from arxiv_browser.modals import SectionToggleModal
 
         binding_keys = {b.key for b in SectionToggleModal.BINDINGS}
         expected = {"escape", "enter", "a", "b", "t", "r", "s", "e", "h", "v"}
