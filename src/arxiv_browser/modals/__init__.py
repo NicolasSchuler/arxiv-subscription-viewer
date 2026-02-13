@@ -21,14 +21,21 @@ from arxiv_browser.modals.editing import (
     TagsModal,
 )
 
-# Future extractions (Tasks 4-7) will add imports here:
-# - search.py: ArxivSearchModal, CommandPaletteModal
+# search.py — arXiv search form, command palette
+from arxiv_browser.modals.search import (
+    ArxivSearchModal,
+    CommandPaletteModal,
+)
+
+# Future extractions (Tasks 5-7) will add imports here:
 # - collections.py: CollectionsModal, CollectionViewModal, AddToCollectionModal
 # - citations.py: CitationGraphScreen, RecommendationsScreen, etc.
 # - llm.py: SummaryModeModal, ResearchInterestsModal, PaperChatScreen
 
 __all__ = [
+    "ArxivSearchModal",
     "AutoTagSuggestModal",
+    "CommandPaletteModal",
     "ConfirmModal",
     "ExportMenuModal",
     "HelpScreen",
