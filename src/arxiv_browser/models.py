@@ -224,6 +224,11 @@ class SessionState:
     selected_ids: list[str] = field(default_factory=list)
     current_date: str | None = None  # YYYY-MM-DD format, None for non-history mode
 
+    def __post_init__(self) -> None:
+        """Clamp sort_index to valid SORT_OPTIONS range (defense-in-depth)."""
+        if self.sort_index < 0 or self.sort_index >= len(SORT_OPTIONS):
+            self.sort_index = 0
+
 
 @dataclass(slots=True)
 class QueryToken:

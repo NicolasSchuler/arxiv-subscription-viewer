@@ -35,6 +35,22 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 # Configuration Persistence
 # ============================================================================
+#
+# Validation contract — _dict_to_config() guarantees valid output for any input:
+#
+#   Field                  Rule                            Handler
+#   ─────────────────────  ──────────────────────────────  ──────────────────
+#   sort_index             0 ≤ x < len(SORT_OPTIONS)       _parse_session_state
+#   arxiv_api_max_results  1 ≤ x ≤ 200                    _parse_session_state
+#   watch_list[].match_type  in WATCH_MATCH_TYPES          _parse_watch_list
+#   collapsed_sections[]   each in DETAIL_SECTION_KEYS     _parse_collapsed_sections
+#   collections length     ≤ MAX_COLLECTIONS               _parse_collections
+#   collection.paper_ids   ≤ MAX_PAPERS_PER_COLLECTION     _parse_collections
+#   scalar fields          type-checked via _safe_get()    _dict_to_config
+#
+# SessionState.__post_init__ provides defense-in-depth clamping for sort_index,
+# ensuring safety even when constructed directly (not via deserialization).
+#
 CONFIG_FILENAME = "config.json"
 
 
