@@ -12,16 +12,13 @@ from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Static, TextArea
 
-from arxiv_browser.llm import CHAT_SYSTEM_PROMPT
+from arxiv_browser.llm import CHAT_SYSTEM_PROMPT, LLM_COMMAND_TIMEOUT
 from arxiv_browser.llm_providers import CLIProvider
 from arxiv_browser.models import Paper
 from arxiv_browser.query import escape_rich_text
 from arxiv_browser.themes import THEME_COLORS
 
 logger = logging.getLogger(__name__)
-
-# Default timeout for LLM CLI commands (seconds).
-LLM_COMMAND_TIMEOUT = 120
 
 
 class SummaryModeModal(ModalScreen[str]):

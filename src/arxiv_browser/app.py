@@ -136,6 +136,7 @@ from arxiv_browser.llm import (  # noqa: F401
     AUTO_TAG_PROMPT_TEMPLATE,
     CHAT_SYSTEM_PROMPT,
     DEFAULT_LLM_PROMPT,
+    LLM_COMMAND_TIMEOUT,
     LLM_PRESETS,
     RELEVANCE_PROMPT_TEMPLATE,
     SUMMARY_MODES,
@@ -578,7 +579,6 @@ BATCH_CONFIRM_THRESHOLD = (
 )
 
 # LLM summary settings
-LLM_COMMAND_TIMEOUT = 120  # Seconds to wait for LLM CLI response
 SUMMARY_DB_FILENAME = "summaries.db"
 MAX_PAPER_CONTENT_LENGTH = 60_000  # ~15k tokens; truncate fetched paper content
 ARXIV_HTML_TIMEOUT = 30  # Seconds to wait for arXiv HTML fetch

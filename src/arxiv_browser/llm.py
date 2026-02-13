@@ -17,6 +17,7 @@ from platformdirs import user_config_dir
 from arxiv_browser.models import CONFIG_APP_NAME, Paper, UserConfig
 
 logger = logging.getLogger(__name__)
+LLM_COMMAND_TIMEOUT = 120  # Seconds to wait for LLM CLI response
 SUMMARY_DB_FILENAME = "summaries.db"
 RELEVANCE_DB_FILENAME = "relevance.db"
 
