@@ -18,6 +18,135 @@ from arxiv_browser.themes import THEME_COLORS
 DATE_NAV_WINDOW_SIZE = 5
 
 
+def build_selection_footer_bindings(
+    selection_bindings: list[tuple[str, str]], selected_count: int
+) -> list[tuple[str, str]]:
+    """Build selection-mode footer bindings with dynamic open(n) label."""
+    bindings = list(selection_bindings)
+    if bindings:
+        bindings[0] = ("o", f"open({selected_count})")
+    return bindings
+
+
+def build_browse_footer_bindings(
+    *,
+    s2_active: bool,
+    has_starred: bool,
+    llm_configured: bool,
+    has_history_navigation: bool,
+) -> list[tuple[str, str]]:
+    """Build default browsing footer bindings with discovery hints."""
+    bindings: list[tuple[str, str]] = [("/", "search"), ("o", "open"), ("s", "sort")]
+    if s2_active:
+        bindings.extend([("e", "S2"), ("G", "graph")])
+    else:
+        bindings.extend([("r", "read"), ("x", "star"), ("n", "notes"), ("t", "tags")])
+    if has_starred:
+        bindings.append(("V", "versions"))
+    if llm_configured:
+        bindings.append(("L", "relevance"))
+    if has_history_navigation:
+        bindings.append(("[/]", "dates"))
+    bindings.extend([("E", "export"), ("^p", "commands"), ("?", "help")])
+    return bindings
+
+
+def build_footer_mode_badge(
+    *,
+    relevance_scoring_active: bool,
+    version_checking: bool,
+    search_visible: bool,
+    in_arxiv_api_mode: bool,
+    selected_count: int,
+) -> str:
+    """Build Rich-markup mode badge text for footer state."""
+    pink = THEME_COLORS["pink"]
+    accent = THEME_COLORS["accent"]
+    orange = THEME_COLORS["orange"]
+    green = THEME_COLORS["green"]
+    panel_alt = THEME_COLORS["panel_alt"]
+    if relevance_scoring_active:
+        return f"[bold {pink} on {panel_alt}] SCORING [/]"
+    if version_checking:
+        return f"[bold {pink} on {panel_alt}] VERSIONS [/]"
+    if search_visible:
+        return f"[bold {accent} on {panel_alt}] SEARCH [/]"
+    if in_arxiv_api_mode:
+        return f"[bold {orange} on {panel_alt}] API [/]"
+    if selected_count > 0:
+        return f"[bold {green} on {panel_alt}] {selected_count} SEL [/]"
+    return ""
+
+
+def build_status_bar_text(
+    *,
+    total: int,
+    filtered: int,
+    query: str,
+    watch_filter_active: bool,
+    selected_count: int,
+    sort_label: str,
+    in_arxiv_api_mode: bool,
+    api_page: int | None,
+    arxiv_api_loading: bool,
+    show_abstract_preview: bool,
+    s2_active: bool,
+    s2_loading: bool,
+    s2_count: int,
+    hf_active: bool,
+    hf_loading: bool,
+    hf_match_count: int,
+    version_checking: bool,
+    version_update_count: int,
+) -> str:
+    """Build semantic status bar text for current UI/application state."""
+    parts: list[str] = []
+
+    if query:
+        truncated_query = query if len(query) <= 30 else query[:27] + "..."
+        safe_query = escape_rich_text(truncated_query)
+        parts.append(
+            f'[{THEME_COLORS["accent"]}]{filtered}[/][dim]/{total} matching [/][{THEME_COLORS["accent"]}]"{safe_query}"[/]'
+        )
+    elif watch_filter_active:
+        parts.append(f"[{THEME_COLORS['orange']}]{filtered}[/][dim]/{total} watched[/]")
+    else:
+        parts.append(f"[dim]{total} papers[/]")
+
+    if selected_count > 0:
+        parts.append(f"[bold {THEME_COLORS['green']}]{selected_count} selected[/]")
+
+    parts.append(f"[dim]Sort: {sort_label}[/]")
+
+    if in_arxiv_api_mode and api_page is not None:
+        parts.append(f"[{THEME_COLORS['orange']}]API[/]")
+        parts.append(f"[dim]Page: {api_page}[/]")
+        if arxiv_api_loading:
+            parts.append(f"[{THEME_COLORS['orange']}]Loading...[/]")
+    if show_abstract_preview:
+        parts.append(f"[{THEME_COLORS['purple']}]Preview[/]")
+    if s2_active:
+        if s2_loading:
+            parts.append(f"[{THEME_COLORS['green']}]S2 loading...[/]")
+        elif s2_count > 0:
+            parts.append(f"[{THEME_COLORS['green']}]S2:{s2_count}[/]")
+        else:
+            parts.append(f"[{THEME_COLORS['green']}]S2[/]")
+    if hf_active:
+        if hf_loading:
+            parts.append(f"[{THEME_COLORS['orange']}]HF loading...[/]")
+        elif hf_match_count > 0:
+            parts.append(f"[{THEME_COLORS['orange']}]HF:{hf_match_count}[/]")
+        else:
+            parts.append(f"[{THEME_COLORS['orange']}]HF[/]")
+    if version_checking:
+        parts.append(f"[{THEME_COLORS['pink']}]Checking versions...[/]")
+    elif version_update_count > 0:
+        parts.append(f"[{THEME_COLORS['pink']}]{version_update_count} updated[/]")
+
+    return " [dim]│[/] ".join(parts)
+
+
 class ContextFooter(Static):
     """Context-sensitive footer showing relevant keybindings."""
 
@@ -342,4 +471,8 @@ __all__ = [
     "ContextFooter",
     "DateNavigator",
     "FilterPillBar",
+    "build_browse_footer_bindings",
+    "build_footer_mode_badge",
+    "build_selection_footer_bindings",
+    "build_status_bar_text",
 ]

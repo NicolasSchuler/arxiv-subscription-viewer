@@ -298,6 +298,7 @@ from arxiv_browser.themes import (
     get_tag_color,
     parse_tag_namespace,
 )
+from arxiv_browser.widgets import chrome as _widget_chrome
 from arxiv_browser.widgets import details as _widget_details
 
 BookmarkTabBar = _widgets.BookmarkTabBar
@@ -4095,63 +4096,36 @@ class ArxivBrowser(App):
         except NoMatches:
             return
 
-        parts = []
-
-        # Paper count — accent if filtered, dim otherwise
         total = len(self.all_papers)
         filtered = len(self.filtered_papers)
         query = self._get_active_query()
-        if query:
-            truncated_query = query if len(query) <= 30 else query[:27] + "..."
-            safe_query = escape_rich_text(truncated_query)
-            parts.append(
-                f'[{THEME_COLORS["accent"]}]{filtered}[/][dim]/{total} matching [/][{THEME_COLORS["accent"]}]"{safe_query}"[/]'
-            )
-        elif self._watch_filter_active:
-            parts.append(f"[{THEME_COLORS['orange']}]{filtered}[/][dim]/{total} watched[/]")
-        else:
-            parts.append(f"[dim]{total} papers[/]")
-
-        # Selection count — green when > 0
-        selected = len(self.selected_ids)
-        if selected > 0:
-            parts.append(f"[bold {THEME_COLORS['green']}]{selected} selected[/]")
-
-        # Sort order
-        parts.append(f"[dim]Sort: {SORT_OPTIONS[self._sort_index]}[/]")
-
-        # Mode badges
+        api_page: int | None = None
         if self._in_arxiv_api_mode and self._arxiv_search_state is not None:
-            page = (self._arxiv_search_state.start // self._arxiv_search_state.max_results) + 1
-            parts.append(f"[{THEME_COLORS['orange']}]API[/]")
-            parts.append(f"[dim]Page: {page}[/]")
-            if self._arxiv_api_loading:
-                parts.append(f"[{THEME_COLORS['orange']}]Loading...[/]")
-        if self._show_abstract_preview:
-            parts.append(f"[{THEME_COLORS['purple']}]Preview[/]")
-        if self._s2_active:
-            s2_count = len(self._s2_cache)
-            if self._s2_loading:
-                parts.append(f"[{THEME_COLORS['green']}]S2 loading...[/]")
-            elif s2_count > 0:
-                parts.append(f"[{THEME_COLORS['green']}]S2:{s2_count}[/]")
-            else:
-                parts.append(f"[{THEME_COLORS['green']}]S2[/]")
-        if self._hf_active:
-            if self._hf_loading:
-                parts.append(f"[{THEME_COLORS['orange']}]HF loading...[/]")
-            else:
-                matched = sum(1 for aid in self._hf_cache if aid in self._papers_by_id)
-                if matched > 0:
-                    parts.append(f"[{THEME_COLORS['orange']}]HF:{matched}[/]")
-                else:
-                    parts.append(f"[{THEME_COLORS['orange']}]HF[/]")
-        if self._version_checking:
-            parts.append(f"[{THEME_COLORS['pink']}]Checking versions...[/]")
-        elif self._version_updates:
-            parts.append(f"[{THEME_COLORS['pink']}]{len(self._version_updates)} updated[/]")
+            api_page = (self._arxiv_search_state.start // self._arxiv_search_state.max_results) + 1
+        hf_match_count = sum(1 for aid in self._hf_cache if aid in self._papers_by_id)
 
-        status.update(" [dim]│[/] ".join(parts))
+        status.update(
+            _widget_chrome.build_status_bar_text(
+                total=total,
+                filtered=filtered,
+                query=query,
+                watch_filter_active=self._watch_filter_active,
+                selected_count=len(self.selected_ids),
+                sort_label=SORT_OPTIONS[self._sort_index],
+                in_arxiv_api_mode=self._in_arxiv_api_mode,
+                api_page=api_page,
+                arxiv_api_loading=self._arxiv_api_loading,
+                show_abstract_preview=self._show_abstract_preview,
+                s2_active=self._s2_active,
+                s2_loading=bool(self._s2_loading),
+                s2_count=len(self._s2_cache),
+                hf_active=self._hf_active,
+                hf_loading=self._hf_loading,
+                hf_match_count=hf_match_count,
+                version_checking=self._version_checking,
+                version_update_count=len(self._version_updates),
+            )
+        )
         self._update_footer()
 
     def _get_footer_bindings(self) -> list[tuple[str, str]]:
@@ -4195,56 +4169,36 @@ class ArxivBrowser(App):
 
         # Selection mode — papers selected
         if self.selected_ids:
-            n = len(self.selected_ids)
-            bindings = list(FOOTER_CONTEXTS["selection"])
-            bindings[0] = ("o", f"open({n})")
-            return bindings
+            return _widget_chrome.build_selection_footer_bindings(
+                FOOTER_CONTEXTS["selection"], len(self.selected_ids)
+            )
 
         # Default browsing — dynamically show contextual hints
-        bindings: list[tuple[str, str]] = [("/", "search"), ("o", "open"), ("s", "sort")]
-        if self._s2_active:
-            bindings.extend([("e", "S2"), ("G", "graph")])
-        else:
-            bindings.extend([("r", "read"), ("x", "star")])
-            bindings.extend([("n", "notes"), ("t", "tags")])
-
-        # Feature discovery hints
         has_starred = any(m.starred for m in self._config.paper_metadata.values())
         llm_configured = bool(_resolve_llm_command(self._config))
-        if has_starred:
-            bindings.append(("V", "versions"))
-        if llm_configured:
-            bindings.append(("L", "relevance"))
-        if self._history_files and len(self._history_files) > 1:
-            bindings.append(("[/]", "dates"))
-        bindings.append(("E", "export"))
-        bindings.append(("^p", "commands"))
-        bindings.append(("?", "help"))
-        return bindings
+        return _widget_chrome.build_browse_footer_bindings(
+            s2_active=self._s2_active,
+            has_starred=has_starred,
+            llm_configured=llm_configured,
+            has_history_navigation=bool(self._history_files and len(self._history_files) > 1),
+        )
 
     def _get_footer_mode_badge(self) -> str:
         """Return a Rich-markup mode badge string for the current state."""
-        pink = THEME_COLORS["pink"]
-        accent = THEME_COLORS["accent"]
-        orange = THEME_COLORS["orange"]
-        green = THEME_COLORS["green"]
-        panel_alt = THEME_COLORS["panel_alt"]
-        if self._relevance_scoring_active:
-            return f"[bold {pink} on {panel_alt}] SCORING [/]"
-        if self._version_checking:
-            return f"[bold {pink} on {panel_alt}] VERSIONS [/]"
+        search_visible = False
         try:
             container = self.query_one("#search-container")
             if container.has_class("visible"):
-                return f"[bold {accent} on {panel_alt}] SEARCH [/]"
+                search_visible = True
         except NoMatches:
             pass
-        if self._in_arxiv_api_mode:
-            return f"[bold {orange} on {panel_alt}] API [/]"
-        if self.selected_ids:
-            n = len(self.selected_ids)
-            return f"[bold {green} on {panel_alt}] {n} SEL [/]"
-        return ""
+        return _widget_chrome.build_footer_mode_badge(
+            relevance_scoring_active=self._relevance_scoring_active,
+            version_checking=self._version_checking,
+            search_visible=search_visible,
+            in_arxiv_api_mode=self._in_arxiv_api_mode,
+            selected_count=len(self.selected_ids),
+        )
 
     def _update_footer(self) -> None:
         """Update the context-sensitive footer based on current state."""
