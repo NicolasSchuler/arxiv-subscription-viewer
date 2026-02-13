@@ -78,7 +78,7 @@ ArxivBrowser.action_chat_with_paper
 ArxivBrowser.action_auto_tag
 
 # ── App-level constants ──────────────────────────────────────────────
-from arxiv_browser.app import MIN_LIST_WIDTH, MAX_LIST_WIDTH, MAX_HISTORY_FILES
+from arxiv_browser.app import MAX_HISTORY_FILES, MAX_LIST_WIDTH, MIN_LIST_WIDTH
 
 MIN_LIST_WIDTH
 MAX_LIST_WIDTH

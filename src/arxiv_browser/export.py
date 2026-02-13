@@ -61,17 +61,16 @@ def get_pdf_download_path(paper: Paper, config: UserConfig) -> Path:
 
 def escape_bibtex(text: str) -> str:
     """Escape special characters for BibTeX."""
-    replacements = [
-        ("&", r"\&"),
-        ("%", r"\%"),
-        ("_", r"\_"),
-        ("#", r"\#"),
-        ("{", r"\{"),
-        ("}", r"\}"),
-    ]
-    for old, new in replacements:
-        text = text.replace(old, new)
-    return text
+    replacements = {
+        "&": r"\&",
+        "%": r"\%",
+        "_": r"\_",
+        "#": r"\#",
+        "{": r"\{",
+        "}": r"\}",
+        "\\": r"\textbackslash{}",
+    }
+    return "".join(replacements.get(char, char) for char in text)
 
 
 def format_authors_bibtex(authors: str) -> str:
