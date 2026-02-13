@@ -102,6 +102,11 @@ from arxiv_browser.config import (  # noqa: F401
     load_config,
     save_config,
 )
+from arxiv_browser.enrichment import (
+    apply_version_updates,
+    count_hf_matches,
+    get_starred_paper_ids_for_version_check,
+)
 from arxiv_browser.export import *  # noqa: F403
 from arxiv_browser.export import (
     DEFAULT_BIBTEX_EXPORT_DIR,
@@ -1598,7 +1603,7 @@ class ArxivBrowser(App):
             self._hf_loading = False
             self._refresh_detail_pane()
             self._mark_badges_dirty("hf")
-            matched = sum(1 for aid in self._hf_cache if aid in self._papers_by_id)
+            matched = count_hf_matches(self._hf_cache, self._papers_by_id)
             self.notify(f"HF: {matched} trending papers matched", title="HF")
             self._update_status_bar()
             return
@@ -1624,7 +1629,7 @@ class ArxivBrowser(App):
             await asyncio.to_thread(save_hf_daily_cache, self._hf_db_path, papers)
             self._refresh_detail_pane()
             self._mark_badges_dirty("hf")
-            matched = sum(1 for aid in self._hf_cache if aid in self._papers_by_id)
+            matched = count_hf_matches(self._hf_cache, self._papers_by_id)
             self.notify(f"HF: {matched} trending papers matched", title="HF")
         except Exception:
             logger.warning("HF daily fetch failed", exc_info=True)
@@ -1685,7 +1690,7 @@ class ArxivBrowser(App):
             self.notify("Version check already in progress", title="Versions")
             return
 
-        starred_ids = {aid for aid, meta in self._config.paper_metadata.items() if meta.starred}
+        starred_ids = get_starred_paper_ids_for_version_check(self._config.paper_metadata)
         if not starred_ids:
             self.notify("No starred papers to check", title="Versions")
             return
@@ -1739,16 +1744,11 @@ class ArxivBrowser(App):
                     )
 
             # Compare with stored versions
-            updates_found = 0
-            for aid, new_ver in version_map.items():
-                meta = self._config.paper_metadata.get(aid)
-                if meta is None or not meta.starred:
-                    continue
-                old_ver = meta.last_checked_version
-                if old_ver is not None and new_ver > old_ver:
-                    self._version_updates[aid] = (old_ver, new_ver)
-                    updates_found += 1
-                meta.last_checked_version = new_ver
+            updates_found = apply_version_updates(
+                version_map,
+                self._config.paper_metadata,
+                self._version_updates,
+            )
 
             # Persist updated metadata
             save_config(self._config)
@@ -4102,7 +4102,7 @@ class ArxivBrowser(App):
         api_page: int | None = None
         if self._in_arxiv_api_mode and self._arxiv_search_state is not None:
             api_page = (self._arxiv_search_state.start // self._arxiv_search_state.max_results) + 1
-        hf_match_count = sum(1 for aid in self._hf_cache if aid in self._papers_by_id)
+        hf_match_count = count_hf_matches(self._hf_cache, self._papers_by_id)
 
         status.update(
             _widget_chrome.build_status_bar_text(
