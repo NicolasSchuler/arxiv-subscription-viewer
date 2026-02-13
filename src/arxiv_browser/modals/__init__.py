@@ -4,6 +4,13 @@ Domain-grouped ModalScreen subclasses extracted from app.py.
 Import modals from this package: ``from arxiv_browser.modals import HelpScreen``
 """
 
+# collections.py — paper collections (reading lists) modals
+from arxiv_browser.modals.collections import (
+    AddToCollectionModal,
+    CollectionsModal,
+    CollectionViewModal,
+)
+
 # common.py — general-purpose dialogs
 from arxiv_browser.modals.common import (
     ConfirmModal,
@@ -27,14 +34,16 @@ from arxiv_browser.modals.search import (
     CommandPaletteModal,
 )
 
-# Future extractions (Tasks 5-7) will add imports here:
-# - collections.py: CollectionsModal, CollectionViewModal, AddToCollectionModal
+# Future extractions (Tasks 6-7) will add imports here:
 # - citations.py: CitationGraphScreen, RecommendationsScreen, etc.
 # - llm.py: SummaryModeModal, ResearchInterestsModal, PaperChatScreen
 
 __all__ = [
+    "AddToCollectionModal",
     "ArxivSearchModal",
     "AutoTagSuggestModal",
+    "CollectionViewModal",
+    "CollectionsModal",
     "CommandPaletteModal",
     "ConfirmModal",
     "ExportMenuModal",
