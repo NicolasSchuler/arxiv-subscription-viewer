@@ -6430,13 +6430,13 @@ class TestTagSuggestionGrouping:
     """Tests for the TagsModal suggestion label."""
 
     def test_build_suggestions_empty(self):
-        from arxiv_browser.app import TagsModal
+        from arxiv_browser.modals import TagsModal
 
         modal = TagsModal("2401.00001", all_tags=[])
         assert modal._build_suggestions_markup() == ""
 
     def test_build_suggestions_groups_by_namespace(self):
-        from arxiv_browser.app import TagsModal
+        from arxiv_browser.modals import TagsModal
 
         modal = TagsModal(
             "2401.00001",
@@ -6448,7 +6448,7 @@ class TestTagSuggestionGrouping:
         assert "important" in markup
 
     def test_build_suggestions_deduplicates(self):
-        from arxiv_browser.app import TagsModal
+        from arxiv_browser.modals import TagsModal
 
         modal = TagsModal(
             "2401.00001",
@@ -6459,7 +6459,7 @@ class TestTagSuggestionGrouping:
         assert markup.count("ml") == 1
 
     def test_modal_accepts_all_tags_param(self):
-        from arxiv_browser.app import TagsModal
+        from arxiv_browser.modals import TagsModal
 
         modal = TagsModal(
             "2401.00001",
@@ -8660,7 +8660,8 @@ class TestMetadataActionsIntegration:
         """Pressing 'n' should open the NotesModal."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser, NotesModal
+        from arxiv_browser.app import ArxivBrowser
+        from arxiv_browser.modals import NotesModal
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
@@ -8678,7 +8679,8 @@ class TestMetadataActionsIntegration:
 
         from textual.widgets import TextArea
 
-        from arxiv_browser.app import ArxivBrowser, NotesModal
+        from arxiv_browser.app import ArxivBrowser
+        from arxiv_browser.modals import NotesModal
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
@@ -8731,7 +8733,8 @@ class TestMetadataActionsIntegration:
         """Pressing 't' should open the TagsModal."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser, TagsModal
+        from arxiv_browser.app import ArxivBrowser
+        from arxiv_browser.modals import TagsModal
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)

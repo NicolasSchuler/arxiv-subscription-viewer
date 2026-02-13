@@ -14,19 +14,27 @@ from arxiv_browser.modals.common import (
     WatchListModal,
 )
 
-# Future extractions (Tasks 3-7) will add imports here:
-# - editing.py: NotesModal, TagsModal, AutoTagSuggestModal
+# editing.py — notes, tags, auto-tag suggestions
+from arxiv_browser.modals.editing import (
+    AutoTagSuggestModal,
+    NotesModal,
+    TagsModal,
+)
+
+# Future extractions (Tasks 4-7) will add imports here:
 # - search.py: ArxivSearchModal, CommandPaletteModal
 # - collections.py: CollectionsModal, CollectionViewModal, AddToCollectionModal
 # - citations.py: CitationGraphScreen, RecommendationsScreen, etc.
 # - llm.py: SummaryModeModal, ResearchInterestsModal, PaperChatScreen
 
 __all__ = [
-    # common
+    "AutoTagSuggestModal",
     "ConfirmModal",
     "ExportMenuModal",
     "HelpScreen",
+    "NotesModal",
     "SectionToggleModal",
+    "TagsModal",
     "WatchListItem",
     "WatchListModal",
 ]
