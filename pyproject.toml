@@ -64,8 +64,9 @@ packages = ["src/arxiv_browser"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = "-m 'not slow'"
 markers = [
-    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "slow: marks tests as slow (run with '-m slow' or 'just bench')",
     "integration: marks Textual integration tests requiring app.run_test()",
 ]
 

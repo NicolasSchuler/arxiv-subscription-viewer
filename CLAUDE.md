@@ -21,6 +21,7 @@ src/arxiv_browser/
 ├── export.py             # BibTeX, RIS, CSV, Markdown export (~330 lines)
 ├── query.py              # Query tokenizer, matching, sorting, text utils (~480 lines)
 ├── llm.py                # LLM summary/relevance/auto-tag, SQLite cache (~540 lines)
+├── llm_providers.py      # LLM provider Protocol + CLI subprocess implementation (~110 lines)
 ├── similarity.py         # TF-IDF index, cosine + Jaccard similarity (~320 lines)
 ├── themes.py             # Color palettes, category colors, Textual themes (~270 lines)
 ├── semantic_scholar.py   # S2 API client, SQLite cache (~820 lines)
@@ -38,6 +39,7 @@ parsing.py             ← models
 export.py              ← models
 query.py               ← models, themes
 llm.py                 ← models
+llm_providers.py       ← llm, models
 similarity.py          ← models
 semantic_scholar.py    ← models
 huggingface.py         ← models
@@ -90,12 +92,14 @@ No module imports from `app.py` — this prevents circular dependencies. `app.py
 - **`semantic_scholar.py`** (~820 lines): S2 API client, `SemanticScholarPaper` / `CitationEntry` dataclasses, SQLite cache for papers, recommendations, and citation graphs
 - **`huggingface.py`** (~350 lines): HuggingFace Daily Papers API client, `HuggingFacePaper` dataclass, SQLite cache
 
-### Test Suite (~1078 tests across 4 files + conftest.py in `tests/`)
+### Test Suite (~1147 tests across 6 files + conftest.py in `tests/`)
 
-- **`tests/test_arxiv_browser.py`** (~5800 lines): Core parsing, similarity, export, config, UI integration
+- **`tests/test_arxiv_browser.py`** (~5800 lines): Core parsing, similarity, export, config, UI integration, WCAG contrast
 - **`tests/test_integration.py`** (~400 lines): End-to-end workflows with real arXiv email fixtures, export validation, resource cleanup, debug logging
 - **`tests/test_semantic_scholar.py`** (~990 lines): S2 response parsing, serialization, cache CRUD, API fetch functions, citation graph
 - **`tests/test_huggingface.py`** (~460 lines): HF response parsing, cache, API fetch functions
+- **`tests/test_llm_providers.py`** (~160 lines): LLMProvider protocol, CLIProvider subprocess wrapper, resolve_provider factory
+- **`tests/test_benchmarks.py`** (~170 lines): Performance regression tests (marked `@pytest.mark.slow`, excluded from default runs)
 
 ## Code Style
 

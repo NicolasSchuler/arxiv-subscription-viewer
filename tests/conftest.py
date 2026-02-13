@@ -49,7 +49,7 @@ def _reset_global_dicts():
             "status": "#a6e22e",
             "project": "#fd971f",
             "method": "#ae81ff",
-            "priority": "#f92672",
+            "priority": "#fd4d8e",
         }
     )
     # Clear highlight pattern cache

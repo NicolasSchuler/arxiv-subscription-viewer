@@ -164,6 +164,7 @@ from arxiv_browser.llm import (  # noqa: F401
     get_relevance_db_path,
     get_summary_db_path,
 )
+from arxiv_browser.llm_providers import CLIProvider, LLMResult, resolve_provider
 from arxiv_browser.models import *  # noqa: F403
 from arxiv_browser.models import (
     ARXIV_API_DEFAULT_MAX_RESULTS,
@@ -339,10 +340,12 @@ __all__ = [
     "ArxivBrowser",
     "ArxivSearchModeState",
     "ArxivSearchRequest",
+    "CLIProvider",
     "CollectionViewModal",
     "CollectionsModal",
     "CommandPaletteModal",
     "FilterPillBar",
+    "LLMResult",
     "LocalBrowseSnapshot",
     "Paper",
     "PaperChatScreen",
@@ -410,6 +413,7 @@ __all__ = [
     "reconstruct_query",
     "render_paper_option",
     "render_progress_bar",
+    "resolve_provider",
     "save_config",
     "sort_papers",
     "to_rpn",
@@ -639,6 +643,19 @@ def _render_title_line(
     return f"{prefix} {title_text}" if prefix else title_text
 
 
+def _relevance_badge_parts(score: int) -> tuple[str, str]:
+    """Return (color, symbol) for a relevance score badge.
+
+    Uses distinct symbols alongside color so the badge is accessible
+    to colorblind users (WCAG 1.4.1 — Use of Color).
+    """
+    if score >= 8:
+        return THEME_COLORS["green"], "\u2605"  # ★
+    if score >= 5:
+        return THEME_COLORS["yellow"], "\u25b8"  # ▸
+    return THEME_COLORS["muted"], "\u00b7"  # ·
+
+
 def _render_meta_badges(
     paper: Paper,
     metadata: PaperMetadata | None,
@@ -666,13 +683,8 @@ def _render_meta_badges(
         parts.append(f"[{THEME_COLORS['pink']}]v{old_v}\u2192v{new_v}[/]")
     if relevance_score is not None:
         score, _ = relevance_score
-        if score >= 8:
-            color = THEME_COLORS["green"]
-        elif score >= 5:
-            color = THEME_COLORS["yellow"]
-        else:
-            color = THEME_COLORS["muted"]
-        parts.append(f"[{color}]{score}/10[/]")
+        color, sym = _relevance_badge_parts(score)
+        parts.append(f"[{color}]{sym}{score}/10[/]")
     return "  ".join(parts)
 
 
@@ -867,13 +879,8 @@ class PaperListItem(ListItem):
         # Relevance score badge
         if self._relevance_score is not None:
             score, _ = self._relevance_score
-            if score >= 8:
-                color = THEME_COLORS["green"]
-            elif score >= 5:
-                color = THEME_COLORS["yellow"]
-            else:
-                color = THEME_COLORS["muted"]
-            parts.append(f"[{color}]{score}/10[/]")
+            color, sym = _relevance_badge_parts(score)
+            parts.append(f"[{color}]{sym}{score}/10[/]")
 
         return "  ".join(parts)
 
@@ -1182,17 +1189,12 @@ class PaperDetails(Static):
         if relevance is None:
             return ""
         rel_score, rel_reason = relevance
+        score_color, score_sym = _relevance_badge_parts(rel_score)
         if is_collapsed:
-            return f"[dim]▸ Relevance ({rel_score}/10)[/]"
-        if rel_score >= 8:
-            score_color = THEME_COLORS["green"]
-        elif rel_score >= 5:
-            score_color = THEME_COLORS["yellow"]
-        else:
-            score_color = THEME_COLORS["muted"]
+            return f"[dim]▸ Relevance ({score_sym}{rel_score}/10)[/]"
         lines = [
             f"[bold {THEME_COLORS['accent']}]▾ Relevance[/]",
-            f"  [bold {THEME_COLORS['accent']}]Score:[/] [{score_color}]{rel_score}/10[/]",
+            f"  [bold {THEME_COLORS['accent']}]Score:[/] [{score_color}]{score_sym}{rel_score}/10[/]",
         ]
         if rel_reason:
             safe_reason = escape_rich_text(rel_reason)
@@ -3102,12 +3104,12 @@ class PaperChatScreen(ModalScreen[None]):
     def __init__(
         self,
         paper: "Paper",
-        command_template: str,
+        provider: "CLIProvider",
         paper_content: str = "",
     ) -> None:
         super().__init__()
         self._paper = paper
-        self._command_template = command_template
+        self._provider = provider
         self._paper_content = paper_content
         self._history: list[tuple[str, str]] = []  # (role, text)
         self._waiting = False
@@ -3174,34 +3176,12 @@ class PaperChatScreen(ModalScreen[None]):
                 context += "\n\nConversation so far:\n" + "\n".join(history_lines)
             context += f"\n\nUser: {question}\nAssistant:"
 
-            shell_command = _build_llm_shell_command(self._command_template, context)
-            proc = await asyncio.create_subprocess_shell(  # nosec B602
-                shell_command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=LLM_COMMAND_TIMEOUT
-                )
-            except TimeoutError:
-                proc.kill()
-                await proc.wait()
-                self._add_message(
-                    "assistant", "[red]Timed out waiting for response.[/]", markup=True
-                )
+            result = await self._provider.execute(context, LLM_COMMAND_TIMEOUT)
+            if not result.success:
+                err = escape_rich_text(result.error[:200])
+                self._add_message("assistant", f"[red]Error: {err}[/]", markup=True)
                 return
-
-            if proc.returncode != 0:
-                err = escape_rich_text((stderr or b"").decode("utf-8", errors="replace").strip())
-                self._add_message("assistant", f"[red]Error: {err[:200]}[/]", markup=True)
-                return
-
-            response = (stdout or b"").decode("utf-8", errors="replace").strip()
-            if response:
-                self._add_message("assistant", response)
-            else:
-                self._add_message("assistant", "[dim]Empty response from LLM.[/]", markup=True)
+            self._add_message("assistant", result.output)
         except Exception as e:
             logger.warning("Chat LLM call failed: %s", e, exc_info=True)
             self._add_message(
@@ -4484,6 +4464,9 @@ class ArxivBrowser(App):
 
         # Shared HTTP client for connection pooling (created in on_mount)
         self._http_client: httpx.AsyncClient | None = None
+
+        # LLM provider (resolved from config)
+        self._llm_provider: CLIProvider | None = resolve_provider(self._config)
 
         # Semantic Scholar enrichment state
         self._s2_active: bool = False  # Runtime toggle (set from config in on_mount)
@@ -6977,7 +6960,11 @@ class ArxivBrowser(App):
     # ========================================================================
 
     def _require_llm_command(self) -> str | None:
-        """Resolve LLM command, showing a notification if not configured."""
+        """Resolve LLM command, showing a notification if not configured.
+
+        Also refreshes self._llm_provider so it stays in sync with config.
+        Returns the command template string (needed for cache hashing).
+        """
         command_template = _resolve_llm_command(self._config)
         if not command_template:
             preset = self._config.llm_preset
@@ -6988,6 +6975,7 @@ class ArxivBrowser(App):
                 msg = f"Set llm_command or llm_preset in config.json ({get_config_path()})"
             self.notify(msg, title="LLM not configured", severity="warning", timeout=8)
             return None
+        self._llm_provider = CLIProvider(command_template)
         return command_template
 
     def action_generate_summary(self) -> None:
@@ -7056,7 +7044,6 @@ class ArxivBrowser(App):
         self._track_task(
             self._generate_summary_async(
                 paper,
-                command_template,
                 prompt_template,
                 cmd_hash,
                 mode_label=mode_label,
@@ -7067,7 +7054,6 @@ class ArxivBrowser(App):
     async def _generate_summary_async(
         self,
         paper: Paper,
-        command_template: str,
         prompt_template: str,
         cmd_hash: str,
         mode_label: str = "",
@@ -7089,42 +7075,20 @@ class ArxivBrowser(App):
                 paper_content = f"Abstract:\n{abstract}" if abstract else ""
 
             prompt = build_llm_prompt(paper, prompt_template, paper_content)
-            shell_command = _build_llm_shell_command(command_template, prompt)
-            logger.debug(f"Running LLM command for {arxiv_id}: {shell_command[:100]}...")
+            assert self._llm_provider is not None
+            logger.debug("Running LLM command for %s", arxiv_id)
 
-            proc = await asyncio.create_subprocess_shell(  # nosec B602
-                shell_command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=LLM_COMMAND_TIMEOUT
-                )
-            except TimeoutError:
-                proc.kill()
-                await proc.wait()
+            result = await self._llm_provider.execute(prompt, LLM_COMMAND_TIMEOUT)
+            if not result.success:
                 self.notify(
-                    f"LLM timed out after {LLM_COMMAND_TIMEOUT}s",
-                    title="AI Summary",
-                    severity="error",
-                )
-                return
-
-            if proc.returncode != 0:
-                err_msg = (stderr or b"").decode("utf-8", errors="replace").strip()
-                self.notify(
-                    f"LLM failed (exit {proc.returncode}): {err_msg[:200]}",
+                    result.error[:200],
                     title="AI Summary",
                     severity="error",
                     timeout=8,
                 )
                 return
 
-            summary = (stdout or b"").decode("utf-8", errors="replace").strip()
-            if not summary:
-                self.notify("LLM returned empty output", title="AI Summary", severity="warning")
-                return
+            summary = result.output
 
             # Cache in memory and persist to SQLite
             self._paper_summaries[arxiv_id] = summary
@@ -7164,12 +7128,13 @@ class ArxivBrowser(App):
             self.notify("No paper selected", title="Chat", severity="warning")
             return
         self.notify("Fetching paper content...", title="Chat")
-        self._track_task(self._open_chat_screen(paper, command_template))
+        assert self._llm_provider is not None  # ensured by _require_llm_command
+        self._track_task(self._open_chat_screen(paper, self._llm_provider))
 
-    async def _open_chat_screen(self, paper: Paper, command_template: str) -> None:
+    async def _open_chat_screen(self, paper: Paper, provider: CLIProvider) -> None:
         """Fetch paper content and open the chat modal."""
         paper_content = await _fetch_paper_content_async(paper, self._http_client)
-        self.push_screen(PaperChatScreen(paper, command_template, paper_content))
+        self.push_screen(PaperChatScreen(paper, provider, paper_content))
 
     # ========================================================================
     # Relevance Scoring
@@ -7275,57 +7240,34 @@ class ArxivBrowser(App):
             scored = 0
             failed = 0
 
+            assert self._llm_provider is not None
             for i, paper in enumerate(uncached):
                 self._scoring_progress = (i + 1, total)
                 self._update_footer()
                 prompt = build_relevance_prompt(paper, interests)
-                try:
-                    shell_command = _build_llm_shell_command(command_template, prompt)
-                except ValueError as e:
-                    logger.warning("Relevance prompt error: %s", e)
-                    self.notify(str(e), title="Relevance", severity="error", timeout=10)
-                    return
 
                 try:
-                    proc = await asyncio.create_subprocess_shell(  # nosec B602
-                        shell_command,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                    )
-                    try:
-                        stdout, stderr = await asyncio.wait_for(
-                            proc.communicate(), timeout=RELEVANCE_SCORE_TIMEOUT
-                        )
-                    except TimeoutError:
-                        proc.kill()
-                        await proc.wait()
-                        logger.warning("Relevance scoring timed out for %s", paper.arxiv_id)
-                        failed += 1
-                        continue
-
-                    if proc.returncode != 0:
-                        err_msg = (stderr or b"").decode("utf-8", errors="replace").strip()
+                    llm_result = await self._llm_provider.execute(prompt, RELEVANCE_SCORE_TIMEOUT)
+                    if not llm_result.success:
                         logger.warning(
-                            "Relevance scoring failed for %s (exit %d): %s",
+                            "Relevance scoring failed for %s: %s",
                             paper.arxiv_id,
-                            proc.returncode,
-                            err_msg[:200],
+                            llm_result.error[:200],
                         )
                         failed += 1
                         continue
 
-                    output = (stdout or b"").decode("utf-8", errors="replace").strip()
-                    result = _parse_relevance_response(output)
-                    if result is None:
+                    parsed = _parse_relevance_response(llm_result.output)
+                    if parsed is None:
                         logger.warning(
                             "Failed to parse relevance response for %s: %s",
                             paper.arxiv_id,
-                            output[:200],
+                            llm_result.output[:200],
                         )
                         failed += 1
                         continue
 
-                    score, reason = result
+                    score, reason = parsed
                     self._relevance_scores[paper.arxiv_id] = (score, reason)
 
                     # Persist to SQLite
@@ -7414,7 +7356,7 @@ class ArxivBrowser(App):
                 self.notify("No selected papers found", title="Auto-Tag", severity="warning")
                 return
             self._update_footer()
-            self._track_task(self._auto_tag_batch_async(papers, command_template, taxonomy))
+            self._track_task(self._auto_tag_batch_async(papers, taxonomy))
         else:
             paper = self._get_current_paper()
             if not paper:
@@ -7422,20 +7364,17 @@ class ArxivBrowser(App):
                 self.notify("No paper selected", title="Auto-Tag", severity="warning")
                 return
             current_tags = (self._tags_for(paper.arxiv_id) or [])[:]
-            self._track_task(
-                self._auto_tag_single_async(paper, command_template, taxonomy, current_tags)
-            )
+            self._track_task(self._auto_tag_single_async(paper, taxonomy, current_tags))
 
     async def _auto_tag_single_async(
         self,
         paper: Paper,
-        command_template: str,
         taxonomy: list[str],
         current_tags: list[str],
     ) -> None:
         """Auto-tag a single paper: call LLM, show suggestion modal."""
         try:
-            suggested = await self._call_auto_tag_llm(paper, command_template, taxonomy)
+            suggested = await self._call_auto_tag_llm(paper, taxonomy)
             if suggested is None:
                 self.notify("Auto-tagging failed", title="Auto-Tag", severity="warning")
                 return
@@ -7455,7 +7394,6 @@ class ArxivBrowser(App):
     async def _auto_tag_batch_async(
         self,
         papers: list[Paper],
-        command_template: str,
         taxonomy: list[str],
     ) -> None:
         """Batch auto-tag: call LLM for each paper, apply directly."""
@@ -7468,7 +7406,7 @@ class ArxivBrowser(App):
                 self._auto_tag_progress = (i + 1, total)
                 self._update_footer()
 
-                suggested = await self._call_auto_tag_llm(paper, command_template, taxonomy)
+                suggested = await self._call_auto_tag_llm(paper, taxonomy)
                 if suggested is None:
                     failed += 1
                     continue
@@ -7509,62 +7447,27 @@ class ArxivBrowser(App):
             self._auto_tag_progress = None
             self._update_footer()
 
-    async def _call_auto_tag_llm(
-        self, paper: Paper, command_template: str, taxonomy: list[str]
-    ) -> list[str] | None:
+    async def _call_auto_tag_llm(self, paper: Paper, taxonomy: list[str]) -> list[str] | None:
         """Call the LLM to get tag suggestions for a paper. Returns tags or None on failure."""
         prompt = build_auto_tag_prompt(paper, taxonomy)
-        try:
-            shell_command = _build_llm_shell_command(command_template, prompt)
-        except ValueError as e:
-            logger.warning("Auto-tag prompt error: %s", e)
-            self.notify(str(e), title="Auto-Tag", severity="error", timeout=10)
+        assert self._llm_provider is not None
+
+        llm_result = await self._llm_provider.execute(prompt, AUTO_TAG_TIMEOUT)
+        if not llm_result.success:
+            logger.warning("Auto-tag failed for %s: %s", paper.arxiv_id, llm_result.error[:200])
             return None
 
-        try:
-            proc = await asyncio.create_subprocess_shell(  # nosec B602
-                shell_command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+        tags = _parse_auto_tag_response(llm_result.output)
+        if tags is None:
+            logger.warning(
+                "Failed to parse auto-tag response for %s: %s",
+                paper.arxiv_id,
+                llm_result.output[:200],
             )
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=AUTO_TAG_TIMEOUT
-                )
-            except TimeoutError:
-                proc.kill()
-                await proc.wait()
-                logger.warning("Auto-tag timed out for %s", paper.arxiv_id)
-                return None
-
-            if proc.returncode != 0:
-                err_msg = (stderr or b"").decode("utf-8", errors="replace").strip()
-                logger.warning(
-                    "Auto-tag failed for %s (exit %d): %s",
-                    paper.arxiv_id,
-                    proc.returncode,
-                    err_msg[:200],
-                )
-                return None
-
-            output = (stdout or b"").decode("utf-8", errors="replace").strip()
-            if not output:
-                logger.warning("Auto-tag returned empty output for %s", paper.arxiv_id)
-                return None
-
-            tags = _parse_auto_tag_response(output)
-            if tags is None:
-                logger.warning(
-                    "Failed to parse auto-tag response for %s: %s", paper.arxiv_id, output[:200]
-                )
-                self.notify("Could not parse LLM response", title="Auto-Tag", severity="warning")
-                return None
-
-            return tags
-
-        except Exception:
-            logger.warning("Auto-tag LLM call failed for %s", paper.arxiv_id, exc_info=True)
+            self.notify("Could not parse LLM response", title="Auto-Tag", severity="warning")
             return None
+
+        return tags
 
     def _on_auto_tag_accepted(self, tags: list[str] | None, arxiv_id: str) -> None:
         """Callback when user accepts auto-tag suggestions."""

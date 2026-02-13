@@ -58,6 +58,7 @@ from arxiv_browser.app import (
     to_rpn,
     tokenize_query,
 )
+from arxiv_browser.themes import THEME_NAMES, THEMES
 
 # ============================================================================
 # Tests for clean_latex function
@@ -224,7 +225,7 @@ class TestFormatCategories:
         """Known category should get its assigned color."""
         result = format_categories("cs.AI")
         assert "cs.AI" in result
-        assert "#f92672" in result  # Monokai pink for cs.AI
+        assert "#fd4d8e" in result  # Monokai pink for cs.AI (WCAG AA adjusted)
 
     def test_single_unknown_category(self):
         """Unknown category should get default gray color."""
@@ -3534,27 +3535,27 @@ class TestGenerateSummaryAsync:
         app._summary_mode_label = {}
         app._summary_command_hash = {}
         app._http_client = None
+        app._llm_provider = None  # will be set per-test via _make_provider_mock
         app.notify = MagicMock()
         app._update_abstract_display = MagicMock()
         return app
 
-    def _make_proc_mock(self, stdout=b"", stderr=b"", returncode=0):
-        """Create an AsyncMock subprocess with controlled outputs."""
-        from unittest.mock import AsyncMock, MagicMock
+    def _make_provider_mock(self, output="", success=True, error=""):
+        """Create an AsyncMock LLM provider with controlled LLMResult."""
+        from unittest.mock import AsyncMock
 
-        proc = AsyncMock()
-        proc.communicate.return_value = (stdout, stderr)
-        proc.returncode = returncode
-        proc.kill = MagicMock()  # kill() is synchronous
-        proc.wait = AsyncMock()
-        return proc
+        from arxiv_browser.llm_providers import LLMResult
+
+        provider = AsyncMock()
+        provider.execute.return_value = LLMResult(output=output, success=success, error=error)
+        return provider
 
     async def test_success_caches_and_notifies(self, paper, mock_app):
         from unittest.mock import AsyncMock, patch
 
         from arxiv_browser.app import ArxivBrowser
 
-        proc = self._make_proc_mock(stdout=b"Great paper about transformers.")
+        mock_app._llm_provider = self._make_provider_mock(output="Great paper about transformers.")
 
         with (
             patch(
@@ -3562,16 +3563,9 @@ class TestGenerateSummaryAsync:
                 new_callable=AsyncMock,
                 return_value="Full paper text.",
             ),
-            patch(
-                "arxiv_browser.app.asyncio.create_subprocess_shell",
-                new_callable=AsyncMock,
-                return_value=proc,
-            ),
             patch("arxiv_browser.app._save_summary"),
         ):
-            await ArxivBrowser._generate_summary_async(
-                mock_app, paper, "claude -p {prompt}", "", "hash123"
-            )
+            await ArxivBrowser._generate_summary_async(mock_app, paper, "", "hash123")
 
         assert mock_app._paper_summaries["2401.12345"] == "Great paper about transformers."
         # Verify notification
@@ -3581,97 +3575,72 @@ class TestGenerateSummaryAsync:
         assert "2401.12345" not in mock_app._summary_loading
         mock_app._update_abstract_display.assert_called()
 
-    async def test_timeout_kills_process(self, paper, mock_app):
-        import asyncio
+    async def test_timeout_error(self, paper, mock_app):
         from unittest.mock import AsyncMock, patch
 
         from arxiv_browser.app import ArxivBrowser
 
-        proc = self._make_proc_mock()
-        proc.communicate.side_effect = TimeoutError()
+        mock_app._llm_provider = self._make_provider_mock(
+            success=False, error="Timed out after 120s"
+        )
 
-        with (
-            patch(
-                "arxiv_browser.app._fetch_paper_content_async",
-                new_callable=AsyncMock,
-                return_value="text",
-            ),
-            patch(
-                "arxiv_browser.app.asyncio.create_subprocess_shell",
-                new_callable=AsyncMock,
-                return_value=proc,
-            ),
+        with patch(
+            "arxiv_browser.app._fetch_paper_content_async",
+            new_callable=AsyncMock,
+            return_value="text",
         ):
-            await ArxivBrowser._generate_summary_async(
-                mock_app, paper, "claude -p {prompt}", "", "hash123"
-            )
+            await ArxivBrowser._generate_summary_async(mock_app, paper, "", "hash123")
 
-        proc.kill.assert_called_once()
-        proc.wait.assert_called_once()
         assert "2401.12345" not in mock_app._paper_summaries
-        error_calls = [c for c in mock_app.notify.call_args_list if "timed out" in str(c)]
+        error_calls = [c for c in mock_app.notify.call_args_list if "Timed out" in str(c)]
         assert len(error_calls) == 1
         # Verify loading state cleaned up
         assert "2401.12345" not in mock_app._summary_loading
 
-    async def test_nonzero_exit_shows_stderr(self, paper, mock_app):
+    async def test_nonzero_exit_shows_error(self, paper, mock_app):
         from unittest.mock import AsyncMock, patch
 
         from arxiv_browser.app import ArxivBrowser
 
-        proc = self._make_proc_mock(stderr=b"Model not found", returncode=1)
+        mock_app._llm_provider = self._make_provider_mock(
+            success=False, error="Exit 1: Model not found"
+        )
 
-        with (
-            patch(
-                "arxiv_browser.app._fetch_paper_content_async",
-                new_callable=AsyncMock,
-                return_value="text",
-            ),
-            patch(
-                "arxiv_browser.app.asyncio.create_subprocess_shell",
-                new_callable=AsyncMock,
-                return_value=proc,
-            ),
+        with patch(
+            "arxiv_browser.app._fetch_paper_content_async",
+            new_callable=AsyncMock,
+            return_value="text",
         ):
-            await ArxivBrowser._generate_summary_async(
-                mock_app, paper, "claude -p {prompt}", "", "hash123"
-            )
+            await ArxivBrowser._generate_summary_async(mock_app, paper, "", "hash123")
 
         assert "2401.12345" not in mock_app._paper_summaries
         error_calls = [c for c in mock_app.notify.call_args_list if "Model not found" in str(c)]
         assert len(error_calls) == 1
 
-    async def test_empty_stdout_warns(self, paper, mock_app):
+    async def test_empty_output_warns(self, paper, mock_app):
         from unittest.mock import AsyncMock, patch
 
         from arxiv_browser.app import ArxivBrowser
 
-        proc = self._make_proc_mock(stdout=b"", returncode=0)
+        mock_app._llm_provider = self._make_provider_mock(success=False, error="Empty output")
 
-        with (
-            patch(
-                "arxiv_browser.app._fetch_paper_content_async",
-                new_callable=AsyncMock,
-                return_value="text",
-            ),
-            patch(
-                "arxiv_browser.app.asyncio.create_subprocess_shell",
-                new_callable=AsyncMock,
-                return_value=proc,
-            ),
+        with patch(
+            "arxiv_browser.app._fetch_paper_content_async",
+            new_callable=AsyncMock,
+            return_value="text",
         ):
-            await ArxivBrowser._generate_summary_async(
-                mock_app, paper, "claude -p {prompt}", "", "hash123"
-            )
+            await ArxivBrowser._generate_summary_async(mock_app, paper, "", "hash123")
 
         assert "2401.12345" not in mock_app._paper_summaries
-        warning_calls = [c for c in mock_app.notify.call_args_list if "empty output" in str(c)]
+        warning_calls = [c for c in mock_app.notify.call_args_list if "Empty output" in str(c)]
         assert len(warning_calls) == 1
 
     async def test_value_error_from_template(self, paper, mock_app):
         from unittest.mock import AsyncMock, patch
 
         from arxiv_browser.app import ArxivBrowser
+
+        mock_app._llm_provider = self._make_provider_mock(output="unused")
 
         with patch(
             "arxiv_browser.app._fetch_paper_content_async",
@@ -3680,7 +3649,7 @@ class TestGenerateSummaryAsync:
         ):
             # Pass a template with an invalid placeholder to trigger ValueError
             await ArxivBrowser._generate_summary_async(
-                mock_app, paper, "claude -p {prompt}", "Summarize: {invalid_field}", "hash123"
+                mock_app, paper, "Summarize: {invalid_field}", "hash123"
             )
 
         assert "2401.12345" not in mock_app._paper_summaries
@@ -3700,16 +3669,12 @@ class TestGenerateSummaryAsync:
         # Pre-add to loading set to verify cleanup
         mock_app._summary_loading.add("2401.12345")
 
-        with (
-            patch(
-                "arxiv_browser.app._fetch_paper_content_async",
-                new_callable=AsyncMock,
-                side_effect=Exception("unexpected"),
-            ),
+        with patch(
+            "arxiv_browser.app._fetch_paper_content_async",
+            new_callable=AsyncMock,
+            side_effect=Exception("unexpected"),
         ):
-            await ArxivBrowser._generate_summary_async(
-                mock_app, paper, "claude -p {prompt}", "", "hash123"
-            )
+            await ArxivBrowser._generate_summary_async(mock_app, paper, "", "hash123")
 
         # finally block must have cleaned up
         assert "2401.12345" not in mock_app._summary_loading
@@ -3720,23 +3685,17 @@ class TestGenerateSummaryAsync:
 
         from arxiv_browser.app import ArxivBrowser
 
-        proc = self._make_proc_mock(stdout=b"Quick summary.")
+        mock_app._llm_provider = self._make_provider_mock(output="Quick summary.")
 
         with (
             patch(
                 "arxiv_browser.app._fetch_paper_content_async", new_callable=AsyncMock
             ) as fetch_mock,
-            patch(
-                "arxiv_browser.app.asyncio.create_subprocess_shell",
-                new_callable=AsyncMock,
-                return_value=proc,
-            ),
             patch("arxiv_browser.app._save_summary"),
         ):
             await ArxivBrowser._generate_summary_async(
                 mock_app,
                 paper,
-                "claude -p {prompt}",
                 "",
                 "hash123",
                 mode_label="QUICK",
@@ -3764,7 +3723,6 @@ class TestGenerateSummaryAsync:
             await ArxivBrowser._generate_summary_async(
                 mock_app,
                 paper,
-                "claude -p {prompt}",
                 "",
                 "new-hash",
                 mode_label="TLDR",
@@ -7507,17 +7465,18 @@ class TestSolarizedDarkTheme:
         from arxiv_browser.app import SOLARIZED_DARK_THEME
 
         assert SOLARIZED_DARK_THEME["background"] == "#002b36"
-        assert SOLARIZED_DARK_THEME["accent"] == "#268bd2"
+        assert SOLARIZED_DARK_THEME["accent"] == "#3c9be2"  # WCAG AA adjusted
         assert SOLARIZED_DARK_THEME["green"] == "#859900"
-        assert SOLARIZED_DARK_THEME["pink"] == "#d33682"
+        assert SOLARIZED_DARK_THEME["pink"] == "#e85da0"  # WCAG AA adjusted
 
-    def test_three_themes_in_cycle(self):
+    def test_four_themes_in_cycle(self):
         from arxiv_browser.app import THEME_NAMES
 
-        assert len(THEME_NAMES) == 3
+        assert len(THEME_NAMES) == 4
         assert "monokai" in THEME_NAMES
         assert "catppuccin-mocha" in THEME_NAMES
         assert "solarized-dark" in THEME_NAMES
+        assert "high-contrast" in THEME_NAMES
 
     def test_solarized_config_roundtrip(self):
         from arxiv_browser.app import _config_to_dict, _dict_to_config
@@ -7678,7 +7637,7 @@ class TestCollapsibleSections:
         paper = make_paper()
         details.update_paper(paper, relevance=(8, "High quality"), collapsed_sections=["relevance"])
         rendered = str(details.content)
-        assert "Relevance (8/10)" in rendered
+        assert "Relevance (\u26058/10)" in rendered
         assert "High quality" not in rendered
 
     def test_url_always_visible_despite_collapsed(self, make_paper):
@@ -10980,7 +10939,7 @@ class TestTextualThemes:
         from arxiv_browser.app import TEXTUAL_THEMES
 
         theme_names = list(TEXTUAL_THEMES.keys())
-        assert len(theme_names) == 3
+        assert len(theme_names) == 4
         keys_0 = set(TEXTUAL_THEMES[theme_names[0]].variables.keys())
         for name in theme_names[1:]:
             assert set(TEXTUAL_THEMES[name].variables.keys()) == keys_0
@@ -11418,21 +11377,26 @@ class TestChatSystemPrompt:
         assert "Full paper text here." in result
 
     def test_chat_screen_init(self, make_paper):
+        from unittest.mock import AsyncMock
+
         from arxiv_browser.app import PaperChatScreen
 
         paper = make_paper(title="My Paper")
-        screen = PaperChatScreen(paper, "claude -p {prompt}", "paper content")
+        provider = AsyncMock()
+        screen = PaperChatScreen(paper, provider, "paper content")
         assert screen._paper is paper
-        assert screen._command_template == "claude -p {prompt}"
+        assert screen._provider is provider
         assert screen._paper_content == "paper content"
         assert screen._history == []
         assert screen._waiting is False
 
     def test_chat_screen_add_message(self, make_paper):
+        from unittest.mock import AsyncMock
+
         from arxiv_browser.app import PaperChatScreen
 
         paper = make_paper(title="My Paper")
-        screen = PaperChatScreen(paper, "claude -p {prompt}")
+        screen = PaperChatScreen(paper, AsyncMock())
         # Test message tracking (without DOM — just the history list)
         screen._history.append(("user", "What is this about?"))
         screen._history.append(("assistant", "This paper discusses..."))
@@ -11479,11 +11443,12 @@ class TestAskLlm:
 
     @pytest.fixture
     def chat_screen(self, make_paper):
-        from unittest.mock import MagicMock
+        from unittest.mock import AsyncMock, MagicMock
 
         from textual.css.query import NoMatches
 
         from arxiv_browser.app import PaperChatScreen
+        from arxiv_browser.llm_providers import LLMResult
 
         paper = make_paper(
             title="Test Paper",
@@ -11491,7 +11456,9 @@ class TestAskLlm:
             categories="cs.AI",
             abstract="An abstract.",
         )
-        screen = PaperChatScreen(paper, "claude -p {prompt}", "Full paper text.")
+        provider = AsyncMock()
+        provider.execute.return_value = LLMResult(output="", success=True)
+        screen = PaperChatScreen(paper, provider, "Full paper text.")
         # Mock _add_message since it requires DOM
         screen._add_message = MagicMock()
         # Simulate a question already in history (as on_question_submitted does)
@@ -11501,28 +11468,13 @@ class TestAskLlm:
         screen.query_one = MagicMock(side_effect=NoMatches())
         return screen
 
-    def _make_proc_mock(self, stdout=b"", stderr=b"", returncode=0):
-        from unittest.mock import AsyncMock, MagicMock
-
-        proc = AsyncMock()
-        proc.communicate.return_value = (stdout, stderr)
-        proc.returncode = returncode
-        proc.kill = MagicMock()
-        proc.wait = AsyncMock()
-        return proc
-
     async def test_success_adds_response(self, chat_screen):
-        from unittest.mock import AsyncMock, patch
+        from arxiv_browser.llm_providers import LLMResult
 
-        proc = self._make_proc_mock(stdout=b"This paper discusses transformers.")
-        with (
-            patch(
-                "arxiv_browser.app.asyncio.create_subprocess_shell",
-                new_callable=AsyncMock,
-                return_value=proc,
-            ),
-        ):
-            await chat_screen._ask_llm("What is this about?")
+        chat_screen._provider.execute.return_value = LLMResult(
+            output="This paper discusses transformers.", success=True
+        )
+        await chat_screen._ask_llm("What is this about?")
 
         # Verify response was added without markup flag (escaped by default)
         chat_screen._add_message.assert_called_once_with(
@@ -11530,70 +11482,48 @@ class TestAskLlm:
         )
         assert chat_screen._waiting is False
 
-    async def test_timeout_kills_process_and_shows_error(self, chat_screen):
-        from unittest.mock import AsyncMock, patch
+    async def test_timeout_shows_error(self, chat_screen):
+        from arxiv_browser.llm_providers import LLMResult
 
-        proc = self._make_proc_mock()
-        proc.communicate.side_effect = TimeoutError()
-        with (
-            patch(
-                "arxiv_browser.app.asyncio.create_subprocess_shell",
-                new_callable=AsyncMock,
-                return_value=proc,
-            ),
-        ):
-            await chat_screen._ask_llm("question")
+        chat_screen._provider.execute.return_value = LLMResult(
+            output="", success=False, error="Timed out after 120s"
+        )
+        await chat_screen._ask_llm("question")
 
-        proc.kill.assert_called_once()
         chat_screen._add_message.assert_called_once_with(
-            "assistant", "[red]Timed out waiting for response.[/]", markup=True
+            "assistant", "[red]Error: Timed out after 120s[/]", markup=True
         )
         assert chat_screen._waiting is False
 
-    async def test_nonzero_exit_shows_stderr(self, chat_screen):
-        from unittest.mock import AsyncMock, patch
+    async def test_nonzero_exit_shows_error(self, chat_screen):
+        from arxiv_browser.llm_providers import LLMResult
 
-        proc = self._make_proc_mock(stderr=b"model not found", returncode=1)
-        with (
-            patch(
-                "arxiv_browser.app.asyncio.create_subprocess_shell",
-                new_callable=AsyncMock,
-                return_value=proc,
-            ),
-        ):
-            await chat_screen._ask_llm("question")
+        chat_screen._provider.execute.return_value = LLMResult(
+            output="", success=False, error="Exit 1: model not found"
+        )
+        await chat_screen._ask_llm("question")
 
         chat_screen._add_message.assert_called_once_with(
-            "assistant", "[red]Error: model not found[/]", markup=True
+            "assistant", "[red]Error: Exit 1: model not found[/]", markup=True
         )
         assert chat_screen._waiting is False
 
-    async def test_empty_response_shows_dim_message(self, chat_screen):
-        from unittest.mock import AsyncMock, patch
+    async def test_empty_output_shows_error(self, chat_screen):
+        from arxiv_browser.llm_providers import LLMResult
 
-        proc = self._make_proc_mock(stdout=b"   ")
-        with (
-            patch(
-                "arxiv_browser.app.asyncio.create_subprocess_shell",
-                new_callable=AsyncMock,
-                return_value=proc,
-            ),
-        ):
-            await chat_screen._ask_llm("question")
+        chat_screen._provider.execute.return_value = LLMResult(
+            output="", success=False, error="Empty output"
+        )
+        await chat_screen._ask_llm("question")
 
         chat_screen._add_message.assert_called_once_with(
-            "assistant", "[dim]Empty response from LLM.[/]", markup=True
+            "assistant", "[red]Error: Empty output[/]", markup=True
         )
 
     async def test_exception_logged_and_shown(self, chat_screen):
-        from unittest.mock import AsyncMock, patch
+        chat_screen._provider.execute.side_effect = OSError("command not found")
 
-        with patch(
-            "arxiv_browser.app.asyncio.create_subprocess_shell",
-            new_callable=AsyncMock,
-            side_effect=OSError("command not found"),
-        ):
-            await chat_screen._ask_llm("question")
+        await chat_screen._ask_llm("question")
 
         chat_screen._add_message.assert_called_once_with(
             "assistant", "[red]Error: command not found[/]", markup=True
@@ -11602,25 +11532,18 @@ class TestAskLlm:
 
     async def test_rich_markup_in_response_is_escaped(self, chat_screen):
         """LLM response with brackets should not be interpreted as Rich markup."""
-        from unittest.mock import AsyncMock, patch
+        from arxiv_browser.llm_providers import LLMResult
 
         response_text = "See [1] and [Section 3] for details"
-        proc = self._make_proc_mock(stdout=response_text.encode())
-        with (
-            patch(
-                "arxiv_browser.app.asyncio.create_subprocess_shell",
-                new_callable=AsyncMock,
-                return_value=proc,
-            ),
-        ):
-            await chat_screen._ask_llm("question")
+        chat_screen._provider.execute.return_value = LLMResult(output=response_text, success=True)
+        await chat_screen._ask_llm("question")
 
         # Response is passed WITHOUT markup=True, so _add_message will escape it
         chat_screen._add_message.assert_called_once_with("assistant", response_text)
 
     async def test_history_included_in_context(self, chat_screen):
         """Conversation history should be sent to the LLM."""
-        from unittest.mock import AsyncMock, patch
+        from arxiv_browser.llm_providers import LLMResult
 
         # Add prior conversation
         chat_screen._history = [
@@ -11629,36 +11552,25 @@ class TestAskLlm:
             ("user", "Follow up"),
         ]
 
-        captured_command = []
+        chat_screen._provider.execute.return_value = LLMResult(output="response", success=True)
+        await chat_screen._ask_llm("Follow up")
 
-        async def capture_shell(cmd, **kwargs):
-            captured_command.append(cmd)
-            proc = self._make_proc_mock(stdout=b"response")
-            return proc
-
-        with (
-            patch(
-                "arxiv_browser.app.asyncio.create_subprocess_shell",
-                new_callable=AsyncMock,
-                side_effect=capture_shell,
-            ),
-        ):
-            await chat_screen._ask_llm("Follow up")
-
-        # The shell command should contain prior history
-        assert len(captured_command) == 1
-        # _build_llm_shell_command embeds the context into the command
-        assert "First question" in captured_command[0]
-        assert "First answer" in captured_command[0]
+        # The provider.execute should have been called with context containing history
+        call_args = chat_screen._provider.execute.call_args
+        context = call_args[0][0]  # first positional arg is the prompt/context
+        assert "First question" in context
+        assert "First answer" in context
 
 
 class TestAddMessageMarkup:
     """Tests for _add_message markup parameter behavior."""
 
     def test_add_message_escapes_by_default(self, make_paper):
+        from unittest.mock import AsyncMock
+
         from arxiv_browser.app import PaperChatScreen
 
-        screen = PaperChatScreen(make_paper(title="T"), "cmd")
+        screen = PaperChatScreen(make_paper(title="T"), AsyncMock())
         # Just test the history tracking (no DOM)
         screen._history = []
         assert callable(screen._add_message)
@@ -11772,7 +11684,7 @@ class TestPaperDetailsRenderHelpers:
     def test_render_relevance_collapsed(self):
         details = self._make_details()
         result = details._render_relevance((8, "Good paper"), True)
-        assert "▸ Relevance (8/10)" in result
+        assert "▸ Relevance (\u26058/10)" in result
 
     def test_render_relevance_high_score(self):
         details = self._make_details()
@@ -12194,6 +12106,74 @@ class TestReconstructQuery:
         tokens = tokenize_query('author:"John Smith" cat:cs.AI')
         result = reconstruct_query(tokens, 1)
         assert result == 'author:"John Smith"'
+
+
+# ============================================================================
+# Accessibility: WCAG Contrast Compliance
+# ============================================================================
+
+
+class TestWcagContrastCompliance:
+    """Verify WCAG contrast ratios for all theme colors against their backgrounds."""
+
+    TEXT_COLOR_KEYS = [
+        "text",
+        "accent",
+        "accent_alt",
+        "green",
+        "yellow",
+        "orange",
+        "pink",
+        "purple",
+        "muted",
+    ]
+
+    @staticmethod
+    def _relative_luminance(hex_color: str) -> float:
+        """Compute WCAG relative luminance from a hex color string."""
+        hex_color = hex_color.lstrip("#")
+        r, g, b = (int(hex_color[i : i + 2], 16) / 255.0 for i in (0, 2, 4))
+
+        def linearize(c: float) -> float:
+            return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+        return 0.2126 * linearize(r) + 0.7152 * linearize(g) + 0.0722 * linearize(b)
+
+    @classmethod
+    def _contrast_ratio(cls, hex1: str, hex2: str) -> float:
+        """Compute WCAG contrast ratio between two hex colors."""
+        l1 = cls._relative_luminance(hex1)
+        l2 = cls._relative_luminance(hex2)
+        lighter = max(l1, l2)
+        darker = min(l1, l2)
+        return (lighter + 0.05) / (darker + 0.05)
+
+    @pytest.mark.parametrize("theme_name", THEME_NAMES)
+    def test_text_colors_meet_aa(self, theme_name: str) -> None:
+        """All text colors in every theme must meet WCAG AA (4.5:1)."""
+        theme = THEMES[theme_name]
+        bg = theme["background"]
+        failures = []
+        for key in self.TEXT_COLOR_KEYS:
+            if key not in theme:
+                continue
+            ratio = self._contrast_ratio(theme[key], bg)
+            if ratio < 4.5:
+                failures.append(f"{key}={theme[key]} ratio={ratio:.2f}")
+        assert not failures, f"WCAG AA failures in {theme_name}: {', '.join(failures)}"
+
+    def test_high_contrast_meets_aaa(self) -> None:
+        """High Contrast theme must meet WCAG AAA (7.0:1) for all text colors."""
+        theme = THEMES["high-contrast"]
+        bg = theme["background"]
+        failures = []
+        for key in self.TEXT_COLOR_KEYS:
+            if key not in theme:
+                continue
+            ratio = self._contrast_ratio(theme[key], bg)
+            if ratio < 7.0:
+                failures.append(f"{key}={theme[key]} ratio={ratio:.2f}")
+        assert not failures, f"WCAG AAA failures in high-contrast: {', '.join(failures)}"
 
 
 # ============================================================================

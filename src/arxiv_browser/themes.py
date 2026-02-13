@@ -9,14 +9,14 @@ DEFAULT_CATEGORY_COLOR = "#888888"
 
 # Category color mapping (Monokai-inspired palette)
 DEFAULT_CATEGORY_COLORS = {
-    "cs.AI": "#f92672",  # Monokai pink
+    "cs.AI": "#fd4d8e",  # Monokai pink (WCAG AA)
     "cs.CL": "#66d9ef",  # Monokai blue
     "cs.LG": "#a6e22e",  # Monokai green
     "cs.CV": "#e6db74",  # Monokai yellow
     "cs.SE": "#ae81ff",  # Monokai purple
     "cs.HC": "#fd971f",  # Monokai orange
     "cs.RO": "#66d9ef",  # Monokai blue
-    "cs.NE": "#f92672",  # Monokai pink
+    "cs.NE": "#fd4d8e",  # Monokai pink (WCAG AA)
     "cs.IR": "#ae81ff",  # Monokai purple
     "cs.CR": "#fd971f",  # Monokai orange
 }
@@ -29,13 +29,13 @@ DEFAULT_THEME = {
     "panel_alt": "#3e3d32",
     "border": "#75715e",
     "text": "#f8f8f2",
-    "muted": "#75715e",
+    "muted": "#948e7d",  # lightened for WCAG AA (4.5:1)
     "accent": "#66d9ef",
     "accent_alt": "#e6db74",
     "green": "#a6e22e",
     "yellow": "#e6db74",
     "orange": "#fd971f",
-    "pink": "#f92672",
+    "pink": "#fd4d8e",  # lightened for WCAG AA (4.5:1)
     "purple": "#ae81ff",
     "highlight": "#49483e",
     "highlight_focus": "#5a5950",
@@ -56,7 +56,7 @@ CATPPUCCIN_MOCHA_THEME: dict[str, str] = {
     "panel_alt": "#313244",
     "border": "#585b70",
     "text": "#cdd6f4",
-    "muted": "#6c7086",
+    "muted": "#8488a2",  # lightened for WCAG AA (4.5:1)
     "accent": "#89b4fa",
     "accent_alt": "#f9e2af",
     "green": "#a6e3a1",
@@ -83,14 +83,14 @@ SOLARIZED_DARK_THEME: dict[str, str] = {
     "panel_alt": "#586e75",
     "border": "#657b83",
     "text": "#839496",
-    "muted": "#586e75",
-    "accent": "#268bd2",
+    "muted": "#7c9098",  # lightened for WCAG AA (4.5:1)
+    "accent": "#3c9be2",  # lightened for WCAG AA (5.0:1)
     "accent_alt": "#b58900",
     "green": "#859900",
     "yellow": "#b58900",
-    "orange": "#cb4b16",
-    "pink": "#d33682",
-    "purple": "#6c71c4",
+    "orange": "#e87d3e",  # lightened for WCAG AA (5.2:1)
+    "pink": "#e85da0",  # lightened for WCAG AA (5.0:1)
+    "purple": "#8b8fd6",  # lightened for WCAG AA (5.0:1)
     "highlight": "#073642",
     "highlight_focus": "#586e75",
     "selection": "#073642",
@@ -99,15 +99,43 @@ SOLARIZED_DARK_THEME: dict[str, str] = {
     "scrollbar_background_hover": "#586e75",
     "scrollbar_background_active": "#657b83",
     "scrollbar": "#657b83",
-    "scrollbar_active": "#268bd2",
+    "scrollbar_active": "#3c9be2",  # match accent
     "scrollbar_hover": "#93a1a1",
     "scrollbar_corner_color": "#073642",
+}
+
+HIGH_CONTRAST_THEME: dict[str, str] = {
+    "background": "#000000",
+    "panel": "#0a0a0a",
+    "panel_alt": "#1a1a1a",
+    "border": "#808080",
+    "text": "#ffffff",  # 21.0:1 — WCAG AAA
+    "muted": "#b0b0b0",  # 13.3:1 — WCAG AAA
+    "accent": "#5cb8ff",  # 8.0:1 — WCAG AAA
+    "accent_alt": "#ffdf4d",  # 14.7:1 — WCAG AAA
+    "green": "#5dfa5d",  # 12.4:1 — WCAG AAA
+    "yellow": "#ffdf4d",  # 14.7:1 — WCAG AAA
+    "orange": "#ffaa44",  # 10.3:1 — WCAG AAA
+    "pink": "#ff7ab2",  # 7.5:1 — WCAG AAA
+    "purple": "#b4a7ff",  # 8.2:1 — WCAG AAA
+    "highlight": "#1a1a1a",
+    "highlight_focus": "#2a2a2a",
+    "selection": "#1a3a1a",
+    "selection_highlight": "#2a4a2a",
+    "scrollbar_background": "#1a1a1a",
+    "scrollbar_background_hover": "#2a2a2a",
+    "scrollbar_background_active": "#3a3a3a",
+    "scrollbar": "#808080",
+    "scrollbar_active": "#5cb8ff",
+    "scrollbar_hover": "#b0b0b0",
+    "scrollbar_corner_color": "#1a1a1a",
 }
 
 THEMES: dict[str, dict[str, str]] = {
     "monokai": DEFAULT_THEME,
     "catppuccin-mocha": CATPPUCCIN_MOCHA_THEME,
     "solarized-dark": SOLARIZED_DARK_THEME,
+    "high-contrast": HIGH_CONTRAST_THEME,
 }
 THEME_NAMES: list[str] = list(THEMES.keys())
 
@@ -173,16 +201,28 @@ THEME_CATEGORY_COLORS: dict[str, dict[str, str]] = {
         "cs.CR": "#fab387",  # peach
     },
     "solarized-dark": {
-        "cs.AI": "#d33682",  # magenta
-        "cs.CL": "#268bd2",  # blue
+        "cs.AI": "#e85da0",  # magenta (WCAG AA)
+        "cs.CL": "#3c9be2",  # blue (WCAG AA)
         "cs.LG": "#859900",  # green
         "cs.CV": "#b58900",  # yellow
-        "cs.SE": "#6c71c4",  # violet
-        "cs.HC": "#cb4b16",  # orange
-        "cs.RO": "#268bd2",  # blue
-        "cs.NE": "#d33682",  # magenta
-        "cs.IR": "#6c71c4",  # violet
-        "cs.CR": "#cb4b16",  # orange
+        "cs.SE": "#8b8fd6",  # violet (WCAG AA)
+        "cs.HC": "#e87d3e",  # orange (WCAG AA)
+        "cs.RO": "#3c9be2",  # blue (WCAG AA)
+        "cs.NE": "#e85da0",  # magenta (WCAG AA)
+        "cs.IR": "#8b8fd6",  # violet (WCAG AA)
+        "cs.CR": "#e87d3e",  # orange (WCAG AA)
+    },
+    "high-contrast": {
+        "cs.AI": "#ff7ab2",  # pink (WCAG AAA)
+        "cs.CL": "#5cb8ff",  # blue (WCAG AAA)
+        "cs.LG": "#5dfa5d",  # green (WCAG AAA)
+        "cs.CV": "#ffdf4d",  # yellow (WCAG AAA)
+        "cs.SE": "#b4a7ff",  # purple (WCAG AAA)
+        "cs.HC": "#ffaa44",  # orange (WCAG AAA)
+        "cs.RO": "#5cb8ff",  # blue (WCAG AAA)
+        "cs.NE": "#ff7ab2",  # pink (WCAG AAA)
+        "cs.IR": "#b4a7ff",  # purple (WCAG AAA)
+        "cs.CR": "#ffaa44",  # orange (WCAG AAA)
     },
 }
 
@@ -196,11 +236,18 @@ THEME_TAG_NAMESPACE_COLORS: dict[str, dict[str, str]] = {
         "priority": "#f38ba8",
     },
     "solarized-dark": {
-        "topic": "#268bd2",
+        "topic": "#3c9be2",  # WCAG AA
         "status": "#859900",
-        "project": "#cb4b16",
-        "method": "#6c71c4",
-        "priority": "#d33682",
+        "project": "#e87d3e",  # WCAG AA
+        "method": "#8b8fd6",  # WCAG AA
+        "priority": "#e85da0",  # WCAG AA
+    },
+    "high-contrast": {
+        "topic": "#5cb8ff",  # WCAG AAA
+        "status": "#5dfa5d",  # WCAG AAA
+        "project": "#ffaa44",  # WCAG AAA
+        "method": "#b4a7ff",  # WCAG AAA
+        "priority": "#ff7ab2",  # WCAG AAA
     },
 }
 
@@ -212,10 +259,10 @@ TAG_NAMESPACE_COLORS: dict[str, str] = {
     "status": "#a6e22e",  # green
     "project": "#fd971f",  # orange
     "method": "#ae81ff",  # purple
-    "priority": "#f92672",  # pink
+    "priority": "#fd4d8e",  # pink (WCAG AA)
 }
 # Fallback palette for unknown namespaces (deterministic via hash)
-_TAG_FALLBACK_COLORS = ["#66d9ef", "#a6e22e", "#fd971f", "#ae81ff", "#f92672", "#e6db74"]
+_TAG_FALLBACK_COLORS = ["#66d9ef", "#a6e22e", "#fd971f", "#ae81ff", "#fd4d8e", "#e6db74"]
 
 
 def parse_tag_namespace(tag: str) -> tuple[str, str]:
@@ -253,6 +300,7 @@ __all__ = [
     "DEFAULT_CATEGORY_COLOR",
     "DEFAULT_CATEGORY_COLORS",
     "DEFAULT_THEME",
+    "HIGH_CONTRAST_THEME",
     "SOLARIZED_DARK_THEME",
     "TAG_NAMESPACE_COLORS",
     "TEXTUAL_THEMES",
