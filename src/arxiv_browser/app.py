@@ -60,7 +60,6 @@ import platform
 import shlex
 import subprocess
 import sys
-import tempfile
 import webbrowser
 from collections import deque
 from collections.abc import Callable
@@ -132,6 +131,12 @@ from arxiv_browser.huggingface import (
     get_hf_db_path,
     load_hf_daily_cache,
     save_hf_daily_cache,
+)
+from arxiv_browser.io_actions import (
+    build_markdown_export_document,
+    filter_papers_needing_download,
+    resolve_target_papers,
+    write_timestamped_export_file,
 )
 from arxiv_browser.llm import *  # noqa: F403
 from arxiv_browser.llm import (  # noqa: F401
@@ -2853,15 +2858,9 @@ class ArxivBrowser(App):
             self.notify("No paper selected", title="Markdown", severity="warning")
             return
 
-        # Create markdown document
-        lines = ["# arXiv Papers Export", "", f"*Exported {len(papers)} paper(s)*", ""]
-        for paper in papers:
-            lines.append(self._format_paper_as_markdown(paper))
-            lines.append("")
-            lines.append("---")
-            lines.append("")
-
-        markdown_text = "\n".join(lines)
+        markdown_text = build_markdown_export_document(
+            [self._format_paper_as_markdown(paper) for paper in papers]
+        )
 
         if self._copy_to_clipboard(markdown_text):
             count = len(papers)
@@ -2907,26 +2906,12 @@ class ArxivBrowser(App):
     def _export_to_file(self, content: str, extension: str, format_name: str) -> None:
         """Write content to a timestamped file using atomic write."""
         export_dir = self._get_export_dir()
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        filename = f"arxiv-{timestamp}.{extension}"
-        filepath = export_dir / filename
         try:
-            export_dir.mkdir(parents=True, exist_ok=True)
-            fd, tmp_path = tempfile.mkstemp(dir=export_dir, suffix=".tmp", prefix=f".{extension}-")
-            closed = False
-            try:
-                os.write(fd, content.encode("utf-8"))
-                os.close(fd)
-                closed = True
-                os.replace(tmp_path, filepath)
-            except BaseException:
-                if not closed:
-                    os.close(fd)
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-                raise
+            filepath = write_timestamped_export_file(
+                content=content,
+                export_dir=export_dir,
+                extension=extension,
+            )
         except OSError as exc:
             self.notify(
                 f"Failed to export {format_name}: {exc}",
@@ -3048,25 +3033,13 @@ class ArxivBrowser(App):
 
     def _get_target_papers(self) -> list[Paper]:
         """Get papers to export (selected or current)."""
-        if self.selected_ids:
-            # Preserve list order for selected papers
-            ordered: list[Paper] = []
-            seen: set[str] = set()
-            for paper in self.filtered_papers:
-                if paper.arxiv_id in self.selected_ids:
-                    ordered.append(paper)
-                    seen.add(paper.arxiv_id)
-            # Include selected papers not in current filter
-            remaining_ids = sorted(aid for aid in self.selected_ids if aid not in seen)
-            for arxiv_id in remaining_ids:
-                paper = self._get_paper_by_id(arxiv_id)
-                if paper is not None:
-                    ordered.append(paper)
-            return ordered
         details = self.query_one(PaperDetails)
-        if details.paper:
-            return [details.paper]
-        return []
+        return resolve_target_papers(
+            filtered_papers=self.filtered_papers,
+            selected_ids=self.selected_ids,
+            papers_by_id=self._papers_by_id,
+            current_paper=details.paper,
+        )
 
     # ========================================================================
     # Phase 9: Paper Similarity
@@ -4415,14 +4388,12 @@ class ArxivBrowser(App):
             self.notify("No papers to download", title="Download", severity="warning")
             return
 
-        # Filter out already downloaded
-        to_download: list[Paper] = []
-        for paper in papers_to_download:
-            path = get_pdf_download_path(paper, self._config)
-            if path.exists() and path.stat().st_size > 0:
-                logger.debug("Skipping %s: already downloaded", paper.arxiv_id)
-            else:
-                to_download.append(paper)
+        to_download, skipped_ids = filter_papers_needing_download(
+            papers_to_download,
+            lambda paper: get_pdf_download_path(paper, self._config),
+        )
+        for arxiv_id in skipped_ids:
+            logger.debug("Skipping %s: already downloaded", arxiv_id)
 
         if not to_download:
             self.notify("All PDFs already downloaded", title="Download")

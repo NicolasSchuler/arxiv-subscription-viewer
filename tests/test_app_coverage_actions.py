@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import date
+from datetime import date, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -53,6 +53,69 @@ def _make_hf_paper(arxiv_id: str) -> HuggingFacePaper:
         github_repo="",
         github_stars=0,
     )
+
+
+class TestIoActionHelpers:
+    def test_resolve_target_papers_preserves_order_and_includes_hidden(self, make_paper):
+        from arxiv_browser.io_actions import resolve_target_papers
+
+        visible = [
+            make_paper(arxiv_id="2401.00003"),
+            make_paper(arxiv_id="2401.00001"),
+        ]
+        hidden = make_paper(arxiv_id="2401.99999")
+
+        result = resolve_target_papers(
+            filtered_papers=visible,
+            selected_ids={"2401.99999", "2401.00001"},
+            papers_by_id={p.arxiv_id: p for p in [*visible, hidden]},
+            current_paper=None,
+        )
+
+        assert [p.arxiv_id for p in result] == ["2401.00001", "2401.99999"]
+
+    def test_filter_papers_needing_download_splits_pending_and_skipped(self, make_paper, tmp_path):
+        from arxiv_browser.io_actions import filter_papers_needing_download
+
+        existing_paper = make_paper(arxiv_id="2401.01001")
+        pending_paper = make_paper(arxiv_id="2401.01002")
+        existing_path = tmp_path / "exists.pdf"
+        existing_path.write_bytes(b"ready")
+        pending_path = tmp_path / "missing.pdf"
+
+        path_map = {
+            existing_paper.arxiv_id: existing_path,
+            pending_paper.arxiv_id: pending_path,
+        }
+        to_download, skipped = filter_papers_needing_download(
+            [existing_paper, pending_paper],
+            lambda paper: path_map[paper.arxiv_id],
+        )
+
+        assert [p.arxiv_id for p in to_download] == [pending_paper.arxiv_id]
+        assert skipped == [existing_paper.arxiv_id]
+
+    def test_build_markdown_export_document_renders_expected_structure(self):
+        from arxiv_browser.io_actions import build_markdown_export_document
+
+        markdown = build_markdown_export_document(["## Paper A", "## Paper B"])
+        assert markdown.startswith("# arXiv Papers Export")
+        assert "*Exported 2 paper(s)*" in markdown
+        assert markdown.count("\n---\n") == 2
+
+    def test_write_timestamped_export_file_writes_atomically(self, tmp_path):
+        from arxiv_browser.io_actions import write_timestamped_export_file
+
+        export_dir = tmp_path / "exports"
+        out = write_timestamped_export_file(
+            content="hello",
+            export_dir=export_dir,
+            extension="txt",
+            now=datetime(2026, 2, 13, 20, 0, 0),
+        )
+        assert out.name == "arxiv-2026-02-13_200000.txt"
+        assert out.read_text(encoding="utf-8") == "hello"
+        assert list(export_dir.glob(".txt-*.tmp")) == []
 
 
 class TestRelevanceBatchCoverage:
