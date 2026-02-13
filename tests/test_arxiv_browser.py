@@ -6155,7 +6155,7 @@ class TestSummaryModeModal:
     """Tests for the SummaryModeModal dismiss values."""
 
     def test_modal_returns_mode_names(self):
-        from arxiv_browser.app import SummaryModeModal
+        from arxiv_browser.modals import SummaryModeModal
 
         modal = SummaryModeModal()
         # Each action should produce the correct mode name
@@ -6168,7 +6168,7 @@ class TestSummaryModeModal:
         assert hasattr(modal, "action_cancel")
 
     def test_modal_bindings(self):
-        from arxiv_browser.app import SummaryModeModal
+        from arxiv_browser.modals import SummaryModeModal
 
         modal = SummaryModeModal()
         binding_keys = {b.key for b in modal.BINDINGS}
@@ -6924,19 +6924,19 @@ class TestResearchInterestsModal:
     """Tests for ResearchInterestsModal structure."""
 
     def test_modal_exists(self):
-        from arxiv_browser.app import ResearchInterestsModal
+        from arxiv_browser.modals import ResearchInterestsModal
 
         modal = ResearchInterestsModal("test interests")
         assert modal._current_interests == "test interests"
 
     def test_modal_empty_default(self):
-        from arxiv_browser.app import ResearchInterestsModal
+        from arxiv_browser.modals import ResearchInterestsModal
 
         modal = ResearchInterestsModal()
         assert modal._current_interests == ""
 
     def test_modal_has_bindings(self):
-        from arxiv_browser.app import ResearchInterestsModal
+        from arxiv_browser.modals import ResearchInterestsModal
 
         binding_keys = {b.key for b in ResearchInterestsModal.BINDINGS}
         assert "ctrl+s" in binding_keys
@@ -9861,7 +9861,7 @@ class TestSummaryModeModalDismiss:
     def test_action_mode_default_dismisses_default(self):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import SummaryModeModal
+        from arxiv_browser.modals import SummaryModeModal
 
         modal = SummaryModeModal()
         modal.dismiss = MagicMock()
@@ -9871,7 +9871,7 @@ class TestSummaryModeModalDismiss:
     def test_action_mode_tldr_dismisses_tldr(self):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import SummaryModeModal
+        from arxiv_browser.modals import SummaryModeModal
 
         modal = SummaryModeModal()
         modal.dismiss = MagicMock()
@@ -9881,7 +9881,7 @@ class TestSummaryModeModalDismiss:
     def test_action_mode_quick_dismisses_quick(self):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import SummaryModeModal
+        from arxiv_browser.modals import SummaryModeModal
 
         modal = SummaryModeModal()
         modal.dismiss = MagicMock()
@@ -9891,7 +9891,7 @@ class TestSummaryModeModalDismiss:
     def test_action_mode_methods_dismisses_methods(self):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import SummaryModeModal
+        from arxiv_browser.modals import SummaryModeModal
 
         modal = SummaryModeModal()
         modal.dismiss = MagicMock()
@@ -9901,7 +9901,7 @@ class TestSummaryModeModalDismiss:
     def test_action_mode_results_dismisses_results(self):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import SummaryModeModal
+        from arxiv_browser.modals import SummaryModeModal
 
         modal = SummaryModeModal()
         modal.dismiss = MagicMock()
@@ -9911,7 +9911,7 @@ class TestSummaryModeModalDismiss:
     def test_action_mode_comparison_dismisses_comparison(self):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import SummaryModeModal
+        from arxiv_browser.modals import SummaryModeModal
 
         modal = SummaryModeModal()
         modal.dismiss = MagicMock()
@@ -9921,7 +9921,7 @@ class TestSummaryModeModalDismiss:
     def test_action_cancel_dismisses_empty(self):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import SummaryModeModal
+        from arxiv_browser.modals import SummaryModeModal
 
         modal = SummaryModeModal()
         modal.dismiss = MagicMock()
@@ -9932,7 +9932,8 @@ class TestSummaryModeModalDismiss:
         """Verify each modal mode corresponds to a key in SUMMARY_MODES."""
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import SUMMARY_MODES, SummaryModeModal
+        from arxiv_browser.app import SUMMARY_MODES
+        from arxiv_browser.modals import SummaryModeModal
 
         modal = SummaryModeModal()
         modal.dismiss = MagicMock()
@@ -9964,7 +9965,7 @@ class TestResearchInterestsModalActions:
     def test_action_cancel_dismisses_empty_string(self):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import ResearchInterestsModal
+        from arxiv_browser.modals import ResearchInterestsModal
 
         modal = ResearchInterestsModal("some interests")
         modal.dismiss = MagicMock()
@@ -9972,13 +9973,13 @@ class TestResearchInterestsModalActions:
         modal.dismiss.assert_called_once_with("")
 
     def test_initial_interests_stored(self):
-        from arxiv_browser.app import ResearchInterestsModal
+        from arxiv_browser.modals import ResearchInterestsModal
 
         modal = ResearchInterestsModal("LLM quantization, speculative decoding")
         assert modal._current_interests == "LLM quantization, speculative decoding"
 
     def test_default_interests_empty(self):
-        from arxiv_browser.app import ResearchInterestsModal
+        from arxiv_browser.modals import ResearchInterestsModal
 
         modal = ResearchInterestsModal()
         assert modal._current_interests == ""
@@ -11387,7 +11388,7 @@ class TestChatSystemPrompt:
     def test_chat_screen_init(self, make_paper):
         from unittest.mock import AsyncMock
 
-        from arxiv_browser.app import PaperChatScreen
+        from arxiv_browser.modals import PaperChatScreen
 
         paper = make_paper(title="My Paper")
         provider = AsyncMock()
@@ -11401,7 +11402,7 @@ class TestChatSystemPrompt:
     def test_chat_screen_add_message(self, make_paper):
         from unittest.mock import AsyncMock
 
-        from arxiv_browser.app import PaperChatScreen
+        from arxiv_browser.modals import PaperChatScreen
 
         paper = make_paper(title="My Paper")
         screen = PaperChatScreen(paper, AsyncMock())
@@ -11455,7 +11456,7 @@ class TestAskLlm:
 
         from textual.css.query import NoMatches
 
-        from arxiv_browser.app import PaperChatScreen
+        from arxiv_browser.modals import PaperChatScreen
         from arxiv_browser.llm_providers import LLMResult
 
         paper = make_paper(
@@ -11576,7 +11577,7 @@ class TestAddMessageMarkup:
     def test_add_message_escapes_by_default(self, make_paper):
         from unittest.mock import AsyncMock
 
-        from arxiv_browser.app import PaperChatScreen
+        from arxiv_browser.modals import PaperChatScreen
 
         screen = PaperChatScreen(make_paper(title="T"), AsyncMock())
         # Just test the history tracking (no DOM)

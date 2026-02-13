@@ -37,14 +37,18 @@ from arxiv_browser.modals.editing import (
     TagsModal,
 )
 
+# llm.py — LLM-powered modals (summaries, relevance, chat)
+from arxiv_browser.modals.llm import (
+    PaperChatScreen,
+    ResearchInterestsModal,
+    SummaryModeModal,
+)
+
 # search.py — arXiv search form, command palette
 from arxiv_browser.modals.search import (
     ArxivSearchModal,
     CommandPaletteModal,
 )
-
-# Future extractions (Task 7) will add imports here:
-# - llm.py: SummaryModeModal, ResearchInterestsModal, PaperChatScreen
 
 __all__ = [
     "AddToCollectionModal",
@@ -59,10 +63,13 @@ __all__ = [
     "ExportMenuModal",
     "HelpScreen",
     "NotesModal",
+    "PaperChatScreen",
     "RecommendationListItem",
     "RecommendationSourceModal",
     "RecommendationsScreen",
+    "ResearchInterestsModal",
     "SectionToggleModal",
+    "SummaryModeModal",
     "TagsModal",
     "WatchListItem",
     "WatchListModal",
