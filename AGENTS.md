@@ -23,12 +23,16 @@ Instructions for AI agents working on this codebase.
 - `just lint` — zero ruff errors, formatting matches
 - `just typecheck` — zero pyright errors (basic mode)
 - `just test` — all tests pass, coverage >= 60%
-
-### Should-pass gates (quality targets)
-
+- `uv run xenon src/arxiv_browser/ --max-absolute C --max-modules C --max-average B`
 - `just dead-code` — zero vulture findings
-- `just security` — no new bandit findings
+- `just security` — zero Bandit findings (use targeted `# nosec <rule-id>` only with inline justification)
 - `just deps` — no dependency issues
+- `src/arxiv_browser/app.py` line-count guardrail: <= 5000 lines
+
+### Advisory checks (non-blocking quality targets)
+
+- `just report` dashboard metrics (coverage/complexity/maintainability trends)
+- Per-module coverage ratchets for extracted UI modules (`modals/*`, `widgets/*`)
 
 ### Quality metrics to track
 

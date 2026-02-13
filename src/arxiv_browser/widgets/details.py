@@ -41,9 +41,9 @@ def _detail_cache_key(
     """Build a stable cache key for rendered detail markup."""
     # Convert mutable/unhashable structures to tuples.
     abstract_digest = (
-        hashlib.sha1(abstract_text.encode("utf-8")).hexdigest() if abstract_text else ""
+        hashlib.sha256(abstract_text.encode("utf-8")).hexdigest() if abstract_text else ""
     )
-    summary_digest = hashlib.sha1(summary.encode("utf-8")).hexdigest() if summary else ""
+    summary_digest = hashlib.sha256(summary.encode("utf-8")).hexdigest() if summary else ""
     s2_key = (
         (
             s2_data.citation_count,

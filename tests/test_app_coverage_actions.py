@@ -796,6 +796,19 @@ class TestDownloadClipboardAndOpenCoverage:
         assert ok is False
         assert "Failed to open PDF viewer" in app.notify.call_args[0][0]
 
+    def test_open_with_viewer_uses_subprocess_args_not_shell(self):
+        app = _new_app()
+        app.notify = MagicMock()
+
+        with patch("arxiv_browser.app.subprocess.Popen") as popen:
+            ok = app._open_with_viewer("open -a Skim {path}", "/tmp/my paper.pdf")
+
+        assert ok is True
+        popen.assert_called_once()
+        call_args = popen.call_args
+        assert call_args.args[0] == ["open", "-a", "Skim", "/tmp/my paper.pdf"]
+        assert "shell" not in call_args.kwargs
+
     def test_action_open_url_uses_confirmation_for_large_batches(self, make_paper):
         app = _new_app()
         app._get_target_papers = MagicMock(

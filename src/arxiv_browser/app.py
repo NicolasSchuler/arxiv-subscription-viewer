@@ -1084,8 +1084,10 @@ class ArxivBrowser(App):
         if client is not None:
             try:
                 await client.aclose()
-            except Exception:
-                pass  # Best-effort cleanup during shutdown
+            except Exception as e:
+                logger.debug(
+                    "Failed to close shared HTTP client during shutdown: %s", e, exc_info=True
+                )
 
     def _refresh_date_navigator(self) -> None:
         """Refresh date navigator labels after DOM updates settle."""
@@ -1141,12 +1143,12 @@ class ArxivBrowser(App):
             merged.update(self._config.theme)
             try:
                 self.register_theme(_build_textual_theme(self._config.theme_name, merged))
-            except Exception:
-                pass  # __new__() mock tests lack reactive infrastructure
+            except Exception as e:
+                logger.debug("Skipping theme registration in current context: %s", e, exc_info=True)
         try:
             self.theme = self._config.theme_name
-        except Exception:
-            pass  # __new__() mock tests lack reactive infrastructure
+        except Exception as e:
+            logger.debug("Skipping theme activation in current context: %s", e, exc_info=True)
         # Apply per-theme tag namespace colors
         TAG_NAMESPACE_COLORS.clear()
         TAG_NAMESPACE_COLORS.update(
@@ -4425,17 +4427,20 @@ class ArxivBrowser(App):
 
         The command template can use {url} or {path} as placeholders.
         If no placeholder is found, the URL is appended as an argument.
-        The URL/path is always shell-quoted to prevent injection.
         """
         try:
-            quoted = shlex.quote(url_or_path)
+            args = shlex.split(viewer_cmd)
+            if not args:
+                raise ValueError("Viewer command is empty")
             if "{url}" in viewer_cmd or "{path}" in viewer_cmd:
-                cmd = viewer_cmd.replace("{url}", quoted).replace("{path}", quoted)
+                args = [
+                    arg.replace("{url}", url_or_path).replace("{path}", url_or_path) for arg in args
+                ]
             else:
-                cmd = f"{viewer_cmd} {quoted}"
-            subprocess.Popen(
-                cmd,
-                shell=True,
+                args.append(url_or_path)
+            # User-configured local viewer command execution is an explicit feature.
+            subprocess.Popen(  # nosec B603
+                args,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
