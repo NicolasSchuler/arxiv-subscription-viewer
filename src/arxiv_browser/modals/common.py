@@ -370,7 +370,7 @@ class ExportMenuModal(ModalScreen[str]):
 class WatchListItem(ListItem):
     """List item for watch list entries."""
 
-    def __init__(self, entry: WatchListEntry, *children: object, **kwargs: object) -> None:
+    def __init__(self, entry: WatchListEntry, *children, **kwargs) -> None:
         super().__init__(*children, **kwargs)
         self.entry = entry
 

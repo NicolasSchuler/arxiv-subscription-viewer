@@ -11456,8 +11456,8 @@ class TestAskLlm:
 
         from textual.css.query import NoMatches
 
-        from arxiv_browser.modals import PaperChatScreen
         from arxiv_browser.llm_providers import LLMResult
+        from arxiv_browser.modals import PaperChatScreen
 
         paper = make_paper(
             title="Test Paper",
