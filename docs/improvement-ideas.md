@@ -19,16 +19,18 @@
 search.py, collections.py, citations.py, llm.py. Reduced `app.py` from ~8,300 to
 ~5,800 lines. See `docs/plans/2026-02-13-modal-extraction-design.md`.
 
-## 2. Extract Widgets into a `widgets/` Package
+## 2. ~~Extract Widgets into a `widgets/` Package~~ DONE
 
 **Category:** Architecture
 **Effort:** Medium
 **Impact:** High
 
-`PaperListItem`, `PaperDetails`, `FilterPillBar`, `BookmarkTabBar`, `DateNavigator`
-are reusable UI components embedded in `app.py`. Moving them to `widgets/` would
-reduce `app.py` to primarily the `ArxivBrowser` class + glue, potentially under
-4,000 lines.
+Extracted reusable widgets into `src/arxiv_browser/widgets/`:
+`listing.py` (`PaperListItem`, `render_paper_option`), `details.py`
+(`PaperDetails`), and `chrome.py` (`FilterPillBar`, `BookmarkTabBar`,
+`DateNavigator`, `ContextFooter`). `app.py` now acts as composition/glue and
+re-exports widget symbols for backward compatibility (`from arxiv_browser.app import ...`).
+This reduced `app.py` from ~5,806 to ~4,792 lines.
 
 ## 3. Raise `app.py` Coverage from 57% to 80%
 

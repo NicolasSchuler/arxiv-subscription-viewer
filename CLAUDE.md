@@ -14,7 +14,7 @@ Published on PyPI as `arxiv-subscription-viewer`. Install with `pip install arxi
 src/arxiv_browser/
 ├── __init__.py           # Re-exports public API from app.py
 ├── __main__.py           # python -m arxiv_browser support
-├── app.py                # Widgets, ArxivBrowser App, CLI (~5800 lines)
+├── app.py                # ArxivBrowser app + CLI entrypoint/glue (~4800 lines)
 ├── models.py             # Dataclasses: Paper, PaperMetadata, UserConfig, etc. (~330 lines)
 ├── config.py             # Config persistence: load/save/export/import (~540 lines)
 ├── parsing.py            # arXiv parsing, LaTeX cleaning, history (~570 lines)
@@ -34,6 +34,11 @@ src/arxiv_browser/
 │   ├── collections.py    # CollectionsModal, CollectionViewModal, AddToCollectionModal
 │   ├── citations.py      # RecommendationSourceModal, RecommendationsScreen, CitationGraphScreen
 │   └── llm.py            # SummaryModeModal, ResearchInterestsModal, PaperChatScreen
+├── widgets/              # Reusable widgets extracted from app.py
+│   ├── __init__.py       # Re-exports all widget classes/helpers/constants
+│   ├── listing.py        # PaperListItem + render_paper_option list helpers
+│   ├── details.py        # PaperDetails + detail pane cache/render helpers
+│   └── chrome.py         # FilterPillBar, BookmarkTabBar, DateNavigator, ContextFooter
 └── py.typed              # PEP 561 type marker
 ```
 
@@ -57,10 +62,13 @@ modals/search.py       ← models, parsing, query, themes
 modals/collections.py  ← models
 modals/citations.py    ← models, query, semantic_scholar, themes
 modals/llm.py          ← llm, llm_providers, models, query, themes
+widgets/listing.py     ← models, query, themes, semantic_scholar, huggingface
+widgets/details.py     ← models, query, themes, semantic_scholar, huggingface, widgets/listing
+widgets/chrome.py      ← models, parsing, query, themes
 app.py                 ← all above
 ```
 
-No module imports from `app.py` — this prevents circular dependencies. Modal submodules follow the same DAG constraint. `app.py` re-exports all public symbols from sub-modules via `from arxiv_browser.X import *` for backward compatibility. `modals/__init__.py` re-exports all modal classes for flat imports (`from arxiv_browser.modals import TagsModal`).
+No module imports from `app.py` — this prevents circular dependencies. Modal and widget submodules follow the same DAG constraint. `app.py` re-exports all public symbols from sub-modules via `from arxiv_browser.X import *` for backward compatibility. `modals/__init__.py` and `widgets/__init__.py` provide flat imports for extracted UI classes.
 
 ### Data Models (`models.py`)
 
@@ -81,15 +89,15 @@ No module imports from `app.py` — this prevents circular dependencies. Modal s
 - **`export.py`**: `format_paper_as_bibtex()`, `format_papers_as_csv()`, `format_paper_as_ris()`
 - **`themes.py`**: `get_tag_color()`, `parse_tag_namespace()`, `TEXTUAL_THEMES`
 
-### UI Components (`app.py`)
+### UI Components (`widgets/` + `app.py`)
 
-- `ArxivBrowser` - Main Textual App class
-- `PaperListItem` - Custom ListItem with selection/metadata display
-- `PaperDetails` - Rich-formatted paper detail view
-- `BookmarkTabBar` - Horizontal bookmark tabs widget
-- `DateNavigator` - Date navigation widget for history mode
-- `FilterPillBar` - Active search token pills
-- `ContextFooter` - Context-sensitive footer
+- `ArxivBrowser` (`app.py`) - Main Textual App class
+- `PaperListItem` (`widgets/listing.py`) - Custom ListItem with selection/metadata display
+- `PaperDetails` (`widgets/details.py`) - Rich-formatted paper detail view
+- `BookmarkTabBar` (`widgets/chrome.py`) - Horizontal bookmark tabs widget
+- `DateNavigator` (`widgets/chrome.py`) - Date navigation widget for history mode
+- `FilterPillBar` (`widgets/chrome.py`) - Active search token pills
+- `ContextFooter` (`widgets/chrome.py`) - Context-sensitive footer
 
 ### Modal Screens (`modals/`)
 
