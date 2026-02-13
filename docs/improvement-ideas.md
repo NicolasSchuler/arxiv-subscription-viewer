@@ -8,16 +8,16 @@
 
 ---
 
-## 1. Extract Modals into a `modals/` Package
+## 1. ~~Extract Modals into a `modals/` Package~~ DONE
 
 **Category:** Architecture
 **Effort:** Medium
 **Impact:** High
 
-`app.py` contains 19 `ModalScreen` subclasses (~2,500+ lines). Each is self-contained
-with its own CSS, `compose()`, and key bindings. Extract into
-`src/arxiv_browser/modals/` grouped logically (notes, search, collections, citations,
-etc.). Natural follow-up to the B1 module extraction.
+`app.py` contained 19 `ModalScreen` subclasses (~2,500+ lines). Extracted into
+`src/arxiv_browser/modals/` with 6 domain-grouped submodules: common.py, editing.py,
+search.py, collections.py, citations.py, llm.py. Reduced `app.py` from ~8,300 to
+~5,800 lines. See `docs/plans/2026-02-13-modal-extraction-design.md`.
 
 ## 2. Extract Widgets into a `widgets/` Package
 

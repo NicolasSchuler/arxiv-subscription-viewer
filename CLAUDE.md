@@ -14,7 +14,7 @@ Published on PyPI as `arxiv-subscription-viewer`. Install with `pip install arxi
 src/arxiv_browser/
 ├── __init__.py           # Re-exports public API from app.py
 ├── __main__.py           # python -m arxiv_browser support
-├── app.py                # Widgets, modals, ArxivBrowser App, CLI (~8300 lines)
+├── app.py                # Widgets, ArxivBrowser App, CLI (~5800 lines)
 ├── models.py             # Dataclasses: Paper, PaperMetadata, UserConfig, etc. (~330 lines)
 ├── config.py             # Config persistence: load/save/export/import (~540 lines)
 ├── parsing.py            # arXiv parsing, LaTeX cleaning, history (~570 lines)
@@ -26,6 +26,14 @@ src/arxiv_browser/
 ├── themes.py             # Color palettes, category colors, Textual themes (~270 lines)
 ├── semantic_scholar.py   # S2 API client, SQLite cache (~820 lines)
 ├── huggingface.py        # HF Daily Papers API client, SQLite cache (~350 lines)
+├── modals/               # ModalScreen subclasses, domain-grouped (~2700 lines)
+│   ├── __init__.py       # Re-exports all modals for flat imports
+│   ├── common.py         # HelpScreen, ConfirmModal, ExportMenuModal, WatchListModal, SectionToggleModal
+│   ├── editing.py        # NotesModal, TagsModal, AutoTagSuggestModal
+│   ├── search.py         # ArxivSearchModal, CommandPaletteModal
+│   ├── collections.py    # CollectionsModal, CollectionViewModal, AddToCollectionModal
+│   ├── citations.py      # RecommendationSourceModal, RecommendationsScreen, CitationGraphScreen
+│   └── llm.py            # SummaryModeModal, ResearchInterestsModal, PaperChatScreen
 └── py.typed              # PEP 561 type marker
 ```
 
@@ -43,10 +51,16 @@ llm_providers.py       ← llm, models
 similarity.py          ← models
 semantic_scholar.py    ← models
 huggingface.py         ← models
+modals/common.py       ← models, themes
+modals/editing.py      ← themes
+modals/search.py       ← models, parsing, query, themes
+modals/collections.py  ← models
+modals/citations.py    ← models, query, semantic_scholar, themes
+modals/llm.py          ← llm, llm_providers, models, query, themes
 app.py                 ← all above
 ```
 
-No module imports from `app.py` — this prevents circular dependencies. `app.py` re-exports all public symbols from sub-modules via `from arxiv_browser.X import *` for backward compatibility.
+No module imports from `app.py` — this prevents circular dependencies. Modal submodules follow the same DAG constraint. `app.py` re-exports all public symbols from sub-modules via `from arxiv_browser.X import *` for backward compatibility. `modals/__init__.py` re-exports all modal classes for flat imports (`from arxiv_browser.modals import TagsModal`).
 
 ### Data Models (`models.py`)
 
@@ -72,10 +86,20 @@ No module imports from `app.py` — this prevents circular dependencies. `app.py
 - `ArxivBrowser` - Main Textual App class
 - `PaperListItem` - Custom ListItem with selection/metadata display
 - `PaperDetails` - Rich-formatted paper detail view
-- `NotesModal` / `TagsModal` - ModalScreen dialogs for editing
-- `RecommendationsScreen` - Similar papers modal
-- `CitationGraphScreen` - Citation graph drill-down modal
 - `BookmarkTabBar` - Horizontal bookmark tabs widget
+- `DateNavigator` - Date navigation widget for history mode
+- `FilterPillBar` - Active search token pills
+- `ContextFooter` - Context-sensitive footer
+
+### Modal Screens (`modals/`)
+
+19 ModalScreen subclasses organized by domain:
+- **common.py**: HelpScreen, ConfirmModal, ExportMenuModal, WatchListModal, SectionToggleModal
+- **editing.py**: NotesModal, TagsModal, AutoTagSuggestModal
+- **search.py**: ArxivSearchModal, CommandPaletteModal
+- **collections.py**: CollectionsModal, CollectionViewModal, AddToCollectionModal
+- **citations.py**: RecommendationSourceModal, RecommendationsScreen, CitationGraphScreen
+- **llm.py**: SummaryModeModal, ResearchInterestsModal, PaperChatScreen
 
 ### Performance Optimizations
 
@@ -130,10 +154,12 @@ No module imports from `app.py` — this prevents circular dependencies. `app.py
 ### Import Patterns (src layout)
 - **Public API**: `from arxiv_browser import Paper, main` — via `__init__.py` → `app.py` re-exports
 - **Canonical module import**: `from arxiv_browser.models import Paper` — preferred for new code
+- **Modal imports**: `from arxiv_browser.modals import TagsModal` — via `modals/__init__.py` re-exports
 - **Backward compat**: `from arxiv_browser.app import Paper` — still works via re-export bridge
 - **Mock paths in tests**: Patch at the module where the function is *resolved*, not where it's re-exported:
   - Functions called by other functions in the same module: patch at the actual module (e.g., `"arxiv_browser.config.get_config_path"`)
   - Functions called by `ArxivBrowser` (resolves from `app.py`): patch at `"arxiv_browser.app.X"`
+  - Modal classes in tests: `from arxiv_browser.modals import X` (not `from arxiv_browser.app import X`)
   - S2/HF modules: `"arxiv_browser.semantic_scholar.X"`, `"arxiv_browser.huggingface.X"`
 
 ### Error Handling

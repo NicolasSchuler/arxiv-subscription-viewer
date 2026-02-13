@@ -1,7 +1,7 @@
 # Design: Extract Modals into `modals/` Package
 
 > Date: 2026-02-13
-> Status: Approved
+> Status: Completed
 > Roadmap item: #1 (Extract Modals into a `modals/` Package)
 
 ## Goal
