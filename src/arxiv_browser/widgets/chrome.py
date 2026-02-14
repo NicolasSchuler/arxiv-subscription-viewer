@@ -109,106 +109,257 @@ def build_status_bar_text(
 ) -> str:
     """Build semantic status bar text for current UI/application state."""
     if max_width is not None and max_width <= 100:
-        compact_parts: list[str] = []
-        if query:
-            compact_parts.append(f"{filtered}/{total} match")
-        elif watch_filter_active:
-            compact_parts.append(f"{filtered}/{total} watched")
-        else:
-            compact_parts.append(f"{total} papers")
+        compact_parts = _build_compact_status_parts(
+            total=total,
+            filtered=filtered,
+            query=query,
+            watch_filter_active=watch_filter_active,
+            selected_count=selected_count,
+            sort_label=sort_label,
+            in_arxiv_api_mode=in_arxiv_api_mode,
+            api_page=api_page,
+            arxiv_api_loading=arxiv_api_loading,
+            show_abstract_preview=show_abstract_preview,
+            s2_active=s2_active,
+            s2_loading=s2_loading,
+            s2_count=s2_count,
+            hf_active=hf_active,
+            hf_loading=hf_loading,
+            hf_match_count=hf_match_count,
+            version_checking=version_checking,
+            version_update_count=version_update_count,
+            max_width=max_width,
+        )
+        return _render_compact_status(compact_parts, max_width)
 
-        if selected_count > 0:
-            compact_parts.append(f"{selected_count} selected")
+    parts = _build_full_status_parts(
+        total=total,
+        filtered=filtered,
+        query=query,
+        watch_filter_active=watch_filter_active,
+        selected_count=selected_count,
+        sort_label=sort_label,
+        in_arxiv_api_mode=in_arxiv_api_mode,
+        api_page=api_page,
+        arxiv_api_loading=arxiv_api_loading,
+        show_abstract_preview=show_abstract_preview,
+        s2_active=s2_active,
+        s2_loading=s2_loading,
+        s2_count=s2_count,
+        hf_active=hf_active,
+        hf_loading=hf_loading,
+        hf_match_count=hf_match_count,
+        version_checking=version_checking,
+        version_update_count=version_update_count,
+    )
+    rendered = " [dim]│[/] ".join(parts)
+    return _truncate_rich_text(rendered, max_width)
 
-        compact_parts.append(f"sort:{sort_label}")
 
-        if in_arxiv_api_mode and api_page is not None:
-            compact_parts.append(f"api p{api_page}")
-            if arxiv_api_loading:
-                compact_parts.append("loading")
+def _compact_primary_segment(
+    *, total: int, filtered: int, query: str, watch_filter_active: bool
+) -> str:
+    """Build the first compact segment (query/watch/default)."""
+    if query:
+        return f"{filtered}/{total} match"
+    if watch_filter_active:
+        return f"{filtered}/{total} watched"
+    return f"{total} papers"
 
-        if s2_active:
-            if s2_loading:
-                compact_parts.append("S2 loading")
-            elif s2_count > 0:
-                compact_parts.append(f"S2:{s2_count}")
-            else:
-                compact_parts.append("S2")
 
-        if hf_active and max_width >= 90:
-            if hf_loading:
-                compact_parts.append("HF loading")
-            elif hf_match_count > 0:
-                compact_parts.append(f"HF:{hf_match_count}")
-            else:
-                compact_parts.append("HF")
-
-        if show_abstract_preview and max_width >= 95:
-            compact_parts.append("preview")
-
-        if version_checking:
-            compact_parts.append("checking versions")
-        elif version_update_count > 0:
-            compact_parts.append(f"{version_update_count} updated")
-
-        compact = " | ".join(compact_parts)
-        if len(compact) <= max_width:
-            return compact
-
-        while len(compact_parts) > 1 and len(" | ".join(compact_parts) + " ...") > max_width:
-            compact_parts.pop()
-        return " | ".join(compact_parts) + " ..."
-
-    parts: list[str] = []
-
+def _full_primary_segment(
+    *, total: int, filtered: int, query: str, watch_filter_active: bool
+) -> str:
+    """Build the first rich segment (query/watch/default)."""
     if query:
         truncated_query = query if len(query) <= 30 else query[:27] + "..."
         safe_query = escape_rich_text(truncated_query)
-        parts.append(
-            f'[{THEME_COLORS["accent"]}]{filtered}[/][dim]/{total} matching [/][{THEME_COLORS["accent"]}]"{safe_query}"[/]'
+        return (
+            f"[{THEME_COLORS['accent']}]{filtered}[/][dim]/{total} matching [/]"
+            f'[{THEME_COLORS["accent"]}]"{safe_query}"[/]'
         )
-    elif watch_filter_active:
-        parts.append(f"[{THEME_COLORS['orange']}]{filtered}[/][dim]/{total} watched[/]")
-    else:
-        parts.append(f"[dim]{total} papers[/]")
+    if watch_filter_active:
+        return f"[{THEME_COLORS['orange']}]{filtered}[/][dim]/{total} watched[/]"
+    return f"[dim]{total} papers[/]"
 
+
+def _compact_flag_segment(*, active: bool, loading: bool, count: int, label: str) -> str | None:
+    """Return compact flag text like S2/HF status, or None when inactive."""
+    if not active:
+        return None
+    if loading:
+        return f"{label} loading"
+    if count > 0:
+        return f"{label}:{count}"
+    return label
+
+
+def _full_flag_segment(
+    *, active: bool, loading: bool, count: int, label: str, color: str
+) -> str | None:
+    """Return rich-markup status text for S2/HF style toggles."""
+    if not active:
+        return None
+    if loading:
+        return f"[{color}]{label} loading...[/]"
+    if count > 0:
+        return f"[{color}]{label}:{count}[/]"
+    return f"[{color}]{label}[/]"
+
+
+def _build_compact_status_parts(
+    *,
+    total: int,
+    filtered: int,
+    query: str,
+    watch_filter_active: bool,
+    selected_count: int,
+    sort_label: str,
+    in_arxiv_api_mode: bool,
+    api_page: int | None,
+    arxiv_api_loading: bool,
+    show_abstract_preview: bool,
+    s2_active: bool,
+    s2_loading: bool,
+    s2_count: int,
+    hf_active: bool,
+    hf_loading: bool,
+    hf_match_count: int,
+    version_checking: bool,
+    version_update_count: int,
+    max_width: int,
+) -> list[str]:
+    """Build compact status tokens for narrow terminals."""
+    parts = [
+        _compact_primary_segment(
+            total=total,
+            filtered=filtered,
+            query=query,
+            watch_filter_active=watch_filter_active,
+        ),
+        f"sort:{sort_label}",
+    ]
     if selected_count > 0:
-        parts.append(f"[bold {THEME_COLORS['green']}]{selected_count} selected[/]")
-
-    parts.append(f"[dim]Sort: {sort_label}[/]")
-
+        parts.insert(1, f"{selected_count} selected")
     if in_arxiv_api_mode and api_page is not None:
-        parts.append(f"[{THEME_COLORS['orange']}]API[/]")
-        parts.append(f"[dim]Page: {api_page}[/]")
+        parts.extend([f"api p{api_page}"])
+        if arxiv_api_loading:
+            parts.append("loading")
+
+    s2_segment = _compact_flag_segment(
+        active=s2_active, loading=s2_loading, count=s2_count, label="S2"
+    )
+    if s2_segment:
+        parts.append(s2_segment)
+
+    if max_width >= 90:
+        hf_segment = _compact_flag_segment(
+            active=hf_active, loading=hf_loading, count=hf_match_count, label="HF"
+        )
+        if hf_segment:
+            parts.append(hf_segment)
+
+    if show_abstract_preview and max_width >= 95:
+        parts.append("preview")
+
+    if version_checking:
+        parts.append("checking versions")
+    elif version_update_count > 0:
+        parts.append(f"{version_update_count} updated")
+    return parts
+
+
+def _build_full_status_parts(
+    *,
+    total: int,
+    filtered: int,
+    query: str,
+    watch_filter_active: bool,
+    selected_count: int,
+    sort_label: str,
+    in_arxiv_api_mode: bool,
+    api_page: int | None,
+    arxiv_api_loading: bool,
+    show_abstract_preview: bool,
+    s2_active: bool,
+    s2_loading: bool,
+    s2_count: int,
+    hf_active: bool,
+    hf_loading: bool,
+    hf_match_count: int,
+    version_checking: bool,
+    version_update_count: int,
+) -> list[str]:
+    """Build rich status tokens for regular widths."""
+    parts = [
+        _full_primary_segment(
+            total=total,
+            filtered=filtered,
+            query=query,
+            watch_filter_active=watch_filter_active,
+        ),
+        f"[dim]Sort: {sort_label}[/]",
+    ]
+    if selected_count > 0:
+        parts.insert(1, f"[bold {THEME_COLORS['green']}]{selected_count} selected[/]")
+    if in_arxiv_api_mode and api_page is not None:
+        parts.extend(
+            [
+                f"[{THEME_COLORS['orange']}]API[/]",
+                f"[dim]Page: {api_page}[/]",
+            ]
+        )
         if arxiv_api_loading:
             parts.append(f"[{THEME_COLORS['orange']}]Loading...[/]")
     if show_abstract_preview:
         parts.append(f"[{THEME_COLORS['purple']}]Preview[/]")
-    if s2_active:
-        if s2_loading:
-            parts.append(f"[{THEME_COLORS['green']}]S2 loading...[/]")
-        elif s2_count > 0:
-            parts.append(f"[{THEME_COLORS['green']}]S2:{s2_count}[/]")
-        else:
-            parts.append(f"[{THEME_COLORS['green']}]S2[/]")
-    if hf_active:
-        if hf_loading:
-            parts.append(f"[{THEME_COLORS['orange']}]HF loading...[/]")
-        elif hf_match_count > 0:
-            parts.append(f"[{THEME_COLORS['orange']}]HF:{hf_match_count}[/]")
-        else:
-            parts.append(f"[{THEME_COLORS['orange']}]HF[/]")
+
+    s2_segment = _full_flag_segment(
+        active=s2_active,
+        loading=s2_loading,
+        count=s2_count,
+        label="S2",
+        color=THEME_COLORS["green"],
+    )
+    if s2_segment:
+        parts.append(s2_segment)
+
+    hf_segment = _full_flag_segment(
+        active=hf_active,
+        loading=hf_loading,
+        count=hf_match_count,
+        label="HF",
+        color=THEME_COLORS["orange"],
+    )
+    if hf_segment:
+        parts.append(hf_segment)
+
     if version_checking:
         parts.append(f"[{THEME_COLORS['pink']}]Checking versions...[/]")
     elif version_update_count > 0:
         parts.append(f"[{THEME_COLORS['pink']}]{version_update_count} updated[/]")
+    return parts
 
-    rendered = " [dim]│[/] ".join(parts)
-    if max_width is not None and max_width > 0:
-        visible = re.sub(r"\[[^\]]*]", "", rendered)
-        if len(visible) > max_width:
-            return visible[: max(0, max_width - 3)] + "..."
-    return rendered
+
+def _render_compact_status(parts: list[str], max_width: int) -> str:
+    """Render compact parts and shrink if necessary."""
+    compact = " | ".join(parts)
+    if len(compact) <= max_width:
+        return compact
+
+    while len(parts) > 1 and len(" | ".join(parts) + " ...") > max_width:
+        parts.pop()
+    return " | ".join(parts) + " ..."
+
+
+def _truncate_rich_text(text: str, max_width: int | None) -> str:
+    """Truncate rendered Rich markup by visible width when constrained."""
+    if max_width is None or max_width <= 0:
+        return text
+    visible = re.sub(r"\[[^\]]*]", "", text)
+    if len(visible) <= max_width:
+        return text
+    return visible[: max(0, max_width - 3)] + "..."
 
 
 class ContextFooter(Static):
