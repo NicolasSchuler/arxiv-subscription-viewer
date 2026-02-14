@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import re
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from rich.markup import escape as escape_markup
@@ -247,6 +248,18 @@ def reconstruct_query(tokens: list[QueryToken], exclude_index: int) -> str:
     return " ".join(_token_to_str(t) for t in cleaned)
 
 
+def get_query_tokens(query: str) -> list[QueryToken]:
+    """Tokenize a query after trimming surrounding whitespace."""
+    normalized_query = query.strip()
+    return tokenize_query(normalized_query) if normalized_query else []
+
+
+def remove_query_token(query: str, token_index: int) -> str:
+    """Remove one token from a query string and rebuild it."""
+    tokens = get_query_tokens(query)
+    return reconstruct_query(tokens, token_index)
+
+
 def _token_to_str(token: QueryToken) -> str:
     """Convert a QueryToken back to its query string representation."""
     if token.kind == "op":
@@ -331,6 +344,39 @@ def build_highlight_terms(tokens: list[QueryToken]) -> dict[str, list[str]]:
             highlight["title"].append(token.value)
             highlight["author"].append(token.value)
     return highlight
+
+
+def execute_query_filter(
+    query: str,
+    papers: list[Paper],
+    *,
+    fuzzy_search: Callable[[str], list[Paper]],
+    advanced_match: Callable[[Paper, list[QueryToken]], bool],
+) -> tuple[list[Paper], dict[str, list[str]]]:
+    """Filter papers for a query and return (filtered_papers, highlight_terms)."""
+    normalized_query = query.strip()
+    if not normalized_query:
+        return papers.copy(), {"title": [], "author": [], "abstract": []}
+
+    tokens = tokenize_query(normalized_query)
+    highlight_terms = build_highlight_terms(tokens)
+
+    if is_advanced_query(tokens):
+        advanced_tokens = insert_implicit_and(tokens)
+        rpn = to_rpn(advanced_tokens)
+        filtered = [paper for paper in papers if advanced_match(paper, rpn)]
+        return filtered, highlight_terms
+
+    return fuzzy_search(normalized_query), highlight_terms
+
+
+def apply_watch_filter(
+    papers: list[Paper], watched_paper_ids: set[str], watch_filter_active: bool
+) -> list[Paper]:
+    """Apply watch-list intersection filtering when enabled."""
+    if not watch_filter_active:
+        return papers
+    return [paper for paper in papers if paper.arxiv_id in watched_paper_ids]
 
 
 def match_query_term(
@@ -477,10 +523,13 @@ def sort_papers(
 
 __all__ = [
     "_HIGHLIGHT_PATTERN_CACHE",
+    "apply_watch_filter",
     "build_highlight_terms",
     "escape_rich_text",
+    "execute_query_filter",
     "format_categories",
     "format_summary_as_rich",
+    "get_query_tokens",
     "highlight_text",
     "insert_implicit_and",
     "is_advanced_query",
@@ -489,6 +538,7 @@ __all__ = [
     "paper_matches_watch_entry",
     "pill_label_for_token",
     "reconstruct_query",
+    "remove_query_token",
     "render_progress_bar",
     "sort_papers",
     "to_rpn",

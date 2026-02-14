@@ -133,10 +133,17 @@ from arxiv_browser.huggingface import (
 )
 from arxiv_browser.io_actions import (
     build_clipboard_payload,
+    build_download_pdfs_confirmation_prompt,
+    build_download_start_notification,
     build_markdown_export_document,
+    build_open_papers_confirmation_prompt,
+    build_open_papers_notification,
+    build_open_pdfs_confirmation_prompt,
+    build_open_pdfs_notification,
     build_viewer_args,
     filter_papers_needing_download,
     get_clipboard_command_plan,
+    requires_batch_confirmation,
     resolve_target_papers,
     write_timestamped_export_file,
 )
@@ -235,10 +242,13 @@ from arxiv_browser.parsing import (
 from arxiv_browser.query import *  # noqa: F403
 from arxiv_browser.query import (
     _HIGHLIGHT_PATTERN_CACHE,
+    apply_watch_filter,
     build_highlight_terms,
     escape_rich_text,
+    execute_query_filter,
     format_categories,
     format_summary_as_rich,
+    get_query_tokens,
     highlight_text,
     insert_implicit_and,
     is_advanced_query,
@@ -247,6 +257,7 @@ from arxiv_browser.query import (
     paper_matches_watch_entry,
     pill_label_for_token,
     reconstruct_query,
+    remove_query_token,
     render_progress_bar,
     sort_papers,
     to_rpn,
@@ -399,6 +410,7 @@ __all__ = [
     "UserConfig",
     "WatchListEntry",
     "_configure_logging",
+    "apply_watch_filter",
     "build_arxiv_search_query",
     "build_auto_tag_prompt",
     "build_daily_digest",
@@ -411,6 +423,7 @@ __all__ = [
     "discover_history_files",
     "escape_bibtex",
     "escape_rich_text",
+    "execute_query_filter",
     "export_metadata",
     "extract_text_from_html",
     "extract_year",
@@ -430,6 +443,7 @@ __all__ = [
     "get_paper_url",
     "get_pdf_download_path",
     "get_pdf_url",
+    "get_query_tokens",
     "get_relevance_db_path",
     "get_summary_db_path",
     "get_tag_color",
@@ -450,6 +464,7 @@ __all__ = [
     "parse_tag_namespace",
     "pill_label_for_token",
     "reconstruct_query",
+    "remove_query_token",
     "render_paper_option",
     "render_progress_bar",
     "resolve_provider",
@@ -2173,26 +2188,17 @@ class ArxivBrowser(App):
         self._match_scores.clear()
         _HIGHLIGHT_PATTERN_CACHE.clear()
 
-        if not query:
-            self.filtered_papers = self.all_papers.copy()
-            self._highlight_terms = {"title": [], "author": [], "abstract": []}
-        else:
-            tokens = tokenize_query(query)
-            self._highlight_terms = build_highlight_terms(tokens)
-            if is_advanced_query(tokens):
-                tokens = insert_implicit_and(tokens)
-                rpn = to_rpn(tokens)
-                self.filtered_papers = [
-                    paper for paper in self.all_papers if self._matches_advanced_query(paper, rpn)
-                ]
-            else:
-                self.filtered_papers = self._fuzzy_search(query)
+        self.filtered_papers, self._highlight_terms = execute_query_filter(
+            query,
+            self.all_papers,
+            fuzzy_search=self._fuzzy_search,
+            advanced_match=self._matches_advanced_query,
+        )
 
         # Apply watch filter if active (intersects with other filters)
-        if self._watch_filter_active:
-            self.filtered_papers = [
-                p for p in self.filtered_papers if p.arxiv_id in self._watched_paper_ids
-            ]
+        self.filtered_papers = apply_watch_filter(
+            self.filtered_papers, self._watched_paper_ids, self._watch_filter_active
+        )
 
         # Apply current sort order and refresh the list view
         self._sort_papers()
@@ -2218,7 +2224,7 @@ class ArxivBrowser(App):
             except NoMatches:
                 pass
             return
-        tokens = tokenize_query(query) if query.strip() else []
+        tokens = get_query_tokens(query)
         try:
             pill_bar = self.query_one(FilterPillBar)
             self._track_task(pill_bar.update_pills(tokens, self._watch_filter_active))
@@ -2229,10 +2235,7 @@ class ArxivBrowser(App):
     def on_remove_filter(self, event: FilterPillBar.RemoveFilter) -> None:
         """Handle removal of a filter pill by reconstructing the query."""
         search_input = self.query_one("#search-input", Input)
-        current_query = search_input.value.strip()
-        tokens = tokenize_query(current_query) if current_query else []
-        new_query = reconstruct_query(tokens, event.token_index)
-        search_input.value = new_query
+        search_input.value = remove_query_token(search_input.value, event.token_index)
 
     @on(FilterPillBar.RemoveWatchFilter)
     def on_remove_watch_filter(self, event: FilterPillBar.RemoveWatchFilter) -> None:
@@ -4311,9 +4314,9 @@ class ArxivBrowser(App):
         papers = self._get_target_papers()
         if not papers:
             return
-        if len(papers) > BATCH_CONFIRM_THRESHOLD:
+        if requires_batch_confirmation(len(papers), BATCH_CONFIRM_THRESHOLD):
             self.push_screen(
-                ConfirmModal(f"Open {len(papers)} papers in browser?"),
+                ConfirmModal(build_open_papers_confirmation_prompt(len(papers))),
                 lambda confirmed: self._do_open_urls(papers) if confirmed else None,
             )
         else:
@@ -4324,16 +4327,16 @@ class ArxivBrowser(App):
         for paper in papers:
             self._safe_browser_open(get_paper_url(paper, prefer_pdf=self._config.prefer_pdf_url))
         count = len(papers)
-        self.notify(f"Opening {count} paper{'s' if count > 1 else ''}", title="Browser")
+        self.notify(build_open_papers_notification(count), title="Browser")
 
     def action_open_pdf(self) -> None:
         """Open selected papers' PDF URLs in the default browser."""
         papers = self._get_target_papers()
         if not papers:
             return
-        if len(papers) > BATCH_CONFIRM_THRESHOLD:
+        if requires_batch_confirmation(len(papers), BATCH_CONFIRM_THRESHOLD):
             self.push_screen(
-                ConfirmModal(f"Open {len(papers)} PDFs in browser?"),
+                ConfirmModal(build_open_pdfs_confirmation_prompt(len(papers))),
                 lambda confirmed: self._do_open_pdfs(papers) if confirmed else None,
             )
         else:
@@ -4349,7 +4352,7 @@ class ArxivBrowser(App):
             else:
                 self._safe_browser_open(url)
         count = len(papers)
-        self.notify(f"Opening {count} PDF{'s' if count > 1 else ''}", title="PDF")
+        self.notify(build_open_pdfs_notification(count), title="PDF")
 
     def _open_with_viewer(self, viewer_cmd: str, url_or_path: str) -> bool:
         """Open a URL/path with a configured external viewer command.
@@ -4393,9 +4396,9 @@ class ArxivBrowser(App):
             self.notify("All PDFs already downloaded", title="Download")
             return
 
-        if len(to_download) > BATCH_CONFIRM_THRESHOLD:
+        if requires_batch_confirmation(len(to_download), BATCH_CONFIRM_THRESHOLD):
             self.push_screen(
-                ConfirmModal(f"Download {len(to_download)} PDFs?"),
+                ConfirmModal(build_download_pdfs_confirmation_prompt(len(to_download))),
                 lambda confirmed: self._do_start_downloads(to_download) if confirmed else None,
             )
         else:
@@ -4413,10 +4416,7 @@ class ArxivBrowser(App):
         self._download_results.clear()
 
         # Notify and start downloads
-        self.notify(
-            f"Downloading {len(to_download)} PDF{'s' if len(to_download) != 1 else ''}...",
-            title="Download",
-        )
+        self.notify(build_download_start_notification(len(to_download)), title="Download")
         self._start_downloads()
 
     def _format_paper_for_clipboard(self, paper: Paper) -> str:

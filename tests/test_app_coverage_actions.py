@@ -154,6 +154,149 @@ class TestIoActionHelpers:
         assert get_clipboard_command_plan("Windows") == ([["clip"]], "utf-16")
         assert get_clipboard_command_plan("Plan9") is None
 
+    def test_batch_confirmation_and_notification_helpers(self):
+        from arxiv_browser.io_actions import (
+            build_download_pdfs_confirmation_prompt,
+            build_download_start_notification,
+            build_open_papers_confirmation_prompt,
+            build_open_papers_notification,
+            build_open_pdfs_confirmation_prompt,
+            build_open_pdfs_notification,
+            requires_batch_confirmation,
+        )
+
+        assert requires_batch_confirmation(4, 3) is True
+        assert requires_batch_confirmation(3, 3) is False
+        assert build_open_papers_confirmation_prompt(4) == "Open 4 papers in browser?"
+        assert build_open_pdfs_confirmation_prompt(5) == "Open 5 PDFs in browser?"
+        assert build_download_pdfs_confirmation_prompt(6) == "Download 6 PDFs?"
+        assert build_open_papers_notification(1) == "Opening 1 paper"
+        assert build_open_papers_notification(2) == "Opening 2 papers"
+        assert build_open_pdfs_notification(1) == "Opening 1 PDF"
+        assert build_open_pdfs_notification(2) == "Opening 2 PDFs"
+        assert build_download_start_notification(1) == "Downloading 1 PDF..."
+        assert build_download_start_notification(2) == "Downloading 2 PDFs..."
+
+
+class TestQueryFilterHelpers:
+    def test_get_query_tokens_trims_and_handles_empty(self):
+        from arxiv_browser.query import get_query_tokens
+
+        assert get_query_tokens("   ") == []
+        tokens = get_query_tokens("  cat:cs.AI transformer  ")
+        assert [token.value for token in tokens] == ["cs.AI", "transformer"]
+
+    def test_remove_query_token_rebuilds_query_text(self):
+        from arxiv_browser.query import remove_query_token
+
+        assert remove_query_token("cat:cs.AI AND transformer", 0) == "transformer"
+        assert remove_query_token("cat:cs.AI AND transformer", 2) == "cat:cs.AI"
+
+    def test_execute_query_filter_returns_copy_for_empty_query(self, make_paper):
+        from arxiv_browser.query import execute_query_filter
+
+        papers = [make_paper(arxiv_id="2401.00001"), make_paper(arxiv_id="2401.00002")]
+        fuzzy_search = MagicMock(return_value=[])
+        advanced_match = MagicMock(return_value=False)
+
+        filtered, highlight_terms = execute_query_filter(
+            "   ",
+            papers,
+            fuzzy_search=fuzzy_search,
+            advanced_match=advanced_match,
+        )
+
+        assert [paper.arxiv_id for paper in filtered] == ["2401.00001", "2401.00002"]
+        assert filtered is not papers
+        assert highlight_terms == {"title": [], "author": [], "abstract": []}
+        fuzzy_search.assert_not_called()
+        advanced_match.assert_not_called()
+
+    def test_execute_query_filter_uses_fuzzy_for_basic_query(self, make_paper):
+        from arxiv_browser.query import execute_query_filter
+
+        papers = [make_paper(arxiv_id="2401.00001"), make_paper(arxiv_id="2401.00002")]
+        fuzzy_result = [papers[1]]
+        fuzzy_search = MagicMock(return_value=fuzzy_result)
+        advanced_match = MagicMock(return_value=False)
+
+        filtered, highlight_terms = execute_query_filter(
+            " transformer ",
+            papers,
+            fuzzy_search=fuzzy_search,
+            advanced_match=advanced_match,
+        )
+
+        assert filtered == fuzzy_result
+        assert highlight_terms["title"] == ["transformer"]
+        assert highlight_terms["author"] == ["transformer"]
+        fuzzy_search.assert_called_once_with("transformer")
+        advanced_match.assert_not_called()
+
+    def test_execute_query_filter_uses_advanced_path(self, make_paper):
+        from arxiv_browser.query import execute_query_filter
+
+        papers = [make_paper(arxiv_id="2401.00001"), make_paper(arxiv_id="2401.00002")]
+        fuzzy_search = MagicMock(return_value=[])
+        seen_rpn: list[list[str]] = []
+
+        def advanced_match(paper, rpn):
+            seen_rpn.append([token.value for token in rpn])
+            return paper.arxiv_id == "2401.00001"
+
+        filtered, highlight_terms = execute_query_filter(
+            "cat:cs.AI AND transformer",
+            papers,
+            fuzzy_search=fuzzy_search,
+            advanced_match=advanced_match,
+        )
+
+        assert [paper.arxiv_id for paper in filtered] == ["2401.00001"]
+        assert highlight_terms["title"] == ["transformer"]
+        assert highlight_terms["author"] == ["transformer"]
+        assert len(seen_rpn) == 2
+        assert seen_rpn[0] == ["cs.AI", "transformer", "AND"]
+        fuzzy_search.assert_not_called()
+
+    def test_apply_watch_filter_respects_toggle(self, make_paper):
+        from arxiv_browser.query import apply_watch_filter
+
+        papers = [make_paper(arxiv_id="2401.00001"), make_paper(arxiv_id="2401.00002")]
+        watched = {"2401.00002"}
+
+        assert apply_watch_filter(papers, watched, False) is papers
+        assert [paper.arxiv_id for paper in apply_watch_filter(papers, watched, True)] == [
+            "2401.00002"
+        ]
+
+    def test_update_filter_pills_uses_query_token_helper(self):
+        app = _new_app()
+        app._in_arxiv_api_mode = False
+        app._watch_filter_active = True
+        app._track_task = MagicMock()
+        pill_bar = MagicMock()
+        app.query_one = MagicMock(return_value=pill_bar)
+
+        with patch("arxiv_browser.app.get_query_tokens", return_value=[]) as get_tokens:
+            app._update_filter_pills("  cat:cs.AI  ")
+
+        get_tokens.assert_called_once_with("  cat:cs.AI  ")
+        pill_bar.update_pills.assert_called_once_with([], True)
+        app._track_task.assert_called_once_with(pill_bar.update_pills.return_value)
+
+    def test_on_remove_filter_uses_remove_query_token_helper(self):
+        app = _new_app()
+        search_input = SimpleNamespace(value="cat:cs.AI transformer")
+        app.query_one = MagicMock(return_value=search_input)
+
+        with patch(
+            "arxiv_browser.app.remove_query_token", return_value="transformer"
+        ) as remove_token:
+            app.on_remove_filter(SimpleNamespace(token_index=0))
+
+        remove_token.assert_called_once_with("cat:cs.AI transformer", 0)
+        assert search_input.value == "transformer"
+
 
 class TestRelevanceBatchCoverage:
     @pytest.mark.asyncio
