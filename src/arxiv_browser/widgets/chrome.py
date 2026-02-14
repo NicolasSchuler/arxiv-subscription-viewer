@@ -254,6 +254,98 @@ class DateNavigator(Horizontal):
             self._paper_counts[path] = count_papers_in_file(path)
         return self._paper_counts[path]
 
+    def _prune_count_cache(self, active_paths: set[Path]) -> None:
+        """Drop cached counts for history files no longer present."""
+        self._paper_counts = {
+            path: count for path, count in self._paper_counts.items() if path in active_paths
+        }
+
+    async def _clear_date_items(self) -> None:
+        """Remove only date labels, leaving navigation arrows intact."""
+        for child in self._get_existing_date_items():
+            await child.remove()
+
+    def _compute_window(self, total: int, current_index: int) -> tuple[int, int]:
+        """Compute a centered sliding window clamped to history bounds."""
+        half = DATE_NAV_WINDOW_SIZE // 2
+        start = max(0, current_index - half)
+        end = min(total, start + DATE_NAV_WINDOW_SIZE)
+        if end - start < DATE_NAV_WINDOW_SIZE:
+            start = max(0, end - DATE_NAV_WINDOW_SIZE)
+        return (start, end)
+
+    def _build_desired_items(
+        self,
+        history_files: list[tuple[date, Path]],
+        current_index: int,
+        start: int,
+        end: int,
+    ) -> list[tuple[str, str, bool]]:
+        """Build desired date labels for the visible window."""
+        desired: list[tuple[str, str, bool]] = []
+        for i in range(start, end):
+            d, _ = history_files[i]
+            count = self._get_paper_count(i)
+            label_text = f"{d.strftime('%b %d')}({count})"
+            desired.append((f"date-nav-{i}", label_text, i == current_index))
+        return desired
+
+    def _get_existing_date_items(self) -> list[Label]:
+        """Return currently mounted date label widgets."""
+        return [
+            child
+            for child in self.children
+            if isinstance(child, Label) and "date-nav-item" in child.classes
+        ]
+
+    def _can_patch_in_place(
+        self,
+        existing_items: list[Label],
+        desired: list[tuple[str, str, bool]],
+    ) -> bool:
+        """Return True when existing and desired IDs match in order."""
+        existing_order = [child.id for child in existing_items if child.id is not None]
+        desired_order = [item_id for item_id, _, _ in desired]
+        return existing_order == desired_order
+
+    @staticmethod
+    def _render_label_text(label_text: str, is_current: bool) -> str:
+        """Render one date label, highlighting the currently selected date."""
+        return f"[{label_text}]" if is_current else label_text
+
+    def _patch_items_in_place(
+        self,
+        existing_items: list[Label],
+        desired: list[tuple[str, str, bool]],
+    ) -> None:
+        """Patch existing date labels without unmount/remount churn."""
+        existing_by_id = {child.id: child for child in existing_items}
+        for item_id, label_text, is_current in desired:
+            child = existing_by_id.get(item_id)
+            if child is None:
+                continue
+            child.update(self._render_label_text(label_text, is_current))
+            if is_current:
+                child.add_class("current")
+            else:
+                child.remove_class("current")
+
+    async def _rebuild_items(
+        self,
+        existing_items: list[Label],
+        desired: list[tuple[str, str, bool]],
+    ) -> None:
+        """Rebuild date labels when the visible window changed."""
+        for child in existing_items:
+            await child.remove()
+        next_arrow = self.query_one("#date-nav-next")
+        for item_id, label_text, is_current in desired:
+            classes = "date-nav-item current" if is_current else "date-nav-item"
+            self.mount(
+                Label(self._render_label_text(label_text, is_current), classes=classes, id=item_id),
+                before=next_arrow,
+            )
+
     async def update_dates(
         self,
         history_files: list[tuple[date, Path]],
@@ -262,66 +354,23 @@ class DateNavigator(Horizontal):
         """Update the displayed dates with a sliding window."""
         self._history_files = history_files
         self._current_index = current_index
-        active_paths = {path for _, path in history_files}
-        self._paper_counts = {
-            path: count for path, count in self._paper_counts.items() if path in active_paths
-        }
+        self._prune_count_cache({path for _, path in history_files})
 
         if len(history_files) <= 1:
             self.remove_class("visible")
-            for child in list(self.children):
-                if "date-nav-item" in child.classes:
-                    await child.remove()
+            await self._clear_date_items()
             return
 
         self.add_class("visible")
+        start, end = self._compute_window(len(history_files), current_index)
+        desired = self._build_desired_items(history_files, current_index, start, end)
+        existing_items = self._get_existing_date_items()
 
-        # Compute sliding window centered on current
-        total = len(history_files)
-        half = DATE_NAV_WINDOW_SIZE // 2
-        start = max(0, current_index - half)
-        end = min(total, start + DATE_NAV_WINDOW_SIZE)
-        if end - start < DATE_NAV_WINDOW_SIZE:
-            start = max(0, end - DATE_NAV_WINDOW_SIZE)
-
-        desired: list[tuple[str, str, bool]] = []
-        for i in range(start, end):
-            d, _ = history_files[i]
-            count = self._get_paper_count(i)
-            label_text = f"{d.strftime('%b %d')}({count})"
-            desired.append((f"date-nav-{i}", label_text, i == current_index))
-
-        existing_items = [
-            child
-            for child in self.children
-            if isinstance(child, Label) and "date-nav-item" in child.classes
-        ]
-        existing_order = [child.id for child in existing_items if child.id is not None]
-        desired_order = [item_id for item_id, _, _ in desired]
-
-        # Fast path: patch in place when visible IDs are unchanged.
-        if existing_order == desired_order:
-            existing_by_id = {child.id: child for child in existing_items}
-            for item_id, label_text, is_current in desired:
-                child = existing_by_id.get(item_id)
-                if child is None:
-                    continue
-                render_text = f"[{label_text}]" if is_current else label_text
-                child.update(render_text)
-                if is_current:
-                    child.add_class("current")
-                else:
-                    child.remove_class("current")
+        if self._can_patch_in_place(existing_items, desired):
+            self._patch_items_in_place(existing_items, desired)
             return
 
-        # Fallback: rebuild labels when the window changed.
-        for child in existing_items:
-            await child.remove()
-        next_arrow = self.query_one("#date-nav-next")
-        for item_id, label_text, is_current in desired:
-            render_text = f"[{label_text}]" if is_current else label_text
-            classes = "date-nav-item current" if is_current else "date-nav-item"
-            self.mount(Label(render_text, classes=classes, id=item_id), before=next_arrow)
+        await self._rebuild_items(existing_items, desired)
 
     def on_click(self, event: object) -> None:
         """Handle clicks on arrows and date labels."""

@@ -7121,6 +7121,66 @@ class TestDateNavigator:
                 ]
                 assert len(date_item_ids) == len(set(date_item_ids))
 
+    @pytest.mark.asyncio
+    async def test_update_dates_hides_and_clears_items_for_short_history(
+        self, tmp_path, make_paper
+    ):
+        from datetime import date as dt_date
+        from unittest.mock import patch
+
+        from arxiv_browser.app import ArxivBrowser, DateNavigator
+
+        f1 = tmp_path / "2026-01-01.txt"
+        f2 = tmp_path / "2026-01-02.txt"
+        f1.write_text("arXiv:2401.00001\n", encoding="utf-8")
+        f2.write_text("arXiv:2401.00002\n", encoding="utf-8")
+
+        history = [
+            (dt_date(2026, 1, 2), f2),
+            (dt_date(2026, 1, 1), f1),
+        ]
+
+        app = ArxivBrowser(
+            [make_paper(arxiv_id="2401.00002", title="Paper for 2026-01-02")],
+            restore_session=False,
+            history_files=history,
+            current_date_index=0,
+        )
+
+        with patch("arxiv_browser.app.save_config", return_value=True):
+            async with app.run_test():
+                nav = app.query_one(DateNavigator)
+
+                await nav.update_dates(history, 0)
+                assert "visible" in nav.classes
+                assert any("date-nav-item" in child.classes for child in nav.children)
+
+                await nav.update_dates([history[0]], 0)
+                assert "visible" not in nav.classes
+                assert not any("date-nav-item" in child.classes for child in nav.children)
+
+                await nav.update_dates([], 0)
+                assert "visible" not in nav.classes
+                assert not any("date-nav-item" in child.classes for child in nav.children)
+
+    @pytest.mark.asyncio
+    async def test_update_dates_prunes_stale_count_cache(self, tmp_path):
+        from datetime import date as dt_date
+
+        from arxiv_browser.app import DateNavigator
+
+        keep = tmp_path / "2026-01-01.txt"
+        stale = tmp_path / "2026-01-02.txt"
+        keep.write_text("arXiv:2401.00001\n", encoding="utf-8")
+        stale.write_text("arXiv:2401.00002\narXiv:2401.00003\n", encoding="utf-8")
+
+        nav = DateNavigator([(dt_date(2026, 1, 2), stale), (dt_date(2026, 1, 1), keep)])
+        nav._paper_counts = {keep: 1, stale: 2}
+
+        await nav.update_dates([(dt_date(2026, 1, 1), keep)], 0)
+
+        assert nav._paper_counts == {keep: 1}
+
 
 class TestThemeSwitcher:
     """Tests for U7: Color theme switcher."""
