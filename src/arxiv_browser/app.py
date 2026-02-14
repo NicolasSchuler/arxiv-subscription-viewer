@@ -57,7 +57,6 @@ import logging
 import logging.handlers
 import os
 import platform
-import shlex
 import subprocess
 import sys
 import webbrowser
@@ -133,8 +132,11 @@ from arxiv_browser.huggingface import (
     save_hf_daily_cache,
 )
 from arxiv_browser.io_actions import (
+    build_clipboard_payload,
     build_markdown_export_document,
+    build_viewer_args,
     filter_papers_needing_download,
+    get_clipboard_command_plan,
     resolve_target_papers,
     write_timestamped_export_file,
 )
@@ -4356,15 +4358,7 @@ class ArxivBrowser(App):
         If no placeholder is found, the URL is appended as an argument.
         """
         try:
-            args = shlex.split(viewer_cmd)
-            if not args:
-                raise ValueError("Viewer command is empty")
-            if "{url}" in viewer_cmd or "{path}" in viewer_cmd:
-                args = [
-                    arg.replace("{url}", url_or_path).replace("{path}", url_or_path) for arg in args
-                ]
-            else:
-                args.append(url_or_path)
+            args = build_viewer_args(viewer_cmd, url_or_path)
             # User-configured local viewer command execution is an explicit feature.
             subprocess.Popen(  # nosec B603
                 args,
@@ -4438,43 +4432,25 @@ class ArxivBrowser(App):
         """
         try:
             system = platform.system()
-            if system == "Darwin":  # macOS
-                subprocess.run(  # nosec B603 B607
-                    ["pbcopy"],
-                    input=text.encode("utf-8"),
-                    check=True,
-                    shell=False,
-                    timeout=SUBPROCESS_TIMEOUT,
-                )
-            elif system == "Linux":
-                # Try xclip first, then xsel
-                try:
-                    subprocess.run(  # nosec B603 B607
-                        ["xclip", "-selection", "clipboard"],
-                        input=text.encode("utf-8"),
-                        check=True,
-                        shell=False,
-                        timeout=SUBPROCESS_TIMEOUT,
-                    )
-                except (FileNotFoundError, subprocess.CalledProcessError):
-                    subprocess.run(  # nosec B603 B607
-                        ["xsel", "--clipboard", "--input"],
-                        input=text.encode("utf-8"),
-                        check=True,
-                        shell=False,
-                        timeout=SUBPROCESS_TIMEOUT,
-                    )
-            elif system == "Windows":
-                subprocess.run(  # nosec B603 B607
-                    ["clip"],
-                    input=text.encode("utf-16"),
-                    check=True,
-                    shell=False,
-                    timeout=SUBPROCESS_TIMEOUT,
-                )
-            else:
+            plan = get_clipboard_command_plan(system)
+            if plan is None:
                 logger.debug("Clipboard copy failed: unsupported platform %s", system)
                 return False
+            commands, encoding = plan
+            payload = text.encode(encoding)
+            for index, command in enumerate(commands):
+                try:
+                    subprocess.run(  # nosec B603 B607
+                        command,
+                        input=payload,
+                        check=True,
+                        shell=False,
+                        timeout=SUBPROCESS_TIMEOUT,
+                    )
+                    break
+                except (FileNotFoundError, subprocess.CalledProcessError):
+                    if index == len(commands) - 1:
+                        raise
             return True
         except (
             subprocess.CalledProcessError,
@@ -4492,9 +4468,10 @@ class ArxivBrowser(App):
             self.notify("No papers to copy", title="Copy", severity="warning")
             return
 
-        # Format papers with separator between them
-        separator = f"\n\n{CLIPBOARD_SEPARATOR}\n\n"
-        formatted = separator.join(self._format_paper_for_clipboard(p) for p in papers_to_copy)
+        formatted = build_clipboard_payload(
+            [self._format_paper_for_clipboard(paper) for paper in papers_to_copy],
+            CLIPBOARD_SEPARATOR,
+        )
 
         # Copy to clipboard
         if self._copy_to_clipboard(formatted):

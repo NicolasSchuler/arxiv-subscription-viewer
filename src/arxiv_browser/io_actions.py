@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
@@ -61,6 +62,33 @@ def build_markdown_export_document(formatted_papers: Sequence[str]) -> str:
     return "\n".join(lines)
 
 
+def build_viewer_args(viewer_cmd: str, url_or_path: str) -> list[str]:
+    """Build subprocess argument list for a configured external viewer command."""
+    args = shlex.split(viewer_cmd)
+    if not args:
+        raise ValueError("Viewer command is empty")
+    if "{url}" in viewer_cmd or "{path}" in viewer_cmd:
+        return [arg.replace("{url}", url_or_path).replace("{path}", url_or_path) for arg in args]
+    return [*args, url_or_path]
+
+
+def build_clipboard_payload(entries: Sequence[str], separator_line: str) -> str:
+    """Join clipboard entries with a standard visual separator line."""
+    separator = f"\n\n{separator_line}\n\n"
+    return separator.join(entries)
+
+
+def get_clipboard_command_plan(system: str) -> tuple[list[list[str]], str] | None:
+    """Return clipboard command candidates and input encoding for a platform."""
+    if system == "Darwin":
+        return ([["pbcopy"]], "utf-8")
+    if system == "Linux":
+        return ([["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]], "utf-8")
+    if system == "Windows":
+        return ([["clip"]], "utf-16")
+    return None
+
+
 def write_timestamped_export_file(
     *,
     content: str,
@@ -93,8 +121,11 @@ def write_timestamped_export_file(
 
 
 __all__ = [
+    "build_clipboard_payload",
     "build_markdown_export_document",
+    "build_viewer_args",
     "filter_papers_needing_download",
+    "get_clipboard_command_plan",
     "resolve_target_papers",
     "write_timestamped_export_file",
 ]

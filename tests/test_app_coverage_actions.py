@@ -117,6 +117,43 @@ class TestIoActionHelpers:
         assert out.read_text(encoding="utf-8") == "hello"
         assert list(export_dir.glob(".txt-*.tmp")) == []
 
+    def test_build_viewer_args_supports_placeholders_and_appending(self):
+        from arxiv_browser.io_actions import build_viewer_args
+
+        assert build_viewer_args("open -a Skim {path}", "/tmp/paper.pdf") == [
+            "open",
+            "-a",
+            "Skim",
+            "/tmp/paper.pdf",
+        ]
+        assert build_viewer_args("zathura", "https://arxiv.org/pdf/1") == [
+            "zathura",
+            "https://arxiv.org/pdf/1",
+        ]
+
+    def test_build_viewer_args_rejects_empty_command(self):
+        from arxiv_browser.io_actions import build_viewer_args
+
+        with pytest.raises(ValueError, match="empty"):
+            build_viewer_args("   ", "https://arxiv.org/pdf/1")
+
+    def test_build_clipboard_payload_uses_separator_line(self):
+        from arxiv_browser.io_actions import build_clipboard_payload
+
+        payload = build_clipboard_payload(["A", "B"], "====")
+        assert payload == "A\n\n====\n\nB"
+
+    def test_get_clipboard_command_plan_variants(self):
+        from arxiv_browser.io_actions import get_clipboard_command_plan
+
+        assert get_clipboard_command_plan("Darwin") == ([["pbcopy"]], "utf-8")
+        assert get_clipboard_command_plan("Linux") == (
+            [["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]],
+            "utf-8",
+        )
+        assert get_clipboard_command_plan("Windows") == ([["clip"]], "utf-16")
+        assert get_clipboard_command_plan("Plan9") is None
+
 
 class TestRelevanceBatchCoverage:
     @pytest.mark.asyncio
