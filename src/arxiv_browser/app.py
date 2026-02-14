@@ -59,6 +59,7 @@ import os
 import platform
 import subprocess
 import sys
+import time
 import webbrowser
 from collections import deque
 from collections.abc import Callable
@@ -85,6 +86,15 @@ from textual.widgets import (
 from textual.widgets.option_list import Option, OptionDoesNotExist
 
 from arxiv_browser import widgets as _widgets
+from arxiv_browser.action_messages import (
+    build_download_pdfs_confirmation_prompt,
+    build_download_start_notification,
+    build_open_papers_confirmation_prompt,
+    build_open_papers_notification,
+    build_open_pdfs_confirmation_prompt,
+    build_open_pdfs_notification,
+    requires_batch_confirmation,
+)
 from arxiv_browser.config import *  # noqa: F403
 from arxiv_browser.config import (  # noqa: F401
     CONFIG_APP_NAME,
@@ -133,17 +143,10 @@ from arxiv_browser.huggingface import (
 )
 from arxiv_browser.io_actions import (
     build_clipboard_payload,
-    build_download_pdfs_confirmation_prompt,
-    build_download_start_notification,
     build_markdown_export_document,
-    build_open_papers_confirmation_prompt,
-    build_open_papers_notification,
-    build_open_pdfs_confirmation_prompt,
-    build_open_pdfs_notification,
     build_viewer_args,
     filter_papers_needing_download,
     get_clipboard_command_plan,
-    requires_batch_confirmation,
     resolve_target_papers,
     write_timestamped_export_file,
 )
@@ -321,6 +324,7 @@ from arxiv_browser.themes import (
     get_tag_color,
     parse_tag_namespace,
 )
+from arxiv_browser.ui_runtime import UiRefreshCoordinator, UiRefs
 from arxiv_browser.widgets import chrome as _widget_chrome
 from arxiv_browser.widgets import details as _widget_details
 
@@ -410,7 +414,6 @@ __all__ = [
     "UserConfig",
     "WatchListEntry",
     "_configure_logging",
-    "apply_watch_filter",
     "build_arxiv_search_query",
     "build_auto_tag_prompt",
     "build_daily_digest",
@@ -423,7 +426,6 @@ __all__ = [
     "discover_history_files",
     "escape_bibtex",
     "escape_rich_text",
-    "execute_query_filter",
     "export_metadata",
     "extract_text_from_html",
     "extract_year",
@@ -443,7 +445,6 @@ __all__ = [
     "get_paper_url",
     "get_pdf_download_path",
     "get_pdf_url",
-    "get_query_tokens",
     "get_relevance_db_path",
     "get_summary_db_path",
     "get_tag_color",
@@ -464,7 +465,6 @@ __all__ = [
     "parse_tag_namespace",
     "pill_label_for_token",
     "reconstruct_query",
-    "remove_query_token",
     "render_paper_option",
     "render_progress_bar",
     "resolve_provider",
@@ -883,6 +883,7 @@ class ArxivBrowser(App):
         self._pending_query: str = ""
         self._detail_timer: Timer | None = None
         self._pending_detail_paper: Paper | None = None
+        self._pending_detail_started_at: float | None = None
         self._badges_dirty: set[str] = set()
         self._badge_timer: Timer | None = None
         self._sort_index: int = 0  # Index into SORT_OPTIONS
@@ -993,6 +994,17 @@ class ArxivBrowser(App):
         # TF-IDF index for similarity (lazy-built on first use)
         self._tfidf_index: TfidfIndex | None = None
 
+        # Internal UI boundaries (cached refs + refresh orchestration)
+        self._ui_refs = UiRefs()
+        self._ui_refresh = UiRefreshCoordinator(
+            refresh_list_view=self._refresh_list_view,
+            update_list_header=self._update_list_header,
+            update_status_bar=self._update_status_bar,
+            update_filter_pills=self._update_filter_pills,
+            refresh_detail_pane=self._refresh_detail_pane,
+            refresh_current_list_item=self._refresh_current_list_item,
+        )
+
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal(id="main-container"):
@@ -1050,14 +1062,14 @@ class ArxivBrowser(App):
 
             # Apply saved filter if any
             if session.current_filter:
-                search_input = self.query_one("#search-input", Input)
+                search_input = self._get_search_input_widget()
                 search_input.value = session.current_filter
                 self._apply_filter(session.current_filter)  # calls _refresh_list_view
             else:
                 self._refresh_list_view()  # populate without filter
 
             # Restore scroll position
-            option_list = self.query_one("#paper-list", OptionList)
+            option_list = self._get_paper_list_widget()
             if option_list.option_count > 0:
                 # Clamp index to valid range
                 index = min(session.scroll_index, option_list.option_count - 1)
@@ -1066,7 +1078,7 @@ class ArxivBrowser(App):
             # Populate list (deferred from compose for faster first paint)
             self._refresh_list_view()
             # Default: select first item if available
-            option_list = self.query_one("#paper-list", OptionList)
+            option_list = self._get_paper_list_widget()
             if option_list.option_count > 0:
                 option_list.highlighted = 0
         self._update_status_bar()
@@ -1081,8 +1093,13 @@ class ArxivBrowser(App):
             self._hf_active,
         )
 
+        self._prime_ui_refs()
+
         # Focus the paper list so key bindings work
-        self.query_one("#paper-list", OptionList).focus()
+        try:
+            self._get_paper_list_widget().focus()
+        except NoMatches:
+            pass
 
     async def on_unmount(self) -> None:
         """Called when app is unmounted. Saves session state and cleans up timers.
@@ -1106,6 +1123,18 @@ class ArxivBrowser(App):
         if badge_timer is not None:
             badge_timer.stop()
 
+        # Cancel tracked background tasks to avoid leaks during teardown.
+        background_tasks = getattr(self, "_background_tasks", set())
+        pending = [task for task in background_tasks if not task.done()]
+        for task in pending:
+            task.cancel()
+        if pending:
+            _, still_pending = await asyncio.wait(pending, timeout=0.5)
+            for task in still_pending:
+                logger.debug("Background task did not cancel before shutdown: %r", task)
+        if hasattr(self, "_background_tasks"):
+            self._background_tasks.clear()
+
         # Close shared HTTP client
         client = self._http_client
         self._http_client = None
@@ -1116,11 +1145,102 @@ class ArxivBrowser(App):
                 logger.debug(
                     "Failed to close shared HTTP client during shutdown: %s", e, exc_info=True
                 )
+        ui_refs = getattr(self, "_ui_refs", None)
+        if ui_refs is not None:
+            ui_refs.reset()
+
+    @staticmethod
+    def _is_live_widget(widget: Any) -> bool:
+        """Return True for mounted/attached widgets safe to reuse."""
+        return bool(widget is not None and getattr(widget, "is_attached", False))
+
+    def _get_cached_widget(self, ref_name: str, resolver: Callable[[], Any]) -> Any:
+        """Resolve and cache a widget reference by UiRefs attribute name."""
+        ui_refs = getattr(self, "_ui_refs", None)
+        if ui_refs is None:
+            return resolver()
+        widget = getattr(ui_refs, ref_name)
+        if self._is_live_widget(widget):
+            return widget
+        widget = resolver()
+        setattr(ui_refs, ref_name, widget)
+        return widget
+
+    def _get_search_input_widget(self) -> Input:
+        return self._get_cached_widget(
+            "search_input", lambda: self.query_one("#search-input", Input)
+        )
+
+    def _get_search_container_widget(self) -> Any:
+        return self._get_cached_widget(
+            "search_container", lambda: self.query_one("#search-container")
+        )
+
+    def _get_paper_list_widget(self) -> OptionList:
+        return self._get_cached_widget(
+            "paper_list", lambda: self.query_one("#paper-list", OptionList)
+        )
+
+    def _get_list_header_widget(self) -> Label:
+        return self._get_cached_widget("list_header", lambda: self.query_one("#list-header", Label))
+
+    def _get_status_bar_widget(self) -> Label:
+        return self._get_cached_widget("status_bar", lambda: self.query_one("#status-bar", Label))
+
+    def _get_footer_widget(self) -> ContextFooter:
+        return self._get_cached_widget("footer", lambda: self.query_one(ContextFooter))
+
+    def _get_date_navigator_widget(self) -> DateNavigator:
+        return self._get_cached_widget("date_navigator", lambda: self.query_one(DateNavigator))
+
+    def _get_filter_pill_bar_widget(self) -> FilterPillBar:
+        return self._get_cached_widget("filter_pill_bar", lambda: self.query_one(FilterPillBar))
+
+    def _get_bookmark_bar_widget(self) -> BookmarkTabBar:
+        return self._get_cached_widget("bookmark_bar", lambda: self.query_one(BookmarkTabBar))
+
+    def _get_paper_details_widget(self) -> PaperDetails:
+        return self._get_cached_widget("paper_details", lambda: self.query_one(PaperDetails))
+
+    def _prime_ui_refs(self) -> None:
+        """Warm caches for frequently queried widgets once the DOM is mounted."""
+        for ref_name, getter in (
+            ("search_input", self._get_search_input_widget),
+            ("search_container", self._get_search_container_widget),
+            ("paper_list", self._get_paper_list_widget),
+            ("list_header", self._get_list_header_widget),
+            ("status_bar", self._get_status_bar_widget),
+            ("footer", self._get_footer_widget),
+            ("date_navigator", self._get_date_navigator_widget),
+            ("filter_pill_bar", self._get_filter_pill_bar_widget),
+            ("bookmark_bar", self._get_bookmark_bar_widget),
+            ("paper_details", self._get_paper_details_widget),
+        ):
+            try:
+                getattr(self._ui_refs, ref_name)
+                getter()
+            except NoMatches:
+                continue
+
+    def _get_ui_refresh_coordinator(self) -> UiRefreshCoordinator:
+        """Return the UI refresh coordinator, lazily creating it for __new__ tests."""
+        coordinator = getattr(self, "_ui_refresh", None)
+        if coordinator is None:
+            coordinator = UiRefreshCoordinator(
+                refresh_list_view=self._refresh_list_view,
+                update_list_header=self._update_list_header,
+                update_status_bar=self._update_status_bar,
+                update_filter_pills=self._update_filter_pills,
+                refresh_detail_pane=self._refresh_detail_pane,
+                refresh_current_list_item=self._refresh_current_list_item,
+            )
+            self._ui_refresh = coordinator
+        return coordinator
 
     def _refresh_date_navigator(self) -> None:
         """Refresh date navigator labels after DOM updates settle."""
         try:
-            date_nav = self.query_one(DateNavigator)
+            date_nav = self._get_date_navigator_widget()
         except NoMatches:
             return
         self._track_task(date_nav.update_dates(self._history_files, self._current_date_index))
@@ -1273,7 +1393,7 @@ class ArxivBrowser(App):
 
     def _update_abstract_display(self, arxiv_id: str) -> None:
         try:
-            details = self.query_one(PaperDetails)
+            details = self._get_paper_details_widget()
             if details.paper and details.paper.arxiv_id == arxiv_id:
                 abstract_text = self._abstract_cache.get(arxiv_id, "")
                 details.update_paper(details.paper, abstract_text, **self._detail_kwargs(arxiv_id))
@@ -1314,8 +1434,8 @@ class ArxivBrowser(App):
             return
 
         try:
-            list_view = self.query_one("#paper-list", OptionList)
-            search_input = self.query_one("#search-input", Input)
+            list_view = self._get_paper_list_widget()
+            search_input = self._get_search_input_widget()
 
             self._config.session = SessionState(
                 scroll_index=list_view.highlighted if list_view.highlighted is not None else 0,
@@ -1349,7 +1469,7 @@ class ArxivBrowser(App):
         idx = event.option_index
         if idx is not None and 0 <= idx < len(self.filtered_papers):
             paper = self.filtered_papers[idx]
-            details = self.query_one(PaperDetails)
+            details = self._get_paper_details_widget()
             aid = paper.arxiv_id
             abstract_text = self._get_abstract_text(paper, allow_async=True)
             details.update_paper(paper, abstract_text, **self._detail_kwargs(aid))
@@ -1360,6 +1480,9 @@ class ArxivBrowser(App):
         idx = event.option_index
         if idx is not None and 0 <= idx < len(self.filtered_papers):
             self._pending_detail_paper = self.filtered_papers[idx]
+            self._pending_detail_started_at = (
+                time.perf_counter() if logger.isEnabledFor(logging.DEBUG) else None
+            )
             # Atomic swap pattern (same as search debounce)
             old_timer = self._detail_timer
             self._detail_timer = None
@@ -1375,18 +1498,26 @@ class ArxivBrowser(App):
         self._detail_timer = None
         paper = self._pending_detail_paper
         self._pending_detail_paper = None
+        started_at = self._pending_detail_started_at
+        self._pending_detail_started_at = None
         if paper is None:
             return
         current = self._get_current_paper()
         if current is None or current.arxiv_id != paper.arxiv_id:
             return
         try:
-            details = self.query_one(PaperDetails)
+            details = self._get_paper_details_widget()
         except NoMatches:
             return  # Widget tree torn down during shutdown
         aid = current.arxiv_id
         abstract_text = self._get_abstract_text(current, allow_async=True)
         details.update_paper(current, abstract_text, **self._detail_kwargs(aid))
+        if started_at is not None:
+            logger.debug(
+                "Selection->detail latency: %.2fms (paper=%s)",
+                (time.perf_counter() - started_at) * 1000.0,
+                aid,
+            )
 
     def _cancel_pending_detail_update(self) -> None:
         """Cancel any pending debounced detail-pane update."""
@@ -1395,23 +1526,24 @@ class ArxivBrowser(App):
         if timer is not None:
             timer.stop()
         self._pending_detail_paper = None
+        self._pending_detail_started_at = None
 
     def action_toggle_search(self) -> None:
         """Toggle search input visibility."""
-        container = self.query_one("#search-container")
+        container = self._get_search_container_widget()
         if "visible" in container.classes:
             container.remove_class("visible")
         else:
             container.add_class("visible")
-            self.query_one("#search-input", Input).focus()
+            self._get_search_input_widget().focus()
         self._update_footer()
 
     def action_cancel_search(self) -> None:
         """Cancel search and hide input."""
-        container = self.query_one("#search-container")
+        container = self._get_search_container_widget()
         if "visible" in container.classes:
             container.remove_class("visible")
-            search_input = self.query_one("#search-input", Input)
+            search_input = self._get_search_input_widget()
             search_input.value = ""
             self._apply_filter("")
         if self._in_arxiv_api_mode:
@@ -1420,8 +1552,8 @@ class ArxivBrowser(App):
     def _capture_local_browse_snapshot(self) -> LocalBrowseSnapshot | None:
         """Capture local browsing state before entering API search mode."""
         try:
-            list_view = self.query_one("#paper-list", OptionList)
-            search_input = self.query_one("#search-input", Input)
+            list_view = self._get_paper_list_widget()
+            search_input = self._get_search_input_widget()
         except NoMatches:
             return None
 
@@ -1463,14 +1595,14 @@ class ArxivBrowser(App):
         self._compute_watched_papers()
 
         try:
-            self.query_one("#search-input", Input).value = snapshot.search_query
+            self._get_search_input_widget().value = snapshot.search_query
         except NoMatches:
             pass
 
         self._apply_filter(snapshot.search_query)
 
         try:
-            option_list = self.query_one("#paper-list", OptionList)
+            option_list = self._get_paper_list_widget()
             if option_list.option_count > 0:
                 max_index = max(0, option_list.option_count - 1)
                 option_list.highlighted = min(max(0, snapshot.list_index), max_index)
@@ -1505,7 +1637,7 @@ class ArxivBrowser(App):
         state = "enabled" if self._s2_active else "disabled"
         self.notify(f"Semantic Scholar {state}", title="S2")
         self._update_status_bar()
-        self._refresh_detail_pane()
+        self._get_ui_refresh_coordinator().refresh_detail_pane()
         self._mark_badges_dirty("s2", immediate=True)
 
     async def action_fetch_s2(self) -> None:
@@ -1523,7 +1655,7 @@ class ArxivBrowser(App):
             self.notify("S2 data already loaded", title="S2")
             return
         self._s2_loading.add(aid)
-        self._refresh_detail_pane()  # Show loading indicator immediately
+        self._get_ui_refresh_coordinator().refresh_detail_pane()  # Show loading indicator immediately
         # Try SQLite cache first (off main thread)
         try:
             cached = await asyncio.to_thread(
@@ -1537,8 +1669,7 @@ class ArxivBrowser(App):
         if cached:
             self._s2_cache[aid] = cached
             self._s2_loading.discard(aid)
-            self._refresh_detail_pane()
-            self._refresh_current_list_item()
+            self._get_ui_refresh_coordinator().refresh_detail_and_list_item()
             return
         # Fetch from API
         try:
@@ -1561,8 +1692,7 @@ class ArxivBrowser(App):
             self._s2_cache[arxiv_id] = result
             await asyncio.to_thread(save_s2_paper, self._s2_db_path, result)
             # Update UI if still relevant
-            self._refresh_detail_pane()
-            self._refresh_current_list_item()
+            self._get_ui_refresh_coordinator().refresh_detail_and_list_item()
         except Exception:
             logger.warning("S2 fetch failed for %s", arxiv_id, exc_info=True)
             self.notify("S2 fetch failed", title="S2", severity="error")
@@ -1600,7 +1730,7 @@ class ArxivBrowser(App):
         else:
             self.notify("HuggingFace trending disabled", title="HF")
         self._update_status_bar()
-        self._refresh_detail_pane()
+        self._get_ui_refresh_coordinator().refresh_detail_pane()
         self._mark_badges_dirty("hf", immediate=True)
 
     async def _fetch_hf_daily(self) -> None:
@@ -1623,7 +1753,7 @@ class ArxivBrowser(App):
         if cached is not None:
             self._hf_cache = cached
             self._hf_loading = False
-            self._refresh_detail_pane()
+            self._get_ui_refresh_coordinator().refresh_detail_pane()
             self._mark_badges_dirty("hf")
             matched = count_hf_matches(self._hf_cache, self._papers_by_id)
             self.notify(f"HF: {matched} trending papers matched", title="HF")
@@ -1649,7 +1779,7 @@ class ArxivBrowser(App):
                 return
             self._hf_cache = {p.arxiv_id: p for p in papers}
             await asyncio.to_thread(save_hf_daily_cache, self._hf_db_path, papers)
-            self._refresh_detail_pane()
+            self._get_ui_refresh_coordinator().refresh_detail_pane()
             self._mark_badges_dirty("hf")
             matched = count_hf_matches(self._hf_cache, self._papers_by_id)
             self.notify(f"HF: {matched} trending papers matched", title="HF")
@@ -1690,15 +1820,61 @@ class ArxivBrowser(App):
             old.stop()
         self._badge_timer = self.set_timer(BADGE_COALESCE_DELAY, self._flush_badge_refresh)
 
+    def _badge_refresh_indices(self, dirty: set[str]) -> list[int]:
+        """Return visible list indices requiring badge redraw for dirty badge types."""
+        if not self.filtered_papers:
+            return []
+
+        refresh_all = False
+        dirty_ids: set[str] = set()
+
+        if "s2" in dirty:
+            if self._s2_active:
+                dirty_ids.update(self._s2_cache.keys())
+            else:
+                refresh_all = True
+
+        if "hf" in dirty:
+            if self._hf_active:
+                dirty_ids.update(self._hf_cache.keys())
+            else:
+                refresh_all = True
+
+        if "version" in dirty:
+            dirty_ids.update(self._version_updates.keys())
+
+        # Unknown badge type, or explicit full redraw request: fall back to full repaint.
+        if not dirty or refresh_all or any(kind not in {"s2", "hf", "version"} for kind in dirty):
+            return list(range(len(self.filtered_papers)))
+
+        if not dirty_ids:
+            return list(range(len(self.filtered_papers)))
+
+        visible_index_by_id = {
+            paper.arxiv_id: idx for idx, paper in enumerate(self.filtered_papers)
+        }
+        return sorted(
+            visible_index_by_id[paper_id]
+            for paper_id in dirty_ids
+            if paper_id in visible_index_by_id
+        )
+
     def _flush_badge_refresh(self) -> None:
-        """Single-pass badge refresh for all visible papers."""
+        """Coalesced badge refresh for only affected visible papers."""
         self._badge_timer = None
         dirty = self._badges_dirty.copy()
         self._badges_dirty.clear()
         if not dirty:
             return
-        for i in range(len(self.filtered_papers)):
+        indices = self._badge_refresh_indices(dirty)
+        for i in indices:
             self._update_option_at_index(i)
+        logger.debug(
+            "Badge refresh: dirty=%s updated=%d/%d",
+            sorted(dirty),
+            len(indices),
+            len(self.filtered_papers),
+        )
 
     # ========================================================================
     # Version tracking
@@ -1777,7 +1953,7 @@ class ArxivBrowser(App):
 
             # Refresh UI
             self._mark_badges_dirty("version")
-            self._refresh_detail_pane()
+            self._get_ui_refresh_coordinator().refresh_detail_pane()
 
             if updates_found > 0:
                 self.notify(
@@ -1804,7 +1980,7 @@ class ArxivBrowser(App):
         if not paper:
             return
         try:
-            details = self.query_one(PaperDetails)
+            details = self._get_paper_details_widget()
         except NoMatches:
             return
         aid = paper.arxiv_id
@@ -1948,7 +2124,7 @@ class ArxivBrowser(App):
         self._highlight_terms = {"title": [], "author": [], "abstract": []}
         self._match_scores.clear()
         try:
-            self.query_one("#search-input", Input).value = ""
+            self._get_search_input_widget().value = ""
         except NoMatches:
             pass
 
@@ -1965,7 +2141,7 @@ class ArxivBrowser(App):
         self.sub_title = f"API search · {truncate_text(query_label, 60)}"
 
         try:
-            self.query_one("#paper-list", OptionList).focus()
+            self._get_paper_list_widget().focus()
         except NoMatches:
             pass
 
@@ -2042,12 +2218,12 @@ class ArxivBrowser(App):
 
     def action_cursor_down(self) -> None:
         """Move cursor down (vim-style j key)."""
-        list_view = self.query_one("#paper-list", OptionList)
+        list_view = self._get_paper_list_widget()
         list_view.action_cursor_down()
 
     def action_cursor_up(self) -> None:
         """Move cursor up (vim-style k key)."""
-        list_view = self.query_one("#paper-list", OptionList)
+        list_view = self._get_paper_list_widget()
         list_view.action_cursor_up()
 
     @on(Input.Submitted, "#search-input")
@@ -2055,9 +2231,9 @@ class ArxivBrowser(App):
         """Handle search submission."""
         self._apply_filter(event.value)
         # Hide search after submission
-        self.query_one("#search-container").remove_class("visible")
+        self._get_search_container_widget().remove_class("visible")
         # Focus the list
-        self.query_one("#paper-list", OptionList).focus()
+        self._get_paper_list_widget().focus()
 
     @on(Input.Changed, "#search-input")
     def on_search_changed(self, event: Input.Changed) -> None:
@@ -2099,7 +2275,7 @@ class ArxivBrowser(App):
     def _get_active_query(self) -> str:
         """Get the active search query, preferring the current input value."""
         try:
-            return self.query_one("#search-input", Input).value.strip()
+            return self._get_search_input_widget().value.strip()
         except NoMatches:
             return self._pending_query.strip()
 
@@ -2146,15 +2322,16 @@ class ArxivBrowser(App):
         abstract_text = self._get_abstract_text(paper, allow_async=False) or ""
         return match_query_term(paper, token, metadata, abstract_text)
 
-    def _fuzzy_search(self, query: str) -> list[Paper]:
+    def _fuzzy_search(self, query: str, papers: list[Paper] | None = None) -> list[Paper]:
         """Perform fuzzy search on title and authors.
 
         Populates self._match_scores with relevance scores.
         """
         query_lower = query.lower()
         scored_papers = []
+        search_space = papers if papers is not None else self.all_papers
 
-        for paper in self.all_papers:
+        for paper in search_space:
             # Combine title and authors for matching
             text = f"{paper.title} {paper.authors}"
             score = fuzz.WRatio(query_lower, text.lower())
@@ -2180,6 +2357,7 @@ class ArxivBrowser(App):
         - starred         - Show only starred papers
         - <text>          - Fuzzy search on title/author
         """
+        perf_start = time.perf_counter() if logger.isEnabledFor(logging.DEBUG) else None
         query = query.strip()
         # Keep status/empty-state context synchronized with the applied filter.
         self._pending_query = query
@@ -2200,9 +2378,9 @@ class ArxivBrowser(App):
             self.filtered_papers, self._watched_paper_ids, self._watch_filter_active
         )
 
-        # Apply current sort order and refresh the list view
+        # Apply current sort order and refresh UI
         self._sort_papers()
-        self._refresh_list_view()
+        self._get_ui_refresh_coordinator().apply_filter_refresh(query)
 
         logger.debug(
             "Filter applied: query=%r, matched=%d/%d papers",
@@ -2210,23 +2388,25 @@ class ArxivBrowser(App):
             len(self.filtered_papers),
             len(self.all_papers),
         )
-
-        # Update header with current query context
-        self.query_one("#list-header", Label).update(self._format_header_text(query))
-        self._update_status_bar()
-        self._update_filter_pills(query)
+        if perf_start is not None:
+            logger.debug(
+                "Search->list refresh latency: %.2fms (query=%r, matched=%d)",
+                (time.perf_counter() - perf_start) * 1000.0,
+                query,
+                len(self.filtered_papers),
+            )
 
     def _update_filter_pills(self, query: str) -> None:
         """Update the filter pill bar with current active filters."""
         if self._in_arxiv_api_mode:
             try:
-                self.query_one(FilterPillBar).remove_class("visible")
+                self._get_filter_pill_bar_widget().remove_class("visible")
             except NoMatches:
                 pass
             return
         tokens = get_query_tokens(query)
         try:
-            pill_bar = self.query_one(FilterPillBar)
+            pill_bar = self._get_filter_pill_bar_widget()
             self._track_task(pill_bar.update_pills(tokens, self._watch_filter_active))
         except NoMatches:
             pass
@@ -2234,7 +2414,7 @@ class ArxivBrowser(App):
     @on(FilterPillBar.RemoveFilter)
     def on_remove_filter(self, event: FilterPillBar.RemoveFilter) -> None:
         """Handle removal of a filter pill by reconstructing the query."""
-        search_input = self.query_one("#search-input", Input)
+        search_input = self._get_search_input_widget()
         search_input.value = remove_query_token(search_input.value, event.token_index)
 
     @on(FilterPillBar.RemoveWatchFilter)
@@ -2290,7 +2470,7 @@ class ArxivBrowser(App):
         Uses OptionList for virtual rendering — only visible lines are drawn.
         """
         self._cancel_pending_detail_update()
-        option_list = self.query_one("#paper-list", OptionList)
+        option_list = self._get_paper_list_widget()
         option_list.clear_options()
 
         if self.filtered_papers:
@@ -2312,7 +2492,7 @@ class ArxivBrowser(App):
                 empty_msg = "[dim italic]No papers available.[/]"
             option_list.add_option(Option(empty_msg, disabled=True))
             try:
-                details = self.query_one(PaperDetails)
+                details = self._get_paper_details_widget()
                 details.update_paper(None)
             except NoMatches:
                 pass
@@ -2341,7 +2521,7 @@ class ArxivBrowser(App):
         paper = self.filtered_papers[index]
         markup = self._render_option(paper)
         try:
-            option_list = self.query_one("#paper-list", OptionList)
+            option_list = self._get_paper_list_widget()
             option_list.replace_option_prompt_at_index(index, markup)
         except (NoMatches, OptionDoesNotExist):
             pass
@@ -2370,7 +2550,7 @@ class ArxivBrowser(App):
     def _get_current_paper(self) -> Paper | None:
         """Get the currently highlighted paper."""
         try:
-            option_list = self.query_one("#paper-list", OptionList)
+            option_list = self._get_paper_list_widget()
         except NoMatches:
             return None
         idx = option_list.highlighted
@@ -2381,7 +2561,7 @@ class ArxivBrowser(App):
     def _get_current_index(self) -> int | None:
         """Get the index of the currently highlighted paper."""
         try:
-            option_list = self.query_one("#paper-list", OptionList)
+            option_list = self._get_paper_list_widget()
         except NoMatches:
             return None
         idx = option_list.highlighted
@@ -2642,7 +2822,7 @@ class ArxivBrowser(App):
             self.notify("Showing all papers", title="Watch")
 
         # Re-apply current filter with watch list consideration
-        query = self.query_one("#search-input", Input).value.strip()
+        query = self._get_search_input_widget().value.strip()
         self._apply_filter(query)
 
     def action_manage_watch_list(self) -> None:
@@ -2664,7 +2844,7 @@ class ArxivBrowser(App):
             self._compute_watched_papers()
             if self._watch_filter_active and not self._watched_paper_ids:
                 self._watch_filter_active = False
-            query = self.query_one("#search-input", Input).value.strip()
+            query = self._get_search_input_widget().value.strip()
             self._apply_filter(query)
             self.notify("Watch list updated", title="Watch")
 
@@ -2676,7 +2856,7 @@ class ArxivBrowser(App):
 
     async def _update_bookmark_bar(self) -> None:
         """Update the bookmark tab bar display."""
-        bookmark_bar = self.query_one(BookmarkTabBar)
+        bookmark_bar = self._get_bookmark_bar_widget()
         await bookmark_bar.update_bookmarks(self._config.bookmarks, self._active_bookmark_index)
 
     async def action_goto_bookmark(self, index: int) -> None:
@@ -2688,7 +2868,7 @@ class ArxivBrowser(App):
         self._active_bookmark_index = index
 
         # Update search input and apply filter
-        search_input = self.query_one("#search-input", Input)
+        search_input = self._get_search_input_widget()
         search_input.value = bookmark.query
         self._apply_filter(bookmark.query)
 
@@ -2698,7 +2878,7 @@ class ArxivBrowser(App):
 
     async def action_add_bookmark(self) -> None:
         """Add current search query as a bookmark."""
-        query = self.query_one("#search-input", Input).value.strip()
+        query = self._get_search_input_widget().value.strip()
 
         if not query:
             self.notify("Enter a search query first", title="Bookmark", severity="warning")
@@ -2803,7 +2983,7 @@ class ArxivBrowser(App):
             return
 
         # Find and scroll to the paper in the current list
-        option_list = self.query_one("#paper-list", OptionList)
+        option_list = self._get_paper_list_widget()
         for i, p in enumerate(self.filtered_papers):
             if p.arxiv_id == arxiv_id:
                 option_list.highlighted = i
@@ -3038,7 +3218,7 @@ class ArxivBrowser(App):
 
     def _get_target_papers(self) -> list[Paper]:
         """Get papers to export (selected or current)."""
-        details = self.query_one(PaperDetails)
+        details = self._get_paper_details_widget()
         return resolve_target_papers(
             filtered_papers=self.filtered_papers,
             selected_ids=self.selected_ids,
@@ -3123,7 +3303,7 @@ class ArxivBrowser(App):
         """Handle selection from the recommendations modal."""
         if not arxiv_id:
             return
-        option_list = self.query_one("#paper-list", OptionList)
+        option_list = self._get_paper_list_widget()
         for i, p in enumerate(self.filtered_papers):
             if p.arxiv_id == arxiv_id:
                 option_list.highlighted = i
@@ -3303,7 +3483,7 @@ class ArxivBrowser(App):
         self._apply_theme_overrides()
         self._apply_category_overrides()
         try:
-            self.query_one(PaperDetails).clear_cache()
+            self._get_paper_details_widget().clear_cache()
         except NoMatches:
             pass
         self._refresh_list_view()
@@ -3966,7 +4146,7 @@ class ArxivBrowser(App):
         self._abstract_queue.clear()
         self._abstract_pending_ids.clear()
         try:
-            self.query_one(PaperDetails).clear_cache()
+            self._get_paper_details_widget().clear_cache()
         except NoMatches:
             pass
         self._paper_summaries.clear()
@@ -3992,7 +4172,7 @@ class ArxivBrowser(App):
         self._show_daily_digest()
 
         # Apply current filter and sort
-        query = self.query_one("#search-input", Input).value.strip()
+        query = self._get_search_input_widget().value.strip()
         self._apply_filter(query)
 
         # Re-fetch HF data if active (since HF data is date-specific)
@@ -4061,16 +4241,23 @@ class ArxivBrowser(App):
         if current_date:
             self.notify(f"Loaded {current_date.strftime(HISTORY_DATE_FORMAT)}", title="Navigate")
 
+    def _update_list_header(self, query: str) -> None:
+        """Update the list header text for the current query/context."""
+        try:
+            self._get_list_header_widget().update(self._format_header_text(query))
+        except NoMatches:
+            pass
+
     def _update_header(self) -> None:
         """Update header with selection count and sort info."""
-        query = self.query_one("#search-input", Input).value.strip()
-        self.query_one("#list-header", Label).update(self._format_header_text(query))
+        query = self._get_active_query()
+        self._update_list_header(query)
         self._update_status_bar()
 
     def _update_status_bar(self) -> None:
         """Update the status bar with semantic, context-aware information."""
         try:
-            status = self.query_one("#status-bar", Label)
+            status = self._get_status_bar_widget()
         except NoMatches:
             return
 
@@ -4135,7 +4322,7 @@ class ArxivBrowser(App):
 
         # Search mode — search container visible
         try:
-            container = self.query_one("#search-container")
+            container = self._get_search_container_widget()
             if container.has_class("visible"):
                 return FOOTER_CONTEXTS["search"]
         except NoMatches:
@@ -4165,7 +4352,7 @@ class ArxivBrowser(App):
         """Return a Rich-markup mode badge string for the current state."""
         search_visible = False
         try:
-            container = self.query_one("#search-container")
+            container = self._get_search_container_widget()
             if container.has_class("visible"):
                 search_visible = True
         except NoMatches:
@@ -4181,7 +4368,7 @@ class ArxivBrowser(App):
     def _update_footer(self) -> None:
         """Update the context-sensitive footer based on current state."""
         try:
-            footer = self.query_one(ContextFooter)
+            footer = self._get_footer_widget()
         except (NoMatches, AttributeError):
             # AttributeError: app not fully composed (e.g. __new__ mock tests)
             return
@@ -4265,7 +4452,7 @@ class ArxivBrowser(App):
     def _update_download_progress(self, completed: int, total: int) -> None:
         """Update status bar and footer with download progress."""
         try:
-            status_bar = self.query_one("#status-bar", Label)
+            status_bar = self._get_status_bar_widget()
             status_bar.update(f"Downloading: {completed}/{total} complete")
         except NoMatches:
             pass

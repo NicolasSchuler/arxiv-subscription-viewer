@@ -155,7 +155,7 @@ class TestIoActionHelpers:
         assert get_clipboard_command_plan("Plan9") is None
 
     def test_batch_confirmation_and_notification_helpers(self):
-        from arxiv_browser.io_actions import (
+        from arxiv_browser.action_messages import (
             build_download_pdfs_confirmation_prompt,
             build_download_start_notification,
             build_open_papers_confirmation_prompt,
@@ -230,8 +230,28 @@ class TestQueryFilterHelpers:
         assert filtered == fuzzy_result
         assert highlight_terms["title"] == ["transformer"]
         assert highlight_terms["author"] == ["transformer"]
-        fuzzy_search.assert_called_once_with("transformer")
+        fuzzy_search.assert_called_once_with("transformer", papers)
         advanced_match.assert_not_called()
+
+    def test_execute_query_filter_passes_input_papers_to_fuzzy_search(self, make_paper):
+        from arxiv_browser.query import execute_query_filter
+
+        papers = [make_paper(arxiv_id="2401.00001"), make_paper(arxiv_id="2401.00002")]
+        seen_scope: list[list[str]] = []
+
+        def fuzzy_search(_query: str, scoped_papers):
+            seen_scope.append([paper.arxiv_id for paper in scoped_papers])
+            return [scoped_papers[-1]]
+
+        filtered, _ = execute_query_filter(
+            "transformer",
+            papers,
+            fuzzy_search=fuzzy_search,
+            advanced_match=MagicMock(return_value=False),
+        )
+
+        assert seen_scope == [["2401.00001", "2401.00002"]]
+        assert [paper.arxiv_id for paper in filtered] == ["2401.00002"]
 
     def test_execute_query_filter_uses_advanced_path(self, make_paper):
         from arxiv_browser.query import execute_query_filter
@@ -269,7 +289,7 @@ class TestQueryFilterHelpers:
             "2401.00002"
         ]
 
-    def test_update_filter_pills_uses_query_token_helper(self):
+    def test_update_filter_pills_forwards_parsed_tokens(self):
         app = _new_app()
         app._in_arxiv_api_mode = False
         app._watch_filter_active = True
@@ -277,25 +297,31 @@ class TestQueryFilterHelpers:
         pill_bar = MagicMock()
         app.query_one = MagicMock(return_value=pill_bar)
 
-        with patch("arxiv_browser.app.get_query_tokens", return_value=[]) as get_tokens:
-            app._update_filter_pills("  cat:cs.AI  ")
+        app._update_filter_pills("  cat:cs.AI transformer  ")
 
-        get_tokens.assert_called_once_with("  cat:cs.AI  ")
-        pill_bar.update_pills.assert_called_once_with([], True)
+        pill_bar.update_pills.assert_called_once()
+        tokens, watch_filter_active = pill_bar.update_pills.call_args.args
+        assert [token.field for token in tokens] == ["cat", None]
+        assert [token.value for token in tokens] == ["cs.AI", "transformer"]
+        assert watch_filter_active is True
         app._track_task.assert_called_once_with(pill_bar.update_pills.return_value)
 
-    def test_on_remove_filter_uses_remove_query_token_helper(self):
+    @pytest.mark.parametrize(
+        ("query", "token_index", "expected"),
+        [
+            ("cat:cs.AI AND transformer", 0, "transformer"),
+            ("cat:cs.AI AND transformer", 2, "cat:cs.AI"),
+            ('title:"deep learning" OR author:Smith', 2, 'title:"deep learning"'),
+        ],
+    )
+    def test_on_remove_filter_rebuilds_query_text(self, query, token_index, expected):
         app = _new_app()
-        search_input = SimpleNamespace(value="cat:cs.AI transformer")
+        search_input = SimpleNamespace(value=query)
         app.query_one = MagicMock(return_value=search_input)
 
-        with patch(
-            "arxiv_browser.app.remove_query_token", return_value="transformer"
-        ) as remove_token:
-            app.on_remove_filter(SimpleNamespace(token_index=0))
+        app.on_remove_filter(SimpleNamespace(token_index=token_index))
 
-        remove_token.assert_called_once_with("cat:cs.AI transformer", 0)
-        assert search_input.value == "transformer"
+        assert search_input.value == expected
 
 
 class TestRelevanceBatchCoverage:

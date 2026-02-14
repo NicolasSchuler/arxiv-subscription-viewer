@@ -89,41 +89,6 @@ def get_clipboard_command_plan(system: str) -> tuple[list[list[str]], str] | Non
     return None
 
 
-def requires_batch_confirmation(item_count: int, threshold: int) -> bool:
-    """Return whether an action should use a confirmation modal."""
-    return item_count > threshold
-
-
-def build_open_papers_confirmation_prompt(item_count: int) -> str:
-    """Build confirmation prompt text for opening paper URLs."""
-    return f"Open {item_count} papers in browser?"
-
-
-def build_open_pdfs_confirmation_prompt(item_count: int) -> str:
-    """Build confirmation prompt text for opening PDF URLs."""
-    return f"Open {item_count} PDFs in browser?"
-
-
-def build_download_pdfs_confirmation_prompt(item_count: int) -> str:
-    """Build confirmation prompt text for starting PDF downloads."""
-    return f"Download {item_count} PDFs?"
-
-
-def build_open_papers_notification(item_count: int) -> str:
-    """Build notification text for opening paper URLs."""
-    return f"Opening {item_count} paper{'s' if item_count > 1 else ''}"
-
-
-def build_open_pdfs_notification(item_count: int) -> str:
-    """Build notification text for opening PDF URLs."""
-    return f"Opening {item_count} PDF{'s' if item_count > 1 else ''}"
-
-
-def build_download_start_notification(item_count: int) -> str:
-    """Build notification text for starting PDF downloads."""
-    return f"Downloading {item_count} PDF{'s' if item_count != 1 else ''}..."
-
-
 def write_timestamped_export_file(
     *,
     content: str,
@@ -157,17 +122,10 @@ def write_timestamped_export_file(
 
 __all__ = [
     "build_clipboard_payload",
-    "build_download_pdfs_confirmation_prompt",
-    "build_download_start_notification",
     "build_markdown_export_document",
-    "build_open_papers_confirmation_prompt",
-    "build_open_papers_notification",
-    "build_open_pdfs_confirmation_prompt",
-    "build_open_pdfs_notification",
     "build_viewer_args",
     "filter_papers_needing_download",
     "get_clipboard_command_plan",
-    "requires_batch_confirmation",
     "resolve_target_papers",
     "write_timestamped_export_file",
 ]

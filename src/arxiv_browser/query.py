@@ -350,7 +350,7 @@ def execute_query_filter(
     query: str,
     papers: list[Paper],
     *,
-    fuzzy_search: Callable[[str], list[Paper]],
+    fuzzy_search: Callable[[str, list[Paper]], list[Paper]],
     advanced_match: Callable[[Paper, list[QueryToken]], bool],
 ) -> tuple[list[Paper], dict[str, list[str]]]:
     """Filter papers for a query and return (filtered_papers, highlight_terms)."""
@@ -367,7 +367,7 @@ def execute_query_filter(
         filtered = [paper for paper in papers if advanced_match(paper, rpn)]
         return filtered, highlight_terms
 
-    return fuzzy_search(normalized_query), highlight_terms
+    return fuzzy_search(normalized_query, papers), highlight_terms
 
 
 def apply_watch_filter(
@@ -523,13 +523,10 @@ def sort_papers(
 
 __all__ = [
     "_HIGHLIGHT_PATTERN_CACHE",
-    "apply_watch_filter",
     "build_highlight_terms",
     "escape_rich_text",
-    "execute_query_filter",
     "format_categories",
     "format_summary_as_rich",
-    "get_query_tokens",
     "highlight_text",
     "insert_implicit_and",
     "is_advanced_query",
@@ -538,7 +535,6 @@ __all__ = [
     "paper_matches_watch_entry",
     "pill_label_for_token",
     "reconstruct_query",
-    "remove_query_token",
     "render_progress_bar",
     "sort_papers",
     "to_rpn",

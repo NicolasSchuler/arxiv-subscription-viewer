@@ -269,14 +269,12 @@ class DateNavigator(Horizontal):
 
         if len(history_files) <= 1:
             self.remove_class("visible")
+            for child in list(self.children):
+                if "date-nav-item" in child.classes:
+                    await child.remove()
             return
 
         self.add_class("visible")
-
-        # Remove old date labels (keep arrows)
-        for child in list(self.children):
-            if "date-nav-item" in child.classes:
-                await child.remove()
 
         # Compute sliding window centered on current
         total = len(history_files)
@@ -286,16 +284,44 @@ class DateNavigator(Horizontal):
         if end - start < DATE_NAV_WINDOW_SIZE:
             start = max(0, end - DATE_NAV_WINDOW_SIZE)
 
-        # Mount date labels between the two arrows
-        next_arrow = self.query_one("#date-nav-next")
+        desired: list[tuple[str, str, bool]] = []
         for i in range(start, end):
             d, _ = history_files[i]
             count = self._get_paper_count(i)
             label_text = f"{d.strftime('%b %d')}({count})"
-            if i == current_index:
-                label_text = f"[{label_text}]"
-            classes = "date-nav-item current" if i == current_index else "date-nav-item"
-            self.mount(Label(label_text, classes=classes, id=f"date-nav-{i}"), before=next_arrow)
+            desired.append((f"date-nav-{i}", label_text, i == current_index))
+
+        existing_items = [
+            child
+            for child in self.children
+            if isinstance(child, Label) and "date-nav-item" in child.classes
+        ]
+        existing_order = [child.id for child in existing_items if child.id is not None]
+        desired_order = [item_id for item_id, _, _ in desired]
+
+        # Fast path: patch in place when visible IDs are unchanged.
+        if existing_order == desired_order:
+            existing_by_id = {child.id: child for child in existing_items}
+            for item_id, label_text, is_current in desired:
+                child = existing_by_id.get(item_id)
+                if child is None:
+                    continue
+                render_text = f"[{label_text}]" if is_current else label_text
+                child.update(render_text)
+                if is_current:
+                    child.add_class("current")
+                else:
+                    child.remove_class("current")
+            return
+
+        # Fallback: rebuild labels when the window changed.
+        for child in existing_items:
+            await child.remove()
+        next_arrow = self.query_one("#date-nav-next")
+        for item_id, label_text, is_current in desired:
+            render_text = f"[{label_text}]" if is_current else label_text
+            classes = "date-nav-item current" if is_current else "date-nav-item"
+            self.mount(Label(render_text, classes=classes, id=item_id), before=next_arrow)
 
     def on_click(self, event: object) -> None:
         """Handle clicks on arrows and date labels."""
@@ -429,17 +455,42 @@ class FilterPillBar(Horizontal):
 
     async def update_pills(self, tokens: list[QueryToken], watch_active: bool) -> None:
         """Update the displayed filter pills."""
-        await self.remove_children()
-        has_pills = False
+        desired: list[tuple[str, str, str]] = []
         for i, token in enumerate(tokens):
             if token.kind == "op":
                 continue
             label_text = escape_rich_text(pill_label_for_token(token))
-            self.mount(Label(f"{label_text} \u00d7", classes="filter-pill", id=f"pill-{i}"))
-            has_pills = True
+            desired.append((f"pill-{i}", f"{label_text} \u00d7", "filter-pill"))
         if watch_active:
-            self.mount(Label("watched \u00d7", classes="filter-pill-watch", id="pill-watch"))
-            has_pills = True
+            desired.append(("pill-watch", "watched \u00d7", "filter-pill-watch"))
+
+        existing_items = [
+            child
+            for child in self.children
+            if isinstance(child, Label) and child.id is not None and child.id.startswith("pill-")
+        ]
+        existing_order = [child.id for child in existing_items]
+        desired_order = [item_id for item_id, _, _ in desired]
+
+        if existing_order == desired_order:
+            existing_by_id = {child.id: child for child in existing_items}
+            for item_id, text, class_name in desired:
+                child = existing_by_id.get(item_id)
+                if child is None:
+                    continue
+                child.update(text)
+                if class_name == "filter-pill-watch":
+                    child.remove_class("filter-pill")
+                    child.add_class("filter-pill-watch")
+                else:
+                    child.remove_class("filter-pill-watch")
+                    child.add_class("filter-pill")
+        else:
+            await self.remove_children()
+            for item_id, text, class_name in desired:
+                self.mount(Label(text, classes=class_name, id=item_id))
+
+        has_pills = bool(desired)
         if has_pills:
             self.add_class("visible")
         else:
