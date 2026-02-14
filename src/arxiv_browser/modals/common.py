@@ -38,6 +38,50 @@ logger = logging.getLogger(__name__)
 class HelpScreen(ModalScreen[None]):
     """Full-screen help overlay showing all keyboard shortcuts by category."""
 
+    _DEFAULT_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
+        (
+            "Navigation",
+            [
+                ("j / k", "Navigate down / up"),
+                ("[ / ]", "Previous / next date"),
+                ("1-9", "Jump to bookmark"),
+                ("m then a-z", "Set mark"),
+                ("' then a-z", "Jump to mark"),
+            ],
+        ),
+        (
+            "Search & Filter",
+            [
+                ("/", "Toggle search"),
+                ("Escape", "Clear search / exit API"),
+                ("A", "Search all arXiv (API mode)"),
+                ("Ctrl+e", "Exit API mode / toggle S2"),
+                ("w", "Toggle watch list filter"),
+                ("Ctrl+b", "Save search as bookmark"),
+            ],
+        ),
+        (
+            "Selection",
+            [
+                ("Space", "Toggle selection"),
+                ("a", "Select all visible"),
+                ("u", "Clear selection"),
+            ],
+        ),
+        (
+            "Actions",
+            [
+                ("o", "Open in browser"),
+                ("P", "Open as PDF"),
+                ("n", "Edit notes"),
+                ("t", "Edit tags"),
+                ("E", "Export menu"),
+                ("d", "Download PDFs"),
+                ("?", "Help overlay"),
+            ],
+        ),
+    ]
+
     BINDINGS = [
         Binding("question_mark", "dismiss", "Close", show=False),
         Binding("escape", "dismiss", "Close"),
@@ -88,91 +132,34 @@ class HelpScreen(ModalScreen[None]):
     }
     """
 
+    def __init__(
+        self,
+        sections: list[tuple[str, list[tuple[str, str]]]] | None = None,
+        footer_note: str = "Press ? / Escape / q to close",
+    ) -> None:
+        super().__init__()
+        self._sections = sections or list(self._DEFAULT_SECTIONS)
+        self._footer_note = footer_note
+
+    @staticmethod
+    def _render_section_lines(entries: list[tuple[str, str]]) -> str:
+        green = THEME_COLORS["green"]
+        lines = [f"  [{green}]{key}[/]  {description}" for key, description in entries]
+        return "\n".join(lines)
+
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="help-dialog"):
             yield Label("Keyboard Shortcuts", id="help-title")
+            for section_name, entries in self._sections:
+                if not entries:
+                    continue
+                yield Label(
+                    f"[{THEME_COLORS['accent']}]{section_name}[/]",
+                    classes="help-section-title",
+                )
+                yield Static(self._render_section_lines(entries), classes="help-keys")
 
-            # Navigation
-            yield Label(f"[{THEME_COLORS['accent']}]Navigation[/]", classes="help-section-title")
-            yield Static(
-                f"  [{THEME_COLORS['green']}]j / k[/]        Navigate down / up\n"
-                f"  [{THEME_COLORS['green']}]bracketleft / bracketright[/]  Previous / next date  [dim](history mode)[/]\n"
-                f"  [{THEME_COLORS['green']}]1-9[/]          Jump to bookmark\n"
-                f"  [{THEME_COLORS['green']}]m[/] [dim]then[/] [{THEME_COLORS['green']}]a-z[/]  Set mark\n"
-                f"  [{THEME_COLORS['green']}]'[/] [dim]then[/] [{THEME_COLORS['green']}]a-z[/]  Jump to mark",
-                classes="help-keys",
-            )
-
-            # Search
-            yield Label(
-                f"[{THEME_COLORS['accent']}]Search & Filter[/]",
-                classes="help-section-title",
-            )
-            yield Static(
-                f"  [{THEME_COLORS['green']}]/[/]            Toggle search\n"
-                f"  [{THEME_COLORS['green']}]Escape[/]       Clear search\n"
-                f"  [{THEME_COLORS['green']}]A[/]            Search all arXiv (API mode)\n"
-                f"  [{THEME_COLORS['green']}]Ctrl+e[/]       Exit API mode\n"
-                f"  [{THEME_COLORS['green']}]bracketleft / bracketright[/]  API page - / + [dim](API mode)[/]\n"
-                f"  [{THEME_COLORS['green']}]w[/]            Toggle watch list filter\n"
-                f"  [{THEME_COLORS['green']}]s[/]            Cycle sort order  [dim](title / date / id / cites / trending / relevance)[/]\n"
-                f"  [{THEME_COLORS['green']}]Ctrl+b[/]       Save search as bookmark\n"
-                f"  [dim]Filters:[/] cat: author: title: abstract: tag: unread starred",
-                classes="help-keys",
-            )
-
-            # Selection
-            yield Label(f"[{THEME_COLORS['accent']}]Selection[/]", classes="help-section-title")
-            yield Static(
-                f"  [{THEME_COLORS['green']}]Space[/]        Toggle selection\n"
-                f"  [{THEME_COLORS['green']}]a[/]            Select all visible\n"
-                f"  [{THEME_COLORS['green']}]u[/]            Clear selection",
-                classes="help-keys",
-            )
-
-            # Paper actions
-            yield Label(
-                f"[{THEME_COLORS['accent']}]Paper Actions[/]",
-                classes="help-section-title",
-            )
-            yield Static(
-                f"  [{THEME_COLORS['green']}]o[/]            Open in browser\n"
-                f"  [{THEME_COLORS['green']}]P[/]            Open as PDF\n"
-                f"  [{THEME_COLORS['green']}]r[/]            Toggle read\n"
-                f"  [{THEME_COLORS['green']}]x[/]            Toggle star\n"
-                f"  [{THEME_COLORS['green']}]n[/]            Edit notes\n"
-                f"  [{THEME_COLORS['green']}]t[/]            Edit tags  [dim](namespace:value supported)[/]\n"
-                f"  [{THEME_COLORS['green']}]R[/]            Show similar papers\n"
-                f"  [{THEME_COLORS['green']}]G[/]            Citation graph  [dim](S2-powered, drill-down)[/]\n"
-                f"  [{THEME_COLORS['green']}]W[/]            Manage watch list\n"
-                f"  [{THEME_COLORS['green']}]Ctrl+s[/]       Generate AI summary  [dim](mode selector)[/]\n"
-                f"  [{THEME_COLORS['green']}]L[/]            Score papers by relevance  [dim](LLM-powered)[/]\n"
-                f"  [{THEME_COLORS['green']}]Ctrl+l[/]       Edit research interests",
-                classes="help-keys",
-            )
-
-            # Export
-            yield Label(
-                f"[{THEME_COLORS['accent']}]Export & Copy[/]",
-                classes="help-section-title",
-            )
-            yield Static(
-                f"  [{THEME_COLORS['green']}]c[/]            Copy to clipboard\n"
-                f"  [{THEME_COLORS['green']}]E[/]            Export menu  [dim](BibTeX, Markdown, RIS, CSV + more)[/]\n"
-                f"  [{THEME_COLORS['green']}]d[/]            Download PDF",
-                classes="help-keys",
-            )
-
-            # View
-            yield Label(f"[{THEME_COLORS['accent']}]View[/]", classes="help-section-title")
-            yield Static(
-                f"  [{THEME_COLORS['green']}]p[/]            Toggle abstract preview\n"
-                f"  [{THEME_COLORS['green']}]?[/]            This help screen\n"
-                f"  [{THEME_COLORS['green']}]q[/]            Quit",
-                classes="help-keys",
-            )
-
-            yield Label("Press ? / Escape / q to close", id="help-footer")
+            yield Label(self._footer_note, id="help-footer")
 
     def action_dismiss(self) -> None:
         """Close the help screen."""

@@ -12,6 +12,7 @@ from arxiv_browser.widgets.listing import (
     PREVIEW_ABSTRACT_MAX_LEN,
     PaperListItem,
     render_paper_option,
+    set_ascii_icons,
 )
 
 __all__ = [
@@ -25,4 +26,5 @@ __all__ = [
     "PaperDetails",
     "PaperListItem",
     "render_paper_option",
+    "set_ascii_icons",
 ]

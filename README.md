@@ -52,7 +52,7 @@
 - Date-aware session restore
 
 ### Visual
-- Three color themes: Monokai (default), Catppuccin, Solarized Dark — cycle with `Ctrl+t`
+- Four color themes: Monokai (default), Catppuccin, Solarized Dark, High Contrast — cycle with `Ctrl+t`
 - Category-specific highlighting and watch list highlighting
 - LaTeX cleaning for readable display
 - Collapsible detail pane sections (`Ctrl+d`)
@@ -108,6 +108,8 @@ arxiv-viewer --help
 # List available dates in history
 arxiv-viewer --list-dates
 
+# Full TUI requires an interactive terminal (use --list-dates in CI/non-TTY contexts)
+
 # Open specific date
 arxiv-viewer --date 2026-01-23
 
@@ -116,6 +118,9 @@ arxiv-viewer -i papers.txt
 
 # Start fresh session (ignore saved state)
 arxiv-viewer --no-restore
+
+# Accessibility options
+arxiv-viewer --color never --ascii
 
 # Alternative: run as module (useful during development)
 uv run python -m arxiv_browser
@@ -133,6 +138,7 @@ uv run python -m arxiv_browser
 | `j`/`k` | Navigate down/up (vim-style) |
 | `1-9` | Jump to search bookmark |
 | `Ctrl+b` | Add current search as bookmark |
+| `Ctrl+Shift+b` | Remove active bookmark |
 | `[` | Previous date (history) / previous API page (API mode) |
 | `]` | Next date (history) / next API page (API mode) |
 
@@ -175,6 +181,8 @@ uv run python -m arxiv_browser
 | `e` | Fetch Semantic Scholar data for current paper |
 | `Ctrl+e` | Toggle Semantic Scholar enrichment on/off |
 | `Ctrl+s` | Generate AI summary (mode selector) |
+| `C` | Chat with current paper (LLM-powered) |
+| `Ctrl+g` | Auto-tag current/selected papers (LLM-powered) |
 | `Ctrl+h` | Toggle HuggingFace trending on/off |
 | `L` | Score papers by relevance (LLM-powered) |
 | `Ctrl+l` | Edit research interests |
@@ -182,8 +190,10 @@ uv run python -m arxiv_browser
 ### General
 | Key | Action |
 |-----|--------|
-| `Ctrl+t` | Cycle color theme (Monokai / Catppuccin / Solarized) |
+| `Ctrl+t` | Cycle color theme (Monokai / Catppuccin / Solarized / High Contrast) |
 | `Ctrl+d` | Toggle detail pane sections |
+| `Ctrl+k` | Manage collections |
+| `Ctrl+p` | Command palette |
 | `?` | Show help overlay |
 | `q` | Quit |
 

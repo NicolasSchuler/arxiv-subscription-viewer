@@ -167,13 +167,19 @@ class TestIoActionHelpers:
 
         assert requires_batch_confirmation(4, 3) is True
         assert requires_batch_confirmation(3, 3) is False
-        assert build_open_papers_confirmation_prompt(4) == "Open 4 papers in browser?"
-        assert build_open_pdfs_confirmation_prompt(5) == "Open 5 PDFs in browser?"
-        assert build_download_pdfs_confirmation_prompt(6) == "Download 6 PDFs?"
-        assert build_open_papers_notification(1) == "Opening 1 paper"
-        assert build_open_papers_notification(2) == "Opening 2 papers"
-        assert build_open_pdfs_notification(1) == "Opening 1 PDF"
-        assert build_open_pdfs_notification(2) == "Opening 2 PDFs"
+        assert "Open 4 papers in your browser?" in build_open_papers_confirmation_prompt(4)
+        assert "This may open many tabs." in build_open_papers_confirmation_prompt(4)
+        assert "Open 5 PDFs in your browser?" in build_open_pdfs_confirmation_prompt(5)
+        assert "viewer windows" in build_open_pdfs_confirmation_prompt(5)
+        assert "Download 6 PDFs?" in build_download_pdfs_confirmation_prompt(6)
+        assert (
+            "Already-downloaded files will be skipped."
+            in build_download_pdfs_confirmation_prompt(6)
+        )
+        assert build_open_papers_notification(1) == "Opening 1 paper in your browser..."
+        assert build_open_papers_notification(2) == "Opening 2 papers in your browser..."
+        assert build_open_pdfs_notification(1) == "Opening 1 PDF..."
+        assert build_open_pdfs_notification(2) == "Opening 2 PDFs..."
         assert build_download_start_notification(1) == "Downloading 1 PDF..."
         assert build_download_start_notification(2) == "Downloading 2 PDFs..."
 
@@ -1063,7 +1069,7 @@ class TestDownloadClipboardAndOpenCoverage:
             ok = app._open_with_viewer("broken-viewer {url}", "https://arxiv.org/pdf/1")
 
         assert ok is False
-        assert "Failed to open PDF viewer" in app.notify.call_args[0][0]
+        assert "Could not open the configured PDF viewer" in app.notify.call_args[0][0]
 
     def test_open_with_viewer_uses_subprocess_args_not_shell(self):
         app = _new_app()

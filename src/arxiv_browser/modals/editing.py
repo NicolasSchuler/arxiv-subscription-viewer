@@ -16,7 +16,7 @@ from arxiv_browser.themes import get_tag_color, parse_tag_namespace
 logger = logging.getLogger(__name__)
 
 
-class NotesModal(ModalScreen[str]):
+class NotesModal(ModalScreen[str | None]):
     """Modal dialog for editing paper notes."""
 
     BINDINGS = [
@@ -87,7 +87,7 @@ class NotesModal(ModalScreen[str]):
         self.dismiss(text)
 
     def action_cancel(self) -> None:
-        self.dismiss(self._current_notes)
+        self.dismiss(None)
 
     @on(Button.Pressed, "#save-btn")
     def on_save_pressed(self) -> None:
@@ -98,7 +98,7 @@ class NotesModal(ModalScreen[str]):
         self.action_cancel()
 
 
-class TagsModal(ModalScreen[list[str]]):
+class TagsModal(ModalScreen[list[str] | None]):
     """Modal dialog for editing paper tags."""
 
     BINDINGS = [
@@ -221,7 +221,7 @@ class TagsModal(ModalScreen[list[str]]):
         self.dismiss(self._parse_tags(text))
 
     def action_cancel(self) -> None:
-        self.dismiss(self._current_tags)
+        self.dismiss(None)
 
     @on(Button.Pressed, "#save-btn")
     def on_save_pressed(self) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from pathlib import Path
 
@@ -35,19 +36,25 @@ def build_browse_footer_bindings(
     llm_configured: bool,
     has_history_navigation: bool,
 ) -> list[tuple[str, str]]:
-    """Build default browsing footer bindings with discovery hints."""
-    bindings: list[tuple[str, str]] = [("/", "search"), ("o", "open"), ("s", "sort")]
+    """Build default browsing footer bindings with stable core actions."""
+    bindings: list[tuple[str, str]] = [
+        ("/", "search"),
+        ("o", "open"),
+        ("s", "sort"),
+        ("r", "read"),
+        ("x", "star"),
+        ("n", "notes"),
+        ("t", "tags"),
+    ]
     if s2_active:
         bindings.extend([("e", "S2"), ("G", "graph")])
-    else:
-        bindings.extend([("r", "read"), ("x", "star"), ("n", "notes"), ("t", "tags")])
     if has_starred:
         bindings.append(("V", "versions"))
     if llm_configured:
         bindings.append(("L", "relevance"))
     if has_history_navigation:
         bindings.append(("[/]", "dates"))
-    bindings.extend([("E", "export"), ("^p", "commands"), ("?", "help")])
+    bindings.extend([("E", "export"), ("Ctrl+p", "commands"), ("?", "help")])
     return bindings
 
 
@@ -98,8 +105,60 @@ def build_status_bar_text(
     hf_match_count: int,
     version_checking: bool,
     version_update_count: int,
+    max_width: int | None = None,
 ) -> str:
     """Build semantic status bar text for current UI/application state."""
+    if max_width is not None and max_width <= 100:
+        compact_parts: list[str] = []
+        if query:
+            compact_parts.append(f"{filtered}/{total} match")
+        elif watch_filter_active:
+            compact_parts.append(f"{filtered}/{total} watched")
+        else:
+            compact_parts.append(f"{total} papers")
+
+        if selected_count > 0:
+            compact_parts.append(f"{selected_count} selected")
+
+        compact_parts.append(f"sort:{sort_label}")
+
+        if in_arxiv_api_mode and api_page is not None:
+            compact_parts.append(f"api p{api_page}")
+            if arxiv_api_loading:
+                compact_parts.append("loading")
+
+        if s2_active:
+            if s2_loading:
+                compact_parts.append("S2 loading")
+            elif s2_count > 0:
+                compact_parts.append(f"S2:{s2_count}")
+            else:
+                compact_parts.append("S2")
+
+        if hf_active and max_width >= 90:
+            if hf_loading:
+                compact_parts.append("HF loading")
+            elif hf_match_count > 0:
+                compact_parts.append(f"HF:{hf_match_count}")
+            else:
+                compact_parts.append("HF")
+
+        if show_abstract_preview and max_width >= 95:
+            compact_parts.append("preview")
+
+        if version_checking:
+            compact_parts.append("checking versions")
+        elif version_update_count > 0:
+            compact_parts.append(f"{version_update_count} updated")
+
+        compact = " | ".join(compact_parts)
+        if len(compact) <= max_width:
+            return compact
+
+        while len(compact_parts) > 1 and len(" | ".join(compact_parts) + " ...") > max_width:
+            compact_parts.pop()
+        return " | ".join(compact_parts) + " ..."
+
     parts: list[str] = []
 
     if query:
@@ -144,7 +203,12 @@ def build_status_bar_text(
     elif version_update_count > 0:
         parts.append(f"[{THEME_COLORS['pink']}]{version_update_count} updated[/]")
 
-    return " [dim]│[/] ".join(parts)
+    rendered = " [dim]│[/] ".join(parts)
+    if max_width is not None and max_width > 0:
+        visible = re.sub(r"\[[^\]]*]", "", rendered)
+        if len(visible) > max_width:
+            return visible[: max(0, max_width - 3)] + "..."
+    return rendered
 
 
 class ContextFooter(Static):

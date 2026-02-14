@@ -1514,14 +1514,48 @@ class TestStatusFilterRegressions:
     Only the source-inspection test remains here.
     """
 
-    def test_help_screen_mentions_actual_history_keys(self):
-        """Help text should reference the actual history key names."""
-        import inspect
+    def test_help_sections_include_history_and_palette_keys(self):
+        """Help content should include key hints from runtime bindings."""
+        from arxiv_browser.app import ArxivBrowser
 
-        from arxiv_browser.modals import HelpScreen
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        sections = app._build_help_sections()
+        entries = {(key, desc) for _, pairs in sections for key, desc in pairs}
+        assert ("[", "Older") in entries
+        assert ("]", "Newer") in entries
+        assert ("Ctrl+p", "Commands") in entries
+        assert ("Ctrl+k", "Collections") in entries
+        assert ("C", "Chat") in entries
+        assert ("Ctrl+g", "Auto-Tag") in entries
 
-        source = inspect.getsource(HelpScreen.compose)
-        assert "bracketleft / bracketright" in source
+    def test_status_bar_compacts_for_narrow_width(self):
+        """Status text should switch to compact mode on narrow terminals."""
+        from arxiv_browser.widgets.chrome import build_status_bar_text
+
+        status = build_status_bar_text(
+            total=83,
+            filtered=12,
+            query="graph transformers",
+            watch_filter_active=False,
+            selected_count=5,
+            sort_label="relevance",
+            in_arxiv_api_mode=True,
+            api_page=2,
+            arxiv_api_loading=True,
+            show_abstract_preview=True,
+            s2_active=True,
+            s2_loading=False,
+            s2_count=11,
+            hf_active=True,
+            hf_loading=False,
+            hf_match_count=4,
+            version_checking=False,
+            version_update_count=1,
+            max_width=80,
+        )
+        assert " | " in status
+        assert "api p2" in status
+        assert len(status) <= 83  # allow tiny ellipsis overhead
 
 
 # ============================================================================
@@ -2410,6 +2444,59 @@ class TestMainCLI:
         captured = capsys.readouterr()
         assert result == 1
         assert "No file found" in captured.err
+
+    def test_non_tty_returns_actionable_error(self, monkeypatch, capsys, make_paper):
+        """Running the interactive path without a TTY should fail with guidance."""
+        from arxiv_browser.app import main
+
+        paper = make_paper(arxiv_id="2401.99999")
+        monkeypatch.setattr("sys.argv", ["arxiv_browser"])
+        monkeypatch.setattr("arxiv_browser.app.load_config", lambda: UserConfig())
+        monkeypatch.setattr(
+            "arxiv_browser.app._resolve_papers",
+            lambda args, base_dir, config, history_files: ([paper], [], 0),
+        )
+        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+        monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+
+        result = main()
+        captured = capsys.readouterr()
+        assert result == 2
+        assert "requires an interactive TTY" in captured.err
+        assert "--list-dates" in captured.err
+
+    def test_main_applies_ascii_and_color_flags(self, monkeypatch, make_paper):
+        """CLI flags should configure ASCII icon mode and color environment hints."""
+        import os
+
+        from arxiv_browser.app import main
+
+        paper = make_paper(arxiv_id="2401.99998")
+        captured_kwargs = {}
+
+        class FakeApp:
+            def __init__(self, *_args, **kwargs):
+                captured_kwargs.update(kwargs)
+
+            def run(self):
+                return None
+
+        monkeypatch.setattr("sys.argv", ["arxiv_browser", "--ascii", "--color", "never"])
+        monkeypatch.setattr("arxiv_browser.app.load_config", lambda: UserConfig())
+        monkeypatch.setattr(
+            "arxiv_browser.app._resolve_papers",
+            lambda args, base_dir, config, history_files: ([paper], [], 0),
+        )
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+        monkeypatch.setattr("arxiv_browser.app.ArxivBrowser", FakeApp)
+        monkeypatch.setenv("NO_COLOR", "")
+        monkeypatch.setenv("FORCE_COLOR", "")
+
+        result = main()
+        assert result == 0
+        assert captured_kwargs.get("ascii_icons") is True
+        assert os.environ.get("NO_COLOR") == "1"
 
 
 # ============================================================================
@@ -8789,6 +8876,33 @@ class TestMetadataActionsIntegration:
                 if first_id in app._config.paper_metadata:
                     assert app._config.paper_metadata[first_id].notes == ""
 
+    async def test_notes_modal_cancel_preserves_existing_notes(self, make_paper):
+        """Escape should discard edits and keep existing notes intact."""
+        from unittest.mock import patch
+
+        from textual.widgets import TextArea
+
+        from arxiv_browser.app import ArxivBrowser, PaperMetadata
+
+        papers = self._make_papers(make_paper, count=1)
+        app = ArxivBrowser(papers, restore_session=False)
+        first_id = papers[0].arxiv_id
+        app._config.paper_metadata[first_id] = PaperMetadata(
+            arxiv_id=first_id, notes="Keep this note"
+        )
+
+        with patch("arxiv_browser.app.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                await pilot.press("n")
+                await pilot.pause(0.2)
+                textarea = app.screen_stack[-1].query_one("#notes-textarea", TextArea)
+                textarea.insert(" (edited)")
+                await pilot.pause(0.1)
+                await pilot.press("escape")
+                await pilot.pause(0.2)
+
+        assert app._config.paper_metadata[first_id].notes == "Keep this note"
+
     async def test_tags_modal_opens(self, make_paper):
         """Pressing 't' should open the TagsModal."""
         from unittest.mock import patch
@@ -8805,6 +8919,34 @@ class TestMetadataActionsIntegration:
                 await pilot.pause(0.2)
                 assert len(app.screen_stack) == 2
                 assert isinstance(app.screen_stack[-1], TagsModal)
+
+    async def test_tags_modal_cancel_preserves_existing_tags(self, make_paper):
+        """Escape should discard tag edits and preserve existing tags."""
+        from unittest.mock import patch
+
+        from textual.widgets import Input
+
+        from arxiv_browser.app import ArxivBrowser, PaperMetadata
+
+        papers = self._make_papers(make_paper, count=1)
+        app = ArxivBrowser(papers, restore_session=False)
+        first_id = papers[0].arxiv_id
+        app._config.paper_metadata[first_id] = PaperMetadata(
+            arxiv_id=first_id,
+            tags=["topic:ml", "status:reading"],
+        )
+
+        with patch("arxiv_browser.app.save_config", return_value=True):
+            async with app.run_test() as pilot:
+                await pilot.press("t")
+                await pilot.pause(0.2)
+                tags_input = app.screen_stack[-1].query_one("#tags-input", Input)
+                tags_input.value = "topic:new"
+                await pilot.pause(0.1)
+                await pilot.press("escape")
+                await pilot.pause(0.2)
+
+        assert app._config.paper_metadata[first_id].tags == ["topic:ml", "status:reading"]
 
 
 # ============================================================================
@@ -11208,6 +11350,19 @@ class TestFooterDiscoverability:
         bindings = app._get_footer_bindings()
         keys = [k for k, _ in bindings]
         assert "E" in keys
+
+    def test_footer_keeps_core_actions_when_s2_active(self):
+        from arxiv_browser.app import UserConfig
+
+        config = UserConfig()
+        app = self._make_footer_app(config)
+        app._s2_active = True
+        bindings = app._get_footer_bindings()
+        keys = [k for k, _ in bindings]
+        assert "r" in keys
+        assert "x" in keys
+        assert "n" in keys
+        assert "t" in keys
 
 
 # ============================================================================

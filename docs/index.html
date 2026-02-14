@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>arXiv Subscription Viewer - Browse arXiv papers from your terminal</title>
-  <meta name="description" content="A terminal user interface (TUI) for browsing arXiv papers from email subscription archives with fuzzy search, LLM summaries, and Semantic Scholar integration.">
+  <meta name="description" content="A keyboard-first terminal UI for browsing arXiv papers with fuzzy search, command palette workflows, LLM enrichment, and accessibility-friendly display options.">
   <link rel="stylesheet" href="styles.css">
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -28,7 +28,7 @@
           arXiv Subscription Viewer
         </h1>
         <p class="text-xl md:text-2xl text-gray-400 mb-8 max-w-2xl mx-auto">
-          Browse arXiv papers from your terminal with fuzzy search, LLM summaries, and Semantic Scholar integration.
+          Browse arXiv papers from your terminal with fuzzy search, command palette workflows, and Semantic Scholar + LLM enrichment.
         </p>
         
         <!-- Install Command -->
@@ -76,7 +76,7 @@
           </div>
           <span class="text-gray-500 text-sm ml-2 mono">arxiv-viewer</span>
         </div>
-        <img src="screenshot.svg" alt="Demo of arXiv Subscription Viewer TUI" class="w-full">
+        <img src="screenshot_preview.png" alt="Demo of arXiv Subscription Viewer TUI" class="w-full">
       </div>
     </div>
   </section>
@@ -151,7 +151,7 @@
             </svg>
           </div>
           <h3 class="text-lg font-semibold mb-2">Beautiful Themes</h3>
-          <p class="text-gray-400 text-sm">Monokai, Catppuccin, and Solarized Dark themes with category-specific highlighting</p>
+          <p class="text-gray-400 text-sm">Monokai, Catppuccin, Solarized Dark, and High Contrast themes with category highlighting and no-color/ASCII fallbacks</p>
         </div>
 
         <!-- Feature 7 -->
@@ -228,6 +228,12 @@
             <div class="bg-black/50 border border-gray-700 rounded-lg px-4 py-3 mono text-sm">
               <span class="text-gray-500">$</span> <span class="text-monokai-green">arxiv-viewer</span>
             </div>
+            <p class="text-gray-400 text-sm mt-3 mono">
+              Accessibility: <span class="text-monokai-green">arxiv-viewer --color never --ascii</span>
+            </p>
+            <p class="text-gray-500 text-sm mt-2 mono">
+              Non-interactive mode: <span class="text-gray-400">arxiv-viewer --list-dates</span>
+            </p>
           </div>
         </div>
       </div>

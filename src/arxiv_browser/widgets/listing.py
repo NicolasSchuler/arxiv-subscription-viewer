@@ -14,6 +14,28 @@ from arxiv_browser.themes import THEME_COLORS, get_tag_color
 
 PREVIEW_ABSTRACT_MAX_LEN = 150  # Max abstract preview length in list items
 
+_ICON_SETS: dict[str, dict[str, str]] = {
+    "unicode": {
+        "selected": "●",
+        "watched": "👁",
+        "starred": "⭐",
+        "read": "✓",
+    },
+    "ascii": {
+        "selected": "[x]",
+        "watched": "[w]",
+        "starred": "*",
+        "read": "v",
+    },
+}
+_ACTIVE_ICON_SET = _ICON_SETS["unicode"]
+
+
+def set_ascii_icons(enabled: bool) -> None:
+    """Switch list indicators between Unicode and ASCII modes."""
+    global _ACTIVE_ICON_SET
+    _ACTIVE_ICON_SET = _ICON_SETS["ascii"] if enabled else _ICON_SETS["unicode"]
+
 
 def _render_title_line(
     paper: Paper,
@@ -25,13 +47,13 @@ def _render_title_line(
     """Build the title line with selection/watch/star/read indicators."""
     prefix_parts: list[str] = []
     if selected:
-        prefix_parts.append(f"[{THEME_COLORS['green']}]●[/]")
+        prefix_parts.append(f"[{THEME_COLORS['green']}]{_ACTIVE_ICON_SET['selected']}[/]")
     if watched:
-        prefix_parts.append(f"[{THEME_COLORS['orange']}]👁[/]")
+        prefix_parts.append(f"[{THEME_COLORS['orange']}]{_ACTIVE_ICON_SET['watched']}[/]")
     if metadata and metadata.starred:
-        prefix_parts.append(f"[{THEME_COLORS['yellow']}]⭐[/]")
+        prefix_parts.append(f"[{THEME_COLORS['yellow']}]{_ACTIVE_ICON_SET['starred']}[/]")
     if metadata and metadata.is_read:
-        prefix_parts.append(f"[{THEME_COLORS['muted']}]✓[/]")
+        prefix_parts.append(f"[{THEME_COLORS['muted']}]{_ACTIVE_ICON_SET['read']}[/]")
     prefix = " ".join(prefix_parts)
 
     title_text = highlight_text(paper.title, ht.get("title", []), THEME_COLORS["accent"])
@@ -205,19 +227,19 @@ class PaperListItem(ListItem):
 
         # Selection indicator
         if self._selected:
-            prefix_parts.append(f"[{THEME_COLORS['green']}]●[/]")
+            prefix_parts.append(f"[{THEME_COLORS['green']}]{_ACTIVE_ICON_SET['selected']}[/]")
 
         # Watched indicator
         if self._watched:
-            prefix_parts.append(f"[{THEME_COLORS['orange']}]👁[/]")
+            prefix_parts.append(f"[{THEME_COLORS['orange']}]{_ACTIVE_ICON_SET['watched']}[/]")
 
         # Starred indicator
         if self._metadata and self._metadata.starred:
-            prefix_parts.append(f"[{THEME_COLORS['yellow']}]⭐[/]")
+            prefix_parts.append(f"[{THEME_COLORS['yellow']}]{_ACTIVE_ICON_SET['starred']}[/]")
 
         # Read indicator
         if self._metadata and self._metadata.is_read:
-            prefix_parts.append(f"[{THEME_COLORS['muted']}]✓[/]")
+            prefix_parts.append(f"[{THEME_COLORS['muted']}]{_ACTIVE_ICON_SET['read']}[/]")
 
         prefix = " ".join(prefix_parts)
         title_text = highlight_text(

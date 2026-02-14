@@ -327,6 +327,7 @@ from arxiv_browser.themes import (
 from arxiv_browser.ui_runtime import UiRefreshCoordinator, UiRefs
 from arxiv_browser.widgets import chrome as _widget_chrome
 from arxiv_browser.widgets import details as _widget_details
+from arxiv_browser.widgets import listing as _widget_listing
 
 BookmarkTabBar = _widgets.BookmarkTabBar
 ContextFooter = _widgets.ContextFooter
@@ -586,6 +587,91 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
     # Vim marks
     ("Set Mark", "Set a named mark (a-z) at current position", "m", "start_mark"),
     ("Jump to Mark", "Jump to a named mark (a-z)", "'", "start_goto_mark"),
+]
+
+# Help screen section spec driven by action names from runtime BINDINGS.
+# This keeps help discoverability aligned with actual key bindings.
+HELP_SECTION_ACTIONS: list[tuple[str, list[str]]] = [
+    (
+        "Navigation",
+        [
+            "cursor_down",
+            "cursor_up",
+            "prev_date",
+            "next_date",
+            "goto_bookmark",
+            "start_mark",
+            "start_goto_mark",
+        ],
+    ),
+    (
+        "Search & Filter",
+        [
+            "toggle_search",
+            "cancel_search",
+            "arxiv_search",
+            "ctrl_e_dispatch",
+            "toggle_watch_filter",
+            "manage_watch_list",
+            "add_bookmark",
+            "remove_bookmark",
+        ],
+    ),
+    (
+        "Selection & Core Actions",
+        [
+            "toggle_select",
+            "select_all",
+            "clear_selection",
+            "open_url",
+            "open_pdf",
+            "copy_selected",
+            "cycle_sort",
+            "toggle_read",
+            "toggle_star",
+            "edit_notes",
+            "edit_tags",
+        ],
+    ),
+    (
+        "Research & AI",
+        [
+            "show_similar",
+            "citation_graph",
+            "check_versions",
+            "fetch_s2",
+            "toggle_hf",
+            "generate_summary",
+            "chat_with_paper",
+            "score_relevance",
+            "edit_interests",
+            "auto_tag",
+        ],
+    ),
+    (
+        "View & Utilities",
+        [
+            "toggle_preview",
+            "export_menu",
+            "download_pdf",
+            "collections",
+            "command_palette",
+            "cycle_theme",
+            "toggle_sections",
+            "show_help",
+            "quit",
+        ],
+    ),
+]
+
+HELP_SEARCH_SYNTAX: list[tuple[str, str]] = [
+    ("cat:cs.AI", "Category filter"),
+    ("tag:to-read", "Tag filter"),
+    ("author:hinton", "Author filter"),
+    ("title:transformer", "Title filter"),
+    ("abstract:attention", "Abstract filter"),
+    ("unread / starred", "State filters"),
+    ("AND / OR / NOT", "Boolean operators"),
 ]
 
 # Subprocess timeout in seconds
@@ -869,6 +955,7 @@ class ArxivBrowser(App):
         restore_session: bool = True,
         history_files: list[tuple[date, Path]] | None = None,
         current_date_index: int = 0,
+        ascii_icons: bool = False,
     ) -> None:
         super().__init__()
         # Register all Textual themes so $th-* CSS variables resolve before compose()
@@ -963,6 +1050,10 @@ class ArxivBrowser(App):
 
         # LLM provider (resolved from config)
         self._llm_provider: CLIProvider | None = resolve_provider(self._config)
+
+        # Accessibility: allow ASCII-only indicators for terminals/fonts
+        # that do not render emoji or box symbols well.
+        _widget_listing.set_ascii_icons(ascii_icons)
 
         # Semantic Scholar enrichment state
         self._s2_active: bool = False  # Runtime toggle (set from config in on_mount)
@@ -2167,14 +2258,33 @@ class ArxivBrowser(App):
             self.notify(str(exc), title="arXiv Search", severity="error")
             return
         except httpx.HTTPStatusError as exc:
-            self.notify(
-                f"arXiv API returned HTTP {exc.response.status_code}",
-                title="arXiv Search",
-                severity="error",
-            )
+            status_code = exc.response.status_code
+            if status_code == 429:
+                message = (
+                    "arXiv API rate limit reached (HTTP 429).\n"
+                    "Next step: wait a few seconds and retry with A."
+                )
+            elif status_code >= 500:
+                message = (
+                    f"arXiv API is unavailable right now (HTTP {status_code}).\n"
+                    "Next step: retry in a minute."
+                )
+            else:
+                message = (
+                    f"arXiv API rejected the request (HTTP {status_code}).\n"
+                    "Next step: refine the query and retry with A."
+                )
+            self.notify(message, title="arXiv Search", severity="error", timeout=8)
             return
         except (httpx.HTTPError, OSError) as exc:
-            self.notify(f"Search failed: {exc}", title="arXiv Search", severity="error")
+            self.notify(
+                "Search failed due to a network or I/O error.\n"
+                "Next step: check connectivity and retry with A.",
+                title="arXiv Search",
+                severity="error",
+                timeout=8,
+            )
+            logger.debug("arXiv search failed: %s", exc, exc_info=True)
             return
         finally:
             if request_token == self._arxiv_api_request_token:
@@ -3503,9 +3613,68 @@ class ArxivBrowser(App):
 
         self.push_screen(SectionToggleModal(self._config.collapsed_sections), _on_result)
 
+    @staticmethod
+    def _format_help_key(key: str) -> str:
+        """Normalize Textual key names for user-facing help text."""
+        replacements = {
+            "slash": "/",
+            "space": "Space",
+            "question_mark": "?",
+            "apostrophe": "'",
+            "bracketleft": "[",
+            "bracketright": "]",
+        }
+        key = replacements.get(key, key)
+        if key.startswith("ctrl+"):
+            rest = key.removeprefix("ctrl+")
+            rest = rest.replace("shift+", "Shift+")
+            return "Ctrl+" + rest
+        return key
+
+    def _binding_for_help_action(self, action_name: str) -> Binding | None:
+        """Resolve a Binding by action name, supporting parameterized actions."""
+        for binding_item in self.BINDINGS:
+            if isinstance(binding_item, Binding):
+                binding = binding_item
+            else:
+                key = binding_item[0]
+                action = binding_item[1]
+                description = binding_item[2] if len(binding_item) > 2 else ""
+                binding = Binding(key, action, description, show=False)
+            if binding.action == action_name:
+                return binding
+            if binding.action.startswith(f"{action_name}("):
+                return binding
+        return None
+
+    def _build_help_sections(self) -> list[tuple[str, list[tuple[str, str]]]]:
+        """Build help sections from the runtime key binding table."""
+        sections: list[tuple[str, list[tuple[str, str]]]] = []
+        for section_name, actions in HELP_SECTION_ACTIONS:
+            entries: list[tuple[str, str]] = []
+            for action_name in actions:
+                if action_name == "goto_bookmark":
+                    entries.append(("1-9", "Jump to bookmark"))
+                    continue
+                binding = self._binding_for_help_action(action_name)
+                if binding is None:
+                    continue
+                key = self._format_help_key(binding.key)
+                description = binding.description
+                entries.append((key, description))
+            sections.append((section_name, entries))
+
+        sections.append(("Search Syntax", HELP_SEARCH_SYNTAX))
+        return sections
+
     def action_show_help(self) -> None:
         """Show the help overlay with all keyboard shortcuts."""
-        self.push_screen(HelpScreen())
+        self.push_screen(
+            HelpScreen(
+                sections=self._build_help_sections(),
+                footer_note="Press ? / Escape / q to close",
+            )
+        )
 
     def action_command_palette(self) -> None:
         """Open the fuzzy-searchable command palette."""
@@ -4268,6 +4437,7 @@ class ArxivBrowser(App):
         if self._in_arxiv_api_mode and self._arxiv_search_state is not None:
             api_page = (self._arxiv_search_state.start // self._arxiv_search_state.max_results) + 1
         hf_match_count = count_hf_matches(self._hf_cache, self._papers_by_id)
+        size = getattr(self, "size", None)
 
         status.update(
             _widget_chrome.build_status_bar_text(
@@ -4289,6 +4459,7 @@ class ArxivBrowser(App):
                 hf_match_count=hf_match_count,
                 version_checking=self._version_checking,
                 version_update_count=len(self._version_updates),
+                max_width=getattr(size, "width", None),
             )
         )
         self._update_footer()
@@ -4493,7 +4664,12 @@ class ArxivBrowser(App):
             return True
         except Exception as e:
             logger.debug("Failed to open browser for %s: %s", url, e)
-            self.notify("Failed to open browser", title="Error", severity="error")
+            self.notify(
+                "Could not open your browser.\nNext step: copy the URL with c or export it with E.",
+                title="Browser",
+                severity="error",
+                timeout=8,
+            )
             return False
 
     def action_open_url(self) -> None:
@@ -4558,7 +4734,13 @@ class ArxivBrowser(App):
             return True
         except Exception as e:
             logger.warning("Failed to open with viewer %r: %s", viewer_cmd, e)
-            self.notify("Failed to open PDF viewer", title="Error", severity="error")
+            self.notify(
+                "Could not open the configured PDF viewer.\n"
+                "Next step: check pdf_viewer in config.json or use P to open in browser.",
+                title="PDF",
+                severity="error",
+                timeout=8,
+            )
             return False
 
     def action_download_pdf(self) -> None:
@@ -4804,6 +4986,25 @@ def _configure_logging(debug: bool) -> None:
     logging.root.setLevel(logging.DEBUG)
 
 
+def _configure_color_mode(color_mode: str) -> None:
+    """Configure environment hints for terminal color behavior."""
+    if color_mode == "never":
+        os.environ["NO_COLOR"] = "1"
+        os.environ.pop("FORCE_COLOR", None)
+        return
+    if color_mode == "always":
+        os.environ["FORCE_COLOR"] = "1"
+        os.environ.pop("NO_COLOR", None)
+        return
+    # auto
+    os.environ.pop("FORCE_COLOR", None)
+
+
+def _validate_interactive_tty() -> bool:
+    """Return True when stdin/stdout are interactive terminals."""
+    return bool(sys.stdin.isatty() and sys.stdout.isatty())
+
+
 def main() -> int:
     """Main entry point. Returns exit code."""
     parser = argparse.ArgumentParser(description="Browse arXiv papers from a text file in a TUI")
@@ -4835,8 +5036,26 @@ def main() -> int:
         action="store_true",
         help="Enable debug logging to file (~/.config/arxiv-browser/debug.log)",
     )
+    parser.add_argument(
+        "--color",
+        choices=["auto", "always", "never"],
+        default="auto",
+        help="Color output mode for terminal UI (default: auto)",
+    )
+    parser.add_argument(
+        "--no-color",
+        action="store_true",
+        help="Disable terminal colors (equivalent to --color never)",
+    )
+    parser.add_argument(
+        "--ascii",
+        action="store_true",
+        help="Use ASCII-only status icons for compatibility with limited terminals",
+    )
     args = parser.parse_args()
 
+    color_mode = "never" if args.no_color else args.color
+    _configure_color_mode(color_mode)
     _configure_logging(args.debug)
     logger.debug("arxiv-viewer starting, cwd=%s", Path.cwd())
 
@@ -4868,6 +5087,18 @@ def main() -> int:
         print("No papers found in the file", file=sys.stderr)
         return 1
 
+    if not _validate_interactive_tty():
+        print(
+            "Error: arxiv-viewer requires an interactive TTY for the full UI.",
+            file=sys.stderr,
+        )
+        print("Next steps:", file=sys.stderr)
+        print("  - Run arxiv-viewer directly in a terminal session", file=sys.stderr)
+        print("  - Use --list-dates for non-interactive output", file=sys.stderr)
+        print("  - Use --date YYYY-MM-DD in an interactive terminal", file=sys.stderr)
+        print("  - Use --help for command documentation", file=sys.stderr)
+        return 2
+
     # Sort papers alphabetically by title
     papers.sort(key=lambda p: p.title.lower())
 
@@ -4877,6 +5108,7 @@ def main() -> int:
         restore_session=not args.no_restore,
         history_files=history_files,
         current_date_index=current_date_index,
+        ascii_icons=args.ascii,
     )
     app.run()
     return 0
