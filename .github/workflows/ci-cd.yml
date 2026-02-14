@@ -13,6 +13,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Git hygiene guard
+        run: |
+          set -euo pipefail
+          forbidden="$(git ls-files | grep -E '^(docs/plans/|docs/.*-prompt\.md$|history/.*\.txt$|history/CLAUDE\.md$)' || true)"
+          if [ -n "${forbidden}" ]; then
+            echo "Forbidden tracked files detected:"
+            echo "${forbidden}"
+            exit 1
+          fi
+
       - name: Install uv
         uses: astral-sh/setup-uv@v4
         with:

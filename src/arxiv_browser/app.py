@@ -134,6 +134,7 @@ from arxiv_browser.export import (
     get_pdf_download_path,
     get_pdf_url,
 )
+from arxiv_browser.help_ui import build_help_sections
 from arxiv_browser.huggingface import (
     HuggingFacePaper,
     fetch_hf_daily_papers,
@@ -587,91 +588,6 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
     # Vim marks
     ("Set Mark", "Set a named mark (a-z) at current position", "m", "start_mark"),
     ("Jump to Mark", "Jump to a named mark (a-z)", "'", "start_goto_mark"),
-]
-
-# Help screen section spec driven by action names from runtime BINDINGS.
-# This keeps help discoverability aligned with actual key bindings.
-HELP_SECTION_ACTIONS: list[tuple[str, list[str]]] = [
-    (
-        "Navigation",
-        [
-            "cursor_down",
-            "cursor_up",
-            "prev_date",
-            "next_date",
-            "goto_bookmark",
-            "start_mark",
-            "start_goto_mark",
-        ],
-    ),
-    (
-        "Search & Filter",
-        [
-            "toggle_search",
-            "cancel_search",
-            "arxiv_search",
-            "ctrl_e_dispatch",
-            "toggle_watch_filter",
-            "manage_watch_list",
-            "add_bookmark",
-            "remove_bookmark",
-        ],
-    ),
-    (
-        "Selection & Core Actions",
-        [
-            "toggle_select",
-            "select_all",
-            "clear_selection",
-            "open_url",
-            "open_pdf",
-            "copy_selected",
-            "cycle_sort",
-            "toggle_read",
-            "toggle_star",
-            "edit_notes",
-            "edit_tags",
-        ],
-    ),
-    (
-        "Research & AI",
-        [
-            "show_similar",
-            "citation_graph",
-            "check_versions",
-            "fetch_s2",
-            "toggle_hf",
-            "generate_summary",
-            "chat_with_paper",
-            "score_relevance",
-            "edit_interests",
-            "auto_tag",
-        ],
-    ),
-    (
-        "View & Utilities",
-        [
-            "toggle_preview",
-            "export_menu",
-            "download_pdf",
-            "collections",
-            "command_palette",
-            "cycle_theme",
-            "toggle_sections",
-            "show_help",
-            "quit",
-        ],
-    ),
-]
-
-HELP_SEARCH_SYNTAX: list[tuple[str, str]] = [
-    ("cat:cs.AI", "Category filter"),
-    ("tag:to-read", "Tag filter"),
-    ("author:hinton", "Author filter"),
-    ("title:transformer", "Title filter"),
-    ("abstract:attention", "Abstract filter"),
-    ("unread / starred", "State filters"),
-    ("AND / OR / NOT", "Boolean operators"),
 ]
 
 # Subprocess timeout in seconds
@@ -3613,59 +3529,9 @@ class ArxivBrowser(App):
 
         self.push_screen(SectionToggleModal(self._config.collapsed_sections), _on_result)
 
-    @staticmethod
-    def _format_help_key(key: str) -> str:
-        """Normalize Textual key names for user-facing help text."""
-        replacements = {
-            "slash": "/",
-            "space": "Space",
-            "question_mark": "?",
-            "apostrophe": "'",
-            "bracketleft": "[",
-            "bracketright": "]",
-        }
-        key = replacements.get(key, key)
-        if key.startswith("ctrl+"):
-            rest = key.removeprefix("ctrl+")
-            rest = rest.replace("shift+", "Shift+")
-            return "Ctrl+" + rest
-        return key
-
-    def _binding_for_help_action(self, action_name: str) -> Binding | None:
-        """Resolve a Binding by action name, supporting parameterized actions."""
-        for binding_item in self.BINDINGS:
-            if isinstance(binding_item, Binding):
-                binding = binding_item
-            else:
-                key = binding_item[0]
-                action = binding_item[1]
-                description = binding_item[2] if len(binding_item) > 2 else ""
-                binding = Binding(key, action, description, show=False)
-            if binding.action == action_name:
-                return binding
-            if binding.action.startswith(f"{action_name}("):
-                return binding
-        return None
-
     def _build_help_sections(self) -> list[tuple[str, list[tuple[str, str]]]]:
         """Build help sections from the runtime key binding table."""
-        sections: list[tuple[str, list[tuple[str, str]]]] = []
-        for section_name, actions in HELP_SECTION_ACTIONS:
-            entries: list[tuple[str, str]] = []
-            for action_name in actions:
-                if action_name == "goto_bookmark":
-                    entries.append(("1-9", "Jump to bookmark"))
-                    continue
-                binding = self._binding_for_help_action(action_name)
-                if binding is None:
-                    continue
-                key = self._format_help_key(binding.key)
-                description = binding.description
-                entries.append((key, description))
-            sections.append((section_name, entries))
-
-        sections.append(("Search Syntax", HELP_SEARCH_SYNTAX))
-        return sections
+        return build_help_sections(self.BINDINGS)
 
     def action_show_help(self) -> None:
         """Show the help overlay with all keyboard shortcuts."""

@@ -8,9 +8,14 @@ wheels/
 
 # Virtual environments
 .venv
-history/**
+history/*
+!history/.gitkeep
 .DS_Store
 .playwright-mcp
+
+# Local planning/scratch docs (not part of published site)
+docs/plans/
+docs/*-prompt.md
 
 # Coverage
 htmlcov/

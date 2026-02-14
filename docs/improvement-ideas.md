@@ -17,7 +17,7 @@
 `app.py` contained 19 `ModalScreen` subclasses (~2,500+ lines). Extracted into
 `src/arxiv_browser/modals/` with 6 domain-grouped submodules: common.py, editing.py,
 search.py, collections.py, citations.py, llm.py. Reduced `app.py` from ~8,300 to
-~5,800 lines. See `docs/plans/2026-02-13-modal-extraction-design.md`.
+~5,800 lines. See local planning docs for the detailed extraction design notes.
 
 ## 2. ~~Extract Widgets into a `widgets/` Package~~ DONE
 
