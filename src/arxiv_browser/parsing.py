@@ -147,15 +147,15 @@ def clean_latex(text: str) -> str:
 def parse_arxiv_file(filepath: Path) -> list[Paper]:
     """Parse arxiv.txt and return a list of Paper objects.
 
-    Duplicate arXiv IDs are skipped (first occurrence is kept).
+    Duplicate arXiv IDs are deduplicated by bare ID (version suffix stripped).
+    When multiple versions of the same ID are present, the highest version wins.
     """
     import time
 
     t0 = time.monotonic()
     # Use errors="replace" to handle any non-UTF-8 characters gracefully
     content = filepath.read_text(encoding="utf-8", errors="replace")
-    papers = []
-    seen_ids: set[str] = set()  # Track seen IDs to skip duplicates
+    papers_by_id: dict[str, tuple[int, Paper]] = {}
 
     # Split by paper separator using pre-compiled pattern
     entries = _ENTRY_SEPARATOR.split(content)
@@ -169,12 +169,12 @@ def parse_arxiv_file(filepath: Path) -> list[Paper]:
         arxiv_match = _ARXIV_ID_PATTERN.search(entry)
         if not arxiv_match:
             continue
-        arxiv_id = arxiv_match.group(1)
-
-        # Skip duplicate papers
-        if arxiv_id in seen_ids:
+        arxiv_id_raw = arxiv_match.group(1)
+        bare_arxiv_id = normalize_arxiv_id(arxiv_id_raw)
+        if not bare_arxiv_id:
             continue
-        seen_ids.add(arxiv_id)
+        version_match = _ARXIV_VERSION_SUFFIX.search(arxiv_id_raw)
+        version = int(version_match.group(0)[1:]) if version_match else 1
 
         # Extract date
         date_match = _DATE_PATTERN.search(entry)
@@ -202,23 +202,25 @@ def parse_arxiv_file(filepath: Path) -> list[Paper]:
 
         # Extract URL
         url_match = _URL_PATTERN.search(entry)
-        url = url_match.group(1) if url_match else f"https://arxiv.org/abs/{arxiv_id}"
+        url = url_match.group(1) if url_match else f"https://arxiv.org/abs/{bare_arxiv_id}"
 
-        papers.append(
-            Paper(
-                arxiv_id=arxiv_id,
-                date=date_val,
-                title=clean_latex(title),
-                authors=clean_latex(authors),
-                categories=categories,
-                comments=clean_latex(comments) if comments else None,
-                abstract=None,
-                abstract_raw=abstract_raw,
-                url=url,
-            )
+        paper = Paper(
+            arxiv_id=bare_arxiv_id,
+            date=date_val,
+            title=clean_latex(title),
+            authors=clean_latex(authors),
+            categories=categories,
+            comments=clean_latex(comments) if comments else None,
+            abstract=None,
+            abstract_raw=abstract_raw,
+            url=url,
         )
+        existing = papers_by_id.get(bare_arxiv_id)
+        if existing is None or version > existing[0]:
+            papers_by_id[bare_arxiv_id] = (version, paper)
 
     elapsed = time.monotonic() - t0
+    papers = [paper for _, paper in papers_by_id.values()]
     logger.debug("Parsed %d papers from %s in %.3fs", len(papers), filepath.name, elapsed)
     return papers
 

@@ -59,6 +59,7 @@ import os
 import platform
 import subprocess
 import sys
+import tempfile
 import time
 import webbrowser
 from collections import deque
@@ -4429,25 +4430,46 @@ class ArxivBrowser(App):
         """
         url = get_pdf_url(paper)
         path = get_pdf_download_path(paper, self._config)
+        tmp_path: str | None = None
 
         try:
             # Create directory if needed (inside try for permission/disk errors)
             path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp_path = tempfile.mkstemp(
+                dir=path.parent,
+                prefix=f".{path.stem}-",
+                suffix=".tmp",
+            )
+
+            async def _stream_to_tmp(active_client: httpx.AsyncClient) -> None:
+                with os.fdopen(fd, "wb") as tmp_file:
+                    async with active_client.stream(
+                        "GET",
+                        url,
+                        timeout=PDF_DOWNLOAD_TIMEOUT,
+                        follow_redirects=True,
+                    ) as response:
+                        response.raise_for_status()
+                        async for chunk in response.aiter_bytes():
+                            if chunk:
+                                tmp_file.write(chunk)
+
             if client is not None:
-                response = await client.get(
-                    url, timeout=PDF_DOWNLOAD_TIMEOUT, follow_redirects=True
-                )
+                await _stream_to_tmp(client)
             else:
                 async with httpx.AsyncClient() as tmp_client:
-                    response = await tmp_client.get(
-                        url, timeout=PDF_DOWNLOAD_TIMEOUT, follow_redirects=True
-                    )
-            response.raise_for_status()
-            path.write_bytes(response.content)
+                    await _stream_to_tmp(tmp_client)
+
+            os.replace(tmp_path, path)
             logger.debug("Downloaded PDF for %s to %s", paper.arxiv_id, path)
             return True
         except (httpx.HTTPError, OSError) as e:
             logger.debug("Download failed for %s: %s", paper.arxiv_id, e)
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
             return False
 
     def _start_downloads(self) -> None:

@@ -1280,6 +1280,74 @@ This is the second unique paper abstract.
         first_paper = next(p for p in papers if p.arxiv_id == "2401.00001")
         assert first_paper.title == "First Paper"
 
+    def test_versioned_duplicates_keep_highest_version(self, tmp_path):
+        """Parser should keep the highest version when duplicate bare IDs exist."""
+        content = """\\
+arXiv:2401.11111v1
+Date: Mon, 15 Jan 2024
+Title: Lower Version
+Authors: Author One
+Categories: cs.AI
+\\\\
+First abstract.
+\\\\
+( https://arxiv.org/abs/2401.11111v1 ,
+------------------------------------------------------------------------------
+\\
+arXiv:2401.11111v3
+Date: Tue, 16 Jan 2024
+Title: Higher Version
+Authors: Author Two
+Categories: cs.LG
+\\\\
+Second abstract.
+\\\\
+( https://arxiv.org/abs/2401.11111v3 ,
+------------------------------------------------------------------------------
+"""
+        file_path = tmp_path / "versioned_duplicates.txt"
+        file_path.write_text(content)
+
+        papers = parse_arxiv_file(file_path)
+
+        assert len(papers) == 1
+        assert papers[0].arxiv_id == "2401.11111"
+        assert papers[0].title == "Higher Version"
+
+    def test_mixed_bare_and_versioned_duplicates_keep_highest_version(self, tmp_path):
+        """Bare IDs are treated as v1 and replaced by higher explicit versions."""
+        content = """\\
+arXiv:2401.22222
+Date: Mon, 15 Jan 2024
+Title: Bare Version
+Authors: Author One
+Categories: cs.AI
+\\\\
+First abstract.
+\\\\
+( https://arxiv.org/abs/2401.22222 ,
+------------------------------------------------------------------------------
+\\
+arXiv:2401.22222v2
+Date: Tue, 16 Jan 2024
+Title: Explicit Higher Version
+Authors: Author Two
+Categories: cs.LG
+\\\\
+Second abstract.
+\\\\
+( https://arxiv.org/abs/2401.22222v2 ,
+------------------------------------------------------------------------------
+"""
+        file_path = tmp_path / "mixed_duplicates.txt"
+        file_path.write_text(content)
+
+        papers = parse_arxiv_file(file_path)
+
+        assert len(papers) == 1
+        assert papers[0].arxiv_id == "2401.22222"
+        assert papers[0].title == "Explicit Higher Version"
+
 
 # ============================================================================
 # Tests for history file discovery
@@ -4339,6 +4407,18 @@ class TestHighlightPatternCache:
         highlight_text("Hello earth", ["earth"], "#ff0000")
         assert len(_HIGHLIGHT_PATTERN_CACHE) == 2
 
+    def test_cache_has_bounded_size(self):
+        from arxiv_browser.app import _HIGHLIGHT_PATTERN_CACHE, highlight_text
+        from arxiv_browser.query import _HIGHLIGHT_PATTERN_CACHE_MAX
+
+        _HIGHLIGHT_PATTERN_CACHE.clear()
+        for i in range(_HIGHLIGHT_PATTERN_CACHE_MAX + 20):
+            highlight_text("value", [f"term{i}"], "#ff0000")
+
+        assert len(_HIGHLIGHT_PATTERN_CACHE) == _HIGHLIGHT_PATTERN_CACHE_MAX
+        assert ("term0",) not in _HIGHLIGHT_PATTERN_CACHE
+        assert (f"term{_HIGHLIGHT_PATTERN_CACHE_MAX + 19}",) in _HIGHLIGHT_PATTERN_CACHE
+
 
 class TestBatchConfirmationThreshold:
     """Verify batch confirmation modal behavior."""
@@ -6463,6 +6543,17 @@ class TestGetTagColor:
         # Both should be valid hex colors
         assert color1.startswith("#")
         assert color2.startswith("#")
+
+    def test_unknown_namespace_uses_stable_hash_algorithm(self):
+        import hashlib
+
+        from arxiv_browser.themes import _TAG_FALLBACK_COLORS
+
+        ns = "custom"
+        digest = hashlib.sha256(ns.encode("utf-8")).digest()
+        idx = int.from_bytes(digest[:2], "big") % len(_TAG_FALLBACK_COLORS)
+        expected = _TAG_FALLBACK_COLORS[idx]
+        assert get_tag_color(f"{ns}:foo") == expected
 
     def test_empty_string_gets_default(self):
         assert get_tag_color("") == "#ae81ff"

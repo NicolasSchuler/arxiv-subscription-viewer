@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import re
+from collections import OrderedDict
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -103,7 +104,8 @@ def format_summary_as_rich(text: str) -> str:
     return indented
 
 
-_HIGHLIGHT_PATTERN_CACHE: dict[tuple[str, ...], re.Pattern[str]] = {}
+_HIGHLIGHT_PATTERN_CACHE_MAX = 256
+_HIGHLIGHT_PATTERN_CACHE: OrderedDict[tuple[str, ...], re.Pattern[str]] = OrderedDict()
 
 
 def highlight_text(text: str, terms: list[str], color: str) -> str:
@@ -129,9 +131,13 @@ def highlight_text(text: str, terms: list[str], color: str) -> str:
     normalized.sort(key=len, reverse=True)
     cache_key = tuple(normalized)
     pattern = _HIGHLIGHT_PATTERN_CACHE.get(cache_key)
-    if pattern is None:
+    if pattern is not None:
+        _HIGHLIGHT_PATTERN_CACHE.move_to_end(cache_key)
+    else:
         escaped_terms = [escape_rich_text(term) for term in normalized]
         pattern = re.compile("|".join(re.escape(term) for term in escaped_terms), re.IGNORECASE)
+        if len(_HIGHLIGHT_PATTERN_CACHE) >= _HIGHLIGHT_PATTERN_CACHE_MAX:
+            _HIGHLIGHT_PATTERN_CACHE.popitem(last=False)
         _HIGHLIGHT_PATTERN_CACHE[cache_key] = pattern
     return pattern.sub(lambda match: f"[bold {color}]{match.group(0)}[/]", escaped_text)
 

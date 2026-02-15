@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 from textual.theme import Theme as TextualTheme
 
 # Default color for unknown categories (Monokai gray)
@@ -291,7 +293,9 @@ def get_tag_color(tag: str) -> str:
     if ns in TAG_NAMESPACE_COLORS:
         return TAG_NAMESPACE_COLORS[ns]
     # Deterministic color for unknown namespaces
-    return _TAG_FALLBACK_COLORS[hash(ns) % len(_TAG_FALLBACK_COLORS)]
+    digest = hashlib.sha256(ns.encode("utf-8")).digest()
+    idx = int.from_bytes(digest[:2], "big") % len(_TAG_FALLBACK_COLORS)
+    return _TAG_FALLBACK_COLORS[idx]
 
 
 __all__ = [

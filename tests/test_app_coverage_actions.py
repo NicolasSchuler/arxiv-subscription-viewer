@@ -913,14 +913,35 @@ class TestS2AndHfCoverage:
 class TestDownloadClipboardAndOpenCoverage:
     @pytest.mark.asyncio
     async def test_download_pdf_async_success_and_failure(self, make_paper, tmp_path):
+        class _FakeResponse:
+            def __init__(self, chunks: list[bytes], error: Exception | None = None) -> None:
+                self._chunks = chunks
+                self._error = error
+
+            def raise_for_status(self) -> None:
+                if self._error is not None:
+                    raise self._error
+
+            async def aiter_bytes(self):
+                for chunk in self._chunks:
+                    yield chunk
+
+        class _StreamContext:
+            def __init__(self, response: _FakeResponse) -> None:
+                self._response = response
+
+            async def __aenter__(self) -> _FakeResponse:
+                return self._response
+
+            async def __aexit__(self, *_args) -> bool:
+                return False
+
         app = _new_app()
         app._config = UserConfig()
         paper = make_paper(arxiv_id="2401.50001")
         target = tmp_path / "pdfs" / "2401.50001.pdf"
-        response = MagicMock()
-        response.content = b"%PDF-1.4"
-        response.raise_for_status = MagicMock()
-        client = SimpleNamespace(get=AsyncMock(return_value=response))
+        response = _FakeResponse([b"%PDF-1.4", b" body"])
+        client = SimpleNamespace(stream=MagicMock(return_value=_StreamContext(response)))
 
         with (
             patch("arxiv_browser.app.get_pdf_url", return_value="https://example/pdf"),
@@ -930,15 +951,17 @@ class TestDownloadClipboardAndOpenCoverage:
 
         assert ok is True
         assert target.exists()
-        assert target.read_bytes() == b"%PDF-1.4"
+        assert target.read_bytes() == b"%PDF-1.4 body"
+        assert list(target.parent.glob(".*.tmp")) == []
 
         with (
             patch("arxiv_browser.app.get_pdf_url", return_value="https://example/pdf"),
             patch("arxiv_browser.app.get_pdf_download_path", return_value=target),
         ):
-            client.get = AsyncMock(side_effect=OSError("network"))
+            client.stream = MagicMock(side_effect=OSError("network"))
             ok = await app._download_pdf_async(paper, client)
         assert ok is False
+        assert list(target.parent.glob(".*.tmp")) == []
 
     @pytest.mark.asyncio
     async def test_process_single_download_updates_state_and_finishes(self, make_paper):
