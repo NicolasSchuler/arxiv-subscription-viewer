@@ -22,7 +22,7 @@ Instructions for AI agents working on this codebase.
 
 - `just lint` — zero ruff errors, formatting matches
 - `just typecheck` — zero pyright errors (basic mode)
-- `just test` — all tests pass, coverage >= 60%
+- `just test` — all tests pass, total coverage >= 60% and `src/arxiv_browser/app.py` coverage >= 80%
 - `uv run xenon src/arxiv_browser/ --max-absolute C --max-modules C --max-average B`
 - `just dead-code` — zero vulture findings
 - `just security` — zero Bandit findings (use targeted `# nosec <rule-id>` only with inline justification)
@@ -41,7 +41,7 @@ Run `just report` for the full dashboard. Key metrics:
 | Metric | Current | Target |
 |--------|---------|--------|
 | Test coverage (overall) | 69% | 80% |
-| Test coverage (app.py) | 57% | 75% |
+| Test coverage (app.py) | 81% | 80% |
 | Complexity (F-rated functions) | 1 | 0 |
 | Complexity (D-rated functions) | 4 | 0 |
 | Maintainability index (app.py) | C (0.0) | B |
@@ -69,6 +69,6 @@ pyproject.toml            # Build config + all tool configurations
 vulture_whitelist.py      # Dead code detection false positive suppressions
 src/arxiv_browser/        # Application source
 tests/                    # Test suite
-docs/                     # Documentation assets + improvement ideas
+docs/                     # Documentation assets
 .github/workflows/        # CI/CD pipeline
 ```

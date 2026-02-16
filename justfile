@@ -28,6 +28,7 @@ typecheck:
 # Run tests with coverage report
 test:
     uv run pytest --cov --cov-report=term-missing
+    uv run coverage report --include=src/arxiv_browser/app.py --fail-under=80
 
 # Run tests without coverage (faster, stop on first failure)
 test-quick:
@@ -80,6 +81,7 @@ ci:
     @echo ""
     @echo "=== Tests ==="
     @uv run pytest --cov --cov-report=term-missing
+    @uv run coverage report --include=src/arxiv_browser/app.py --fail-under=80
     @echo ""
     @echo "=== Dependency Check ==="
     @uv run deptry .

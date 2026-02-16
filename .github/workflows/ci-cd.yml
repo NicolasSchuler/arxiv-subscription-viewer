@@ -46,6 +46,9 @@ jobs:
       - name: Tests with coverage
         run: uv run pytest --cov --cov-report=term-missing
 
+      - name: App.py coverage guardrail
+        run: uv run coverage report --include=src/arxiv_browser/app.py --fail-under=80
+
   quality:
     needs: ci
     runs-on: ubuntu-latest
