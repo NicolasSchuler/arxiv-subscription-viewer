@@ -51,10 +51,9 @@ Search filters:
     AND/OR/NOT      - Combine terms with boolean operators
 """
 
-import argparse
 import asyncio
+import hashlib
 import logging
-import logging.handlers
 import os
 import platform
 import subprocess
@@ -64,12 +63,11 @@ import time
 import webbrowser
 from collections import deque
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 from typing import Any
 
 import httpx
-from platformdirs import user_config_dir
 from rapidfuzz import fuzz
 from textual import on
 from textual.app import App, ComposeResult, ScreenStackError
@@ -95,6 +93,16 @@ from arxiv_browser.action_messages import (
     build_open_pdfs_confirmation_prompt,
     build_open_pdfs_notification,
     requires_batch_confirmation,
+)
+from arxiv_browser.cli import (
+    _configure_color_mode,
+    _configure_logging,
+    _resolve_legacy_fallback,  # noqa: F401
+    _resolve_papers,
+    _validate_interactive_tty,
+)
+from arxiv_browser.cli import (
+    main as _cli_main,
 )
 from arxiv_browser.config import *  # noqa: F403
 from arxiv_browser.config import (  # noqa: F401
@@ -304,6 +312,7 @@ from arxiv_browser.similarity import (  # noqa: F401
     _extract_keywords,
     _jaccard_similarity,
     _tokenize_for_tfidf,
+    build_similarity_corpus_key,
     compute_paper_similarity,
     find_similar_papers,
 )
@@ -999,8 +1008,11 @@ class ArxivBrowser(App):
         self._auto_tag_active: bool = False
         self._auto_tag_progress: tuple[int, int] | None = None  # (current, total)
 
-        # TF-IDF index for similarity (lazy-built on first use)
+        # TF-IDF similarity index state
         self._tfidf_index: TfidfIndex | None = None
+        self._tfidf_corpus_key: str | None = None
+        self._tfidf_build_task: asyncio.Task[None] | None = None
+        self._pending_similarity_paper_id: str | None = None
 
         # Internal UI boundaries (cached refs + refresh orchestration)
         self._ui_refs = UiRefs()
@@ -1142,6 +1154,7 @@ class ArxivBrowser(App):
                 logger.debug("Background task did not cancel before shutdown: %r", task)
         if hasattr(self, "_background_tasks"):
             self._background_tasks.clear()
+        self._tfidf_build_task = None
 
         # Close shared HTTP client
         client = self._http_client
@@ -3283,19 +3296,25 @@ class ArxivBrowser(App):
 
     def _show_local_recommendations(self, paper: Paper) -> None:
         """Show TF-IDF + metadata local recommendations."""
-        if self._tfidf_index is None:
-            self._tfidf_index = TfidfIndex.build(
-                self.all_papers,
-                text_fn=lambda p: (
-                    f"{p.title} {self._get_abstract_text(p, allow_async=False) or ''}"
-                ),
-            )
+        corpus_key = build_similarity_corpus_key(self.all_papers)
+        tfidf_index = getattr(self, "_tfidf_index", None)
+        tfidf_corpus_key = getattr(self, "_tfidf_corpus_key", None)
+        if tfidf_index is None or tfidf_corpus_key != corpus_key:
+            self._pending_similarity_paper_id = paper.arxiv_id
+            build_task = getattr(self, "_tfidf_build_task", None)
+            if build_task is not None and not build_task.done():
+                self.notify("Similarity indexing in progress...", title="Similar")
+                return
+            self.notify("Indexing papers for similarity...", title="Similar")
+            self._tfidf_build_task = self._track_task(self._build_tfidf_index_async(corpus_key))
+            return
+
         similar_papers = find_similar_papers(
             paper,
             self.all_papers,
             metadata=self._config.paper_metadata,
-            abstract_lookup=lambda p: self._get_abstract_text(p, allow_async=False) or "",
-            tfidf_index=self._tfidf_index,
+            abstract_lookup=lambda _paper: "",
+            tfidf_index=tfidf_index,
         )
         if not similar_papers:
             self.notify("No similar papers found", title="Similar", severity="warning")
@@ -3304,6 +3323,56 @@ class ArxivBrowser(App):
             RecommendationsScreen(paper, similar_papers),
             self._on_recommendation_selected,
         )
+
+    @staticmethod
+    def _build_tfidf_index_for_similarity(papers: list[Paper]) -> TfidfIndex:
+        """Build a TF-IDF index using cleaned abstract text."""
+
+        abstract_cache: dict[str, str] = {}
+
+        def _text_for(paper: Paper) -> str:
+            abstract = paper.abstract
+            if abstract is None:
+                abstract = abstract_cache.get(paper.arxiv_id)
+                if abstract is None:
+                    abstract = clean_latex(paper.abstract_raw) if paper.abstract_raw else ""
+                    abstract_cache[paper.arxiv_id] = abstract
+            return f"{paper.title} {abstract}"
+
+        return TfidfIndex.build(papers, text_fn=_text_for)
+
+    async def _build_tfidf_index_async(self, corpus_key: str) -> None:
+        """Build the TF-IDF index off the UI thread and publish it when fresh."""
+        papers_snapshot = list(self.all_papers)
+        try:
+            index = await asyncio.to_thread(self._build_tfidf_index_for_similarity, papers_snapshot)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("Failed to build similarity index", exc_info=True)
+            self.notify("Similarity indexing failed", title="Similar", severity="error")
+            return
+        finally:
+            self._tfidf_build_task = None
+
+        if corpus_key != build_similarity_corpus_key(self.all_papers):
+            logger.debug("Discarded stale similarity index for corpus key %s", corpus_key)
+            return
+
+        self._tfidf_index = index
+        self._tfidf_corpus_key = corpus_key
+
+        pending_id = self._pending_similarity_paper_id
+        self._pending_similarity_paper_id = None
+        if pending_id is None:
+            self.notify("Similarity index ready", title="Similar")
+            return
+
+        current_paper = self._get_current_paper()
+        if current_paper is None or current_paper.arxiv_id != pending_id:
+            self.notify("Similarity index ready", title="Similar")
+            return
+        self._show_local_recommendations(current_paper)
 
     async def _show_s2_recommendations(self, paper: Paper) -> None:
         """Fetch S2 recommendations and show them in the modal."""
@@ -3623,6 +3692,124 @@ class ArxivBrowser(App):
     # LLM Summary Generation
     # ========================================================================
 
+    @staticmethod
+    def _trust_hash(command_template: str) -> str:
+        """Return a stable short hash for trusted command templates."""
+        return hashlib.sha256(command_template.encode("utf-8")).hexdigest()[:16]
+
+    def _remember_trusted_hash(
+        self,
+        command_template: str,
+        trusted_hashes: list[str],
+        title: str,
+    ) -> bool:
+        """Persist command trust hash. Returns True when trusted in-memory."""
+        cmd_hash = self._trust_hash(command_template)
+        if cmd_hash in trusted_hashes:
+            return True
+        trusted_hashes.append(cmd_hash)
+        if save_config(self._config):
+            return True
+        self.notify(
+            "Could not save trust preference. Command trusted for this session only.",
+            title=title,
+            severity="warning",
+        )
+        return True
+
+    def _is_llm_command_trusted(self, command_template: str) -> bool:
+        """Return whether an LLM command template is trusted."""
+        config = getattr(self, "_config", None)
+        if not isinstance(config, UserConfig) or (not config.llm_command and not config.llm_preset):
+            return True
+        if not config.llm_command and command_template == LLM_PRESETS.get(config.llm_preset, ""):
+            return True
+        return self._trust_hash(command_template) in config.trusted_llm_command_hashes
+
+    def _is_pdf_viewer_trusted(self, viewer_cmd: str) -> bool:
+        """Return whether a PDF viewer command is trusted."""
+        config = getattr(self, "_config", None)
+        if not isinstance(config, UserConfig):
+            return True
+        return self._trust_hash(viewer_cmd) in config.trusted_pdf_viewer_hashes
+
+    def _ensure_command_trusted(
+        self,
+        *,
+        command_template: str,
+        title: str,
+        prompt_heading: str,
+        trust_button_label: str,
+        cancel_message: str,
+        trusted_hashes: list[str],
+        on_trusted: Callable[[], None],
+    ) -> bool:
+        """Show trust prompt for a custom command and persist approval on confirm."""
+        command_preview = truncate_text(command_template, 120)
+
+        def _on_decision(confirmed: bool | None) -> None:
+            if not confirmed:
+                self.notify(cancel_message, title=title, severity="warning")
+                return
+            if self._remember_trusted_hash(command_template, trusted_hashes, title):
+                on_trusted()
+
+        try:
+            self.push_screen(
+                ConfirmModal(
+                    f"{prompt_heading}\n"
+                    f"{command_preview}\n\n"
+                    "This command executes on your machine.\n\n"
+                    f"[y] Trust & {trust_button_label}  [n/Esc] Cancel"
+                ),
+                _on_decision,
+            )
+            return False
+        except Exception:
+            logger.debug("Unable to show %s trust prompt", title, exc_info=True)
+            self.notify(
+                f"Could not confirm {title.lower()} command trust; action cancelled.",
+                title=title,
+                severity="warning",
+            )
+            return False
+
+    def _ensure_llm_command_trusted(
+        self,
+        command_template: str,
+        on_trusted: Callable[[], None],
+    ) -> bool:
+        """Ensure a custom LLM command is trusted before execution."""
+        if self._is_llm_command_trusted(command_template):
+            return True
+        return self._ensure_command_trusted(
+            command_template=command_template,
+            title="LLM",
+            prompt_heading="Run untrusted custom LLM command?",
+            trust_button_label="Run",
+            cancel_message="LLM command cancelled",
+            trusted_hashes=self._config.trusted_llm_command_hashes,
+            on_trusted=on_trusted,
+        )
+
+    def _ensure_pdf_viewer_trusted(
+        self,
+        viewer_cmd: str,
+        on_trusted: Callable[[], None],
+    ) -> bool:
+        """Ensure a custom PDF viewer command is trusted before execution."""
+        if self._is_pdf_viewer_trusted(viewer_cmd):
+            return True
+        return self._ensure_command_trusted(
+            command_template=viewer_cmd,
+            title="PDF",
+            prompt_heading="Run untrusted custom PDF viewer command?",
+            trust_button_label="Open",
+            cancel_message="PDF open cancelled",
+            trusted_hashes=self._config.trusted_pdf_viewer_hashes,
+            on_trusted=on_trusted,
+        )
+
     def _require_llm_command(self) -> str | None:
         """Resolve LLM command, showing a notification if not configured.
 
@@ -3647,6 +3834,15 @@ class ArxivBrowser(App):
         command_template = self._require_llm_command()
         if not command_template:
             return
+        if not self._ensure_llm_command_trusted(
+            command_template,
+            lambda: self._start_summary_flow(command_template),
+        ):
+            return
+        self._start_summary_flow(command_template)
+
+    def _start_summary_flow(self, command_template: str) -> None:
+        """Start the summary mode flow after command trust checks pass."""
 
         paper = self._get_current_paper()
         if not paper:
@@ -3787,6 +3983,15 @@ class ArxivBrowser(App):
         command_template = self._require_llm_command()
         if not command_template:
             return
+        if not self._ensure_llm_command_trusted(
+            command_template,
+            lambda: self._start_chat_with_paper(),
+        ):
+            return
+        self._start_chat_with_paper()
+
+    def _start_chat_with_paper(self) -> None:
+        """Start the chat flow after command trust checks pass."""
         paper = self._get_current_paper()
         if not paper:
             self.notify("No paper selected", title="Chat", severity="warning")
@@ -3809,6 +4014,15 @@ class ArxivBrowser(App):
         command_template = self._require_llm_command()
         if not command_template:
             return
+        if not self._ensure_llm_command_trusted(
+            command_template,
+            lambda: self._start_score_relevance_flow(command_template),
+        ):
+            return
+        self._start_score_relevance_flow(command_template)
+
+    def _start_score_relevance_flow(self, command_template: str) -> None:
+        """Start relevance scoring after command trust checks pass."""
 
         if self._relevance_scoring_active:
             self.notify("Relevance scoring already in progress", title="Relevance")
@@ -4005,6 +4219,15 @@ class ArxivBrowser(App):
         command_template = self._require_llm_command()
         if not command_template:
             return
+        if not self._ensure_llm_command_trusted(
+            command_template,
+            lambda: self._start_auto_tag_flow(),
+        ):
+            return
+        self._start_auto_tag_flow()
+
+    def _start_auto_tag_flow(self) -> None:
+        """Start auto-tagging after command trust checks pass."""
 
         if self._auto_tag_active:
             self.notify("Auto-tagging already in progress", title="Auto-Tag")
@@ -4197,6 +4420,11 @@ class ArxivBrowser(App):
         self._relevance_scores.clear()
         self._relevance_scoring_active = False
         self._tfidf_index = None
+        self._tfidf_corpus_key = None
+        self._pending_similarity_paper_id = None
+        if self._tfidf_build_task is not None and not self._tfidf_build_task.done():
+            self._tfidf_build_task.cancel()
+        self._tfidf_build_task = None
 
         # Clear selection when switching dates
         self.selected_ids.clear()
@@ -4596,6 +4824,11 @@ class ArxivBrowser(App):
     def _do_open_pdfs(self, papers: list[Paper]) -> None:
         """Open the given papers' PDF URLs in the browser or configured viewer."""
         viewer = self._config.pdf_viewer.strip()
+        if viewer and not self._ensure_pdf_viewer_trusted(
+            viewer,
+            lambda: self._do_open_pdfs(papers),
+        ):
+            return
         for paper in papers:
             url = get_pdf_url(paper)
             if viewer:
@@ -4745,261 +4978,17 @@ class ArxivBrowser(App):
             )
 
 
-def _resolve_input_file(input_path: Path) -> list[Paper] | int:
-    """Validate and parse an explicit input file. Returns papers or exit code."""
-    arxiv_file = input_path.resolve()
-    if not arxiv_file.exists():
-        print(f"Error: {arxiv_file} not found", file=sys.stderr)
-        return 1
-    if arxiv_file.is_dir():
-        print(f"Error: {arxiv_file} is a directory, not a file", file=sys.stderr)
-        return 1
-    if not os.access(arxiv_file, os.R_OK):
-        print(f"Error: {arxiv_file} is not readable (permission denied)", file=sys.stderr)
-        return 1
-    try:
-        return parse_arxiv_file(arxiv_file)
-    except OSError as e:
-        print(f"Error: Failed to read {arxiv_file}: {e}", file=sys.stderr)
-        return 1
-
-
-def _resolve_history_date(history_files: list[tuple[date, Path]], date_str: str) -> int | None:
-    """Find the index for --date argument. Returns index or None on error."""
-    try:
-        target_date = datetime.strptime(date_str, HISTORY_DATE_FORMAT).date()
-    except ValueError:
-        print(
-            f"Error: Invalid date format '{date_str}', expected YYYY-MM-DD",
-            file=sys.stderr,
-        )
-        return None
-    for i, (d, _) in enumerate(history_files):
-        if d == target_date:
-            return i
-    print(f"Error: No file found for date {date_str}", file=sys.stderr)
-    return None
-
-
-def _resolve_legacy_fallback(base_dir: Path) -> list[Paper] | int:
-    """Find and parse arxiv.txt in the current directory. Returns papers or exit code."""
-    arxiv_file = base_dir / "arxiv.txt"
-    if not arxiv_file.exists():
-        print("Error: No papers found. Either:", file=sys.stderr)
-        print("  - Create history/YYYY-MM-DD.txt files, or", file=sys.stderr)
-        print("  - Create arxiv.txt in the current directory, or", file=sys.stderr)
-        print("  - Use -i to specify an input file", file=sys.stderr)
-        return 1
-    if not os.access(arxiv_file, os.R_OK):
-        print(f"Error: {arxiv_file} is not readable (permission denied)", file=sys.stderr)
-        return 1
-    try:
-        return parse_arxiv_file(arxiv_file)
-    except OSError as e:
-        print(f"Error: Failed to read {arxiv_file}: {e}", file=sys.stderr)
-        return 1
-
-
-def _resolve_papers(
-    args: argparse.Namespace,
-    base_dir: Path,
-    config: UserConfig,
-    history_files: list[tuple[date, Path]],
-) -> tuple[list[Paper], list[tuple[date, Path]], int] | int:
-    """Resolve which papers to load based on CLI args. Returns (papers, history_files, date_index) or exit code."""
-    if args.input is not None:
-        result = _resolve_input_file(args.input)
-        if isinstance(result, int):
-            return result
-        return (result, [], 0)
-
-    if history_files:
-        current_date_index = 0
-        if args.date:
-            idx = _resolve_history_date(history_files, args.date)
-            if idx is None:
-                return 1
-            current_date_index = idx
-        elif not args.no_restore and config.session.current_date:
-            try:
-                saved_date = datetime.strptime(
-                    config.session.current_date, HISTORY_DATE_FORMAT
-                ).date()
-                newest_date = history_files[0][0]
-                if saved_date >= newest_date:
-                    for i, (d, _) in enumerate(history_files):
-                        if d == saved_date:
-                            current_date_index = i
-                            break
-            except ValueError:
-                pass
-        _, arxiv_file = history_files[current_date_index]
-        try:
-            papers = parse_arxiv_file(arxiv_file)
-        except OSError as e:
-            print(f"Error: Failed to read {arxiv_file}: {e}", file=sys.stderr)
-            return 1
-        return (papers, history_files, current_date_index)
-
-    result = _resolve_legacy_fallback(base_dir)
-    if isinstance(result, int):
-        return result
-    return (result, [], 0)
-
-
-def _configure_logging(debug: bool) -> None:
-    """Configure logging. When debug=True, logs to file at DEBUG level."""
-    if not debug:
-        # Default: suppress all logging (TUI captures stderr)
-        logging.disable(logging.CRITICAL)
-        return
-
-    log_dir = Path(user_config_dir(CONFIG_APP_NAME))
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / "debug.log"
-
-    handler = logging.handlers.RotatingFileHandler(
-        log_file,
-        maxBytes=5 * 1024 * 1024,
-        backupCount=3,
-        encoding="utf-8",
-    )
-    handler.setFormatter(
-        logging.Formatter(
-            "%(asctime)s %(name)s %(levelname)s %(message)s",
-            datefmt="%H:%M:%S",
-        )
-    )
-    logging.root.addHandler(handler)
-    logging.root.setLevel(logging.DEBUG)
-
-
-def _configure_color_mode(color_mode: str) -> None:
-    """Configure environment hints for terminal color behavior."""
-    if color_mode == "never":
-        os.environ["NO_COLOR"] = "1"
-        os.environ.pop("FORCE_COLOR", None)
-        return
-    if color_mode == "always":
-        os.environ["FORCE_COLOR"] = "1"
-        os.environ.pop("NO_COLOR", None)
-        return
-    # auto
-    os.environ.pop("FORCE_COLOR", None)
-
-
-def _validate_interactive_tty() -> bool:
-    """Return True when stdin/stdout are interactive terminals."""
-    return bool(sys.stdin.isatty() and sys.stdout.isatty())
-
-
 def main() -> int:
-    """Main entry point. Returns exit code."""
-    parser = argparse.ArgumentParser(description="Browse arXiv papers from a text file in a TUI")
-    parser.add_argument(
-        "-i",
-        "--input",
-        type=Path,
-        default=None,
-        help="Input file containing arXiv metadata (overrides history mode)",
+    """Main entry point wrapper for CLI/bootstrap logic."""
+    return _cli_main(
+        load_config_fn=load_config,
+        discover_history_files_fn=discover_history_files,
+        resolve_papers_fn=_resolve_papers,
+        configure_logging_fn=_configure_logging,
+        configure_color_mode_fn=_configure_color_mode,
+        validate_interactive_tty_fn=_validate_interactive_tty,
+        app_factory=ArxivBrowser,
     )
-    parser.add_argument(
-        "--no-restore",
-        action="store_true",
-        help="Start with fresh session (ignore saved scroll position, filters, etc.)",
-    )
-    parser.add_argument(
-        "--date",
-        type=str,
-        default=None,
-        help="Open specific date in YYYY-MM-DD format (history mode only)",
-    )
-    parser.add_argument(
-        "--list-dates",
-        action="store_true",
-        help="List available dates in history/ and exit",
-    )
-    parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="Enable debug logging to file (~/.config/arxiv-browser/debug.log)",
-    )
-    parser.add_argument(
-        "--color",
-        choices=["auto", "always", "never"],
-        default="auto",
-        help="Color output mode for terminal UI (default: auto)",
-    )
-    parser.add_argument(
-        "--no-color",
-        action="store_true",
-        help="Disable terminal colors (equivalent to --color never)",
-    )
-    parser.add_argument(
-        "--ascii",
-        action="store_true",
-        help="Use ASCII-only status icons for compatibility with limited terminals",
-    )
-    args = parser.parse_args()
-
-    color_mode = "never" if args.no_color else args.color
-    _configure_color_mode(color_mode)
-    _configure_logging(args.debug)
-    logger.debug("arxiv-viewer starting, cwd=%s", Path.cwd())
-
-    base_dir = Path.cwd()
-
-    # Load user config early (needed for session restore)
-    config = load_config()
-
-    # Discover history files
-    history_files = discover_history_files(base_dir)
-
-    # Handle --list-dates
-    if args.list_dates:
-        if not history_files:
-            print("No history files found in history/", file=sys.stderr)
-            return 1
-        print("Available dates:")
-        for d, path in history_files:
-            print(f"  {d.strftime(HISTORY_DATE_FORMAT)}  ({path.name})")
-        return 0
-
-    # Determine which file(s) to load
-    result = _resolve_papers(args, base_dir, config, history_files)
-    if isinstance(result, int):
-        return result
-    papers, history_files, current_date_index = result
-
-    if not papers:
-        print("No papers found in the file", file=sys.stderr)
-        return 1
-
-    if not _validate_interactive_tty():
-        print(
-            "Error: arxiv-viewer requires an interactive TTY for the full UI.",
-            file=sys.stderr,
-        )
-        print("Next steps:", file=sys.stderr)
-        print("  - Run arxiv-viewer directly in a terminal session", file=sys.stderr)
-        print("  - Use --list-dates for non-interactive output", file=sys.stderr)
-        print("  - Use --date YYYY-MM-DD in an interactive terminal", file=sys.stderr)
-        print("  - Use --help for command documentation", file=sys.stderr)
-        return 2
-
-    # Sort papers alphabetically by title
-    papers.sort(key=lambda p: p.title.lower())
-
-    app = ArxivBrowser(
-        papers,
-        config=config,
-        restore_session=not args.no_restore,
-        history_files=history_files,
-        current_date_index=current_date_index,
-        ascii_icons=args.ascii,
-    )
-    app.run()
-    return 0
 
 
 if __name__ == "__main__":

@@ -605,7 +605,9 @@ class TestAutoTagCoverage:
 
     def test_action_auto_tag_selected_and_single_branches(self, make_paper):
         app = _new_app()
+        app._config = UserConfig()
         app._require_llm_command = MagicMock(return_value="cmd {prompt}")
+        app._ensure_llm_command_trusted = MagicMock(return_value=True)
         app._collect_all_tags = MagicMock(return_value=["topic:ml"])
         app.notify = MagicMock()
         app._update_footer = MagicMock()
@@ -1076,6 +1078,7 @@ class TestDownloadClipboardAndOpenCoverage:
         app.notify = MagicMock()
         app._safe_browser_open = MagicMock(return_value=True)
         app._open_with_viewer = MagicMock(return_value=True)
+        app._ensure_pdf_viewer_trusted = MagicMock(return_value=True)
         app._config = UserConfig()
         app._config.pdf_viewer = "viewer {url}"
 
@@ -1226,6 +1229,7 @@ class TestStatusCommandPaletteAndChatCoverage:
     async def test_chat_and_summary_action_paths(self, make_paper):
         app = _new_app()
         app._config = UserConfig()
+        app._ensure_llm_command_trusted = MagicMock(return_value=True)
         app.notify = MagicMock()
         app._summary_loading = set()
         app._paper_summaries = {}
@@ -1337,30 +1341,27 @@ class TestArxivApiAndSimilarityCoverage:
         app._track_task.assert_called_once()
 
     def test_show_local_recommendations_empty_and_success(self, make_paper):
+        from arxiv_browser.app import build_similarity_corpus_key
+
         app = _new_app()
         app.notify = MagicMock()
         app.push_screen = MagicMock()
         app._config = UserConfig()
         app._config.paper_metadata = {}
-        app._tfidf_index = None
+        app._tfidf_index = object()
         app._get_abstract_text = MagicMock(return_value="abstract")
         paper = make_paper(arxiv_id="2401.70003")
         app.all_papers = [paper, make_paper(arxiv_id="2401.70004")]
+        app._tfidf_corpus_key = build_similarity_corpus_key(app.all_papers)
 
-        with (
-            patch("arxiv_browser.app.TfidfIndex.build", return_value=object()),
-            patch("arxiv_browser.app.find_similar_papers", return_value=[]),
-        ):
+        with patch("arxiv_browser.app.find_similar_papers", return_value=[]):
             app._show_local_recommendations(paper)
         assert "No similar papers found" in app.notify.call_args[0][0]
 
         app.notify.reset_mock()
-        with (
-            patch("arxiv_browser.app.TfidfIndex.build", return_value=object()),
-            patch(
-                "arxiv_browser.app.find_similar_papers",
-                return_value=[(make_paper(arxiv_id="2401.70005"), 0.9)],
-            ),
+        with patch(
+            "arxiv_browser.app.find_similar_papers",
+            return_value=[(make_paper(arxiv_id="2401.70005"), 0.9)],
         ):
             app._show_local_recommendations(paper)
         app.push_screen.assert_called_once()
@@ -1503,6 +1504,7 @@ class TestBookmarkRelevanceAndCopyCoverage:
         app2.push_screen = MagicMock()
         app2._start_relevance_scoring = MagicMock()
         app2._require_llm_command = MagicMock(return_value=None)
+        app2._ensure_llm_command_trusted = MagicMock(return_value=True)
         app2._relevance_scoring_active = False
         app2._config = UserConfig()
         app2.action_score_relevance()
@@ -1642,20 +1644,20 @@ class TestCliResolutionCoverage:
         arxiv_file = tmp_path / "arxiv.txt"
         arxiv_file.write_text("placeholder", encoding="utf-8")
 
-        with patch("arxiv_browser.app.os.access", return_value=False):
+        with patch("arxiv_browser.cli.os.access", return_value=False):
             unreadable = _resolve_legacy_fallback(tmp_path)
         assert unreadable == 1
 
         with (
-            patch("arxiv_browser.app.os.access", return_value=True),
-            patch("arxiv_browser.app.parse_arxiv_file", side_effect=OSError("read error")),
+            patch("arxiv_browser.cli.os.access", return_value=True),
+            patch("arxiv_browser.cli.parse_arxiv_file", side_effect=OSError("read error")),
         ):
             read_error = _resolve_legacy_fallback(tmp_path)
         assert read_error == 1
 
         with (
-            patch("arxiv_browser.app.os.access", return_value=True),
-            patch("arxiv_browser.app.parse_arxiv_file", return_value=[make_paper()]),
+            patch("arxiv_browser.cli.os.access", return_value=True),
+            patch("arxiv_browser.cli.parse_arxiv_file", return_value=[make_paper()]),
         ):
             ok = _resolve_legacy_fallback(tmp_path)
         assert isinstance(ok, list) and len(ok) == 1
@@ -1667,7 +1669,7 @@ class TestCliResolutionCoverage:
             (date(2026, 1, 23), tmp_path / "2026-01-23.txt"),
             (date(2026, 1, 22), tmp_path / "2026-01-22.txt"),
         ]
-        with patch("arxiv_browser.app.parse_arxiv_file", return_value=[make_paper()]):
+        with patch("arxiv_browser.cli.parse_arxiv_file", return_value=[make_paper()]):
             result = _resolve_papers(args, tmp_path, config, history_files)
         assert isinstance(result, tuple)
         assert result[2] == 1
@@ -1680,7 +1682,7 @@ class TestCliResolutionCoverage:
             (date(2026, 1, 23), tmp_path / "2026-01-23.txt"),
             (date(2026, 1, 22), tmp_path / "2026-01-22.txt"),
         ]
-        with patch("arxiv_browser.app.parse_arxiv_file", return_value=[make_paper()]):
+        with patch("arxiv_browser.cli.parse_arxiv_file", return_value=[make_paper()]):
             result = _resolve_papers(args, tmp_path, config, history_files)
         assert isinstance(result, tuple)
         assert result[2] == 0
@@ -1693,7 +1695,7 @@ class TestCliResolutionCoverage:
             (date(2026, 1, 23), tmp_path / "2026-01-23.txt"),
             (date(2026, 1, 22), tmp_path / "2026-01-22.txt"),
         ]
-        with patch("arxiv_browser.app.parse_arxiv_file", return_value=[make_paper()]):
+        with patch("arxiv_browser.cli.parse_arxiv_file", return_value=[make_paper()]):
             result = _resolve_papers(args, tmp_path, config, history_files)
         assert isinstance(result, tuple)
         assert result[2] == 0

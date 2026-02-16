@@ -2454,7 +2454,7 @@ class TestMainCLI:
             "arxiv_browser.app.discover_history_files",
             lambda base_dir: [(datemod(2024, 1, 15), history_file)],
         )
-        monkeypatch.setattr("arxiv_browser.app.parse_arxiv_file", raise_read_error)
+        monkeypatch.setattr("arxiv_browser.cli.parse_arxiv_file", raise_read_error)
         monkeypatch.setattr("arxiv_browser.app.load_config", lambda: UserConfig())
 
         result = main()
@@ -2565,6 +2565,124 @@ class TestMainCLI:
         assert result == 0
         assert captured_kwargs.get("ascii_icons") is True
         assert os.environ.get("NO_COLOR") == "1"
+
+
+class TestResolvePapersHistoryRestore:
+    """Tests for history/session restore precedence in CLI paper resolution."""
+
+    def test_restores_saved_date_even_when_older(self, monkeypatch, tmp_path):
+        import argparse
+        from datetime import date as dt_date
+
+        from arxiv_browser.cli import _resolve_papers
+
+        older = tmp_path / "2024-01-14.txt"
+        newer = tmp_path / "2024-01-15.txt"
+        history_files = [(dt_date(2024, 1, 15), newer), (dt_date(2024, 1, 14), older)]
+        config = UserConfig()
+        config.session.current_date = "2024-01-14"
+        parsed: list[Path] = []
+
+        def fake_parse(path: Path) -> list[Paper]:
+            parsed.append(path)
+            return [
+                Paper(
+                    arxiv_id="2401.00001",
+                    date="Mon, 14 Jan 2024",
+                    title="Test",
+                    authors="A",
+                    categories="cs.AI",
+                    comments=None,
+                    abstract="",
+                    abstract_raw="",
+                    url="https://arxiv.org/abs/2401.00001",
+                )
+            ]
+
+        monkeypatch.setattr("arxiv_browser.cli.parse_arxiv_file", fake_parse)
+        args = argparse.Namespace(input=None, date=None, no_restore=False)
+        result = _resolve_papers(args, tmp_path, config, history_files)
+
+        assert not isinstance(result, int)
+        _, _, current_date_index = result
+        assert current_date_index == 1
+        assert parsed == [older]
+
+    def test_invalid_saved_date_falls_back_to_newest(self, monkeypatch, tmp_path):
+        import argparse
+        from datetime import date as dt_date
+
+        from arxiv_browser.cli import _resolve_papers
+
+        older = tmp_path / "2024-01-14.txt"
+        newer = tmp_path / "2024-01-15.txt"
+        history_files = [(dt_date(2024, 1, 15), newer), (dt_date(2024, 1, 14), older)]
+        config = UserConfig()
+        config.session.current_date = "not-a-date"
+        parsed: list[Path] = []
+
+        def fake_parse(path: Path) -> list[Paper]:
+            parsed.append(path)
+            return [
+                Paper(
+                    arxiv_id="2401.00002",
+                    date="Tue, 15 Jan 2024",
+                    title="Test 2",
+                    authors="B",
+                    categories="cs.LG",
+                    comments=None,
+                    abstract="",
+                    abstract_raw="",
+                    url="https://arxiv.org/abs/2401.00002",
+                )
+            ]
+
+        monkeypatch.setattr("arxiv_browser.cli.parse_arxiv_file", fake_parse)
+        args = argparse.Namespace(input=None, date=None, no_restore=False)
+        result = _resolve_papers(args, tmp_path, config, history_files)
+
+        assert not isinstance(result, int)
+        _, _, current_date_index = result
+        assert current_date_index == 0
+        assert parsed == [newer]
+
+    def test_explicit_date_overrides_session_restore(self, monkeypatch, tmp_path):
+        import argparse
+        from datetime import date as dt_date
+
+        from arxiv_browser.cli import _resolve_papers
+
+        older = tmp_path / "2024-01-14.txt"
+        newer = tmp_path / "2024-01-15.txt"
+        history_files = [(dt_date(2024, 1, 15), newer), (dt_date(2024, 1, 14), older)]
+        config = UserConfig()
+        config.session.current_date = "2024-01-14"
+        parsed: list[Path] = []
+
+        def fake_parse(path: Path) -> list[Paper]:
+            parsed.append(path)
+            return [
+                Paper(
+                    arxiv_id="2401.00003",
+                    date="Tue, 15 Jan 2024",
+                    title="Test 3",
+                    authors="C",
+                    categories="cs.CL",
+                    comments=None,
+                    abstract="",
+                    abstract_raw="",
+                    url="https://arxiv.org/abs/2401.00003",
+                )
+            ]
+
+        monkeypatch.setattr("arxiv_browser.cli.parse_arxiv_file", fake_parse)
+        args = argparse.Namespace(input=None, date="2024-01-15", no_restore=False)
+        result = _resolve_papers(args, tmp_path, config, history_files)
+
+        assert not isinstance(result, int)
+        _, _, current_date_index = result
+        assert current_date_index == 0
+        assert parsed == [newer]
 
 
 # ============================================================================
@@ -4046,6 +4164,85 @@ class TestRequireLlmCommand:
         assert "Unknown preset" in call_args_str
 
 
+class TestCommandTrustGuardrails:
+    """Tests for one-time trust prompts for external commands."""
+
+    def _make_mock_app(self, **config_kwargs):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser.app import ArxivBrowser
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._config = UserConfig(**config_kwargs)
+        app.notify = MagicMock()
+        return app
+
+    def test_llm_preset_is_auto_trusted(self):
+        app = self._make_mock_app(llm_preset="copilot")
+        command_template = LLM_PRESETS["copilot"]
+        assert app._is_llm_command_trusted(command_template) is True
+
+    def test_custom_llm_command_trusted_by_hash(self):
+        app = self._make_mock_app(llm_command="custom-tool {prompt}")
+        command_template = "custom-tool {prompt}"
+        cmd_hash = app._trust_hash(command_template)
+        app._config.trusted_llm_command_hashes = [cmd_hash]
+        assert app._is_llm_command_trusted(command_template) is True
+
+    def test_ensure_llm_trusted_prompts_and_persists(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        app = self._make_mock_app(llm_command="custom-tool {prompt}")
+        on_trusted = MagicMock()
+        command_template = "custom-tool {prompt}"
+
+        monkeypatch.setattr("arxiv_browser.app.save_config", lambda _config: True)
+
+        def fake_push_screen(_modal, callback):
+            callback(True)
+
+        app.push_screen = fake_push_screen
+
+        trusted_now = app._ensure_llm_command_trusted(command_template, on_trusted)
+        assert trusted_now is False
+        on_trusted.assert_called_once()
+        cmd_hash = app._trust_hash(command_template)
+        assert cmd_hash in app._config.trusted_llm_command_hashes
+
+    def test_ensure_pdf_viewer_trusted_prompts_and_persists(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        app = self._make_mock_app()
+        viewer_cmd = "open -a Preview {path}"
+        on_trusted = MagicMock()
+
+        monkeypatch.setattr("arxiv_browser.app.save_config", lambda _config: True)
+
+        def fake_push_screen(_modal, callback):
+            callback(True)
+
+        app.push_screen = fake_push_screen
+
+        trusted_now = app._ensure_pdf_viewer_trusted(viewer_cmd, on_trusted)
+        assert trusted_now is False
+        on_trusted.assert_called_once()
+        cmd_hash = app._trust_hash(viewer_cmd)
+        assert cmd_hash in app._config.trusted_pdf_viewer_hashes
+
+    def test_ensure_llm_trusted_cancels_when_prompt_unavailable(self):
+        from unittest.mock import MagicMock
+
+        app = self._make_mock_app(llm_command="custom-tool {prompt}")
+        app.push_screen = MagicMock(side_effect=RuntimeError("no screen"))
+        on_trusted = MagicMock()
+
+        trusted_now = app._ensure_llm_command_trusted("custom-tool {prompt}", on_trusted)
+
+        assert trusted_now is False
+        on_trusted.assert_not_called()
+        assert "action cancelled" in str(app.notify.call_args)
+
+
 class TestBuildLlmShellCommand:
     """Tests for shell command building with proper escaping."""
 
@@ -4138,12 +4335,16 @@ class TestLlmConfigSerialization:
             llm_command="claude -p {prompt}",
             llm_prompt_template="Summarize: {title}",
             llm_preset="claude",
+            trusted_llm_command_hashes=["abc123"],
+            trusted_pdf_viewer_hashes=["def456"],
         )
         data = _config_to_dict(config)
         restored = _dict_to_config(data)
         assert restored.llm_command == "claude -p {prompt}"
         assert restored.llm_prompt_template == "Summarize: {title}"
         assert restored.llm_preset == "claude"
+        assert restored.trusted_llm_command_hashes == ["abc123"]
+        assert restored.trusted_pdf_viewer_hashes == ["def456"]
 
     def test_missing_fields_default(self):
         from arxiv_browser.app import _dict_to_config
@@ -4152,6 +4353,8 @@ class TestLlmConfigSerialization:
         assert config.llm_command == ""
         assert config.llm_prompt_template == ""
         assert config.llm_preset == ""
+        assert config.trusted_llm_command_hashes == []
+        assert config.trusted_pdf_viewer_hashes == []
 
 
 # ============================================================================
@@ -8512,6 +8715,92 @@ class TestFindSimilarPapersBoosts:
         results = find_similar_papers(target, [target], top_n=5)
         ids = [p.arxiv_id for p, _ in results]
         assert "target" not in ids
+
+
+class TestSimilarityIndexLifecycle:
+    """Tests for async TF-IDF index lifecycle and corpus hashing."""
+
+    def test_corpus_key_changes_when_title_changes(self, make_paper):
+        from arxiv_browser.app import build_similarity_corpus_key
+
+        first = make_paper(arxiv_id="2401.00001", title="A")
+        second = make_paper(arxiv_id="2401.00001", title="B")
+        assert build_similarity_corpus_key([first]) != build_similarity_corpus_key([second])
+
+    def test_tfidf_path_skips_abstract_lookup(self, make_paper):
+        from arxiv_browser.app import TfidfIndex, find_similar_papers
+
+        target = make_paper(arxiv_id="target", title="A")
+        other = make_paper(arxiv_id="other", title="B")
+        index = TfidfIndex.build([target, other], text_fn=lambda p: p.title)
+
+        def _fail_lookup(_paper):
+            msg = "abstract_lookup should not be used when tfidf_index is provided"
+            raise AssertionError(msg)
+
+        results = find_similar_papers(
+            target,
+            [target, other],
+            top_n=5,
+            abstract_lookup=_fail_lookup,
+            tfidf_index=index,
+        )
+        assert isinstance(results, list)
+
+    def test_show_local_recommendations_starts_async_build(self, make_paper):
+        from arxiv_browser.app import ArxivBrowser
+
+        paper = make_paper(arxiv_id="2401.00011", title="Target")
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app.all_papers = [paper]
+        app._config = UserConfig()
+        app._tfidf_index = None
+        app._tfidf_corpus_key = None
+        app._tfidf_build_task = None
+        app._pending_similarity_paper_id = None
+        app.notify = lambda *_args, **_kwargs: None
+
+        sentinel_task = object()
+
+        def fake_track_task(coro):
+            coro.close()
+            return sentinel_task
+
+        app._track_task = fake_track_task
+        app._show_local_recommendations(paper)
+
+        assert app._tfidf_build_task is sentinel_task
+        assert app._pending_similarity_paper_id == paper.arxiv_id
+
+    @pytest.mark.asyncio
+    async def test_build_tfidf_async_auto_opens_for_current_paper(self, make_paper, monkeypatch):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser.app import ArxivBrowser, build_similarity_corpus_key
+
+        paper = make_paper(arxiv_id="2401.00012", title="Target")
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app.all_papers = [paper]
+        app._tfidf_index = None
+        app._tfidf_corpus_key = None
+        app._tfidf_build_task = object()
+        app._pending_similarity_paper_id = paper.arxiv_id
+        app.notify = MagicMock()
+        app._get_current_paper = lambda: paper
+        app._show_local_recommendations = MagicMock()
+
+        sentinel_index = object()
+
+        async def fake_to_thread(func, *args, **kwargs):
+            return sentinel_index
+
+        monkeypatch.setattr("arxiv_browser.app.asyncio.to_thread", fake_to_thread)
+        corpus_key = build_similarity_corpus_key(app.all_papers)
+        await app._build_tfidf_index_async(corpus_key)
+
+        assert app._tfidf_index is sentinel_index
+        assert app._tfidf_corpus_key == corpus_key
+        app._show_local_recommendations.assert_called_once_with(paper)
 
 
 # ============================================================================

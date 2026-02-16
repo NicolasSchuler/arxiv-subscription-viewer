@@ -6,6 +6,7 @@ import math
 import re
 from collections.abc import Callable
 from datetime import datetime
+from hashlib import sha256
 from typing import TYPE_CHECKING
 
 from arxiv_browser.models import STOPWORDS, Paper, PaperMetadata
@@ -226,6 +227,20 @@ def compute_paper_similarity(
     return 0.4 * cat_sim + 0.3 * author_sim + 0.2 * title_sim + 0.1 * abstract_sim
 
 
+def build_similarity_corpus_key(papers: list[Paper]) -> str:
+    """Build a deterministic fingerprint for the similarity corpus."""
+    h = sha256()
+    for paper in papers:
+        abstract_text = paper.abstract if paper.abstract is not None else paper.abstract_raw
+        h.update(paper.arxiv_id.encode("utf-8", errors="replace"))
+        h.update(b"\x00")
+        h.update(paper.title.encode("utf-8", errors="replace"))
+        h.update(b"\x00")
+        h.update((abstract_text or "").encode("utf-8", errors="replace"))
+        h.update(b"\x00")
+    return h.hexdigest()[:16]
+
+
 def find_similar_papers(
     target: Paper,
     all_papers: list[Paper],
@@ -251,6 +266,9 @@ def find_similar_papers(
             return paper.abstract or ""
 
         abstract_lookup = _default_abstract_lookup
+
+    use_tfidf = tfidf_index is not None
+    target_abstract = abstract_lookup(target) if not use_tfidf else None
 
     newest_date = datetime.min
     for paper in all_papers:
@@ -285,11 +303,12 @@ def find_similar_papers(
     for paper in all_papers:
         if paper.arxiv_id == target.arxiv_id:
             continue
+        paper_abstract = abstract_lookup(paper) if not use_tfidf else None
         score = compute_paper_similarity(
             target,
             paper,
-            abstract_lookup(target),
-            abstract_lookup(paper),
+            target_abstract,
+            paper_abstract,
             tfidf_index=tfidf_index,
         )
         score += SIMILARITY_RECENCY_WEIGHT * recency_score(paper)
@@ -314,6 +333,7 @@ __all__ = [
     "SIMILARITY_WEIGHT_CATEGORY",
     "SIMILARITY_WEIGHT_TEXT",
     "TfidfIndex",
+    "build_similarity_corpus_key",
     "compute_paper_similarity",
     "find_similar_papers",
 ]

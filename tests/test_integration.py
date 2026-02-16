@@ -364,7 +364,7 @@ class TestDebugLogging:
         logging.root.handlers.clear()
         logging.disable(logging.NOTSET)
 
-        with patch("arxiv_browser.app.user_config_dir", return_value=str(tmp_path)):
+        with patch("arxiv_browser.cli.user_config_dir", return_value=str(tmp_path)):
             _configure_logging(debug=True)
 
         try:
@@ -387,7 +387,7 @@ class TestDebugLogging:
         logging.root.handlers.clear()
         logging.disable(logging.NOTSET)
 
-        with patch("arxiv_browser.app.user_config_dir", return_value=str(tmp_path)):
+        with patch("arxiv_browser.cli.user_config_dir", return_value=str(tmp_path)):
             _configure_logging(debug=True)
 
         try:

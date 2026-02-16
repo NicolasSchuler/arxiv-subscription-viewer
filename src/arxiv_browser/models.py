@@ -271,6 +271,8 @@ class UserConfig:
     pdf_viewer: str = (
         ""  # External PDF viewer command, e.g. "zathura {path}" or "open -a Skim {path}"
     )
+    trusted_llm_command_hashes: list[str] = field(default_factory=list)
+    trusted_pdf_viewer_hashes: list[str] = field(default_factory=list)
     version: int = 1
 
 

@@ -90,6 +90,8 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
         "research_interests": config.research_interests,
         "collapsed_sections": config.collapsed_sections,
         "pdf_viewer": config.pdf_viewer,
+        "trusted_llm_command_hashes": config.trusted_llm_command_hashes,
+        "trusted_pdf_viewer_hashes": config.trusted_pdf_viewer_hashes,
         "session": {
             "scroll_index": config.session.scroll_index,
             "current_filter": config.session.current_filter,
@@ -273,6 +275,12 @@ def _parse_str_dict(data: dict[str, Any], key: str) -> dict[str, str]:
     return {str(k): str(v) for k, v in raw.items() if isinstance(k, str) and isinstance(v, str)}
 
 
+def _parse_str_list(data: dict[str, Any], key: str) -> list[str]:
+    """Parse a list[str] field from config data with type validation."""
+    raw = _safe_get(data, key, [], list)
+    return [item for item in raw if isinstance(item, str)]
+
+
 def _dict_to_config(data: dict[str, Any]) -> UserConfig:
     """Deserialize a dictionary to UserConfig with type validation."""
     marks = data.get("marks", {})
@@ -307,6 +315,8 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         research_interests=_safe_get(data, "research_interests", "", str),
         collapsed_sections=_parse_collapsed_sections(data.get("collapsed_sections")),
         pdf_viewer=_safe_get(data, "pdf_viewer", "", str),
+        trusted_llm_command_hashes=_parse_str_list(data, "trusted_llm_command_hashes"),
+        trusted_pdf_viewer_hashes=_parse_str_list(data, "trusted_pdf_viewer_hashes"),
         version=_safe_get(data, "version", 1, int),
     )
 
