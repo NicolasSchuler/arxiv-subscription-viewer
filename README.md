@@ -27,13 +27,15 @@
 - Add custom notes to any paper
 - Tag papers with custom labels (e.g., `to-read`, `important`, `llm`)
 - Watch list for highlighting papers by author/keyword/title
+- Collections for organizing reading lists (create, rename, reorder, and bulk-add)
 
 ### Export Features
 - Open papers in browser (single or batch)
 - Copy paper metadata to clipboard
 - Export as BibTeX (clipboard or file for Zotero import)
-- Export as Markdown
+- Export as Markdown, RIS, and CSV
 - Download PDFs to local folder (async batch downloads)
+- Export/import user metadata (notes/tags/stars/bookmarks/collections) as portable JSON
 
 ### Productivity
 - Session restore (scroll position, filters, selections persist across runs)
@@ -43,6 +45,7 @@
 - Semantic Scholar integration: citation counts, TLDR summaries, S2-powered recommendations, and citation graph exploration
 - HuggingFace trending: community upvotes, AI summaries, keywords, and GitHub info from HF Daily Papers
 - Paper version tracking: check starred papers for arXiv revisions with diff links
+- AI summary modes (default/quick/TLDR/methods/results/comparison), chat with paper, and auto-tag suggestions
 - LLM-powered relevance scoring: score papers 1-10 based on your research interests
 - Abstract preview toggle in list view
 
@@ -130,9 +133,13 @@ arxiv-viewer --no-restore
 
 # Accessibility options
 arxiv-viewer --color never --ascii
+arxiv-viewer --no-color
 
 # Alternative: run as module (useful during development)
 uv run python -m arxiv_browser
+
+# Debug logging (~/.config/arxiv-browser/debug.log)
+arxiv-viewer --debug
 ```
 
 See `docs/tui-style-guide.md` for UI copy/layout conventions.
@@ -145,7 +152,7 @@ See `docs/tui-style-guide.md` for UI copy/layout conventions.
 | `/` | Toggle search input |
 | `Escape` | Cancel search / exit API mode |
 | `A` | Search all arXiv (API mode) |
-| `Ctrl+e` | Exit API mode |
+| `Ctrl+e` | Exit API mode (when in API mode) |
 | `j`/`k` | Navigate down/up (vim-style) |
 | `1-9` | Jump to search bookmark |
 | `Ctrl+b` | Add current search as bookmark |
@@ -190,7 +197,7 @@ See `docs/tui-style-guide.md` for UI copy/layout conventions.
 | `G` | Explore citation graph (S2-powered, drill-down) |
 | `V` | Check starred papers for version updates |
 | `e` | Fetch Semantic Scholar data for current paper |
-| `Ctrl+e` | Toggle Semantic Scholar enrichment on/off |
+| `Ctrl+e` | Toggle Semantic Scholar enrichment on/off (when not in API mode) |
 | `Ctrl+s` | Generate AI summary (mode selector) |
 | `C` | Chat with current paper (LLM-powered) |
 | `Ctrl+g` | Auto-tag current/selected papers (LLM-powered) |
@@ -295,6 +302,40 @@ Press `d` to download PDFs for selected papers (or current paper) to your local 
 - Progress shown in status bar
 - Supports batch downloads with multi-select
 
+## Collections
+
+Use collections as lightweight reading lists:
+
+- Press `Ctrl+k` to open the collections manager
+- Create, rename, delete collections, and edit descriptions
+- Add current/selected papers to collections from command palette (`Ctrl+p`)
+- Export individual collections as Markdown from the collections UI
+
+## Metadata Export & Import
+
+Use metadata portability to back up or migrate annotations:
+
+- Use command palette (`Ctrl+p`) -> `Export Metadata` to write a timestamped JSON snapshot
+- Use command palette (`Ctrl+p`) -> `Import Metadata` to restore from a metadata snapshot
+- Imported fields include paper notes/tags/read-star state, watch list, bookmarks, marks, and collections
+
+## PDF Viewer Configuration
+
+By default, `P` opens selected PDFs in your browser. To use a custom viewer, set `pdf_viewer`:
+
+```json
+{
+  "pdf_viewer": "zathura {url}"
+}
+```
+
+Supported placeholders:
+
+- `{url}` or `{path}` to inject the PDF URL/path
+- If omitted, the URL is appended as the final argument
+
+On first use of a custom `pdf_viewer`, the app asks for trust confirmation and stores a command hash in config.
+
 ## Input File Format
 
 The application parses arXiv email subscription text files. Expected format:
@@ -333,11 +374,13 @@ Configuration includes:
 - Paper metadata (read status, stars, notes, tags)
 - Watch list entries
 - Search bookmarks
+- Collections
 - Vim-style marks
 - Session state (scroll position, filters, sort order)
 - UI preferences (abstract preview toggle)
 - arXiv API search preferences (`arxiv_api_max_results`)
 - LLM summary settings (command, prompt template, preset)
+- PDF viewer settings (`pdf_viewer`)
 
 ### arXiv API Search Settings
 
@@ -361,7 +404,13 @@ Add one of these to your `config.json`:
 { "llm_preset": "copilot" }
 ```
 
-Available presets: `claude` (`claude -p`), `codex` (`codex exec`), `llm` (`llm`), `copilot` (`copilot -p`).
+Available presets:
+
+- `claude`: `claude -p {prompt}`
+- `codex`: `codex exec {prompt}`
+- `llm`: `llm {prompt}`
+- `copilot`: `copilot --model gpt-5-mini -p {prompt}`
+- `opencode`: `opencode run -m zai-coding-plan/glm-4.7 -- {prompt}`
 
 Or configure a custom command with `{prompt}` placeholder:
 
@@ -375,6 +424,17 @@ Or configure a custom command with `{prompt}` placeholder:
 Prompt placeholders: `{title}`, `{authors}`, `{categories}`, `{abstract}`, `{arxiv_id}`, `{paper_content}`.
 
 Summaries are cached in a local SQLite database and persist across sessions.
+
+Summary mode selector (`Ctrl+s`) supports:
+
+- `d` default full summary
+- `q` quick abstract-focused summary
+- `t` 1-2 sentence TLDR
+- `m` methods deep-dive
+- `r` results-focused summary
+- `c` related-work comparison
+
+When you use a custom `llm_command`, the app prompts for trust on first execution and stores the accepted command hash in config.
 
 ### HuggingFace Trending Setup
 
@@ -439,6 +499,9 @@ uv run pytest -v test_arxiv_browser.py::TestCleanLatex
 
 # Lint + type check
 uv run ruff check . && uv run ruff format --check . && uv run pyright
+
+# Full pre-commit gate used in this repo
+just check
 ```
 
 ## Dependencies
@@ -446,7 +509,7 @@ uv run ruff check . && uv run ruff format --check . && uv run pyright
 - **textual** (>=7.3.0): TUI framework
 - **rapidfuzz** (>=3.0.0): Fuzzy string matching
 - **httpx** (>=0.27.0): Async HTTP client for API calls and PDF downloads
-- **platformdirs**: Cross-platform config directory (transitive via textual)
+- **platformdirs** (>=3.0): Cross-platform config directory
 - **pytest** (>=9.0.2): Testing (dev dependency)
 
 ## Author

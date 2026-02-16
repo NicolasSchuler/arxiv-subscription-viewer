@@ -6,6 +6,7 @@ Instructions for AI agents working on this codebase.
 
 - **Task runner**: `just` (not `make`). Run `just` to list all recipes.
 - **Pre-commit checks**: `just check` (lint + types + tests)
+- **Docs drift check**: `just docs-check`
 - **Full quality suite**: `just quality`
 - **Quality dashboard**: `just report`
 - **Auto-fix formatting**: `just format`
@@ -36,16 +37,14 @@ Instructions for AI agents working on this codebase.
 
 ### Quality metrics to track
 
-Run `just report` for the full dashboard. Key metrics:
+Run `just report` for the full dashboard and trend tracking.
 
-| Metric | Current | Target |
-|--------|---------|--------|
-| Test coverage (overall) | 69% | 80% |
-| Test coverage (app.py) | 81% | 80% |
-| Complexity (F-rated functions) | 1 | 0 |
-| Complexity (D-rated functions) | 4 | 0 |
-| Maintainability index (app.py) | C (0.0) | B |
-| Lines in app.py | 8,341 | <4,000 |
+Use these stable guardrails instead of hard-coded snapshots:
+
+- Coverage thresholds: overall >= 60%, `src/arxiv_browser/app.py` >= 80%
+- Complexity gate: `uv run xenon src/arxiv_browser/ --max-absolute C --max-modules C --max-average B`
+- App size guardrail: `src/arxiv_browser/app.py` <= 5000 lines
+- Hygiene gates: zero findings in `just dead-code`, `just security`, and `just deps`
 
 ## Architecture Rules
 

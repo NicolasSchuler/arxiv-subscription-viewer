@@ -14,19 +14,19 @@ Published on PyPI as `arxiv-subscription-viewer`. Install with `pip install arxi
 src/arxiv_browser/
 ├── __init__.py           # Re-exports public API from app.py
 ├── __main__.py           # python -m arxiv_browser support
-├── app.py                # ArxivBrowser app + CLI entrypoint/glue (~4800 lines)
-├── models.py             # Dataclasses: Paper, PaperMetadata, UserConfig, etc. (~330 lines)
-├── config.py             # Config persistence: load/save/export/import (~540 lines)
-├── parsing.py            # arXiv parsing, LaTeX cleaning, history (~570 lines)
-├── export.py             # BibTeX, RIS, CSV, Markdown export (~330 lines)
-├── query.py              # Query tokenizer, matching, sorting, text utils (~480 lines)
-├── llm.py                # LLM summary/relevance/auto-tag, SQLite cache (~540 lines)
-├── llm_providers.py      # LLM provider Protocol + CLI subprocess implementation (~110 lines)
-├── similarity.py         # TF-IDF index, cosine + Jaccard similarity (~320 lines)
-├── themes.py             # Color palettes, category colors, Textual themes (~270 lines)
-├── semantic_scholar.py   # S2 API client, SQLite cache (~820 lines)
-├── huggingface.py        # HF Daily Papers API client, SQLite cache (~350 lines)
-├── modals/               # ModalScreen subclasses, domain-grouped (~2700 lines)
+├── app.py                # ArxivBrowser app + CLI entrypoint/glue
+├── models.py             # Dataclasses: Paper, PaperMetadata, UserConfig, etc.
+├── config.py             # Config persistence: load/save/export/import
+├── parsing.py            # arXiv parsing, LaTeX cleaning, history
+├── export.py             # BibTeX, RIS, CSV, Markdown export
+├── query.py              # Query tokenizer, matching, sorting, text utilities
+├── llm.py                # LLM summary/relevance/auto-tag, SQLite cache
+├── llm_providers.py      # LLM provider Protocol + CLI subprocess implementation
+├── similarity.py         # TF-IDF index, cosine + Jaccard similarity
+├── themes.py             # Color palettes, category colors, Textual themes
+├── semantic_scholar.py   # S2 API client, SQLite cache
+├── huggingface.py        # HF Daily Papers API client, SQLite cache
+├── modals/               # ModalScreen subclasses, domain-grouped
 │   ├── __init__.py       # Re-exports all modals for flat imports
 │   ├── common.py         # HelpScreen, ConfirmModal, ExportMenuModal, WatchListModal, SectionToggleModal
 │   ├── editing.py        # NotesModal, TagsModal, AutoTagSuggestModal
@@ -121,17 +121,17 @@ No module imports from `app.py` — this prevents circular dependencies. Modal a
 
 ### External Modules
 
-- **`semantic_scholar.py`** (~820 lines): S2 API client, `SemanticScholarPaper` / `CitationEntry` dataclasses, SQLite cache for papers, recommendations, and citation graphs
-- **`huggingface.py`** (~350 lines): HuggingFace Daily Papers API client, `HuggingFacePaper` dataclass, SQLite cache
+- **`semantic_scholar.py`**: S2 API client, `SemanticScholarPaper` / `CitationEntry` dataclasses, SQLite cache for papers, recommendations, and citation graphs
+- **`huggingface.py`**: HuggingFace Daily Papers API client, `HuggingFacePaper` dataclass, SQLite cache
 
-### Test Suite (~1147 tests across 6 files + conftest.py in `tests/`)
+### Test Suite
 
-- **`tests/test_arxiv_browser.py`** (~5800 lines): Core parsing, similarity, export, config, UI integration, WCAG contrast
-- **`tests/test_integration.py`** (~400 lines): End-to-end workflows with real arXiv email fixtures, export validation, resource cleanup, debug logging
-- **`tests/test_semantic_scholar.py`** (~990 lines): S2 response parsing, serialization, cache CRUD, API fetch functions, citation graph
-- **`tests/test_huggingface.py`** (~460 lines): HF response parsing, cache, API fetch functions
-- **`tests/test_llm_providers.py`** (~160 lines): LLMProvider protocol, CLIProvider subprocess wrapper, resolve_provider factory
-- **`tests/test_benchmarks.py`** (~170 lines): Performance regression tests (marked `@pytest.mark.slow`, excluded from default runs)
+- **`tests/test_arxiv_browser.py`**: Core parsing, similarity, export, config, UI integration, WCAG contrast
+- **`tests/test_integration.py`**: End-to-end workflows with real arXiv email fixtures, export validation, resource cleanup, debug logging
+- **`tests/test_semantic_scholar.py`**: S2 response parsing, serialization, cache CRUD, API fetch functions, citation graph
+- **`tests/test_huggingface.py`**: HF response parsing, cache, API fetch functions
+- **`tests/test_llm_providers.py`**: LLMProvider protocol, CLIProvider subprocess wrapper, resolve_provider factory
+- **`tests/test_benchmarks.py`**: Performance regression tests (marked `@pytest.mark.slow`, excluded from default runs)
 
 ## Code Style
 
@@ -182,7 +182,7 @@ No module imports from `app.py` — this prevents circular dependencies. Modal a
 - **textual** (>=7.3.0): TUI framework
 - **rapidfuzz** (>=3.0.0): Fuzzy string matching for search
 - **httpx** (>=0.27.0): Async HTTP client for PDF downloads
-- **platformdirs**: Cross-platform config directories (transitive)
+- **platformdirs** (>=3.0): Cross-platform config directories
 
 **Development:**
 - **pytest** (>=9.0.2): Test framework
@@ -246,6 +246,7 @@ just complexity         # radon cyclomatic complexity + maintainability index
 just security           # bandit security scanner
 just dead-code          # vulture dead code detection
 just deps               # deptry dependency hygiene
+just docs-check         # docs drift guardrail (CLI flags/presets/keybindings)
 just ci                 # CI-equivalent checks locally
 just clean              # remove build artifacts and caches
 ```
@@ -253,8 +254,8 @@ just clean              # remove build artifacts and caches
 ### Advanced checks (not in justfile — run manually)
 
 ```bash
-# Complexity gate (max-absolute F baseline — import_metadata is F-ranked; ratchet down)
-uv run xenon src/arxiv_browser/ --max-absolute F --max-modules D --max-average B
+# Complexity gate (matches CI)
+uv run xenon src/arxiv_browser/ --max-absolute C --max-modules C --max-average B
 
 # Coverage on changed lines only (80% threshold on diffs)
 uv run pytest --cov --cov-report=xml
@@ -329,7 +330,15 @@ Add to `config.json`:
 }
 ```
 
-Available presets: `claude`, `codex`, `llm`, `copilot`. Or use a custom command:
+Available presets:
+
+- `claude`: `claude -p {prompt}`
+- `codex`: `codex exec {prompt}`
+- `llm`: `llm {prompt}`
+- `copilot`: `copilot --model gpt-5-mini -p {prompt}`
+- `opencode`: `opencode run -m zai-coding-plan/glm-4.7 -- {prompt}`
+
+Or use a custom command:
 
 ```json
 {
@@ -418,6 +427,7 @@ git push origin v0.2.0            # CD publishes to PyPI on tag push
 
 ```
 /       - Toggle search (fuzzy matching)
+Escape  - Cancel search / exit API mode
 A       - Search all arXiv (API mode)
 o       - Open selected paper(s) in browser
 P       - Open selected paper(s) as PDF
@@ -442,16 +452,20 @@ R       - Show similar papers (local or Semantic Scholar)
 G       - Citation graph (S2-powered, drill-down navigation)
 V       - Check starred papers for version updates
 e       - Fetch Semantic Scholar data for current paper
-Ctrl+e  - Toggle Semantic Scholar enrichment on/off
+Ctrl+e  - Exit API mode (in API mode) / toggle Semantic Scholar enrichment (otherwise)
 Ctrl+h  - Toggle HuggingFace trending on/off
 Ctrl+s  - Generate AI summary (mode selector: default/TLDR/methods/results/comparison)
+C       - Chat with current paper (LLM-powered)
+Ctrl+g  - Auto-tag current/selected papers (LLM-powered)
 L       - Score papers by relevance (LLM-powered)
 Ctrl+l  - Edit research interests
 1-9     - Jump to bookmark
 Ctrl+b  - Add current search as bookmark
+Ctrl+Shift+b - Remove active bookmark
 Ctrl+t  - Cycle color theme (Monokai / Catppuccin / Solarized)
 Ctrl+d  - Toggle detail pane sections
 Ctrl+k  - Manage paper collections (reading lists)
+Ctrl+p  - Open command palette
 [       - Go to previous (older) date (history mode)
 ]       - Go to next (newer) date (history mode)
 ?       - Show help overlay

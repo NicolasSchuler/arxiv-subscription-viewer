@@ -25,6 +25,10 @@ format:
 typecheck:
     uv run pyright
 
+# Verify docs are aligned with CLI flags, presets, and keybindings
+docs-check:
+    python3 scripts/check_docs_sync.py
+
 # Run tests with coverage report
 test:
     uv run pytest --cov --cov-report=term-missing

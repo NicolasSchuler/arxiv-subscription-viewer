@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>arXiv Subscription Viewer - Browse arXiv papers from your terminal</title>
-  <meta name="description" content="A keyboard-first terminal UI for browsing arXiv papers with fuzzy search, command palette workflows, LLM enrichment, and accessibility-friendly display options.">
+  <meta name="description" content="A keyboard-first terminal UI for browsing arXiv papers with fuzzy search, collections, metadata portability, LLM workflows, and accessibility-friendly display options.">
   <link rel="stylesheet" href="styles.css">
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -28,13 +28,13 @@
           arXiv Subscription Viewer
         </h1>
         <p class="text-xl md:text-2xl text-gray-400 mb-8 max-w-2xl mx-auto">
-          Browse arXiv papers from your terminal with fuzzy search, command palette workflows, and Semantic Scholar + LLM enrichment.
+          Browse arXiv papers from your terminal with fuzzy search, collections, command palette workflows, and Semantic Scholar + LLM enrichment.
         </p>
         
         <!-- Install Command -->
         <div class="inline-flex items-center gap-2 bg-black/40 backdrop-blur border border-gray-700 rounded-xl px-4 py-3 mb-8">
           <span class="text-gray-500">$</span>
-          <code class="text-monokai-green" id="install-cmd">pip install arxiv-subscription-viewer</code>
+          <code class="text-monokai-green" id="install-cmd">uv tool install arxiv-subscription-viewer</code>
           <button onclick="copyInstall()" aria-label="Copy install command to clipboard" class="ml-2 p-1 hover:bg-gray-700 rounded transition-colors" title="Copy to clipboard">
             <svg id="copy-icon" class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
@@ -44,6 +44,9 @@
             </svg>
           </button>
         </div>
+        <p class="text-gray-500 text-sm mb-8 mono">
+          Alternative: <span class="text-gray-400">pip install arxiv-subscription-viewer</span>
+        </p>
         
         <div class="flex flex-wrap justify-center gap-4">
           <a href="https://github.com/NicolasSchuler/arxiv-subscription-viewer" class="inline-flex items-center gap-2 bg-monokai-orange hover:bg-monokai-orange/80 text-white font-semibold px-6 py-3 rounded-lg transition-all hover:scale-105">
@@ -107,7 +110,7 @@
             </svg>
           </div>
           <h3 class="text-lg font-semibold mb-2">Smart Organization</h3>
-          <p class="text-gray-400 text-sm">Tags, stars, notes, read/unread tracking, and watch lists for authors and keywords</p>
+          <p class="text-gray-400 text-sm">Tags, stars, notes, read/unread tracking, watch lists, and collections for reading-list workflows</p>
         </div>
 
         <!-- Feature 3 -->
@@ -117,8 +120,8 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
             </svg>
           </div>
-          <h3 class="text-lg font-semibold mb-2">LLM Summaries</h3>
-          <p class="text-gray-400 text-sm">Generate AI-powered summaries and relevance scores using Claude, Codex, or any LLM CLI</p>
+          <h3 class="text-lg font-semibold mb-2">AI Workflows</h3>
+          <p class="text-gray-400 text-sm">Summary modes, chat with paper, auto-tagging, and relevance scoring using preset or custom LLM CLI commands</p>
         </div>
 
         <!-- Feature 4 -->
@@ -140,7 +143,7 @@
             </svg>
           </div>
           <h3 class="text-lg font-semibold mb-2">Export & Download</h3>
-          <p class="text-gray-400 text-sm">BibTeX, Markdown, RIS, CSV export, batch PDF downloads, and clipboard support</p>
+          <p class="text-gray-400 text-sm">BibTeX/Markdown/RIS/CSV export, metadata import/export, batch PDF downloads, and clipboard support</p>
         </div>
 
         <!-- Feature 6 -->
@@ -184,7 +187,7 @@
             </svg>
           </div>
           <h3 class="text-lg font-semibold mb-2">Vim-Style Navigation</h3>
-          <p class="text-gray-400 text-sm">j/k navigation, marks, search bookmarks, and keyboard-first workflow</p>
+          <p class="text-gray-400 text-sm">j/k navigation, marks, search bookmarks, and command-palette actions for keyboard-first workflows</p>
         </div>
       </div>
     </div>
@@ -203,7 +206,8 @@
           <div class="flex-1">
             <h3 class="font-semibold text-lg mb-2">Install</h3>
             <div class="bg-black/50 border border-gray-700 rounded-lg px-4 py-3 mono text-sm">
-              <span class="text-gray-500">$</span> <span class="text-monokai-green">pip install arxiv-subscription-viewer</span>
+              <span class="text-gray-500">$</span> <span class="text-monokai-green">uv tool install arxiv-subscription-viewer</span><br>
+              <span class="text-gray-500"># or:</span> <span class="text-gray-400">pip install arxiv-subscription-viewer</span>
             </div>
           </div>
         </div>
