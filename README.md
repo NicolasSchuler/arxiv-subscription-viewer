@@ -91,6 +91,8 @@ pip install arxiv-subscription-viewer
 # 2. Place an arXiv email file in history/ (or use -i)
 mkdir -p history
 # Save your arXiv email as history/2026-02-12.txt
+# Tip: this step can be automated with a mail rule (see "Automating Email Ingestion")
+# Alternative (no email files): arxiv-viewer --api-category cs.AI
 
 # 3. Run
 arxiv-viewer
@@ -115,6 +117,13 @@ arxiv-viewer --date 2026-01-23
 
 # Custom input file (disables history mode)
 arxiv-viewer -i papers.txt
+
+# API startup mode (no email file required; default is latest-day digest)
+arxiv-viewer --api-category cs.AI
+arxiv-viewer --api-query "diffusion transformer" --api-field title
+arxiv-viewer --api-query "large language model" --api-category cs.CL
+# Optional: single API page instead of latest-day digest mode
+arxiv-viewer --api-query "transformer" --api-page-mode
 
 # Start fresh session (ignore saved state)
 arxiv-viewer --no-restore
@@ -232,6 +241,49 @@ history/
 - Use `[` and `]` keys to navigate between dates
 - Session state (including current date) persists across runs
 - Falls back to `arxiv.txt` if no history directory exists
+
+### Automating Email Ingestion (No Copy/Paste)
+
+Yes, this is doable with the current app. `arxiv-viewer` only needs dated text files in `history/`, so any email automation that writes `history/YYYY-MM-DD.txt` will work.
+
+Recommended setup:
+
+1. Create a dedicated mailbox folder/label for your arXiv digest emails.
+2. Add a mail rule or scheduled job that exports the latest digest body as plain text to `history/YYYY-MM-DD.txt`.
+3. Keep one file per date (overwrite the same date if needed); the viewer auto-loads the newest file on startup.
+
+Manual fallback shortcut on macOS:
+
+```bash
+pbpaste > "history/$(date +%F).txt"
+```
+
+## API Startup Mode (No Email File)
+
+Launch directly from arXiv API results:
+
+- By default, API mode loads papers from the latest matching arXiv day (email-like behavior), auto-paginating until older days begin
+- `--api-query` for free-text query terms
+- `--api-field` for query field: `all`, `title`, `author`, `abstract`
+- `--api-category` for category filtering (for example `cs.AI`)
+- `--api-max-results` to control page size (defaults to config value)
+- `--api-page-mode` to load just one API page (date-unbounded)
+
+Examples:
+
+```bash
+# Latest cs.AI papers
+arxiv-viewer --api-category cs.AI
+
+# Title-focused query
+arxiv-viewer --api-query "retrieval augmented generation" --api-field title
+
+# Query + category
+arxiv-viewer --api-query "agent benchmark" --api-category cs.LG
+
+# Single-page API mode (no latest-day bounding)
+arxiv-viewer --api-query "agent benchmark" --api-page-mode
+```
 
 ## PDF Downloads
 

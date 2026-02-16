@@ -2580,6 +2580,104 @@ class TestMainCLI:
         assert captured_kwargs.get("ascii_icons") is True
         assert os.environ.get("NO_COLOR") == "1"
 
+    def test_api_category_fetches_latest_day_and_runs_app(self, monkeypatch, make_paper):
+        """--api-category should load startup papers in latest-day digest mode."""
+        from arxiv_browser.app import main
+
+        paper = make_paper(arxiv_id="2602.00001")
+        captured_kwargs = {}
+        captured_papers = []
+        api_calls: list[dict[str, object]] = []
+
+        class FakeApp:
+            def __init__(self, papers, *_args, **kwargs):
+                captured_papers.extend(papers)
+                captured_kwargs.update(kwargs)
+
+            def run(self):
+                return None
+
+        def fake_fetch(**kwargs):
+            api_calls.append(kwargs)
+            return [paper]
+
+        monkeypatch.setattr("sys.argv", ["arxiv_browser", "--api-category", "cs.AI"])
+        monkeypatch.setattr("arxiv_browser.app.load_config", lambda: UserConfig())
+        monkeypatch.setattr("arxiv_browser.cli._fetch_latest_arxiv_digest", fake_fetch)
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+        monkeypatch.setattr("arxiv_browser.app.ArxivBrowser", FakeApp)
+
+        result = main()
+        assert result == 0
+        assert captured_papers == [paper]
+        assert captured_kwargs.get("history_files") == []
+        assert api_calls[0]["category"] == "cs.AI"
+
+    def test_api_page_mode_fetches_single_page(self, monkeypatch, make_paper):
+        """--api-page-mode should use a single API page instead of latest-day mode."""
+        from arxiv_browser.app import main
+
+        paper = make_paper(arxiv_id="2602.00002")
+        captured_papers = []
+        page_calls: list[dict[str, object]] = []
+
+        class FakeApp:
+            def __init__(self, papers, *_args, **_kwargs):
+                captured_papers.extend(papers)
+
+            def run(self):
+                return None
+
+        def fail_digest_fetch(**_kwargs):
+            raise AssertionError("latest-day fetch should not run in --api-page-mode")
+
+        def fake_page_fetch(**kwargs):
+            page_calls.append(kwargs)
+            return [paper]
+
+        monkeypatch.setattr(
+            "sys.argv",
+            ["arxiv_browser", "--api-query", "transformer", "--api-page-mode"],
+        )
+        monkeypatch.setattr("arxiv_browser.app.load_config", lambda: UserConfig())
+        monkeypatch.setattr("arxiv_browser.cli._fetch_latest_arxiv_digest", fail_digest_fetch)
+        monkeypatch.setattr("arxiv_browser.cli._fetch_arxiv_api_papers", fake_page_fetch)
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+        monkeypatch.setattr("arxiv_browser.app.ArxivBrowser", FakeApp)
+
+        result = main()
+        assert result == 0
+        assert captured_papers == [paper]
+        assert page_calls[0]["query"] == "transformer"
+
+    def test_api_query_requires_query_or_category(self, monkeypatch, capsys):
+        """Empty API query/category should fail with actionable error text."""
+        from arxiv_browser.app import main
+
+        monkeypatch.setattr("sys.argv", ["arxiv_browser", "--api-query", ""])
+        monkeypatch.setattr("arxiv_browser.app.load_config", lambda: UserConfig())
+
+        result = main()
+        captured = capsys.readouterr()
+        assert result == 1
+        assert "Search query or category must be provided" in captured.err
+
+    def test_api_mode_rejects_date_flag(self, monkeypatch, capsys):
+        """--date should not be combined with API startup mode flags."""
+        from arxiv_browser.app import main
+
+        monkeypatch.setattr(
+            "sys.argv",
+            ["arxiv_browser", "--api-category", "cs.AI", "--date", "2026-02-01"],
+        )
+
+        result = main()
+        captured = capsys.readouterr()
+        assert result == 1
+        assert "cannot be combined" in captured.err
+
 
 class TestResolvePapersHistoryRestore:
     """Tests for history/session restore precedence in CLI paper resolution."""
@@ -2697,6 +2795,86 @@ class TestResolvePapersHistoryRestore:
         _, _, current_date_index = result
         assert current_date_index == 0
         assert parsed == [newer]
+
+    def test_api_mode_takes_precedence_over_history(
+        self,
+        monkeypatch,
+        tmp_path,
+        make_paper,
+    ):
+        import argparse
+        from datetime import date as dt_date
+
+        from arxiv_browser.cli import _resolve_papers
+
+        history_file = tmp_path / "2024-01-15.txt"
+        history_files = [(dt_date(2024, 1, 15), history_file)]
+        config = UserConfig()
+        api_paper = make_paper(arxiv_id="2602.00077")
+        api_calls: list[dict[str, object]] = []
+
+        def fail_parse(_path: Path) -> list[Paper]:
+            raise AssertionError("history parser should not be called in API mode")
+
+        def fake_fetch(**kwargs):
+            api_calls.append(kwargs)
+            return [api_paper]
+
+        monkeypatch.setattr("arxiv_browser.cli.parse_arxiv_file", fail_parse)
+        monkeypatch.setattr("arxiv_browser.cli._fetch_latest_arxiv_digest", fake_fetch)
+
+        args = argparse.Namespace(
+            input=None,
+            date=None,
+            no_restore=False,
+            api_query=None,
+            api_field="all",
+            api_category="cs.LG",
+            api_max_results=None,
+            api_page_mode=False,
+        )
+
+        result = _resolve_papers(args, tmp_path, config, history_files)
+        assert not isinstance(result, int)
+        papers, resolved_history, current_date_index = result
+        assert papers == [api_paper]
+        assert resolved_history == []
+        assert current_date_index == 0
+        assert api_calls[0]["category"] == "cs.LG"
+
+    def test_fetch_latest_digest_paginates_until_older_day(self, monkeypatch, make_paper):
+        from arxiv_browser.cli import _fetch_latest_arxiv_digest
+
+        latest_day = "Mon, 17 Feb 2026"
+        older_day = "Sun, 16 Feb 2026"
+        page_calls: list[int] = []
+        pages = [
+            [
+                make_paper(arxiv_id="2602.00010", date=latest_day),
+                make_paper(arxiv_id="2602.00011", date=latest_day),
+            ],
+            [
+                make_paper(arxiv_id="2602.00012", date=latest_day),
+                make_paper(arxiv_id="2602.00013", date=older_day),
+            ],
+        ]
+
+        def fake_fetch(**kwargs):
+            page_calls.append(int(kwargs["start"]))
+            return pages.pop(0)
+
+        monkeypatch.setattr("arxiv_browser.cli._fetch_arxiv_api_papers", fake_fetch)
+        monkeypatch.setattr("arxiv_browser.cli.time.sleep", lambda _seconds: None)
+
+        papers = _fetch_latest_arxiv_digest(
+            query="",
+            field="all",
+            category="cs.AI",
+            max_results=2,
+        )
+
+        assert [p.arxiv_id for p in papers] == ["2602.00010", "2602.00011", "2602.00012"]
+        assert page_calls == [0, 2]
 
 
 # ============================================================================

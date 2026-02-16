@@ -212,11 +212,17 @@
         <div class="flex gap-4 items-start">
           <div class="flex-shrink-0 w-10 h-10 bg-monokai-yellow text-monokai-bg rounded-full flex items-center justify-center font-bold text-lg">2</div>
           <div class="flex-1">
-            <h3 class="font-semibold text-lg mb-2">Add your arXiv emails</h3>
+            <h3 class="font-semibold text-lg mb-2">Add (or auto-save) arXiv emails</h3>
             <div class="bg-black/50 border border-gray-700 rounded-lg px-4 py-3 mono text-sm">
               <span class="text-gray-500">$</span> mkdir -p history<br>
-              <span class="text-gray-500"># Save your arXiv email digest as history/2026-02-13.txt</span>
+              <span class="text-gray-500"># Save digest as history/2026-02-13.txt (manual or via mail rule)</span>
             </div>
+            <p class="text-gray-500 text-sm mt-2">
+              Tip: automate this step by writing each digest to <code class="mono text-gray-400">history/YYYY-MM-DD.txt</code>.
+            </p>
+            <p class="text-gray-500 text-sm mt-1 mono">
+              No-email mode: <span class="text-gray-400">arxiv-viewer --api-category cs.AI</span>
+            </p>
           </div>
         </div>
 

@@ -7,20 +7,188 @@ import logging
 import logging.handlers
 import os
 import sys
+import time
 from collections.abc import Callable
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 from platformdirs import user_config_dir
 
-from arxiv_browser.config import CONFIG_APP_NAME, load_config
-from arxiv_browser.models import Paper, UserConfig
-from arxiv_browser.parsing import HISTORY_DATE_FORMAT, discover_history_files, parse_arxiv_file
+from arxiv_browser.config import CONFIG_APP_NAME, _coerce_arxiv_api_max_results, load_config
+from arxiv_browser.models import ARXIV_API_MAX_RESULTS_LIMIT, Paper, UserConfig
+from arxiv_browser.parsing import (
+    ARXIV_QUERY_FIELDS,
+    HISTORY_DATE_FORMAT,
+    build_arxiv_search_query,
+    discover_history_files,
+    parse_arxiv_api_feed,
+    parse_arxiv_date,
+    parse_arxiv_file,
+)
 
 logger = logging.getLogger(__name__)
 
 ResolvePapersResult = tuple[list[Paper], list[tuple[date, Path]], int] | int
+
+ARXIV_API_URL = "https://export.arxiv.org/api/query"
+ARXIV_API_TIMEOUT = 30
+ARXIV_API_USER_AGENT = "arxiv-subscription-viewer/1.0"
+ARXIV_API_MIN_INTERVAL_SECONDS = 3.0
+
+
+def _fetch_arxiv_api_papers(
+    *,
+    query: str,
+    field: str,
+    category: str,
+    max_results: int,
+    start: int = 0,
+) -> list[Paper]:
+    """Fetch one page of papers from the arXiv API."""
+    search_query = build_arxiv_search_query(query, field, category)
+    params = {
+        "search_query": search_query,
+        "sortBy": "submittedDate",
+        "sortOrder": "descending",
+        "start": max(0, start),
+        "max_results": max_results,
+    }
+    response = httpx.get(
+        ARXIV_API_URL,
+        params=params,
+        headers={"User-Agent": ARXIV_API_USER_AGENT},
+        timeout=ARXIV_API_TIMEOUT,
+    )
+    response.raise_for_status()
+    return parse_arxiv_api_feed(response.text)
+
+
+def _fetch_latest_arxiv_digest(
+    *,
+    query: str,
+    field: str,
+    category: str,
+    max_results: int,
+) -> list[Paper]:
+    """Fetch all papers from the newest matching arXiv day.
+
+    This mirrors email-digest behavior: collect papers from the latest
+    available day, then stop when older days begin.
+    """
+    start = 0
+    target_day: date | None = None
+    papers: list[Paper] = []
+    seen_ids: set[str] = set()
+
+    while True:
+        page = _fetch_arxiv_api_papers(
+            query=query,
+            field=field,
+            category=category,
+            max_results=max_results,
+            start=start,
+        )
+        if not page:
+            break
+
+        reached_older_day = False
+        for paper in page:
+            day = parse_arxiv_date(paper.date).date()
+            if target_day is None:
+                target_day = day
+            if day != target_day:
+                reached_older_day = True
+                break
+            if paper.arxiv_id not in seen_ids:
+                papers.append(paper)
+                seen_ids.add(paper.arxiv_id)
+
+        if reached_older_day or len(page) < max_results:
+            break
+
+        start += max_results
+        time.sleep(ARXIV_API_MIN_INTERVAL_SECONDS)
+
+    return papers
+
+
+def _api_mode_requested(args: argparse.Namespace) -> bool:
+    """Return True when CLI flags request startup via arXiv API."""
+    return bool(getattr(args, "api_query", None) is not None or getattr(args, "api_category", None))
+
+
+def _resolve_arxiv_api_mode(
+    args: argparse.Namespace, config: UserConfig
+) -> ResolvePapersResult | None:
+    """Resolve startup papers from arXiv API flags.
+
+    Returns:
+        ``None`` when API mode was not requested.
+        ``ResolvePapersResult`` when API mode is requested.
+    """
+    if not _api_mode_requested(args):
+        return None
+
+    api_query = (getattr(args, "api_query", None) or "").strip()
+    api_category = (getattr(args, "api_category", None) or "").strip()
+    api_field = str(getattr(args, "api_field", "all"))
+    api_page_mode = bool(getattr(args, "api_page_mode", False))
+    max_results_arg = getattr(args, "api_max_results", None)
+    max_results = _coerce_arxiv_api_max_results(
+        max_results_arg if max_results_arg is not None else config.arxiv_api_max_results
+    )
+
+    try:
+        if api_page_mode:
+            papers = _fetch_arxiv_api_papers(
+                query=api_query,
+                field=api_field,
+                category=api_category,
+                max_results=max_results,
+            )
+        else:
+            papers = _fetch_latest_arxiv_digest(
+                query=api_query,
+                field=api_field,
+                category=api_category,
+                max_results=max_results,
+            )
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code
+        if status_code == 429:
+            print(
+                "Error: arXiv API rate limit reached (HTTP 429). Wait a few seconds and retry.",
+                file=sys.stderr,
+            )
+        elif status_code >= 500:
+            print(
+                f"Error: arXiv API is unavailable right now (HTTP {status_code}). Retry later.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"Error: arXiv API rejected the request (HTTP {status_code}). "
+                "Check --api-query/--api-category and retry.",
+                file=sys.stderr,
+            )
+        return 1
+    except (httpx.HTTPError, OSError):
+        print(
+            "Error: Failed to fetch papers from arXiv API (network or I/O error).",
+            file=sys.stderr,
+        )
+        return 1
+
+    if not papers:
+        print("Error: No papers found for the requested arXiv API query.", file=sys.stderr)
+        return 1
+
+    return (papers, [], 0)
 
 
 def _resolve_input_file(input_path: Path) -> list[Paper] | int:
@@ -77,6 +245,10 @@ def _resolve_legacy_fallback(base_dir: Path) -> list[Paper] | int:
         print("Error: No papers found. Either:", file=sys.stderr)
         print("  - Create history/YYYY-MM-DD.txt files, or", file=sys.stderr)
         print("  - Create arxiv.txt in the current directory, or", file=sys.stderr)
+        print(
+            "  - Use --api-query/--api-category to fetch directly from arXiv API, or",
+            file=sys.stderr,
+        )
         print("  - Use -i to specify an input file", file=sys.stderr)
         return 1
     if not os.access(arxiv_file, os.R_OK):
@@ -101,6 +273,10 @@ def _resolve_papers(
         if isinstance(result, int):
             return result
         return (result, [], 0)
+
+    api_result = _resolve_arxiv_api_mode(args, config)
+    if api_result is not None:
+        return api_result
 
     if history_files:
         current_date_index = 0
@@ -220,6 +396,35 @@ def main(
         help="List available dates in history/ and exit",
     )
     parser.add_argument(
+        "--api-query",
+        type=str,
+        default=None,
+        help="Fetch startup papers from arXiv API using this query text",
+    )
+    parser.add_argument(
+        "--api-field",
+        choices=sorted(ARXIV_QUERY_FIELDS),
+        default="all",
+        help="Field for --api-query: all, title, author, abstract (default: all)",
+    )
+    parser.add_argument(
+        "--api-category",
+        type=str,
+        default=None,
+        help="Optional arXiv category filter for API mode (for example: cs.AI)",
+    )
+    parser.add_argument(
+        "--api-max-results",
+        type=int,
+        default=None,
+        help=(f"API request page size (1-{ARXIV_API_MAX_RESULTS_LIMIT}; default: config value)"),
+    )
+    parser.add_argument(
+        "--api-page-mode",
+        action="store_true",
+        help="Load a single API page (default mode loads the latest matching day)",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="Enable debug logging to file (~/.config/arxiv-browser/debug.log)",
@@ -241,6 +446,16 @@ def main(
         help="Use ASCII-only status icons for compatibility with limited terminals",
     )
     args = parser.parse_args(argv)
+    api_mode = _api_mode_requested(args)
+    if api_mode and args.list_dates:
+        print(
+            "Error: --list-dates cannot be combined with --api-query/--api-category",
+            file=sys.stderr,
+        )
+        return 1
+    if api_mode and args.date:
+        print("Error: --date cannot be combined with --api-query/--api-category", file=sys.stderr)
+        return 1
 
     color_mode = "never" if args.no_color else args.color
     configure_color_mode_fn(color_mode)
@@ -308,9 +523,13 @@ def main(
 
 
 __all__ = [
+    "_api_mode_requested",
     "_configure_color_mode",
     "_configure_logging",
+    "_fetch_arxiv_api_papers",
+    "_fetch_latest_arxiv_digest",
     "_find_history_index",
+    "_resolve_arxiv_api_mode",
     "_resolve_history_date",
     "_resolve_input_file",
     "_resolve_legacy_fallback",
