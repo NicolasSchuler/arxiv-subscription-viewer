@@ -126,6 +126,8 @@ arxiv-viewer --color never --ascii
 uv run python -m arxiv_browser
 ```
 
+See `docs/tui-style-guide.md` for UI copy/layout conventions.
+
 ## Keyboard Shortcuts
 
 ### Navigation & Search

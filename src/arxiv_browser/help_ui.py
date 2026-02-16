@@ -90,6 +90,23 @@ HELP_SEARCH_SYNTAX: list[tuple[str, str]] = [
     ("AND / OR / NOT", "Boolean operators"),
 ]
 
+HELP_GETTING_STARTED: list[tuple[str, str]] = [
+    ("/", "Search papers"),
+    ("j / k", "Move selection"),
+    ("Space", "Select current paper"),
+    ("o", "Open selected paper(s)"),
+    ("Ctrl+p", "Open command palette"),
+    ("?", "Show full shortcuts"),
+]
+
+HELP_DESCRIPTION_OVERRIDES: dict[str, str] = {
+    "ctrl_e_dispatch": "Semantic Scholar / Exit API",
+    "command_palette": "Command palette",
+    "show_help": "Help overlay",
+    "open_url": "Open in browser",
+    "open_pdf": "Open PDF",
+}
+
 
 def _format_help_key(key: str) -> str:
     """Normalize Textual key names for user-facing help text."""
@@ -142,7 +159,9 @@ def build_help_sections(
     bindings: Sequence[Binding | tuple[Any, ...]],
 ) -> list[tuple[str, list[tuple[str, str]]]]:
     """Build help sections from runtime key bindings."""
-    sections: list[tuple[str, list[tuple[str, str]]]] = []
+    sections: list[tuple[str, list[tuple[str, str]]]] = [
+        ("Getting Started", list(HELP_GETTING_STARTED))
+    ]
     for section_name, actions in HELP_SECTION_ACTIONS:
         entries: list[tuple[str, str]] = []
         for action_name in actions:
@@ -153,7 +172,8 @@ def build_help_sections(
             if binding is None:
                 continue
             key = _format_help_key(binding.key)
-            entries.append((key, binding.description))
+            description = HELP_DESCRIPTION_OVERRIDES.get(action_name, binding.description)
+            entries.append((key, description))
         sections.append((section_name, entries))
 
     sections.append(("Search Syntax", HELP_SEARCH_SYNTAX))

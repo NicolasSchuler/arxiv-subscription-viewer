@@ -522,13 +522,13 @@ FOOTER_CONTEXTS: dict[str, list[tuple[str, str]]] = {
         ("?", "help"),
     ],
     "search": [
-        ("type to filter", ""),
-        ("Esc", "close"),
-        ("↑↓", "navigate"),
+        ("type to search", ""),
+        ("Esc", "cancel"),
+        ("↑↓", "move"),
         ("?", "help"),
     ],
     "api": [
-        ("[/]", "pages"),
+        ("[/]", "page"),
         ("Esc", "exit API"),
         ("o", "open"),
         ("s", "sort"),
@@ -3608,7 +3608,7 @@ class ArxivBrowser(App):
         self.push_screen(
             HelpScreen(
                 sections=self._build_help_sections(),
-                footer_note="Press ? / Escape / q to close",
+                footer_note="Close: ? / Esc / q",
             )
         )
 

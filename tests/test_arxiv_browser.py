@@ -1591,10 +1591,24 @@ class TestStatusFilterRegressions:
         entries = {(key, desc) for _, pairs in sections for key, desc in pairs}
         assert ("[", "Older") in entries
         assert ("]", "Newer") in entries
-        assert ("Ctrl+p", "Commands") in entries
+        assert ("Ctrl+p", "Command palette") in entries
         assert ("Ctrl+k", "Collections") in entries
         assert ("C", "Chat") in entries
         assert ("Ctrl+g", "Auto-Tag") in entries
+
+    def test_help_sections_include_getting_started_shortcuts(self):
+        """Help content should lead with a concise getting-started flow."""
+        from arxiv_browser.app import ArxivBrowser
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        sections = app._build_help_sections()
+
+        assert sections[0][0] == "Getting Started"
+        getting_started_entries = set(sections[0][1])
+        assert ("/", "Search papers") in getting_started_entries
+        assert ("Space", "Select current paper") in getting_started_entries
+        assert ("Ctrl+p", "Open command palette") in getting_started_entries
+        assert ("?", "Show full shortcuts") in getting_started_entries
 
     def test_status_bar_compacts_for_narrow_width(self):
         """Status text should switch to compact mode on narrow terminals."""
@@ -11743,6 +11757,30 @@ class TestFooterDiscoverability:
         assert "x" in keys
         assert "n" in keys
         assert "t" in keys
+
+    def test_footer_uses_palette_and_history_labels(self):
+        from datetime import date as dt_date
+        from pathlib import Path
+
+        from arxiv_browser.app import UserConfig
+
+        config = UserConfig()
+        app = self._make_footer_app(config)
+        app._history_files = [
+            (dt_date(2026, 1, 2), Path("history/2026-01-02.txt")),
+            (dt_date(2026, 1, 1), Path("history/2026-01-01.txt")),
+        ]
+        bindings = app._get_footer_bindings()
+        assert ("Ctrl+p", "palette") in bindings
+        assert ("[/]", "history") in bindings
+
+    def test_search_and_api_footer_copy(self):
+        from arxiv_browser.app import FOOTER_CONTEXTS
+
+        assert ("type to search", "") in FOOTER_CONTEXTS["search"]
+        assert ("Esc", "cancel") in FOOTER_CONTEXTS["search"]
+        assert ("↑↓", "move") in FOOTER_CONTEXTS["search"]
+        assert ("[/]", "page") in FOOTER_CONTEXTS["api"]
 
 
 # ============================================================================

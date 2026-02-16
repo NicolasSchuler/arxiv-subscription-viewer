@@ -53,8 +53,8 @@ def build_browse_footer_bindings(
     if llm_configured:
         bindings.append(("L", "relevance"))
     if has_history_navigation:
-        bindings.append(("[/]", "dates"))
-    bindings.extend([("E", "export"), ("Ctrl+p", "commands"), ("?", "help")])
+        bindings.append(("[/]", "history"))
+    bindings.extend([("E", "export"), ("Ctrl+p", "palette"), ("?", "help")])
     return bindings
 
 
