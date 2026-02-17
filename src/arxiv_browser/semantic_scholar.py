@@ -39,6 +39,7 @@ import json
 import logging
 import random
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -495,7 +496,7 @@ def get_s2_db_path() -> Path:
 def init_s2_db(db_path: Path) -> None:
     """Create S2 cache tables if they don't exist."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(str(db_path)) as conn:
+    with closing(sqlite3.connect(str(db_path))) as conn, conn:
         conn.execute(
             "CREATE TABLE IF NOT EXISTS s2_papers ("
             "  arxiv_id TEXT PRIMARY KEY,"
@@ -591,7 +592,7 @@ def load_s2_paper(
     if not db_path.exists():
         return None
     try:
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
             row = conn.execute(
                 "SELECT payload_json, fetched_at FROM s2_papers WHERE arxiv_id = ?",
                 (arxiv_id,),
@@ -613,7 +614,7 @@ def save_s2_paper(db_path: Path, paper: SemanticScholarPaper) -> None:
         init_s2_db(db_path)
         now = datetime.now(UTC).isoformat()
         payload = _paper_to_json(paper)
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
             conn.execute(
                 "INSERT OR REPLACE INTO s2_papers (arxiv_id, payload_json, fetched_at) "
                 "VALUES (?, ?, ?)",
@@ -632,7 +633,7 @@ def load_s2_recommendations(
     if not db_path.exists():
         return []
     try:
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
             rows = conn.execute(
                 "SELECT payload_json, fetched_at FROM s2_recommendations "
                 "WHERE source_arxiv_id = ? ORDER BY rank",
@@ -664,7 +665,7 @@ def save_s2_recommendations(
     try:
         init_s2_db(db_path)
         now = datetime.now(UTC).isoformat()
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
             # Clear old recommendations for this source
             conn.execute(
                 "DELETE FROM s2_recommendations WHERE source_arxiv_id = ?",
@@ -732,7 +733,7 @@ def has_s2_citation_graph_cache(
     if not db_path.exists():
         return False
     try:
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
             row = conn.execute(
                 "SELECT fetched_at FROM s2_citation_graph_fetches WHERE paper_id = ?",
                 (paper_id,),
@@ -757,7 +758,7 @@ def load_s2_citation_graph(
     if not db_path.exists():
         return []
     try:
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
             rows = conn.execute(
                 "SELECT payload_json, fetched_at FROM s2_citation_graph "
                 "WHERE paper_id = ? AND direction = ? ORDER BY rank",
@@ -795,7 +796,7 @@ def save_s2_citation_graph(
     try:
         init_s2_db(db_path)
         now = datetime.now(UTC).isoformat()
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
             conn.execute(
                 "DELETE FROM s2_citation_graph WHERE paper_id = ? AND direction = ?",
                 (paper_id, direction),

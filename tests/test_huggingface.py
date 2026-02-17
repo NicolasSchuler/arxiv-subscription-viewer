@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import closing
 from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -287,7 +288,7 @@ class TestHfCache:
 
         import sqlite3
 
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
             tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
             table_names = [t[0] for t in tables]
             assert "hf_daily_papers" in table_names
@@ -315,7 +316,7 @@ class TestHfCache:
         import sqlite3
 
         old_time = (datetime.now(UTC) - timedelta(hours=HF_DEFAULT_CACHE_TTL_HOURS + 1)).isoformat()
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
             conn.execute("UPDATE hf_daily_papers SET fetched_at = ?", (old_time,))
 
         result = load_hf_daily_cache(db_path)

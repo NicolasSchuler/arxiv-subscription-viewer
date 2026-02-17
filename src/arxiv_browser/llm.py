@@ -8,6 +8,7 @@ import logging
 import re
 import shlex
 import sqlite3
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -163,7 +164,7 @@ def _init_summary_db(db_path: Path) -> None:
     (arxiv_id, command_hash) to support multiple summary modes per paper.
     """
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(str(db_path)) as conn:
+    with closing(sqlite3.connect(str(db_path))) as conn, conn:
         # Check if table exists with old schema (single PK on arxiv_id)
         row = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='summaries'"
@@ -186,7 +187,7 @@ def _load_summary(db_path: Path, arxiv_id: str, command_hash: str) -> str | None
     if not db_path.exists():
         return None
     try:
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
             row = conn.execute(
                 "SELECT summary FROM summaries WHERE arxiv_id = ? AND command_hash = ?",
                 (arxiv_id, command_hash),
@@ -201,7 +202,7 @@ def _save_summary(db_path: Path, arxiv_id: str, summary: str, command_hash: str)
     """Persist a summary to the SQLite database."""
     try:
         _init_summary_db(db_path)
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
             conn.execute(
                 "INSERT OR REPLACE INTO summaries (arxiv_id, summary, command_hash, created_at) "
                 "VALUES (?, ?, ?, ?)",
@@ -231,7 +232,7 @@ def get_relevance_db_path() -> Path:
 def _init_relevance_db(db_path: Path) -> None:
     """Create the relevance_scores table if it doesn't exist."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(str(db_path)) as conn:
+    with closing(sqlite3.connect(str(db_path))) as conn, conn:
         conn.execute(
             "CREATE TABLE IF NOT EXISTS relevance_scores ("
             "  arxiv_id TEXT NOT NULL,"
@@ -251,7 +252,7 @@ def _load_relevance_score(
     if not db_path.exists():
         return None
     try:
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
             row = conn.execute(
                 "SELECT score, reason FROM relevance_scores "
                 "WHERE arxiv_id = ? AND interests_hash = ?",
@@ -269,7 +270,7 @@ def _save_relevance_score(
     """Persist a relevance score to the SQLite database."""
     try:
         _init_relevance_db(db_path)
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
             conn.execute(
                 "INSERT OR REPLACE INTO relevance_scores "
                 "(arxiv_id, interests_hash, score, reason, created_at) "
@@ -285,7 +286,7 @@ def _load_all_relevance_scores(db_path: Path, interests_hash: str) -> dict[str, 
     if not db_path.exists():
         return {}
     try:
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
             rows = conn.execute(
                 "SELECT arxiv_id, score, reason FROM relevance_scores WHERE interests_hash = ?",
                 (interests_hash,),

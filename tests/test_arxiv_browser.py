@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for arXiv Paper Browser TUI."""
 
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 
@@ -6785,7 +6786,7 @@ class TestSummaryDbMigration:
         db_path = tmp_path / "summaries.db"
         _init_summary_db(db_path)
 
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
             row = conn.execute(
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name='summaries'"
             ).fetchone()
@@ -6798,7 +6799,7 @@ class TestSummaryDbMigration:
 
         db_path = tmp_path / "summaries.db"
         # Create old schema
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
             conn.execute(
                 "CREATE TABLE summaries ("
                 "  arxiv_id TEXT PRIMARY KEY,"
@@ -6814,7 +6815,7 @@ class TestSummaryDbMigration:
         # Migrate
         _init_summary_db(db_path)
 
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
             row = conn.execute(
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name='summaries'"
             ).fetchone()
@@ -7237,7 +7238,7 @@ class TestRelevanceDb:
 
         db_path = tmp_path / "relevance.db"
         _init_relevance_db(db_path)
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
             row = conn.execute(
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name='relevance_scores'"
             ).fetchone()
@@ -8703,7 +8704,7 @@ class TestSummaryDbErrorHandlers:
         from arxiv_browser.app import _load_summary
 
         db_path = tmp_path / "empty.db"
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
             conn.execute("CREATE TABLE other_table (id TEXT)")
         result = _load_summary(db_path, "2401.00001", "hash123")
         assert result is None
@@ -8767,7 +8768,7 @@ class TestRelevanceDbErrorHandlers:
         from arxiv_browser.app import _load_relevance_score
 
         db_path = tmp_path / "empty.db"
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
             conn.execute("CREATE TABLE other_table (id TEXT)")
         result = _load_relevance_score(db_path, "2401.00001", "hash123")
         assert result is None
@@ -8804,7 +8805,7 @@ class TestRelevanceDbErrorHandlers:
         from arxiv_browser.app import _load_all_relevance_scores
 
         db_path = tmp_path / "empty.db"
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
             conn.execute("CREATE TABLE other_table (id TEXT)")
         result = _load_all_relevance_scores(db_path, "hash123")
         assert result == {}

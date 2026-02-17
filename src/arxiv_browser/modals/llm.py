@@ -232,7 +232,7 @@ class PaperChatScreen(ModalScreen[None]):
     }
 
     .chat-assistant {
-        color: $th-foreground;
+        color: $th-text;
         margin-bottom: 1;
     }
 

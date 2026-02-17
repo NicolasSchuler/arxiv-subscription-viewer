@@ -30,6 +30,7 @@ import json
 import logging
 import random
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -230,7 +231,7 @@ def get_hf_db_path() -> Path:
 def init_hf_db(db_path: Path) -> None:
     """Create HF cache table if it doesn't exist."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(str(db_path)) as conn:
+    with closing(sqlite3.connect(str(db_path))) as conn, conn:
         conn.execute(
             "CREATE TABLE IF NOT EXISTS hf_daily_papers ("
             "  arxiv_id TEXT PRIMARY KEY,"
@@ -309,7 +310,7 @@ def load_hf_daily_cache(
     if not db_path.exists():
         return None
     try:
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
             rows = conn.execute("SELECT payload_json, fetched_at FROM hf_daily_papers").fetchall()
             if not rows:
                 return None
@@ -336,7 +337,7 @@ def save_hf_daily_cache(db_path: Path, papers: list[HuggingFacePaper]) -> None:
     try:
         init_hf_db(db_path)
         now = datetime.now(UTC).isoformat()
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
             conn.execute("DELETE FROM hf_daily_papers")
             for paper in papers:
                 payload = _hf_paper_to_json(paper)

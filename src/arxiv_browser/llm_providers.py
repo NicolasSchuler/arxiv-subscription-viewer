@@ -55,7 +55,7 @@ class CLIProvider:
             return LLMResult(output="", success=False, error=str(e))
 
         try:
-            proc = await asyncio.create_subprocess_shell(  # nosec B602
+            proc = await asyncio.create_subprocess_shell(
                 shell_command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

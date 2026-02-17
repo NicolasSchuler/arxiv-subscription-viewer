@@ -4890,7 +4890,7 @@ class ArxivBrowser(App):
             payload = text.encode(encoding)
             for index, command in enumerate(commands):
                 try:
-                    subprocess.run(  # nosec B603 B607
+                    subprocess.run(  # nosec B603
                         command,
                         input=payload,
                         check=True,
