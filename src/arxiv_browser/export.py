@@ -23,8 +23,8 @@ DEFAULT_BIBTEX_EXPORT_DIR = "arxiv-exports"  # Default subdirectory in home fold
 # PDF download settings
 DEFAULT_PDF_DOWNLOAD_DIR = "arxiv-pdfs"  # Relative to home directory
 
-# Matches 4-digit years (2000-2099) for BibTeX export
-_YEAR_PATTERN = re.compile(r"\b(20\d{2})\b")
+# Matches 4-digit years (1900-2099) for BibTeX export
+_YEAR_PATTERN = re.compile(r"\b((?:19|20)\d{2})\b")
 
 
 def get_pdf_download_path(paper: Paper, config: UserConfig) -> Path:

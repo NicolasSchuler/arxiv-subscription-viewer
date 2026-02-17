@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import arxiv_browser.app as app_mod
 from arxiv_browser.app import (
     ArxivBrowser,
     PaperCollection,
@@ -372,23 +373,21 @@ class TestRelevanceBatchCoverage:
         app.notify = MagicMock()
         app._relevance_scoring_active = True
         app._scoring_progress = None
-        app._llm_provider = SimpleNamespace(
-            execute=AsyncMock(
-                side_effect=[
-                    SimpleNamespace(success=True, output="ok-1", error=""),
-                    SimpleNamespace(success=True, output="bad-parse", error=""),
-                    SimpleNamespace(success=False, output="", error="timeout"),
-                    RuntimeError("provider crash"),
-                    SimpleNamespace(success=True, output="ok-2", error=""),
-                ]
-            )
-        )
+        app._llm_provider = object()
 
         with (
             patch("arxiv_browser.app._load_all_relevance_scores", return_value={}),
             patch(
-                "arxiv_browser.app._parse_relevance_response",
-                side_effect=[(9, "great match"), None, (6, "partial match")],
+                "arxiv_browser.app._score_relevance_once_service",
+                new=AsyncMock(
+                    side_effect=[
+                        (9, "great match"),
+                        None,
+                        None,
+                        RuntimeError("provider crash"),
+                        (6, "partial match"),
+                    ]
+                ),
             ),
             patch("arxiv_browser.app._save_relevance_score", return_value=None),
         ):
@@ -819,7 +818,7 @@ class TestS2AndHfCoverage:
     @pytest.mark.asyncio
     async def test_fetch_s2_paper_async_success_and_no_data(self, tmp_path):
         app = _new_app()
-        app._http_client = AsyncMock()
+        app._http_client = object()
         app._config = UserConfig()
         app._config.s2_api_key = ""
         app._s2_db_path = tmp_path / "s2.db"
@@ -830,8 +829,10 @@ class TestS2AndHfCoverage:
         app._refresh_current_list_item = MagicMock()
 
         with (
-            patch("arxiv_browser.app.fetch_s2_paper", return_value=_make_s2_paper("2401.30003")),
-            patch("arxiv_browser.app.save_s2_paper", return_value=None),
+            patch(
+                "arxiv_browser.app._load_or_fetch_s2_paper_cached",
+                return_value=_make_s2_paper("2401.30003"),
+            ),
         ):
             await app._fetch_s2_paper_async("2401.30003")
 
@@ -839,7 +840,7 @@ class TestS2AndHfCoverage:
         assert "2401.30003" not in app._s2_loading
 
         app._s2_loading.add("2401.30004")
-        with patch("arxiv_browser.app.fetch_s2_paper", return_value=None):
+        with patch("arxiv_browser.app._load_or_fetch_s2_paper_cached", return_value=None):
             await app._fetch_s2_paper_async("2401.30004")
         assert "No S2 data found" in app.notify.call_args[0][0]
         assert "2401.30004" not in app._s2_loading
@@ -885,7 +886,7 @@ class TestS2AndHfCoverage:
     @pytest.mark.asyncio
     async def test_fetch_hf_daily_async_success_and_empty(self, tmp_path):
         app = _new_app()
-        app._http_client = AsyncMock()
+        app._http_client = object()
         app._config = UserConfig()
         app._hf_db_path = tmp_path / "hf.db"
         app._hf_cache = {}
@@ -897,16 +898,13 @@ class TestS2AndHfCoverage:
         app._mark_badges_dirty = MagicMock()
 
         hf = _make_hf_paper("2401.40002")
-        with (
-            patch("arxiv_browser.app.fetch_hf_daily_papers", return_value=[hf]),
-            patch("arxiv_browser.app.save_hf_daily_cache", return_value=None),
-        ):
+        with patch("arxiv_browser.app._load_or_fetch_hf_daily_cached", return_value=[hf]):
             await app._fetch_hf_daily_async()
         assert app._hf_cache["2401.40002"] is hf
         assert app._hf_loading is False
 
         app._hf_loading = True
-        with patch("arxiv_browser.app.fetch_hf_daily_papers", return_value=[]):
+        with patch("arxiv_browser.app._load_or_fetch_hf_daily_cached", return_value=[]):
             await app._fetch_hf_daily_async()
         assert "No HF trending data found" in app.notify.call_args[0][0]
         assert app._hf_loading is False
@@ -914,56 +912,21 @@ class TestS2AndHfCoverage:
 
 class TestDownloadClipboardAndOpenCoverage:
     @pytest.mark.asyncio
-    async def test_download_pdf_async_success_and_failure(self, make_paper, tmp_path):
-        class _FakeResponse:
-            def __init__(self, chunks: list[bytes], error: Exception | None = None) -> None:
-                self._chunks = chunks
-                self._error = error
-
-            def raise_for_status(self) -> None:
-                if self._error is not None:
-                    raise self._error
-
-            async def aiter_bytes(self):
-                for chunk in self._chunks:
-                    yield chunk
-
-        class _StreamContext:
-            def __init__(self, response: _FakeResponse) -> None:
-                self._response = response
-
-            async def __aenter__(self) -> _FakeResponse:
-                return self._response
-
-            async def __aexit__(self, *_args) -> bool:
-                return False
-
+    async def test_download_pdf_async_delegates_to_service(self, make_paper):
         app = _new_app()
         app._config = UserConfig()
         paper = make_paper(arxiv_id="2401.50001")
-        target = tmp_path / "pdfs" / "2401.50001.pdf"
-        response = _FakeResponse([b"%PDF-1.4", b" body"])
-        client = SimpleNamespace(stream=MagicMock(return_value=_StreamContext(response)))
+        client = object()
 
-        with (
-            patch("arxiv_browser.app.get_pdf_url", return_value="https://example/pdf"),
-            patch("arxiv_browser.app.get_pdf_download_path", return_value=target),
-        ):
+        with patch("arxiv_browser.app._download_pdf_service", return_value=True) as service_mock:
             ok = await app._download_pdf_async(paper, client)
-
         assert ok is True
-        assert target.exists()
-        assert target.read_bytes() == b"%PDF-1.4 body"
-        assert list(target.parent.glob(".*.tmp")) == []
+        service_mock.assert_awaited_once()
 
-        with (
-            patch("arxiv_browser.app.get_pdf_url", return_value="https://example/pdf"),
-            patch("arxiv_browser.app.get_pdf_download_path", return_value=target),
-        ):
-            client.stream = MagicMock(side_effect=OSError("network"))
+        with patch("arxiv_browser.app._download_pdf_service", return_value=False) as service_mock:
             ok = await app._download_pdf_async(paper, client)
         assert ok is False
-        assert list(target.parent.glob(".*.tmp")) == []
+        service_mock.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_process_single_download_updates_state_and_finishes(self, make_paper):
@@ -1267,38 +1230,16 @@ class TestArxivApiAndSimilarityCoverage:
 
         app = _new_app()
         app._apply_arxiv_rate_limit = AsyncMock()
-        response = MagicMock()
-        response.text = "<feed/>"
-        app._http_client = SimpleNamespace(get=AsyncMock(return_value=response))
+        app._http_client = object()
 
-        with (
-            patch("arxiv_browser.app.build_arxiv_search_query", return_value="all:transformers"),
-            patch("arxiv_browser.app.parse_arxiv_api_feed", return_value=[make_paper()]),
-        ):
+        with patch("arxiv_browser.app._fetch_arxiv_api_page_service", return_value=[make_paper()]):
             papers = await app._fetch_arxiv_api_page(request, start=0, max_results=5)
         assert len(papers) == 1
 
         app2 = _new_app()
         app2._apply_arxiv_rate_limit = AsyncMock()
         app2._http_client = None
-        response2 = MagicMock()
-        response2.text = "<feed/>"
-
-        class DummyClient:
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                return False
-
-            async def get(self, *_args, **_kwargs):
-                return response2
-
-        with (
-            patch("arxiv_browser.app.build_arxiv_search_query", return_value="all:transformers"),
-            patch("arxiv_browser.app.parse_arxiv_api_feed", return_value=[make_paper()]),
-            patch("arxiv_browser.app.httpx.AsyncClient", return_value=DummyClient()),
-        ):
+        with patch("arxiv_browser.app._fetch_arxiv_api_page_service", return_value=[make_paper()]):
             papers2 = await app2._fetch_arxiv_api_page(request, start=0, max_results=5)
         assert len(papers2) == 1
 
@@ -1566,24 +1507,23 @@ class TestAutoTagAndPdfOpenCoverage:
     async def test_call_auto_tag_llm_and_acceptance_paths(self, make_paper):
         app = _new_app()
         app.notify = MagicMock()
-        app._llm_provider = SimpleNamespace(execute=AsyncMock())
+        app._llm_provider = object()
         paper = make_paper(arxiv_id="2401.90001")
 
-        app._llm_provider.execute.return_value = SimpleNamespace(
-            success=False, output="", error="bad command"
-        )
-        result = await app._call_auto_tag_llm(paper, ["topic:ml"])
+        with patch(
+            "arxiv_browser.app._suggest_tags_once_service",
+            side_effect=app_mod._LLMExecutionError("bad command"),
+        ):
+            result = await app._call_auto_tag_llm(paper, ["topic:ml"])
         assert result is None
+        app.notify.assert_not_called()
 
-        app._llm_provider.execute.return_value = SimpleNamespace(
-            success=True, output='{"tags": ["topic:ml"]}', error=""
-        )
-        with patch("arxiv_browser.app._parse_auto_tag_response", return_value=None):
+        with patch("arxiv_browser.app._suggest_tags_once_service", return_value=None):
             result = await app._call_auto_tag_llm(paper, ["topic:ml"])
         assert result is None
         assert "Could not parse LLM response" in app.notify.call_args[0][0]
 
-        with patch("arxiv_browser.app._parse_auto_tag_response", return_value=["topic:ml"]):
+        with patch("arxiv_browser.app._suggest_tags_once_service", return_value=["topic:ml"]):
             result = await app._call_auto_tag_llm(paper, ["topic:ml"])
         assert result == ["topic:ml"]
 

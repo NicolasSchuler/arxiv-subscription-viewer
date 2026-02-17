@@ -54,11 +54,9 @@ Search filters:
 import asyncio
 import hashlib
 import logging
-import os
 import platform
 import subprocess
 import sys
-import tempfile
 import time
 import webbrowser
 from collections import deque
@@ -146,10 +144,8 @@ from arxiv_browser.export import (
 from arxiv_browser.help_ui import build_help_sections
 from arxiv_browser.huggingface import (
     HuggingFacePaper,
-    fetch_hf_daily_papers,
     get_hf_db_path,
     load_hf_daily_cache,
-    save_hf_daily_cache,
 )
 from arxiv_browser.io_actions import (
     build_clipboard_payload,
@@ -283,7 +279,6 @@ from arxiv_browser.semantic_scholar import (
     CitationEntry,
     SemanticScholarPaper,
     fetch_s2_citations,
-    fetch_s2_paper,
     fetch_s2_recommendations,
     fetch_s2_references,
     get_s2_db_path,
@@ -292,8 +287,37 @@ from arxiv_browser.semantic_scholar import (
     load_s2_paper,
     load_s2_recommendations,
     save_s2_citation_graph,
-    save_s2_paper,
     save_s2_recommendations,
+)
+from arxiv_browser.services.arxiv_api_service import (
+    enforce_rate_limit as _enforce_arxiv_api_rate_limit,
+)
+from arxiv_browser.services.arxiv_api_service import (
+    fetch_page as _fetch_arxiv_api_page_service,
+)
+from arxiv_browser.services.arxiv_api_service import (
+    format_query_label as _format_arxiv_query_label,
+)
+from arxiv_browser.services.download_service import (
+    download_pdf as _download_pdf_service,
+)
+from arxiv_browser.services.enrichment_service import (
+    load_or_fetch_hf_daily_cached as _load_or_fetch_hf_daily_cached,
+)
+from arxiv_browser.services.enrichment_service import (
+    load_or_fetch_s2_paper_cached as _load_or_fetch_s2_paper_cached,
+)
+from arxiv_browser.services.llm_service import (
+    LLMExecutionError as _LLMExecutionError,
+)
+from arxiv_browser.services.llm_service import (
+    generate_summary as _generate_summary_service,
+)
+from arxiv_browser.services.llm_service import (
+    score_relevance_once as _score_relevance_once_service,
+)
+from arxiv_browser.services.llm_service import (
+    suggest_tags_once as _suggest_tags_once_service,
 )
 from arxiv_browser.similarity import *  # noqa: F403
 from arxiv_browser.similarity import (  # noqa: F401
@@ -1702,16 +1726,18 @@ class ArxivBrowser(App):
     async def _fetch_s2_paper_async(self, arxiv_id: str) -> None:
         """Fetch S2 paper data and update UI on completion."""
         try:
-            client = self._http_client
-            if client is None:
-                return
-            result = await fetch_s2_paper(arxiv_id, client, api_key=self._config.s2_api_key)
+            result = await _load_or_fetch_s2_paper_cached(
+                arxiv_id=arxiv_id,
+                db_path=self._s2_db_path,
+                cache_ttl_days=self._config.s2_cache_ttl_days,
+                client=self._http_client,
+                api_key=self._config.s2_api_key,
+            )
             if result is None:
                 self.notify("No S2 data found", title="S2", severity="warning")
                 return
             # Cache in memory + SQLite
             self._s2_cache[arxiv_id] = result
-            await asyncio.to_thread(save_s2_paper, self._s2_db_path, result)
             # Update UI if still relevant
             self._get_ui_refresh_coordinator().refresh_detail_and_list_item()
         except Exception:
@@ -1791,15 +1817,15 @@ class ArxivBrowser(App):
     async def _fetch_hf_daily_async(self) -> None:
         """Background task: fetch HF daily papers and update UI."""
         try:
-            client = self._http_client
-            if client is None:
-                return
-            papers = await fetch_hf_daily_papers(client)
+            papers = await _load_or_fetch_hf_daily_cached(
+                db_path=self._hf_db_path,
+                cache_ttl_hours=self._config.hf_cache_ttl_hours,
+                client=self._http_client,
+            )
             if not papers:
                 self.notify("No HF trending data found", title="HF", severity="warning")
                 return
             self._hf_cache = {p.arxiv_id: p for p in papers}
-            await asyncio.to_thread(save_hf_daily_cache, self._hf_db_path, papers)
             self._get_ui_refresh_coordinator().refresh_detail_pane()
             self._mark_badges_dirty("hf")
             matched = count_hf_matches(self._hf_cache, self._papers_by_id)
@@ -2058,23 +2084,23 @@ class ArxivBrowser(App):
     @staticmethod
     def _format_arxiv_search_label(request: ArxivSearchRequest) -> str:
         """Build a human-readable query label for API mode UI."""
-        try:
-            return build_arxiv_search_query(request.query, request.field, request.category)
-        except ValueError:
-            return request.query or f"cat:{request.category}"
+        return _format_arxiv_query_label(request)
 
     async def _apply_arxiv_rate_limit(self) -> None:
         """Sleep as needed to respect arXiv API rate limits."""
-        now = asyncio.get_running_loop().time()
-        elapsed = now - self._last_arxiv_api_request_at
-        if self._last_arxiv_api_request_at > 0 and elapsed < ARXIV_API_MIN_INTERVAL_SECONDS:
-            wait_seconds = ARXIV_API_MIN_INTERVAL_SECONDS - elapsed
+        loop = asyncio.get_running_loop()
+        new_last_request_at, wait_seconds = await _enforce_arxiv_api_rate_limit(
+            last_request_at=self._last_arxiv_api_request_at,
+            min_interval_seconds=ARXIV_API_MIN_INTERVAL_SECONDS,
+            now=loop.time,
+            sleep=asyncio.sleep,
+        )
+        if wait_seconds > 0:
             self.notify(
                 f"Waiting {wait_seconds:.1f}s for arXiv API rate limit",
                 title="arXiv Search",
             )
-            await asyncio.sleep(wait_seconds)
-        self._last_arxiv_api_request_at = asyncio.get_running_loop().time()
+        self._last_arxiv_api_request_at = new_last_request_at
 
     async def _fetch_arxiv_api_page(
         self,
@@ -2083,36 +2109,15 @@ class ArxivBrowser(App):
         max_results: int,
     ) -> list[Paper]:
         """Fetch one page of results from arXiv API."""
-        search_query = build_arxiv_search_query(request.query, request.field, request.category)
-        params = {
-            "search_query": search_query,
-            "sortBy": "submittedDate",
-            "sortOrder": "descending",
-            "start": start,
-            "max_results": max_results,
-        }
-        headers = {"User-Agent": "arxiv-subscription-viewer/1.0"}
-
         await self._apply_arxiv_rate_limit()
-
-        if self._http_client is not None:
-            response = await self._http_client.get(
-                ARXIV_API_URL,
-                params=params,
-                headers=headers,
-                timeout=ARXIV_API_TIMEOUT,
-            )
-        else:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    ARXIV_API_URL,
-                    params=params,
-                    headers=headers,
-                    timeout=ARXIV_API_TIMEOUT,
-                )
-
-        response.raise_for_status()
-        return parse_arxiv_api_feed(response.text)
+        return await _fetch_arxiv_api_page_service(
+            client=self._http_client,
+            request=request,
+            start=start,
+            max_results=max_results,
+            timeout_seconds=ARXIV_API_TIMEOUT,
+            user_agent="arxiv-subscription-viewer/1.0",
+        )
 
     def _apply_arxiv_search_results(
         self,
@@ -3923,32 +3928,30 @@ class ArxivBrowser(App):
         arxiv_id = paper.arxiv_id
         generated_summary = False
         try:
-            if use_full_paper_content:
-                # Fetch full paper content from arXiv HTML (falls back to abstract).
-                # Use a shorter timeout for summary flow to keep interactions snappy.
-                self.notify("Fetching paper content...", title="AI Summary")
-                paper_content = await _fetch_paper_content_async(
-                    paper, self._http_client, timeout=SUMMARY_HTML_TIMEOUT
-                )
-            else:
-                abstract = paper.abstract or paper.abstract_raw or ""
-                paper_content = f"Abstract:\n{abstract}" if abstract else ""
-
-            prompt = build_llm_prompt(paper, prompt_template, paper_content)
             assert self._llm_provider is not None
-            logger.debug("Running LLM command for %s", arxiv_id)
+            if use_full_paper_content:
+                self.notify("Fetching paper content...", title="AI Summary")
 
-            result = await self._llm_provider.execute(prompt, LLM_COMMAND_TIMEOUT)
-            if not result.success:
+            summary, error = await _generate_summary_service(
+                paper=paper,
+                prompt_template=prompt_template,
+                provider=self._llm_provider,
+                use_full_paper_content=use_full_paper_content,
+                summary_timeout_seconds=LLM_COMMAND_TIMEOUT,
+                fetch_paper_content=lambda selected_paper: _fetch_paper_content_async(
+                    selected_paper,
+                    self._http_client,
+                    timeout=SUMMARY_HTML_TIMEOUT,
+                ),
+            )
+            if summary is None:
                 self.notify(
-                    result.error[:200],
+                    (error or "LLM command failed")[:200],
                     title="AI Summary",
                     severity="error",
                     timeout=8,
                 )
                 return
-
-            summary = result.output
 
             # Cache in memory and persist to SQLite
             self._paper_summaries[arxiv_id] = summary
@@ -4122,26 +4125,15 @@ class ArxivBrowser(App):
             for i, paper in enumerate(uncached):
                 self._scoring_progress = (i + 1, total)
                 self._update_footer()
-                prompt = build_relevance_prompt(paper, interests)
 
                 try:
-                    llm_result = await self._llm_provider.execute(prompt, RELEVANCE_SCORE_TIMEOUT)
-                    if not llm_result.success:
-                        logger.warning(
-                            "Relevance scoring failed for %s: %s",
-                            paper.arxiv_id,
-                            llm_result.error[:200],
-                        )
-                        failed += 1
-                        continue
-
-                    parsed = _parse_relevance_response(llm_result.output)
+                    parsed = await _score_relevance_once_service(
+                        paper=paper,
+                        interests=interests,
+                        provider=self._llm_provider,
+                        timeout_seconds=RELEVANCE_SCORE_TIMEOUT,
+                    )
                     if parsed is None:
-                        logger.warning(
-                            "Failed to parse relevance response for %s: %s",
-                            paper.arxiv_id,
-                            llm_result.output[:200],
-                        )
                         failed += 1
                         continue
 
@@ -4336,21 +4328,21 @@ class ArxivBrowser(App):
 
     async def _call_auto_tag_llm(self, paper: Paper, taxonomy: list[str]) -> list[str] | None:
         """Call the LLM to get tag suggestions for a paper. Returns tags or None on failure."""
-        prompt = build_auto_tag_prompt(paper, taxonomy)
         assert self._llm_provider is not None
 
-        llm_result = await self._llm_provider.execute(prompt, AUTO_TAG_TIMEOUT)
-        if not llm_result.success:
-            logger.warning("Auto-tag failed for %s: %s", paper.arxiv_id, llm_result.error[:200])
+        try:
+            tags = await _suggest_tags_once_service(
+                paper=paper,
+                taxonomy=taxonomy,
+                provider=self._llm_provider,
+                timeout_seconds=AUTO_TAG_TIMEOUT,
+            )
+        except _LLMExecutionError as exc:
+            logger.warning("Auto-tag failed for %s: %s", paper.arxiv_id, str(exc)[:200])
             return None
 
-        tags = _parse_auto_tag_response(llm_result.output)
         if tags is None:
-            logger.warning(
-                "Failed to parse auto-tag response for %s: %s",
-                paper.arxiv_id,
-                llm_result.output[:200],
-            )
+            logger.warning("Failed to parse auto-tag response for %s", paper.arxiv_id)
             self.notify("Could not parse LLM response", title="Auto-Tag", severity="warning")
             return None
 
@@ -4656,49 +4648,17 @@ class ArxivBrowser(App):
         Returns:
             True if download succeeded, False otherwise.
         """
-        url = get_pdf_url(paper)
-        path = get_pdf_download_path(paper, self._config)
-        tmp_path: str | None = None
-
-        try:
-            # Create directory if needed (inside try for permission/disk errors)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            fd, tmp_path = tempfile.mkstemp(
-                dir=path.parent,
-                prefix=f".{path.stem}-",
-                suffix=".tmp",
-            )
-
-            async def _stream_to_tmp(active_client: httpx.AsyncClient) -> None:
-                with os.fdopen(fd, "wb") as tmp_file:
-                    async with active_client.stream(
-                        "GET",
-                        url,
-                        timeout=PDF_DOWNLOAD_TIMEOUT,
-                        follow_redirects=True,
-                    ) as response:
-                        response.raise_for_status()
-                        async for chunk in response.aiter_bytes():
-                            if chunk:
-                                tmp_file.write(chunk)
-
-            if client is not None:
-                await _stream_to_tmp(client)
-            else:
-                async with httpx.AsyncClient() as tmp_client:
-                    await _stream_to_tmp(tmp_client)
-
-            os.replace(tmp_path, path)
-            logger.debug("Downloaded PDF for %s to %s", paper.arxiv_id, path)
-            return True
-        except (httpx.HTTPError, OSError) as e:
-            logger.debug("Download failed for %s: %s", paper.arxiv_id, e)
-            if tmp_path:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-            return False
+        success = await _download_pdf_service(
+            paper=paper,
+            config=self._config,
+            client=client,
+            timeout_seconds=PDF_DOWNLOAD_TIMEOUT,
+        )
+        if success:
+            logger.debug("Downloaded PDF for %s", paper.arxiv_id)
+        else:
+            logger.debug("Download failed for %s", paper.arxiv_id)
+        return success
 
     def _start_downloads(self) -> None:
         """Start download tasks up to the concurrency limit."""

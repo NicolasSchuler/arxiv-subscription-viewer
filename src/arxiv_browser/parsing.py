@@ -54,8 +54,10 @@ _LATEX_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 # Pre-compiled regex patterns for parsing arXiv entries
-# Matches: "arXiv:2301.12345" or "arXiv:2301.12345v2" -> captures ID with optional version
-_ARXIV_ID_PATTERN = re.compile(r"arXiv:(\d{4}\.\d{4,5}(?:v\d+)?)")
+# Matches modern IDs (2301.12345) and legacy IDs (hep-th/9901001), with optional version suffix.
+_ARXIV_ID_PATTERN = re.compile(
+    r"arXiv:((?:\d{4}\.\d{4,5}|[A-Za-z-]+(?:\.[A-Za-z-]+)?/\d{7})(?:v\d+)?)"
+)
 # Matches: "Date: Mon, 15 Jan 2024 (v1)" -> captures "Mon, 15 Jan 2024"
 _DATE_PATTERN = re.compile(r"Date:\s*(.+?)(?:\s*\(|$)", re.MULTILINE)
 # Matches multi-line title up to "Authors:" label

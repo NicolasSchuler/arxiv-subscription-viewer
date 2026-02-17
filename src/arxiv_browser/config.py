@@ -137,6 +137,10 @@ def _safe_get(data: dict, key: str, default: Any, expected_type: type) -> Any:
     Returns the default if key is missing or value has wrong type.
     """
     value = data.get(key, default)
+    if expected_type is int:
+        if not isinstance(value, int) or isinstance(value, bool):
+            return default
+        return value
     if not isinstance(value, expected_type):
         return default
     return value
@@ -144,7 +148,7 @@ def _safe_get(data: dict, key: str, default: Any, expected_type: type) -> Any:
 
 def _coerce_arxiv_api_max_results(value: Any) -> int:
     """Validate and clamp the configured max_results for arXiv API queries."""
-    if not isinstance(value, int):
+    if not isinstance(value, int) or isinstance(value, bool):
         return ARXIV_API_DEFAULT_MAX_RESULTS
     return max(1, min(value, ARXIV_API_MAX_RESULTS_LIMIT))
 

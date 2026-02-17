@@ -823,13 +823,14 @@ class TestBibTeXExport:
     @pytest.mark.parametrize(
         "date_str, expected_year",
         [
+            ("Mon, 15 Jan 1999", "1999"),
             ("Mon, 15 Jan 2024", "2024"),
             ("Tue, 3 Feb 2026", "2026"),
             ("", None),  # None = current year
             ("   ", None),
             ("no date here", None),
         ],
-        ids=["2024", "2026", "empty", "whitespace", "no-year"],
+        ids=["1999", "2024", "2026", "empty", "whitespace", "no-year"],
     )
     def test_extract_year(self, date_str, expected_year):
         """extract_year should find 4-digit years or fall back to current year."""
@@ -1192,6 +1193,13 @@ class TestSafeGetAndTypeValidation:
         data = {"key": "not_an_int"}
         assert _safe_get(data, "key", 0, int) == 0
 
+    def test_safe_get_rejects_bool_for_int(self):
+        """_safe_get should reject bool values for integer fields."""
+        from arxiv_browser.app import _safe_get
+
+        data = {"key": True}
+        assert _safe_get(data, "key", 50, int) == 50
+
     def test_safe_get_missing_key(self):
         """_safe_get should return default for missing key."""
         from arxiv_browser.app import _safe_get
@@ -1222,6 +1230,13 @@ class TestSafeGetAndTypeValidation:
         assert config.paper_metadata == {}
         assert config.arxiv_api_max_results == ARXIV_API_DEFAULT_MAX_RESULTS
         assert config.version == 1
+
+    def test_dict_to_config_rejects_bool_for_int_fields(self):
+        """_dict_to_config should treat bool as invalid for integer configuration fields."""
+        from arxiv_browser.app import _dict_to_config
+
+        config = _dict_to_config({"arxiv_api_max_results": True})
+        assert config.arxiv_api_max_results == ARXIV_API_DEFAULT_MAX_RESULTS
 
 
 # ============================================================================
@@ -1347,6 +1362,28 @@ Second abstract.
         assert len(papers) == 1
         assert papers[0].arxiv_id == "2401.22222"
         assert papers[0].title == "Explicit Higher Version"
+
+    def test_legacy_arxiv_id_is_parsed_and_normalized(self, tmp_path):
+        """Legacy arXiv IDs should be parsed and normalized by stripping version suffix."""
+        content = """\\
+arXiv:hep-th/9901001v2
+Date: Mon, 15 Jan 2024
+Title: Legacy Format Paper
+Authors: Legacy Author
+Categories: hep-th
+\\\\
+Legacy abstract text.
+\\\\
+( https://arxiv.org/abs/hep-th/9901001v2 ,
+------------------------------------------------------------------------------
+"""
+        file_path = tmp_path / "legacy_id.txt"
+        file_path.write_text(content)
+
+        papers = parse_arxiv_file(file_path)
+
+        assert len(papers) == 1
+        assert papers[0].arxiv_id == "hep-th/9901001"
 
 
 # ============================================================================
