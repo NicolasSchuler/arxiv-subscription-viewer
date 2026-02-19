@@ -318,8 +318,8 @@ class AutoTagSuggestModal(ModalScreen[list[str] | None]):
                 id="autotag-input",
             )
             with Horizontal(id="autotag-buttons"):
-                yield Button("Accept [Ctrl+s]", id="accept-btn", variant="success")
-                yield Button("Cancel [Esc]", id="cancel-btn")
+                yield Button("Accept (Ctrl+S)", id="accept-btn", variant="success")
+                yield Button("Cancel (Esc)", id="cancel-btn")
 
     def action_accept(self) -> None:
         text_input = self.query_one("#autotag-input", Input)

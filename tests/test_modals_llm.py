@@ -26,7 +26,9 @@ async def test_summary_mode_modal_compose_in_app(make_paper):
 
         assert modal.query_one("#summary-mode-dialog") is not None
         assert modal.query_one("#summary-mode-title") is not None
-        assert modal.query_one("#summary-mode-footer") is not None
+        footer = modal.query_one("#summary-mode-footer")
+        assert footer is not None
+        assert "Cancel: Esc" in str(footer.content)
 
 
 @pytest.mark.asyncio

@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 from textual.events import Click
-from textual.widgets import Checkbox, Input, Label, ListView, Select
+from textual.widgets import Checkbox, Input, Label, ListView, Select, Static
 
 from arxiv_browser.app import (
     MAX_COLLECTIONS,
@@ -482,6 +482,7 @@ async def test_command_palette_modal_filters_and_executes(make_paper):
             await _open_modal(app, pilot, modal)
             results = modal.query_one("#palette-results")
             assert results.option_count == 3
+            assert "Close: Esc" in str(modal.query_one("#palette-footer", Static).content)
 
             modal._populate_results("watch")
             assert results.option_count >= 1
@@ -491,12 +492,34 @@ async def test_command_palette_modal_filters_and_executes(make_paper):
             assert modal.dismiss.called
 
             modal.dismiss.reset_mock()
+            modal._populate_results("zzzzqzzzz")
+            assert results.option_count == 1
+            assert "No commands match" in str(results.get_option_at_index(0).prompt)
+            modal.key_enter()
+            modal.dismiss.assert_not_called()
+
+            modal.dismiss.reset_mock()
             modal._on_option_selected(SimpleNamespace(option_id="csv"))
             modal.dismiss.assert_called_once_with("csv")
 
             modal.dismiss.reset_mock()
             modal.action_cancel()
             modal.dismiss.assert_called_once_with("")
+
+
+def test_help_screen_default_ctrl_e_copy():
+    from arxiv_browser.modals.common import HelpScreen
+
+    entries = {(key, desc) for _, pairs in HelpScreen._DEFAULT_SECTIONS for key, desc in pairs}
+    assert ("Ctrl+e", "Toggle S2 (browse) / Exit API (API mode)") in entries
+    assert ("Esc", "Clear search / exit API") in entries
+
+
+def test_help_screen_default_footer_copy():
+    from arxiv_browser.modals.common import HelpScreen
+
+    modal = HelpScreen()
+    assert modal._footer_note == "Close: ? / Esc / q"
 
 
 @pytest.mark.asyncio

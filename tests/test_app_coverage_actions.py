@@ -1059,7 +1059,23 @@ class TestDownloadClipboardAndOpenCoverage:
             ok = app._open_with_viewer("broken-viewer {url}", "https://arxiv.org/pdf/1")
 
         assert ok is False
-        assert "Could not open the configured PDF viewer" in app.notify.call_args[0][0]
+        message = app.notify.call_args[0][0]
+        assert "Could not open the configured PDF viewer." in message
+        assert "Why:" in message
+        assert "Next step:" in message
+
+    def test_safe_browser_open_handles_errors(self):
+        app = _new_app()
+        app.notify = MagicMock()
+
+        with patch("arxiv_browser.app.webbrowser.open", side_effect=OSError("no browser")):
+            ok = app._safe_browser_open("https://arxiv.org/abs/2602.12345")
+
+        assert ok is False
+        message = app.notify.call_args[0][0]
+        assert "Could not open your browser." in message
+        assert "Why:" in message
+        assert "Next step:" in message
 
     def test_open_with_viewer_uses_subprocess_args_not_shell(self):
         app = _new_app()

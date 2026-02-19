@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 from platformdirs import user_config_dir
 
+from arxiv_browser.action_messages import build_actionable_error
 from arxiv_browser.config import CONFIG_APP_NAME, _coerce_arxiv_api_max_results, load_config
 from arxiv_browser.models import ARXIV_API_MAX_RESULTS_LIMIT, Paper, UserConfig
 from arxiv_browser.parsing import (
@@ -242,14 +243,17 @@ def _resolve_legacy_fallback(base_dir: Path) -> list[Paper] | int:
     """Find and parse arxiv.txt in the current directory. Returns papers or exit code."""
     arxiv_file = base_dir / "arxiv.txt"
     if not arxiv_file.exists():
-        print("Error: No papers found. Either:", file=sys.stderr)
-        print("  - Create history/YYYY-MM-DD.txt files, or", file=sys.stderr)
-        print("  - Create arxiv.txt in the current directory, or", file=sys.stderr)
         print(
-            "  - Use --api-query/--api-category to fetch directly from arXiv API, or",
+            build_actionable_error(
+                "find startup papers",
+                why="no history files or arxiv.txt were found in the current directory",
+                next_step=(
+                    "create history/YYYY-MM-DD.txt, create arxiv.txt, "
+                    "or use --api-query/--api-category"
+                ),
+            ),
             file=sys.stderr,
         )
-        print("  - Use -i to specify an input file", file=sys.stderr)
         return 1
     if not os.access(arxiv_file, os.R_OK):
         print(f"Error: {arxiv_file} is not readable (permission denied)", file=sys.stderr)
@@ -473,7 +477,14 @@ def main(
     # Handle --list-dates
     if args.list_dates:
         if not history_files:
-            print("No history files found in history/", file=sys.stderr)
+            print(
+                build_actionable_error(
+                    "list history dates",
+                    why="no history files were found in history/",
+                    next_step="add history/YYYY-MM-DD.txt files or run --api-category cs.AI",
+                ),
+                file=sys.stderr,
+            )
             return 1
         print("Available dates:")
         for d, path in history_files:
@@ -487,7 +498,14 @@ def main(
     papers, history_files, current_date_index = result
 
     if not papers:
-        print("No papers found in the file", file=sys.stderr)
+        print(
+            build_actionable_error(
+                "start arxiv-viewer",
+                why="the selected source contained no papers",
+                next_step="choose another input/date or run --api-category cs.AI",
+            ),
+            file=sys.stderr,
+        )
         return 1
 
     if not validate_interactive_tty_fn():

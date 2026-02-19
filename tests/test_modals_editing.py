@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from textual.widgets import Button
 
 from arxiv_browser.app import ArxivBrowser, AutoTagSuggestModal, NotesModal, TagsModal
 
@@ -106,6 +107,8 @@ async def test_autotag_modal_compose_accept_cancel_and_handlers(make_paper):
         assert modal.query_one("#autotag-title") is not None
         input_widget = modal.query_one("#autotag-input")
         assert input_widget.value == "status:todo, topic:ml, method:transformer"
+        assert str(modal.query_one("#accept-btn", Button).label) == "Accept (Ctrl+S)"
+        assert str(modal.query_one("#cancel-btn", Button).label) == "Cancel (Esc)"
 
     modal.dismiss = MagicMock()
     modal.query_one = MagicMock(return_value=SimpleNamespace(value=" Topic:ML,  method:RAG "))

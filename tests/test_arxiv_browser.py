@@ -1627,12 +1627,22 @@ class TestStatusFilterRegressions:
         app = ArxivBrowser.__new__(ArxivBrowser)
         sections = app._build_help_sections()
         entries = {(key, desc) for _, pairs in sections for key, desc in pairs}
+        assert ("Ctrl+e", "Toggle S2 (browse) / Exit API (API mode)") in entries
         assert ("[", "Older") in entries
         assert ("]", "Newer") in entries
         assert ("Ctrl+p", "Command palette") in entries
         assert ("Ctrl+k", "Collections") in entries
         assert ("C", "Chat") in entries
         assert ("Ctrl+g", "Auto-Tag") in entries
+
+    def test_command_palette_ctrl_e_entry_is_contextual(self):
+        """Command palette Ctrl+e entry should mirror context-dependent behavior."""
+        from arxiv_browser.app import COMMAND_PALETTE_COMMANDS
+
+        entry = next(cmd for cmd in COMMAND_PALETTE_COMMANDS if cmd[2] == "Ctrl+e")
+        assert entry[0] == "Toggle S2 / Exit API"
+        assert "browse mode" in entry[1]
+        assert entry[3] == "ctrl_e_dispatch"
 
     def test_help_sections_include_getting_started_shortcuts(self):
         """Help content should lead with a concise getting-started flow."""
@@ -1675,7 +1685,54 @@ class TestStatusFilterRegressions:
         )
         assert " | " in status
         assert "api p2" in status
+        assert "preview" not in status.lower()
+        assert "updated" not in status.lower()
         assert len(status) <= 83  # allow tiny ellipsis overhead
+
+    def test_empty_state_messages_include_try_guidance(self):
+        from arxiv_browser.app import build_list_empty_message
+
+        query_msg = build_list_empty_message(
+            query="transformer",
+            in_arxiv_api_mode=False,
+            watch_filter_active=False,
+            history_mode=False,
+        )
+        api_msg = build_list_empty_message(
+            query="",
+            in_arxiv_api_mode=True,
+            watch_filter_active=False,
+            history_mode=False,
+        )
+        watch_msg = build_list_empty_message(
+            query="",
+            in_arxiv_api_mode=False,
+            watch_filter_active=True,
+            history_mode=False,
+        )
+        history_msg = build_list_empty_message(
+            query="",
+            in_arxiv_api_mode=False,
+            watch_filter_active=False,
+            history_mode=True,
+        )
+
+        assert "Try:" in query_msg
+        assert "Try:" in api_msg
+        assert "Try:" in watch_msg
+        assert "Try:" in history_msg
+
+    def test_actionable_error_template(self):
+        from arxiv_browser.action_messages import build_actionable_error
+
+        message = build_actionable_error(
+            "run arXiv API search",
+            why="rate limit reached (HTTP 429)",
+            next_step="retry in a few seconds",
+        )
+        assert "Could not run arXiv API search." in message
+        assert "Why: rate limit reached (HTTP 429)." in message
+        assert "Next step: retry in a few seconds." in message
 
 
 # ============================================================================
@@ -2457,7 +2514,8 @@ class TestMainCLI:
         result = main()
         captured = capsys.readouterr()
         assert result == 1
-        assert "No history files" in captured.err
+        assert "Could not list history dates." in captured.err
+        assert "Next step:" in captured.err
 
     def test_input_file_not_found(self, tmp_path, monkeypatch, capsys):
         """-i nonexistent.txt should return 1."""
@@ -2515,7 +2573,7 @@ class TestMainCLI:
         assert "Failed to read" in captured.err
 
     def test_no_papers_exits_with_error(self, tmp_path, monkeypatch, capsys):
-        """Empty file should return 1 with 'No papers'."""
+        """Empty file should return 1 with actionable guidance."""
         from arxiv_browser.app import main
 
         empty_file = tmp_path / "empty.txt"
@@ -2527,7 +2585,8 @@ class TestMainCLI:
         result = main()
         captured = capsys.readouterr()
         assert result == 1
-        assert "No papers" in captured.err
+        assert "Could not start arxiv-viewer." in captured.err
+        assert "Next step:" in captured.err
 
     def test_invalid_date_format(self, monkeypatch, capsys):
         """--date Jan-15-2024 should return 1 with 'Invalid date'."""
@@ -3464,7 +3523,10 @@ class TestArxivApiErrorHandling:
         assert app._arxiv_api_loading is False
         app._apply_arxiv_search_results.assert_not_called()
         app.notify.assert_called_once()
-        assert "Search failed" in app.notify.call_args.args[0]
+        message = app.notify.call_args.args[0]
+        assert "Could not run arXiv API search." in message
+        assert "Why:" in message
+        assert "Next step:" in message
 
 
 # ============================================================================
@@ -10661,6 +10723,13 @@ class TestExportMenuModal:
 
         assert len(set(values)) == 9
 
+    def test_compose_footer_uses_cancel_esc_copy(self):
+        import inspect
+
+        from arxiv_browser.modals import ExportMenuModal
+
+        assert "Cancel: Esc" in inspect.getsource(ExportMenuModal.compose)
+
 
 # ============================================================================
 # Tests for SummaryModeModal dismiss values
@@ -10974,6 +11043,13 @@ class TestSectionToggleModal:
         binding_keys = {b.key for b in SectionToggleModal.BINDINGS}
         expected = {"escape", "enter", "a", "b", "t", "r", "s", "e", "h", "v"}
         assert expected <= binding_keys
+
+    def test_compose_footer_uses_cancel_esc_copy(self):
+        import inspect
+
+        from arxiv_browser.modals import SectionToggleModal
+
+        assert "Cancel: Esc" in inspect.getsource(SectionToggleModal.compose)
 
 
 # ============================================================================
@@ -11932,6 +12008,7 @@ class TestFooterDiscoverability:
         bindings = app._get_footer_bindings()
         keys = [k for k, _ in bindings]
         assert "V" in keys
+        assert "t" not in keys
 
     def test_footer_shows_relevance_hint_when_llm(self):
         from arxiv_browser.app import UserConfig
@@ -11941,6 +12018,7 @@ class TestFooterDiscoverability:
         bindings = app._get_footer_bindings()
         keys = [k for k, _ in bindings]
         assert "L" in keys
+        assert "t" not in keys
 
     def test_footer_hides_features_when_inactive(self):
         from arxiv_browser.app import UserConfig
@@ -11951,6 +12029,7 @@ class TestFooterDiscoverability:
         keys = [k for k, _ in bindings]
         assert "V" not in keys
         assert "L" not in keys
+        assert "t" in keys
 
     def test_footer_shows_export_hint(self):
         from arxiv_browser.app import UserConfig
@@ -11961,6 +12040,17 @@ class TestFooterDiscoverability:
         keys = [k for k, _ in bindings]
         assert "E" in keys
 
+    def test_footer_is_capped_and_keeps_help_palette(self):
+        from arxiv_browser.app import UserConfig
+
+        config = UserConfig(llm_preset="claude")
+        app = self._make_footer_app(config)
+        bindings = app._get_footer_bindings()
+        keys = [k for k, _ in bindings]
+        assert len(bindings) <= 10
+        assert "Ctrl+p" in keys
+        assert "?" in keys
+
     def test_footer_keeps_core_actions_when_s2_active(self):
         from arxiv_browser.app import UserConfig
 
@@ -11969,10 +12059,7 @@ class TestFooterDiscoverability:
         app._s2_active = True
         bindings = app._get_footer_bindings()
         keys = [k for k, _ in bindings]
-        assert "r" in keys
-        assert "x" in keys
-        assert "n" in keys
-        assert "t" in keys
+        assert keys == ["/", "o", "s", "r", "x", "n", "e", "E", "Ctrl+p", "?"]
 
     def test_footer_uses_palette_and_history_labels(self):
         from datetime import date as dt_date
@@ -11987,16 +12074,21 @@ class TestFooterDiscoverability:
             (dt_date(2026, 1, 1), Path("history/2026-01-01.txt")),
         ]
         bindings = app._get_footer_bindings()
+        assert len(bindings) == 10
         assert ("Ctrl+p", "palette") in bindings
         assert ("[/]", "history") in bindings
+        assert ("n", "notes") not in bindings
 
     def test_search_and_api_footer_copy(self):
         from arxiv_browser.app import FOOTER_CONTEXTS
 
         assert ("type to search", "") in FOOTER_CONTEXTS["search"]
-        assert ("Esc", "cancel") in FOOTER_CONTEXTS["search"]
+        assert ("Enter", "apply") in FOOTER_CONTEXTS["search"]
+        assert ("Esc", "clear") in FOOTER_CONTEXTS["search"]
         assert ("↑↓", "move") in FOOTER_CONTEXTS["search"]
         assert ("[/]", "page") in FOOTER_CONTEXTS["api"]
+        assert ("Ctrl+e", "exit") in FOOTER_CONTEXTS["api"]
+        assert ("A", "new query") in FOOTER_CONTEXTS["api"]
 
 
 # ============================================================================

@@ -22,8 +22,9 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 - Use `Selection` for multi-paper operations.
 - Use `Command palette` for `Ctrl+p`.
 - Use `Help overlay` for `?`.
-- Use `Semantic Scholar` in help text, `S2` in compact status/footer hints.
+- Use `Semantic Scholar` in help text and `S2` in compact status/footer hints.
 - Use `History` for date navigation context.
+- Canonical `Ctrl+e` wording: `Toggle S2 (browse) / Exit API (API mode)`.
 
 ## 4. Layout Hierarchy Rules
 
@@ -35,7 +36,20 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 - Prefer compact status tokens and shorter labels before removing high-value hints.
 - Keep `? help` visible in all contexts.
 
-## 5. Color And Icon Accessibility Rules
+## 5. Footer Hierarchy Rules
+
+- Default browse footer is capped at 10 hints.
+- Always include these core hints in order:
+- `/ search`, `o open`, `s sort`, `r read`, `x star`, `E export`, `Ctrl+p palette`, `? help`.
+- Add exactly two context slots in order:
+- Slot A: `[/] history` if history navigation is available, else `n notes`.
+- Slot B: `e S2` if S2 is active, else `V versions` if starred papers exist, else `L relevance` if LLM is configured, else `t tags`.
+- Search footer should emphasize immediate flow:
+- `type to search`, `Enter apply`, `Esc clear`, `↑↓ move`, `? help`.
+- API footer should emphasize mode exits and paging:
+- `[/] page`, `Ctrl+e exit`, `A new query`, `o open`, `? help`.
+
+## 6. Color And Icon Accessibility Rules
 
 - Never rely on color alone for meaning; pair with text or symbol.
 - Ensure all key states remain readable with `--color never`.
@@ -44,11 +58,11 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 - Accent for interactive controls and key hints.
 - Green/yellow/orange/pink for status meaning, not decoration.
 
-## 6. Message Templates
+## 7. Message Templates
 
 - Error template:
 - `Could not <action>.`
-- `Why: <short reason if known>.`
+- Optional: `Why: <short reason if known>.`
 - `Next step: <specific recovery action>.`
 - Success template:
 - `<Action complete>.`
@@ -59,38 +73,45 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 - `No <entity> found.`
 - `Try: <next command or filter adjustment>.`
 
-## 7. Tables, Lists, Truncation, Wrapping
+## 8. Tables, Lists, Truncation, Wrapping
 
 - Keep list rows stable: title, authors, metadata badges, optional abstract preview.
 - Favor truncation with ellipsis over hard wrapping for dense list rows.
 - Preserve key metadata visibility under width pressure:
 - arXiv ID, category, and high-value badges (for example relevance/version).
-- In compact status mode, drop lowest-priority tokens first and keep core context.
+- In compact status mode, keep only immediate context:
+- primary count/query, selection count, sort, API page/loading, S2, HF.
+- Omit lower-priority compact tokens such as preview/version details.
 
-## 8. Help And Footer Discoverability
+## 9. Help And Discoverability
 
 - Help overlay must include a top `Getting Started` section with the core flow:
 - Search, move, select, open, command palette, full help.
-- Footer should prioritize immediate next actions for current mode.
+- Footer should prioritize immediate next actions for the current mode.
+- Modals should use consistent close/cancel hints:
+- `Close: Esc` for read-only views and `Cancel: Esc` for edit/confirm flows.
 - Use consistent labels across footer/help/notifications:
 - `palette`, `history`, `help`, `search`, `open`, `export`.
 - Keep close instructions concise in modals (for example `Close: ? / Esc / q`).
+- Command palette must provide a clear empty-state message with next-step guidance.
 
-## 9. PR Checklist
+## 10. PR Checklist
 
 - [ ] New or changed UI copy uses the terminology canon.
-- [ ] At least one explicit next-step hint exists in each interaction context.
+- [ ] `Ctrl+e` copy uses canonical browse/API wording.
+- [ ] Footer preserves the capped hierarchy and context-slot policy.
+- [ ] `Ctrl+p palette` and `? help` remain visible in browse contexts.
+- [ ] Every empty state includes a concrete `Try:` next step.
 - [ ] Error text includes actionable recovery guidance.
-- [ ] Footer hints remain short and consistent with help overlay wording.
 - [ ] Non-color/ASCII compatibility remains intact.
-- [ ] Tests cover changed help/footer strings.
+- [ ] Tests cover changed help/footer/status/empty/error strings.
 - [ ] No keybinding behavior changed unless explicitly intended.
 
-## 10. UI Direction Options
+## 11. UI Direction Options
 
-### Minimalist Direction
+### Minimalist Direction (default)
 
-- Keep status/footer ultra-compact.
+- Keep status/footer compact.
 - Emphasize list/detail reading flow.
 - Show only core actions by default; keep advanced actions in palette/help.
 - Tradeoff: Lowest cognitive load, but advanced capabilities are less visible.

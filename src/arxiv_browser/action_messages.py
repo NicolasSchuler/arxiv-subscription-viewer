@@ -3,6 +3,30 @@
 from __future__ import annotations
 
 
+def _ensure_sentence(text: str) -> str:
+    """Return text with terminal sentence punctuation."""
+    cleaned = text.strip()
+    if not cleaned:
+        return ""
+    if cleaned.endswith((".", "!", "?")):
+        return cleaned
+    return f"{cleaned}."
+
+
+def build_actionable_error(
+    action: str,
+    *,
+    next_step: str,
+    why: str | None = None,
+) -> str:
+    """Build a 2-3 line actionable error message."""
+    lines = [f"Could not {action.strip()}."]
+    if why:
+        lines.append(f"Why: {_ensure_sentence(why)}")
+    lines.append(f"Next step: {_ensure_sentence(next_step)}")
+    return "\n".join(lines)
+
+
 def requires_batch_confirmation(item_count: int, threshold: int) -> bool:
     """Return whether an action should use a confirmation modal."""
     return item_count > threshold
@@ -51,6 +75,7 @@ def build_download_start_notification(item_count: int) -> str:
 
 
 __all__ = [
+    "build_actionable_error",
     "build_download_pdfs_confirmation_prompt",
     "build_download_start_notification",
     "build_open_papers_confirmation_prompt",

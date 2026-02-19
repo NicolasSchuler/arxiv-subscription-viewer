@@ -77,7 +77,7 @@ class SummaryModeModal(ModalScreen[str]):
                 f"  [{g}]c[/]  Compare  [dim]— Comparison with related work[/]",
                 classes="summary-mode-keys",
             )
-            yield Static("[dim]Esc to cancel[/dim]", id="summary-mode-footer")
+            yield Static("[dim]Cancel: Esc[/dim]", id="summary-mode-footer")
 
     def action_cancel(self) -> None:
         self.dismiss("")

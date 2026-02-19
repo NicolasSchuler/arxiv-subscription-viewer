@@ -10,7 +10,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, OptionList, Select
+from textual.widgets import Button, Input, Label, OptionList, Select, Static
 from textual.widgets.option_list import Option
 
 from arxiv_browser.models import ArxivSearchRequest
@@ -194,6 +194,11 @@ class CommandPaletteModal(ModalScreen[str]):
     CommandPaletteModal #palette-results {
         height: 1fr;
     }
+
+    CommandPaletteModal #palette-footer {
+        color: $th-muted;
+        margin-top: 1;
+    }
     """
 
     def __init__(self, commands: list[tuple[str, str, str, str]]) -> None:
@@ -203,9 +208,10 @@ class CommandPaletteModal(ModalScreen[str]):
 
     def compose(self) -> ComposeResult:
         with Vertical():
-            yield Label(f"[bold {THEME_COLORS['accent']}]Command Palette[/]")
+            yield Label(f"[bold {THEME_COLORS['accent']}]Command palette[/]")
             yield Input(placeholder="Type to search commands...", id="palette-search")
             yield OptionList(id="palette-results")
+            yield Static("Close: Esc", id="palette-footer")
 
     def on_mount(self) -> None:
         self._populate_results("")
@@ -235,6 +241,26 @@ class CommandPaletteModal(ModalScreen[str]):
             self._filtered = [cmd for _, cmd in scored]
         else:
             self._filtered = list(self._commands)
+
+        if not self._filtered:
+            if query:
+                safe_query = escape_rich_text(query)
+                option_list.add_option(
+                    Option(
+                        "[dim]No commands match "
+                        f'[bold]"{safe_query}"[/bold].[/]\n'
+                        "[dim]Try a shorter term or press [bold]Esc[/bold] to close.[/]",
+                        disabled=True,
+                    )
+                )
+            else:
+                option_list.add_option(
+                    Option(
+                        "[dim]No commands available.[/]\n[dim]Press [bold]Esc[/bold] to close.[/]",
+                        disabled=True,
+                    )
+                )
+            return
 
         accent = THEME_COLORS["accent"]
         muted = THEME_COLORS["muted"]

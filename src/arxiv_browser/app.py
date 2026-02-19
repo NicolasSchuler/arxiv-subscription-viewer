@@ -32,7 +32,7 @@ Key bindings:
     1-9     - Jump to bookmark
     Ctrl+b  - Add current search as bookmark
     V       - Check starred papers for version updates
-    Ctrl+e  - Toggle S2 / Exit arXiv API mode
+    Ctrl+e  - Toggle S2 (browse) / Exit API (API mode)
     e       - Fetch Semantic Scholar data
     [       - Previous date (history) / previous API page (API mode)
     ]       - Next date (history) / next API page (API mode)
@@ -85,6 +85,7 @@ from textual.widgets.option_list import Option, OptionDoesNotExist
 
 from arxiv_browser import widgets as _widgets
 from arxiv_browser.action_messages import (
+    build_actionable_error,
     build_download_pdfs_confirmation_prompt,
     build_download_start_notification,
     build_open_papers_confirmation_prompt,
@@ -524,7 +525,7 @@ MIN_LIST_WIDTH = 50
 MAX_LIST_WIDTH = 100
 CLIPBOARD_SEPARATOR = "=" * 80
 
-# Context-sensitive footer keybinding hints (max ~8 per context)
+# Context-sensitive footer keybinding hints
 FOOTER_CONTEXTS: dict[str, list[tuple[str, str]]] = {
     "default": [
         ("/", "search"),
@@ -548,15 +549,16 @@ FOOTER_CONTEXTS: dict[str, list[tuple[str, str]]] = {
     ],
     "search": [
         ("type to search", ""),
-        ("Esc", "cancel"),
+        ("Enter", "apply"),
+        ("Esc", "clear"),
         ("↑↓", "move"),
         ("?", "help"),
     ],
     "api": [
         ("[/]", "page"),
-        ("Esc", "exit API"),
+        ("Ctrl+e", "exit"),
+        ("A", "new query"),
         ("o", "open"),
-        ("s", "sort"),
         ("?", "help"),
     ],
 }
@@ -599,7 +601,12 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
     ("Import Metadata", "Import annotations from JSON file", "", "import_metadata"),
     # Enrichment
     ("Fetch S2 Data", "Fetch Semantic Scholar data for current paper", "e", "fetch_s2"),
-    ("Toggle S2", "Enable/disable Semantic Scholar enrichment", "Ctrl+e", "toggle_s2"),
+    (
+        "Toggle S2 / Exit API",
+        "Toggle S2 in browse mode or exit API mode",
+        "Ctrl+e",
+        "ctrl_e_dispatch",
+    ),
     ("Toggle HuggingFace", "Enable/disable HuggingFace trending", "Ctrl+h", "toggle_hf"),
     ("Check Versions", "Check starred papers for arXiv updates", "V", "check_versions"),
     ("Citation Graph", "Explore citation graph (S2-powered)", "G", "citation_graph"),
@@ -702,6 +709,41 @@ async def _fetch_paper_content_async(
     # Fallback to abstract
     abstract = paper.abstract or paper.abstract_raw or ""
     return f"Abstract:\n{abstract}" if abstract else ""
+
+
+def build_list_empty_message(
+    *,
+    query: str,
+    in_arxiv_api_mode: bool,
+    watch_filter_active: bool,
+    history_mode: bool,
+) -> str:
+    """Build actionable empty-state copy for the paper list."""
+    if query:
+        return (
+            "[dim italic]No papers match your search.[/]\n"
+            "[dim]Try: edit the query or press [bold]Esc[/bold] to clear search.[/]"
+        )
+    if in_arxiv_api_mode:
+        return (
+            "[dim italic]No arXiv API results on this page.[/]\n"
+            "[dim]Try: [bold]][/bold] next page, [bold][[/bold] previous page, "
+            "or [bold]A[/bold] new query.[/]"
+        )
+    if watch_filter_active:
+        return (
+            "[dim italic]No watched papers found.[/]\n"
+            "[dim]Try: [bold]w[/bold] show all papers or [bold]W[/bold] manage watch list.[/]"
+        )
+    if history_mode:
+        return (
+            "[dim italic]No papers available.[/]\n"
+            "[dim]Try: [bold]A[/bold] search arXiv or move to another history date.[/]"
+        )
+    return (
+        "[dim italic]No papers available.[/]\n"
+        "[dim]Try: [bold]A[/bold] search arXiv or load a history/input file.[/]"
+    )
 
 
 class ArxivBrowser(App):
@@ -828,7 +870,12 @@ class ArxivBrowser(App):
         Binding("q", "quit", "Quit", show=False),
         Binding("slash", "toggle_search", "Search", show=False),
         Binding("A", "arxiv_search", "arXiv Search", show=False),
-        Binding("ctrl+e", "ctrl_e_dispatch", "S2 / Exit API", show=False),
+        Binding(
+            "ctrl+e",
+            "ctrl_e_dispatch",
+            "Toggle S2 (browse) / Exit API (API mode)",
+            show=False,
+        ),
         Binding("escape", "cancel_search", "Cancel", show=False),
         Binding("o", "open_url", "Open Selected", show=False),
         Binding("P", "open_pdf", "Open PDF", show=False),
@@ -2214,26 +2261,32 @@ class ArxivBrowser(App):
         except httpx.HTTPStatusError as exc:
             status_code = exc.response.status_code
             if status_code == 429:
-                message = (
-                    "arXiv API rate limit reached (HTTP 429).\n"
-                    "Next step: wait a few seconds and retry with A."
+                message = build_actionable_error(
+                    "run arXiv API search",
+                    why="arXiv API rate limit reached (HTTP 429)",
+                    next_step="wait a few seconds and retry with A",
                 )
             elif status_code >= 500:
-                message = (
-                    f"arXiv API is unavailable right now (HTTP {status_code}).\n"
-                    "Next step: retry in a minute."
+                message = build_actionable_error(
+                    "run arXiv API search",
+                    why=f"arXiv API is unavailable right now (HTTP {status_code})",
+                    next_step="retry in a minute",
                 )
             else:
-                message = (
-                    f"arXiv API rejected the request (HTTP {status_code}).\n"
-                    "Next step: refine the query and retry with A."
+                message = build_actionable_error(
+                    "run arXiv API search",
+                    why=f"arXiv API rejected the request (HTTP {status_code})",
+                    next_step="refine the query and retry with A",
                 )
             self.notify(message, title="arXiv Search", severity="error", timeout=8)
             return
         except (httpx.HTTPError, OSError) as exc:
             self.notify(
-                "Search failed due to a network or I/O error.\n"
-                "Next step: check connectivity and retry with A.",
+                build_actionable_error(
+                    "run arXiv API search",
+                    why="a network or I/O error occurred",
+                    next_step="check connectivity and retry with A",
+                ),
                 title="arXiv Search",
                 severity="error",
                 timeout=8,
@@ -2545,15 +2598,12 @@ class ArxivBrowser(App):
             option_list.add_options(options)
             option_list.highlighted = 0
         else:
-            query = self._get_active_query()
-            if query:
-                empty_msg = "[dim italic]No papers match your search.[/]\n[dim]Try a different query or press [bold]Escape[/bold] to clear.[/]"
-            elif self._in_arxiv_api_mode:
-                empty_msg = "[dim italic]No arXiv API results on this page.[/]\n[dim]Try [bold]][/bold] for next page or [bold]A[/bold] for a new query.[/]"
-            elif self._watch_filter_active:
-                empty_msg = "[dim italic]No watched papers found.[/]\n[dim]Press [bold]w[/bold] to show all papers or [bold]W[/bold] to manage watch list.[/]"
-            else:
-                empty_msg = "[dim italic]No papers available.[/]"
+            empty_msg = build_list_empty_message(
+                query=self._get_active_query(),
+                in_arxiv_api_mode=self._in_arxiv_api_mode,
+                watch_filter_active=self._watch_filter_active,
+                history_mode=self._is_history_mode(),
+            )
             option_list.add_option(Option(empty_msg, disabled=True))
             try:
                 details = self._get_paper_details_widget()
@@ -3635,7 +3685,6 @@ class ArxivBrowser(App):
         self.push_screen(
             HelpScreen(
                 sections=self._build_help_sections(),
-                footer_note="Close: ? / Esc / q",
             )
         )
 
@@ -4771,7 +4820,11 @@ class ArxivBrowser(App):
         except (webbrowser.Error, OSError) as e:
             logger.warning("Failed to open browser for %s: %s", url, e)
             self.notify(
-                "Could not open your browser.\nNext step: copy the URL with c or export it with E.",
+                build_actionable_error(
+                    "open your browser",
+                    why="the system browser command failed",
+                    next_step="copy the URL with c or export it with E",
+                ),
                 title="Browser",
                 severity="error",
                 timeout=8,
@@ -4846,8 +4899,11 @@ class ArxivBrowser(App):
         except Exception as e:
             logger.warning("Failed to open with viewer %r: %s", viewer_cmd, e)
             self.notify(
-                "Could not open the configured PDF viewer.\n"
-                "Next step: check pdf_viewer in config.json or use P to open in browser.",
+                build_actionable_error(
+                    "open the configured PDF viewer",
+                    why="the viewer command failed to launch",
+                    next_step="check pdf_viewer in config.json or use P to open in browser",
+                ),
                 title="PDF",
                 severity="error",
                 timeout=8,

@@ -100,7 +100,7 @@ HELP_GETTING_STARTED: list[tuple[str, str]] = [
 ]
 
 HELP_DESCRIPTION_OVERRIDES: dict[str, str] = {
-    "ctrl_e_dispatch": "Semantic Scholar / Exit API",
+    "ctrl_e_dispatch": "Toggle S2 (browse) / Exit API (API mode)",
     "command_palette": "Command palette",
     "show_help": "Help overlay",
     "open_url": "Open in browser",

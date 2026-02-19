@@ -53,9 +53,9 @@ class HelpScreen(ModalScreen[None]):
             "Search & Filter",
             [
                 ("/", "Toggle search"),
-                ("Escape", "Clear search / exit API"),
+                ("Esc", "Clear search / exit API"),
                 ("A", "Search all arXiv (API mode)"),
-                ("Ctrl+e", "Exit API mode / toggle S2"),
+                ("Ctrl+e", "Toggle S2 (browse) / Exit API (API mode)"),
                 ("w", "Toggle watch list filter"),
                 ("Ctrl+b", "Save search as bookmark"),
             ],
@@ -135,7 +135,7 @@ class HelpScreen(ModalScreen[None]):
     def __init__(
         self,
         sections: list[tuple[str, list[tuple[str, str]]]] | None = None,
-        footer_note: str = "Press ? / Escape / q to close",
+        footer_note: str = "Close: ? / Esc / q",
     ) -> None:
         super().__init__()
         self._sections = sections or list(self._DEFAULT_SECTIONS)
@@ -316,7 +316,7 @@ class ExportMenuModal(ModalScreen[str]):
                 f"  [{g}]B[/]  BibTeX (.bib)  [{g}]R[/]  RIS (.ris)\n  [{g}]C[/]  CSV (.csv)",
                 classes="export-keys",
             )
-            yield Static("[dim]Esc to cancel[/dim]", id="export-footer")
+            yield Static("[dim]Cancel: Esc[/dim]", id="export-footer")
 
     def action_cancel(self) -> None:
         self.dismiss("")
@@ -646,7 +646,7 @@ class SectionToggleModal(ModalScreen[list[str] | None]):
                 self._render_list(), id="section-toggle-list", classes="section-toggle-list"
             )
             yield Static(
-                "[dim]Press key to toggle \u00b7 Enter to save \u00b7 Esc to cancel[/]",
+                "[dim]Toggle: key \u00b7 Save: Enter \u00b7 Cancel: Esc[/]",
                 id="section-toggle-footer",
             )
 

@@ -36,26 +36,29 @@ def build_browse_footer_bindings(
     llm_configured: bool,
     has_history_navigation: bool,
 ) -> list[tuple[str, str]]:
-    """Build default browsing footer bindings with stable core actions."""
-    bindings: list[tuple[str, str]] = [
+    """Build a capped default browsing footer with deterministic priority."""
+    slot_a = ("[/]", "history") if has_history_navigation else ("n", "notes")
+    if s2_active:
+        slot_b = ("e", "S2")
+    elif has_starred:
+        slot_b = ("V", "versions")
+    elif llm_configured:
+        slot_b = ("L", "relevance")
+    else:
+        slot_b = ("t", "tags")
+
+    return [
         ("/", "search"),
         ("o", "open"),
         ("s", "sort"),
         ("r", "read"),
         ("x", "star"),
-        ("n", "notes"),
-        ("t", "tags"),
+        slot_a,
+        slot_b,
+        ("E", "export"),
+        ("Ctrl+p", "palette"),
+        ("?", "help"),
     ]
-    if s2_active:
-        bindings.extend([("e", "S2"), ("G", "graph")])
-    if has_starred:
-        bindings.append(("V", "versions"))
-    if llm_configured:
-        bindings.append(("L", "relevance"))
-    if has_history_navigation:
-        bindings.append(("[/]", "history"))
-    bindings.extend([("E", "export"), ("Ctrl+p", "palette"), ("?", "help")])
-    return bindings
 
 
 def build_footer_mode_badge(
@@ -259,13 +262,9 @@ def _build_compact_status_parts(
         if hf_segment:
             parts.append(hf_segment)
 
-    if show_abstract_preview and max_width >= 95:
-        parts.append("preview")
-
-    if version_checking:
-        parts.append("checking versions")
-    elif version_update_count > 0:
-        parts.append(f"{version_update_count} updated")
+    # Keep compact mode focused on immediate context. Preview/version details
+    # stay in full-width mode to reduce narrow-screen cognitive load.
+    _ = (show_abstract_preview, version_checking, version_update_count)
     return parts
 
 
