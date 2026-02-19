@@ -55,6 +55,7 @@ import asyncio
 import hashlib
 import logging
 import platform
+import sqlite3
 import subprocess
 import sys
 import time
@@ -1077,6 +1078,14 @@ class ArxivBrowser(App):
         # Create shared HTTP client for connection pooling
         self._http_client = httpx.AsyncClient()
 
+        # Warn if config was corrupt and defaults were used
+        if self._config.config_defaulted:
+            self.notify(
+                "Config file was corrupt and has been backed up. Using defaults.",
+                severity="warning",
+                timeout=8,
+            )
+
         # Initialize S2 runtime state from config
         self._s2_active = self._config.s2_enabled
 
@@ -1447,6 +1456,16 @@ class ArxivBrowser(App):
         # Update list option if showing preview
         if self._show_abstract_preview:
             self._update_option_for_paper(arxiv_id)
+
+    def _save_config_or_warn(self, context: str) -> bool:
+        """Save config and notify the user on failure.
+
+        Returns True on success, False on failure.
+        """
+        if not save_config(self._config):
+            self.notify(f"Failed to save {context}.", severity="warning")
+            return False
+        return True
 
     def _save_session_state(self) -> None:
         """Save current session state to config.
@@ -1980,7 +1999,7 @@ class ArxivBrowser(App):
                     response.raise_for_status()
                     batch_map = parse_arxiv_version_map(response.text)
                     version_map.update(batch_map)
-                except Exception:
+                except (httpx.HTTPError, ValueError, OSError):
                     logger.warning(
                         "Version check batch failed (IDs %d-%d)",
                         i,
@@ -1996,7 +2015,7 @@ class ArxivBrowser(App):
             )
 
             # Persist updated metadata
-            save_config(self._config)
+            self._save_config_or_warn("version tracking data")
 
             # Refresh UI
             self._mark_badges_dirty("version")
@@ -2219,7 +2238,7 @@ class ArxivBrowser(App):
                 severity="error",
                 timeout=8,
             )
-            logger.debug("arXiv search failed: %s", exc, exc_info=True)
+            logger.warning("arXiv search failed: %s", exc, exc_info=True)
             return
         finally:
             if request_token == self._arxiv_api_request_token:
@@ -3430,7 +3449,10 @@ class ArxivBrowser(App):
             return []
         recs = await fetch_s2_recommendations(arxiv_id, client, api_key=self._config.s2_api_key)
         if recs:
-            await asyncio.to_thread(save_s2_recommendations, self._s2_db_path, arxiv_id, recs)
+            try:
+                await asyncio.to_thread(save_s2_recommendations, self._s2_db_path, arxiv_id, recs)
+            except (OSError, sqlite3.Error):
+                logger.warning("Failed to cache S2 recommendations for %s", arxiv_id, exc_info=True)
         return recs
 
     @staticmethod
@@ -3590,7 +3612,7 @@ class ArxivBrowser(App):
         self._refresh_list_view()
         self._refresh_detail_pane()
         self._update_status_bar()
-        save_config(self._config)
+        self._save_config_or_warn("theme preference")
         self.notify(f"Theme: {THEME_NAMES[next_idx]}", title="Theme")
 
     def action_toggle_sections(self) -> None:
@@ -3599,7 +3621,7 @@ class ArxivBrowser(App):
         def _on_result(result: list[str] | None) -> None:
             if result is not None:
                 self._config.collapsed_sections = result
-                save_config(self._config)
+                self._save_config_or_warn("section toggle")
                 self._refresh_detail_pane()
 
         self.push_screen(SectionToggleModal(self._config.collapsed_sections), _on_result)
@@ -3649,7 +3671,7 @@ class ArxivBrowser(App):
             if result != "save":
                 return
             self._config.collections = modal.collections
-            save_config(self._config)
+            self._save_config_or_warn("collections")
             count = len(self._config.collections)
             self.notify(
                 f"Saved {count} collection{'s' if count != 1 else ''}",
@@ -3684,7 +3706,7 @@ class ArxivBrowser(App):
                             col.paper_ids.append(pid)
                             existing.add(pid)
                             added += 1
-                    save_config(self._config)
+                    self._save_config_or_warn("collection update")
                     self.notify(
                         f"Added {added} paper{'s' if added != 1 else ''} to '{name}'",
                         title="Collections",
@@ -3928,7 +3950,9 @@ class ArxivBrowser(App):
         arxiv_id = paper.arxiv_id
         generated_summary = False
         try:
-            assert self._llm_provider is not None
+            if self._llm_provider is None:
+                logger.warning("LLM provider unexpectedly None in _generate_summary_async")
+                return
             if use_full_paper_content:
                 self.notify("Fetching paper content...", title="AI Summary")
 
@@ -3999,8 +4023,10 @@ class ArxivBrowser(App):
         if not paper:
             self.notify("No paper selected", title="Chat", severity="warning")
             return
+        if self._llm_provider is None:
+            logger.warning("LLM provider unexpectedly None in _start_chat_with_paper")
+            return
         self.notify("Fetching paper content...", title="Chat")
-        assert self._llm_provider is not None  # ensured by _require_llm_command
         self._track_task(self._open_chat_screen(paper, self._llm_provider))
 
     async def _open_chat_screen(self, paper: Paper, provider: CLIProvider) -> None:
@@ -4049,7 +4075,7 @@ class ArxivBrowser(App):
             self.notify("Relevance scoring already in progress", title="Relevance")
             return
         self._config.research_interests = interests
-        save_config(self._config)
+        self._save_config_or_warn("research interests")
         self.notify("Research interests saved", title="Relevance")
         self._start_relevance_scoring(command_template, interests)
 
@@ -4075,7 +4101,7 @@ class ArxivBrowser(App):
         if not interests or interests == self._config.research_interests:
             return
         self._config.research_interests = interests
-        save_config(self._config)
+        self._save_config_or_warn("research interests")
         self._relevance_scores.clear()
         self._mark_badges_dirty("relevance", immediate=True)
         self._refresh_detail_pane()
@@ -4121,7 +4147,9 @@ class ArxivBrowser(App):
             scored = 0
             failed = 0
 
-            assert self._llm_provider is not None
+            if self._llm_provider is None:
+                logger.warning("LLM provider unexpectedly None in _score_relevance_batch")
+                return
             for i, paper in enumerate(uncached):
                 self._scoring_progress = (i + 1, total)
                 self._update_footer()
@@ -4301,7 +4329,7 @@ class ArxivBrowser(App):
                     if tag not in taxonomy:
                         taxonomy.append(tag)
 
-            save_config(self._config)
+            self._save_config_or_warn("auto-tag results")
             self._mark_badges_dirty("tags", immediate=True)
             self._refresh_detail_pane()
 
@@ -4313,7 +4341,7 @@ class ArxivBrowser(App):
         except Exception:
             logger.error("Auto-tag batch failed after tagging %d papers", tagged, exc_info=True)
             if tagged > 0:
-                save_config(self._config)
+                self._save_config_or_warn("partial auto-tag results")
             self.notify(
                 f"Auto-tagging failed ({tagged} tagged before error)"
                 if tagged
@@ -4328,7 +4356,9 @@ class ArxivBrowser(App):
 
     async def _call_auto_tag_llm(self, paper: Paper, taxonomy: list[str]) -> list[str] | None:
         """Call the LLM to get tag suggestions for a paper. Returns tags or None on failure."""
-        assert self._llm_provider is not None
+        if self._llm_provider is None:
+            logger.warning("LLM provider unexpectedly None in _call_auto_tag_llm")
+            return None
 
         try:
             tags = await _suggest_tags_once_service(
@@ -4354,7 +4384,7 @@ class ArxivBrowser(App):
             return
         meta = self._get_or_create_metadata(arxiv_id)
         meta.tags = tags
-        save_config(self._config)
+        self._save_config_or_warn("tag changes")
 
         self._update_option_for_paper(arxiv_id)
         self._refresh_detail_pane()
@@ -4657,7 +4687,7 @@ class ArxivBrowser(App):
         if success:
             logger.debug("Downloaded PDF for %s", paper.arxiv_id)
         else:
-            logger.debug("Download failed for %s", paper.arxiv_id)
+            logger.warning("Download failed for %s", paper.arxiv_id)
         return success
 
     def _start_downloads(self) -> None:
@@ -4738,8 +4768,8 @@ class ArxivBrowser(App):
         try:
             webbrowser.open(url)
             return True
-        except Exception as e:
-            logger.debug("Failed to open browser for %s: %s", url, e)
+        except (webbrowser.Error, OSError) as e:
+            logger.warning("Failed to open browser for %s: %s", url, e)
             self.notify(
                 "Could not open your browser.\nNext step: copy the URL with c or export it with E.",
                 title="Browser",
@@ -4878,13 +4908,13 @@ class ArxivBrowser(App):
         """Copy text to system clipboard. Returns True on success.
 
         Uses platform-specific clipboard tools with timeout protection.
-        Logs failures at debug level for troubleshooting.
+        Logs failures at warning level for troubleshooting.
         """
         try:
             system = platform.system()
             plan = get_clipboard_command_plan(system)
             if plan is None:
-                logger.debug("Clipboard copy failed: unsupported platform %s", system)
+                logger.warning("Clipboard copy failed: unsupported platform %s", system)
                 return False
             commands, encoding = plan
             payload = text.encode(encoding)
@@ -4908,7 +4938,7 @@ class ArxivBrowser(App):
             subprocess.TimeoutExpired,
             OSError,
         ) as e:
-            logger.debug("Clipboard copy failed: %s", e)
+            logger.warning("Clipboard copy failed: %s", e)
             return False
 
     def action_copy_selected(self) -> None:

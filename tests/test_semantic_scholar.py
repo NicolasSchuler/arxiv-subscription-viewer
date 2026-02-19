@@ -1210,3 +1210,19 @@ class TestFetchS2Citations:
         )
         assert entries == []
         assert complete is False
+
+
+class TestInitS2DbOsError:
+    """Fix 3: init_s2_db converts mkdir OSError to sqlite3.OperationalError."""
+
+    def test_init_s2_db_permission_error(self, tmp_path):
+        """PermissionError during mkdir should raise sqlite3.OperationalError."""
+        import sqlite3 as _sqlite3
+        from unittest.mock import patch
+
+        db_path = tmp_path / "sub" / "db.sqlite"
+        with (
+            patch("pathlib.Path.mkdir", side_effect=PermissionError("denied")),
+            pytest.raises(_sqlite3.OperationalError, match="Cannot create DB directory"),
+        ):
+            init_s2_db(db_path)

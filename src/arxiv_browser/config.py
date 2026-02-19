@@ -325,10 +325,22 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
     )
 
 
+def _backup_corrupt_config(config_path: Path) -> None:
+    """Rename a corrupt config file to .corrupt so the next save doesn't overwrite it."""
+    backup_path = config_path.with_suffix(".json.corrupt")
+    try:
+        config_path.rename(backup_path)
+        logger.warning("Backed up corrupt config to %s", backup_path)
+    except OSError:
+        logger.warning("Could not back up corrupt config file", exc_info=True)
+
+
 def load_config() -> UserConfig:
     """Load configuration from disk.
 
     Returns default config if file doesn't exist or is corrupted.
+    When the file is corrupt (invalid JSON or structure), it is backed up
+    to config.json.corrupt before returning defaults.
     Logs specific errors to help diagnose config issues.
     """
     config_path = get_config_path()
@@ -341,10 +353,12 @@ def load_config() -> UserConfig:
         return _dict_to_config(data)
     except json.JSONDecodeError as e:
         logger.warning("Config file has invalid JSON, using defaults: %s", e)
-        return UserConfig()
+        _backup_corrupt_config(config_path)
+        return UserConfig(config_defaulted=True)
     except (KeyError, TypeError) as e:
         logger.warning("Config file has invalid structure, using defaults: %s", e)
-        return UserConfig()
+        _backup_corrupt_config(config_path)
+        return UserConfig(config_defaulted=True)
     except OSError as e:
         logger.warning("Could not read config file, using defaults: %s", e)
         return UserConfig()
@@ -375,7 +389,7 @@ def save_config(config: UserConfig) -> bool:
             os.close(fd)
             closed = True
             os.replace(tmp_path, config_path)
-        except BaseException:
+        except Exception:
             if not closed:
                 os.close(fd)
             try:

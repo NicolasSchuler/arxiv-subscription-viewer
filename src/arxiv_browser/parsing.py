@@ -504,7 +504,8 @@ def count_papers_in_file(path: Path) -> int:
     try:
         content = path.read_text(encoding="utf-8", errors="replace")
         return len(_ARXIV_ID_PATTERN.findall(content))
-    except OSError:
+    except OSError as e:
+        logger.warning("Could not read %s: %s", path, e)
         return 0
 
 

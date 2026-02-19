@@ -13035,6 +13035,129 @@ class TestWcagContrastCompliance:
 
 
 # ============================================================================
+# Tests for critical fixes and error handling hardening
+# ============================================================================
+
+
+class TestAtomicWriteBaseException:
+    """Fix 1: BaseException → Exception in save_config atomic write."""
+
+    def test_keyboard_interrupt_propagates_from_save(self, tmp_path, monkeypatch):
+        """KeyboardInterrupt during os.replace should not be caught."""
+        from unittest.mock import patch
+
+        config_file = tmp_path / "config.json"
+        monkeypatch.setattr("arxiv_browser.config.get_config_path", lambda: config_file)
+
+        with (
+            patch("os.replace", side_effect=KeyboardInterrupt),
+            pytest.raises(KeyboardInterrupt),
+        ):
+            save_config(UserConfig())
+
+
+class TestCountPapersLogging:
+    """Fix 2: count_papers_in_file logs warning on OSError."""
+
+    def test_logs_warning_on_read_error(self, tmp_path, caplog):
+        """OSError during file read should log a warning and return 0."""
+        import logging as _logging
+        from unittest.mock import patch
+
+        from arxiv_browser.parsing import count_papers_in_file
+
+        path = tmp_path / "test.txt"
+        with (
+            patch.object(type(path), "read_text", side_effect=OSError("permission denied")),
+            caplog.at_level(_logging.WARNING, logger="arxiv_browser.parsing"),
+        ):
+            result = count_papers_in_file(path)
+        assert result == 0
+        assert "permission denied" in caplog.text
+
+
+class TestInitDbOsError:
+    """Fix 3: init_*_db guards against OSError from mkdir."""
+
+    def test_init_summary_db_oserror(self, tmp_path):
+        """_init_summary_db should convert mkdir OSError to sqlite3.OperationalError."""
+        import sqlite3
+        from unittest.mock import patch
+
+        from arxiv_browser.llm import _init_summary_db
+
+        db_path = tmp_path / "sub" / "db.sqlite"
+        with (
+            patch("pathlib.Path.mkdir", side_effect=PermissionError("denied")),
+            pytest.raises(sqlite3.OperationalError, match="Cannot create DB directory"),
+        ):
+            _init_summary_db(db_path)
+
+    def test_init_relevance_db_oserror(self, tmp_path):
+        """_init_relevance_db should convert mkdir OSError to sqlite3.OperationalError."""
+        import sqlite3
+        from unittest.mock import patch
+
+        from arxiv_browser.llm import _init_relevance_db
+
+        db_path = tmp_path / "sub" / "db.sqlite"
+        with (
+            patch("pathlib.Path.mkdir", side_effect=PermissionError("denied")),
+            pytest.raises(sqlite3.OperationalError, match="Cannot create DB directory"),
+        ):
+            _init_relevance_db(db_path)
+
+
+class TestCorruptConfigBackup:
+    """Fix 4: load_config backs up corrupt config and sets config_defaulted."""
+
+    def test_corrupt_json_creates_backup(self, tmp_path, monkeypatch):
+        """Corrupt JSON config should be backed up to .corrupt."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text("{invalid json!!!")
+        monkeypatch.setattr("arxiv_browser.config.get_config_path", lambda: config_file)
+
+        result = load_config()
+        assert result.config_defaulted is True
+        assert (tmp_path / "config.json.corrupt").exists()
+        assert not config_file.exists()
+
+    def test_invalid_structure_creates_backup(self, tmp_path, monkeypatch):
+        """Config with invalid structure should be backed up to .corrupt."""
+        from unittest.mock import patch
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text('{"valid": "json"}')
+        monkeypatch.setattr("arxiv_browser.config.get_config_path", lambda: config_file)
+
+        with patch(
+            "arxiv_browser.config._dict_to_config",
+            side_effect=KeyError("missing_field"),
+        ):
+            result = load_config()
+        assert result.config_defaulted is True
+        assert (tmp_path / "config.json.corrupt").exists()
+
+    def test_oserror_does_not_create_backup(self, tmp_path, monkeypatch):
+        """OSError (temp inaccessibility) should NOT create a backup."""
+        from unittest.mock import patch
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text('{"valid": "json"}')
+        monkeypatch.setattr("arxiv_browser.config.get_config_path", lambda: config_file)
+
+        with patch.object(type(config_file), "read_text", side_effect=OSError("temporary")):
+            result = load_config()
+        assert result.config_defaulted is False
+        assert not (tmp_path / "config.json.corrupt").exists()
+
+    def test_config_defaulted_default_is_false(self):
+        """config_defaulted should default to False."""
+        config = UserConfig()
+        assert config.config_defaulted is False
+
+
+# ============================================================================
 # Run tests
 # ============================================================================
 

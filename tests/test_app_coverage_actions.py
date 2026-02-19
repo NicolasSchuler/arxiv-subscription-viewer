@@ -8,6 +8,7 @@ from datetime import date, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 import arxiv_browser.app as app_mod
@@ -496,7 +497,7 @@ class TestVersionCheckCoverage:
 
         ok_response = MagicMock()
         ok_response.text = "<feed ok/>"
-        app._http_client.get.side_effect = [ok_response, RuntimeError("network down")]
+        app._http_client.get.side_effect = [ok_response, httpx.ConnectError("network down")]
 
         with (
             patch(
@@ -1639,3 +1640,137 @@ class TestCliResolutionCoverage:
             result = _resolve_papers(args, tmp_path, config, history_files)
         assert isinstance(result, tuple)
         assert result[2] == 0
+
+
+# ============================================================================
+# Tests for _save_config_or_warn (Fix 7)
+# ============================================================================
+
+
+class TestSaveConfigOrWarn:
+    """Fix 7: _save_config_or_warn helper notifies on failure."""
+
+    def test_returns_true_on_success(self):
+        app = _new_app()
+        app._config = UserConfig()
+        app.notify = MagicMock()
+        with patch("arxiv_browser.app.save_config", return_value=True):
+            result = app._save_config_or_warn("test context")
+        assert result is True
+        app.notify.assert_not_called()
+
+    def test_returns_false_and_notifies_on_failure(self):
+        app = _new_app()
+        app._config = UserConfig()
+        app.notify = MagicMock()
+        with patch("arxiv_browser.app.save_config", return_value=False):
+            result = app._save_config_or_warn("theme preference")
+        assert result is False
+        app.notify.assert_called_once()
+        call_args = app.notify.call_args
+        assert "Failed to save theme preference" in call_args[0][0]
+        assert call_args[1]["severity"] == "warning"
+
+
+# ============================================================================
+# Tests for assert → explicit check (Fix 8)
+# ============================================================================
+
+
+class TestLlmProviderGuards:
+    """Fix 8: LLM provider None guards return gracefully instead of crashing."""
+
+    @pytest.mark.asyncio
+    async def test_generate_summary_returns_on_none_provider(self, make_paper):
+        """_generate_summary_async should return early if _llm_provider is None."""
+        app = _new_app()
+        app._config = UserConfig()
+        app._llm_provider = None
+        app._summary_cache = {}
+        app._summary_mode_label = {}
+        app._summary_command_hash = {}
+        app._summary_loading = set()
+        app._paper_summaries = {}
+        app._update_abstract_display = MagicMock()
+        app.notify = MagicMock()
+        paper = make_paper()
+        # Should not raise — just return
+        await app._generate_summary_async(paper, "prompt_template", "hash")
+
+    @pytest.mark.asyncio
+    async def test_start_chat_returns_on_none_provider(self, make_paper):
+        """_start_chat_with_paper should return early if _llm_provider is None."""
+        app = _new_app()
+        app._config = UserConfig()
+        app._llm_provider = None
+        app._papers_by_id = {"2401.00001": make_paper()}
+        app._track_task = MagicMock()
+        app.notify = MagicMock()
+        app._get_current_paper = MagicMock(return_value=make_paper())
+        # Should not raise
+        app._start_chat_with_paper()
+        app._track_task.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_score_relevance_returns_on_none_provider(self, make_paper):
+        """_score_relevance_batch_async should return early if _llm_provider is None."""
+        app = _new_app()
+        app._config = UserConfig()
+        app._llm_provider = None
+        app._relevance_scores = {}
+        app._scoring_in_progress = True
+        app._scoring_progress = None
+        app.notify = MagicMock()
+        app._update_footer = MagicMock()
+        app._mark_badges_dirty = MagicMock()
+        app._refresh_detail_pane = MagicMock()
+        app._update_status_bar = MagicMock()
+        # Should not raise
+        await app._score_relevance_batch_async([make_paper()], "cmd", "interests")
+
+    @pytest.mark.asyncio
+    async def test_call_auto_tag_returns_none_on_none_provider(self, make_paper):
+        """_call_auto_tag_llm should return None if _llm_provider is None."""
+        app = _new_app()
+        app._llm_provider = None
+        result = await app._call_auto_tag_llm(make_paper(), ["topic:ml"])
+        assert result is None
+
+
+# ============================================================================
+# Tests for best-effort S2 cache write (Fix 9)
+# ============================================================================
+
+
+class TestBestEffortS2CacheWrite:
+    """Fix 9: S2 recommendation cache write failure doesn't lose API data."""
+
+    @pytest.mark.asyncio
+    async def test_recs_returned_despite_cache_write_failure(self):
+        """Recommendations should be returned even if cache write fails."""
+        app = _new_app()
+        app._config = UserConfig()
+        app._s2_db_path = "/tmp/nonexistent/s2.db"
+        rec = _make_s2_paper("2401.99999")
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        app._http_client = mock_client
+
+        with (
+            patch(
+                "arxiv_browser.app.load_s2_recommendations",
+                return_value=[],
+            ),
+            patch(
+                "arxiv_browser.app.fetch_s2_recommendations",
+                return_value=[rec],
+            ),
+            patch(
+                "arxiv_browser.app.save_s2_recommendations",
+                side_effect=OSError("disk full"),
+            ),
+        ):
+            result = await app._fetch_s2_recommendations_async("2401.00001")
+
+        assert len(result) == 1
+        assert result[0].arxiv_id == "2401.99999"

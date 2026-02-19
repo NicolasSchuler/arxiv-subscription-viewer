@@ -229,8 +229,14 @@ def get_hf_db_path() -> Path:
 
 
 def init_hf_db(db_path: Path) -> None:
-    """Create HF cache table if it doesn't exist."""
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    """Create HF cache table if it doesn't exist.
+
+    Raises sqlite3.OperationalError if the parent directory cannot be created.
+    """
+    try:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise sqlite3.OperationalError(f"Cannot create DB directory: {e}") from e
     with closing(sqlite3.connect(str(db_path))) as conn, conn:
         conn.execute(
             "CREATE TABLE IF NOT EXISTS hf_daily_papers ("

@@ -7,6 +7,7 @@ from datetime import date as dt_date
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from textual.events import Click
 from textual.widgets import Checkbox, Input, Label, ListView, Select
@@ -372,7 +373,7 @@ async def test_citation_graph_drill_down_failure_restores_state(make_paper):
     )
 
     async def _fetch(_paper_id: str):
-        raise RuntimeError("boom")
+        raise httpx.ConnectError("boom")
 
     app = ArxivBrowser([root], restore_session=False)
     modal = CitationGraphScreen(

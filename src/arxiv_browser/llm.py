@@ -162,8 +162,13 @@ def _init_summary_db(db_path: Path) -> None:
 
     Migrates from old single-PK schema (arxiv_id only) to composite PK
     (arxiv_id, command_hash) to support multiple summary modes per paper.
+
+    Raises sqlite3.OperationalError if the parent directory cannot be created.
     """
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise sqlite3.OperationalError(f"Cannot create DB directory: {e}") from e
     with closing(sqlite3.connect(str(db_path))) as conn, conn:
         # Check if table exists with old schema (single PK on arxiv_id)
         row = conn.execute(
@@ -230,8 +235,14 @@ def get_relevance_db_path() -> Path:
 
 
 def _init_relevance_db(db_path: Path) -> None:
-    """Create the relevance_scores table if it doesn't exist."""
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    """Create the relevance_scores table if it doesn't exist.
+
+    Raises sqlite3.OperationalError if the parent directory cannot be created.
+    """
+    try:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise sqlite3.OperationalError(f"Cannot create DB directory: {e}") from e
     with closing(sqlite3.connect(str(db_path))) as conn, conn:
         conn.execute(
             "CREATE TABLE IF NOT EXISTS relevance_scores ("

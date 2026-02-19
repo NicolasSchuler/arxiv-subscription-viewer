@@ -274,6 +274,7 @@ class UserConfig:
     trusted_llm_command_hashes: list[str] = field(default_factory=list)
     trusted_pdf_viewer_hashes: list[str] = field(default_factory=list)
     version: int = 1
+    config_defaulted: bool = False  # True when config was corrupt and defaults were used
 
 
 @dataclass(slots=True)

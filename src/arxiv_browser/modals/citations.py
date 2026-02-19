@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 import webbrowser
 from collections.abc import Callable
 
+import httpx
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -503,11 +505,15 @@ class CitationGraphScreen(ModalScreen[str | None]):
             self._current_cites = cites
             self._populate_lists()
             self._update_breadcrumb()
-        except Exception:
+        except (httpx.HTTPError, OSError, sqlite3.Error):
             logger.warning(
                 "Citation graph fetch failed for %s",
                 entry.s2_paper_id,
                 exc_info=True,
+            )
+            self.app.notify(
+                "Failed to load citations. Check your connection.",
+                severity="error",
             )
             # Undo the push
             self._stack.pop()

@@ -512,3 +512,19 @@ class TestFetchHfDailyPapers:
 
         result = await fetch_hf_daily_papers(client)
         assert len(result) == 2
+
+
+class TestInitHfDbOsError:
+    """Fix 3: init_hf_db converts mkdir OSError to sqlite3.OperationalError."""
+
+    def test_init_hf_db_permission_error(self, tmp_path):
+        """PermissionError during mkdir should raise sqlite3.OperationalError."""
+        import sqlite3
+        from unittest.mock import patch
+
+        db_path = tmp_path / "sub" / "db.sqlite"
+        with (
+            patch("pathlib.Path.mkdir", side_effect=PermissionError("denied")),
+            pytest.raises(sqlite3.OperationalError, match="Cannot create DB directory"),
+        ):
+            init_hf_db(db_path)
