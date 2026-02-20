@@ -129,7 +129,7 @@ APP_BINDINGS: list[BindingType] = [
         show=False,
     ),
     Binding("escape", "cancel_search", "Cancel", show=False),
-    Binding("o", "open_url", "Open Selected", show=False),
+    Binding("o", "open_url", "Open in Browser", show=False),
     Binding("P", "open_pdf", "Open PDF", show=False),
     Binding("c", "copy_selected", "Copy", show=False),
     Binding("s", "cycle_sort", "Sort", show=False),
@@ -193,7 +193,7 @@ APP_BINDINGS: list[BindingType] = [
     # Help overlay
     Binding("question_mark", "show_help", "Help (?)", show=False),
     # Command palette
-    Binding("ctrl+p", "command_palette", "Commands", show=False),
+    Binding("ctrl+p", "command_palette", "Command palette", show=False),
     # Collections
     Binding("ctrl+k", "collections", "Collections", show=False),
 ]
