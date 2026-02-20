@@ -525,42 +525,17 @@ MIN_LIST_WIDTH = 50
 MAX_LIST_WIDTH = 100
 CLIPBOARD_SEPARATOR = "=" * 80
 
-# Context-sensitive footer keybinding hints
+# Context-sensitive footer keybinding hints (compatibility alias kept for tests/imports).
 FOOTER_CONTEXTS: dict[str, list[tuple[str, str]]] = {
-    "default": [
-        ("/", "search"),
-        ("o", "open"),
-        ("s", "sort"),
-        ("r", "read"),
-        ("x", "star"),
-        ("n", "notes"),
-        ("t", "tags"),
-        ("?", "help"),
-    ],
-    "selection": [
-        ("o", "open"),
-        ("r", "read"),
-        ("x", "star"),
-        ("t", "tags"),
-        ("E", "export"),
-        ("d", "download"),
-        ("u", "clear"),
-        ("?", "help"),
-    ],
-    "search": [
-        ("type to search", ""),
-        ("Enter", "apply"),
-        ("Esc", "clear"),
-        ("↑↓", "move"),
-        ("?", "help"),
-    ],
-    "api": [
-        ("[/]", "page"),
-        ("Ctrl+e", "exit"),
-        ("A", "new query"),
-        ("o", "open"),
-        ("?", "help"),
-    ],
+    "default": _widget_chrome.build_browse_footer_bindings(
+        s2_active=False,
+        has_starred=False,
+        llm_configured=False,
+        has_history_navigation=False,
+    ),
+    "selection": _widget_chrome.build_selection_footer_base_bindings(),
+    "search": _widget_chrome.build_search_footer_bindings(),
+    "api": _widget_chrome.build_api_footer_bindings(),
 }
 
 # Command palette registry: (name, description, key_hint, action_name)
@@ -726,9 +701,10 @@ def build_list_empty_message(
         )
     if in_arxiv_api_mode:
         return (
-            "[dim italic]No arXiv API results on this page.[/]\n"
+            "[dim italic]No API results on this page.[/]\n"
             "[dim]Try: [bold]][/bold] next page, [bold][[/bold] previous page, "
-            "or [bold]A[/bold] new query.[/]"
+            "[bold]A[/bold] new query, or [bold]Esc[/bold]/[bold]Ctrl+e[/bold] "
+            "to exit API mode.[/]"
         )
     if watch_filter_active:
         return (
@@ -877,7 +853,7 @@ class ArxivBrowser(App):
             show=False,
         ),
         Binding("escape", "cancel_search", "Cancel", show=False),
-        Binding("o", "open_url", "Open Selected", show=False),
+        Binding("o", "open_url", "Open in Browser", show=False),
         Binding("P", "open_pdf", "Open PDF", show=False),
         Binding("c", "copy_selected", "Copy", show=False),
         Binding("s", "cycle_sort", "Sort", show=False),
@@ -941,7 +917,7 @@ class ArxivBrowser(App):
         # Help overlay
         Binding("question_mark", "show_help", "Help (?)", show=False),
         # Command palette
-        Binding("ctrl+p", "command_palette", "Commands", show=False),
+        Binding("ctrl+p", "command_palette", "Command palette", show=False),
         # Collections
         Binding("ctrl+k", "collections", "Collections", show=False),
     ]
@@ -4661,19 +4637,17 @@ class ArxivBrowser(App):
         try:
             container = self._get_search_container_widget()
             if container.has_class("visible"):
-                return FOOTER_CONTEXTS["search"]
+                return _widget_chrome.build_search_footer_bindings()
         except NoMatches:
             pass
 
         # arXiv API search mode
         if self._in_arxiv_api_mode:
-            return FOOTER_CONTEXTS["api"]
+            return _widget_chrome.build_api_footer_bindings()
 
         # Selection mode — papers selected
         if self.selected_ids:
-            return _widget_chrome.build_selection_footer_bindings(
-                FOOTER_CONTEXTS["selection"], len(self.selected_ids)
-            )
+            return _widget_chrome.build_selection_footer_bindings(len(self.selected_ids))
 
         # Default browsing — dynamically show contextual hints
         has_starred = any(m.starred for m in self._config.paper_metadata.values())

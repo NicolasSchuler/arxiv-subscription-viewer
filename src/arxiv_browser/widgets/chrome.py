@@ -18,12 +18,52 @@ from arxiv_browser.themes import THEME_COLORS
 
 DATE_NAV_WINDOW_SIZE = 5
 
+_SELECTION_FOOTER_BINDINGS: tuple[tuple[str, str], ...] = (
+    ("o", "open"),
+    ("r", "read"),
+    ("x", "star"),
+    ("t", "tags"),
+    ("E", "export"),
+    ("d", "download"),
+    ("u", "clear"),
+    ("?", "help"),
+)
 
-def build_selection_footer_bindings(
-    selection_bindings: list[tuple[str, str]], selected_count: int
-) -> list[tuple[str, str]]:
+_SEARCH_FOOTER_BINDINGS: tuple[tuple[str, str], ...] = (
+    ("type to search", ""),
+    ("Enter", "apply"),
+    ("Esc", "clear"),
+    ("↑↓", "move"),
+    ("?", "help"),
+)
+
+_API_FOOTER_BINDINGS: tuple[tuple[str, str], ...] = (
+    ("[/]", "page"),
+    ("Ctrl+e", "exit"),
+    ("A", "new query"),
+    ("o", "open"),
+    ("?", "help"),
+)
+
+
+def build_selection_footer_base_bindings() -> list[tuple[str, str]]:
+    """Return canonical selection-mode footer hints."""
+    return list(_SELECTION_FOOTER_BINDINGS)
+
+
+def build_search_footer_bindings() -> list[tuple[str, str]]:
+    """Return canonical search-mode footer hints."""
+    return list(_SEARCH_FOOTER_BINDINGS)
+
+
+def build_api_footer_bindings() -> list[tuple[str, str]]:
+    """Return canonical API-mode footer hints."""
+    return list(_API_FOOTER_BINDINGS)
+
+
+def build_selection_footer_bindings(selected_count: int) -> list[tuple[str, str]]:
     """Build selection-mode footer bindings with dynamic open(n) label."""
-    bindings = list(selection_bindings)
+    bindings = build_selection_footer_base_bindings()
     if bindings:
         bindings[0] = ("o", f"open({selected_count})")
     return bindings
@@ -785,8 +825,11 @@ __all__ = [
     "ContextFooter",
     "DateNavigator",
     "FilterPillBar",
+    "build_api_footer_bindings",
     "build_browse_footer_bindings",
     "build_footer_mode_badge",
+    "build_search_footer_bindings",
+    "build_selection_footer_base_bindings",
     "build_selection_footer_bindings",
     "build_status_bar_text",
 ]

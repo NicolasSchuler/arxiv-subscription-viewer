@@ -481,6 +481,7 @@ async def test_command_palette_modal_filters_and_executes(make_paper):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
             results = modal.query_one("#palette-results")
+            assert "Command palette" in str(modal.query_one(Label).content)
             assert results.option_count == 3
             assert "Close: Esc" in str(modal.query_one("#palette-footer", Static).content)
 

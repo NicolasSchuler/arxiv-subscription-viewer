@@ -103,7 +103,7 @@ HELP_DESCRIPTION_OVERRIDES: dict[str, str] = {
     "ctrl_e_dispatch": "Toggle S2 (browse) / Exit API (API mode)",
     "command_palette": "Command palette",
     "show_help": "Help overlay",
-    "open_url": "Open in browser",
+    "open_url": "Open in Browser",
     "open_pdf": "Open PDF",
 }
 

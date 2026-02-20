@@ -1658,6 +1658,14 @@ class TestStatusFilterRegressions:
         assert ("Ctrl+p", "Open command palette") in getting_started_entries
         assert ("?", "Show full shortcuts") in getting_started_entries
 
+    def test_binding_labels_use_long_form_naming(self):
+        """Binding descriptions should use long-form action names."""
+        from arxiv_browser.app import ArxivBrowser
+
+        by_action = {binding.action: binding for binding in ArxivBrowser.BINDINGS}
+        assert by_action["command_palette"].description == "Command palette"
+        assert by_action["open_url"].description == "Open in Browser"
+
     def test_status_bar_compacts_for_narrow_width(self):
         """Status text should switch to compact mode on narrow terminals."""
         from arxiv_browser.widgets.chrome import build_status_bar_text
@@ -1721,6 +1729,9 @@ class TestStatusFilterRegressions:
         assert "Try:" in api_msg
         assert "Try:" in watch_msg
         assert "Try:" in history_msg
+        assert "[bold]][/bold] next page" in api_msg
+        assert "[bold][[/bold] previous page" in api_msg
+        assert "[bold]Esc[/bold]/[bold]Ctrl+e[/bold]" in api_msg
 
     def test_actionable_error_template(self):
         from arxiv_browser.action_messages import build_actionable_error
@@ -12089,6 +12100,25 @@ class TestFooterDiscoverability:
         assert ("[/]", "page") in FOOTER_CONTEXTS["api"]
         assert ("Ctrl+e", "exit") in FOOTER_CONTEXTS["api"]
         assert ("A", "new query") in FOOTER_CONTEXTS["api"]
+
+    def test_footer_context_alias_matches_chrome_builders(self):
+        from arxiv_browser.app import FOOTER_CONTEXTS
+        from arxiv_browser.widgets.chrome import (
+            build_api_footer_bindings,
+            build_browse_footer_bindings,
+            build_search_footer_bindings,
+            build_selection_footer_base_bindings,
+        )
+
+        assert FOOTER_CONTEXTS["default"] == build_browse_footer_bindings(
+            s2_active=False,
+            has_starred=False,
+            llm_configured=False,
+            has_history_navigation=False,
+        )
+        assert FOOTER_CONTEXTS["selection"] == build_selection_footer_base_bindings()
+        assert FOOTER_CONTEXTS["search"] == build_search_footer_bindings()
+        assert FOOTER_CONTEXTS["api"] == build_api_footer_bindings()
 
 
 # ============================================================================

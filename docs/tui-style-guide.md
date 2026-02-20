@@ -24,6 +24,9 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 - Use `Help overlay` for `?`.
 - Use `Semantic Scholar` in help text and `S2` in compact status/footer hints.
 - Use `History` for date navigation context.
+- Compact-vs-long naming policy:
+- Footer stays compact (`o open`, `Ctrl+p palette`) for 80-col scan speed.
+- Help/modals/binding descriptions use long-form labels (`Open in Browser`, `Command palette`).
 - Canonical `Ctrl+e` wording: `Toggle S2 (browse) / Exit API (API mode)`.
 
 ## 4. Layout Hierarchy Rules
@@ -48,6 +51,8 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 - `type to search`, `Enter apply`, `Esc clear`, `↑↓ move`, `? help`.
 - API footer should emphasize mode exits and paging:
 - `[/] page`, `Ctrl+e exit`, `A new query`, `o open`, `? help`.
+- API empty states must mention both recovery paths:
+- Pagination keys (`[` and `]`) and exit keys (`Esc` or `Ctrl+e`).
 
 ## 6. Color And Icon Accessibility Rules
 
@@ -92,6 +97,8 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 - `Close: Esc` for read-only views and `Cancel: Esc` for edit/confirm flows.
 - Use consistent labels across footer/help/notifications:
 - `palette`, `history`, `help`, `search`, `open`, `export`.
+- Keep label density intentional:
+- Footer uses compact tokens while help/modal copy uses expanded phrasing.
 - Keep close instructions concise in modals (for example `Close: ? / Esc / q`).
 - Command palette must provide a clear empty-state message with next-step guidance.
 

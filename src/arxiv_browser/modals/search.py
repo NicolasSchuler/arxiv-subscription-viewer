@@ -209,7 +209,10 @@ class CommandPaletteModal(ModalScreen[str]):
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Label(f"[bold {THEME_COLORS['accent']}]Command palette[/]")
-            yield Input(placeholder="Type to search commands...", id="palette-search")
+            yield Input(
+                placeholder="Type to search command palette actions...",
+                id="palette-search",
+            )
             yield OptionList(id="palette-results")
             yield Static("Close: Esc", id="palette-footer")
 

@@ -152,7 +152,7 @@ See `docs/tui-style-guide.md` for UI copy/layout conventions.
 | `/` | Toggle search input |
 | `Escape` | Cancel search / exit API mode |
 | `A` | Search all arXiv (API mode) |
-| `Ctrl+e` | Exit API mode (when in API mode) |
+| `Ctrl+e` | Toggle S2 (browse) / Exit API (API mode) |
 | `j`/`k` | Navigate down/up (vim-style) |
 | `1-9` | Jump to search bookmark |
 | `Ctrl+b` | Add current search as bookmark |
@@ -197,7 +197,7 @@ See `docs/tui-style-guide.md` for UI copy/layout conventions.
 | `G` | Explore citation graph (S2-powered, drill-down) |
 | `V` | Check starred papers for version updates |
 | `e` | Fetch Semantic Scholar data for current paper |
-| `Ctrl+e` | Toggle Semantic Scholar enrichment on/off (when not in API mode) |
+| `Ctrl+e` | Toggle S2 (browse) / Exit API (API mode) |
 | `Ctrl+s` | Generate AI summary (mode selector) |
 | `C` | Chat with current paper (LLM-powered) |
 | `Ctrl+g` | Auto-tag current/selected papers (LLM-powered) |
