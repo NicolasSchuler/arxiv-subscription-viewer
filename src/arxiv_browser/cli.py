@@ -96,7 +96,10 @@ def _fetch_latest_arxiv_digest(
 
         reached_older_day = False
         for paper in page:
-            day = parse_arxiv_date(paper.date).date()
+            parsed_date = parse_arxiv_date(paper.date)
+            if parsed_date == datetime.min:
+                continue
+            day = parsed_date.date()
             if target_day is None:
                 target_day = day
             if day != target_day:

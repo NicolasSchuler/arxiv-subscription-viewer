@@ -193,10 +193,12 @@ def _parse_paper_metadata_dict(data: dict[str, Any]) -> dict[str, PaperMetadata]
         if not isinstance(meta_data, dict):
             continue
         lcv_raw = meta_data.get("last_checked_version")
+        raw_tags = _safe_get(meta_data, "tags", [], list)
+        safe_tags = [tag for tag in raw_tags if isinstance(tag, str)]
         result[arxiv_id] = PaperMetadata(
             arxiv_id=arxiv_id,
             notes=_safe_get(meta_data, "notes", "", str),
-            tags=_safe_get(meta_data, "tags", [], list),
+            tags=safe_tags,
             is_read=_safe_get(meta_data, "is_read", False, bool),
             starred=_safe_get(meta_data, "starred", False, bool),
             last_checked_version=lcv_raw if isinstance(lcv_raw, int) else None,
