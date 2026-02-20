@@ -1064,6 +1064,18 @@ class TestDownloadClipboardAndOpenCoverage:
         assert "Why:" in message
         assert "Next step:" in message
 
+    def test_open_with_viewer_handles_invalid_command_template(self):
+        app = _new_app()
+        app.notify = MagicMock()
+
+        ok = app._open_with_viewer("   ", "https://arxiv.org/pdf/1")
+
+        assert ok is False
+        message = app.notify.call_args[0][0]
+        assert "Could not open the configured PDF viewer." in message
+        assert "Why:" in message
+        assert "Next step:" in message
+
     def test_safe_browser_open_handles_errors(self):
         app = _new_app()
         app.notify = MagicMock()

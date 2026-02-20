@@ -2984,6 +2984,41 @@ class TestResolvePapersHistoryRestore:
         assert [p.arxiv_id for p in papers] == ["2602.00010", "2602.00011", "2602.00012"]
         assert page_calls == [0, 2]
 
+    def test_fetch_latest_digest_skips_invalid_first_date(self, monkeypatch, make_paper):
+        from arxiv_browser.cli import _fetch_latest_arxiv_digest
+
+        latest_day = "Mon, 17 Feb 2026"
+        older_day = "Sun, 16 Feb 2026"
+        page_calls: list[int] = []
+        pages = [
+            [
+                make_paper(arxiv_id="2602.00010", date="not-a-date"),
+                make_paper(arxiv_id="2602.00011", date=latest_day),
+                make_paper(arxiv_id="2602.00012", date=latest_day),
+            ],
+            [
+                make_paper(arxiv_id="2602.00013", date=latest_day),
+                make_paper(arxiv_id="2602.00014", date=older_day),
+            ],
+        ]
+
+        def fake_fetch(**kwargs):
+            page_calls.append(int(kwargs["start"]))
+            return pages.pop(0)
+
+        monkeypatch.setattr("arxiv_browser.cli._fetch_arxiv_api_papers", fake_fetch)
+        monkeypatch.setattr("arxiv_browser.cli.time.sleep", lambda _seconds: None)
+
+        papers = _fetch_latest_arxiv_digest(
+            query="",
+            field="all",
+            category="cs.AI",
+            max_results=3,
+        )
+
+        assert [p.arxiv_id for p in papers] == ["2602.00011", "2602.00012", "2602.00013"]
+        assert page_calls == [0, 3]
+
 
 # ============================================================================
 # Phase 6: Textual Integration Tests
@@ -4492,6 +4527,13 @@ class TestCommandTrustGuardrails:
         app._config.trusted_llm_command_hashes = [cmd_hash]
         assert app._is_llm_command_trusted(command_template) is True
 
+    def test_arxiv_browser_uses_shared_ui_constants(self):
+        from arxiv_browser.app import ArxivBrowser
+        from arxiv_browser.ui_constants import APP_BINDINGS, APP_CSS
+
+        assert ArxivBrowser.BINDINGS is APP_BINDINGS
+        assert ArxivBrowser.CSS == APP_CSS
+
     def test_ensure_llm_trusted_prompts_and_persists(self, monkeypatch):
         from unittest.mock import MagicMock
 
@@ -4535,8 +4577,10 @@ class TestCommandTrustGuardrails:
     def test_ensure_llm_trusted_cancels_when_prompt_unavailable(self):
         from unittest.mock import MagicMock
 
+        from textual.app import ScreenStackError
+
         app = self._make_mock_app(llm_command="custom-tool {prompt}")
-        app.push_screen = MagicMock(side_effect=RuntimeError("no screen"))
+        app.push_screen = MagicMock(side_effect=ScreenStackError("no screen"))
         on_trusted = MagicMock()
 
         trusted_now = app._ensure_llm_command_trusted("custom-tool {prompt}", on_trusted)
@@ -8510,6 +8554,21 @@ class TestDictToConfigEdgeCases:
         assert meta.tags == []
         assert meta.is_read is False
         assert meta.starred is False
+
+    def test_metadata_tags_list_filters_non_string_items(self):
+        """Mixed-type tag lists should keep only string tags."""
+        from arxiv_browser.app import _dict_to_config
+
+        data = {
+            "paper_metadata": {
+                "2401.00001": {
+                    "tags": ["topic:ml", 1, None, {"x": "y"}],
+                }
+            }
+        }
+        config = _dict_to_config(data)
+        meta = config.paper_metadata["2401.00001"]
+        assert meta.tags == ["topic:ml"]
 
     def test_metadata_last_checked_version_non_int_becomes_none(self):
         """last_checked_version that is not int should become None."""
