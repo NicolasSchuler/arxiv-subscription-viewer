@@ -64,7 +64,13 @@ def build_markdown_export_document(formatted_papers: Sequence[str]) -> str:
 
 def build_viewer_args(viewer_cmd: str, url_or_path: str) -> list[str]:
     """Build subprocess argument list for a configured external viewer command."""
-    args = shlex.split(viewer_cmd)
+    args = shlex.split(viewer_cmd, posix=os.name != "nt")
+    if os.name == "nt":
+        # Windows split keeps wrapping quotes when posix=False.
+        args = [
+            arg[1:-1] if len(arg) >= 2 and arg.startswith('"') and arg.endswith('"') else arg
+            for arg in args
+        ]
     if not args:
         raise ValueError("Viewer command is empty")
     if "{url}" in viewer_cmd or "{path}" in viewer_cmd:

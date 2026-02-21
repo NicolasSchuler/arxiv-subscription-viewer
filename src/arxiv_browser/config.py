@@ -173,12 +173,14 @@ def _parse_session_state(data: dict[str, Any]) -> SessionState:
     sort_index = _safe_get(session_data, "sort_index", 0, int)
     if sort_index < 0 or sort_index >= len(SORT_OPTIONS):
         sort_index = 0
+    selected_ids_raw = _safe_get(session_data, "selected_ids", [], list)
+    selected_ids = [item for item in selected_ids_raw if isinstance(item, str)]
 
     return SessionState(
         scroll_index=_safe_get(session_data, "scroll_index", 0, int),
         current_filter=_safe_get(session_data, "current_filter", "", str),
         sort_index=sort_index,
-        selected_ids=_safe_get(session_data, "selected_ids", [], list),
+        selected_ids=selected_ids,
         current_date=current_date,
     )
 
@@ -352,6 +354,8 @@ def load_config() -> UserConfig:
 
     try:
         data = json.loads(config_path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise TypeError("Config root must be a JSON object")
         return _dict_to_config(data)
     except json.JSONDecodeError as e:
         logger.warning("Config file has invalid JSON, using defaults: %s", e)
@@ -583,7 +587,8 @@ def import_metadata(
     """Import metadata from a previously exported dict into config.
 
     When merge=True (default), existing metadata is preserved and new data
-    is merged. When merge=False, imported data replaces existing.
+    is merged. When merge=False, imported data deterministically replaces
+    import-target metadata sections.
 
     Returns (papers_imported, watch_entries_imported, bookmarks_imported,
     collections_imported).
@@ -591,10 +596,20 @@ def import_metadata(
     if data.get("format") != "arxiv-browser-metadata":
         raise ValueError("Not a valid arxiv-browser metadata export")
 
+    if not merge:
+        # Replace mode: clear all import-target sections before applying data.
+        config.paper_metadata.clear()
+        config.watch_list.clear()
+        config.bookmarks.clear()
+        config.collections.clear()
+        config.research_interests = ""
+
     papers = _import_paper_metadata(data.get("paper_metadata", {}), config, merge)
     watch = _import_watch_entries(data.get("watch_list", []), config)
-    bookmarks = _import_bookmarks(data.get("bookmarks", []), config, merge)
-    collections = _import_collections(data.get("collections", []), config, merge)
+    # Bookmark/collection import remains deduplicating, but replace mode now
+    # imports into the cleared destination collections.
+    bookmarks = _import_bookmarks(data.get("bookmarks", []), config, True)
+    collections = _import_collections(data.get("collections", []), config, True)
 
     if not config.research_interests and data.get("research_interests"):
         config.research_interests = str(data["research_interests"])

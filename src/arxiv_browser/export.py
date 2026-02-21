@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import csv
 import io
-import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -48,8 +47,8 @@ def get_pdf_download_path(paper: Paper, config: UserConfig) -> Path:
     else:
         base_dir = (Path.home() / DEFAULT_PDF_DOWNLOAD_DIR).resolve()
     result = (base_dir / f"{paper.arxiv_id}.pdf").resolve()
-    # Ensure the resolved path is still under the base directory
-    if not str(result).startswith(str(base_dir) + os.sep) and result.parent != base_dir:
+    # Ensure the resolved path is still under the base directory.
+    if not result.is_relative_to(base_dir):
         raise ValueError(f"Invalid arXiv ID for path construction: {paper.arxiv_id!r}")
     return result
 
