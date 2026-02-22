@@ -10,6 +10,13 @@ from arxiv_browser.services.enrichment_service import (
     load_or_fetch_hf_daily_cached,
     load_or_fetch_s2_paper_cached,
 )
+from arxiv_browser.services.interfaces import (
+    AppServices,
+    ArxivApiService,
+    DownloadService,
+    LlmService,
+    build_default_app_services,
+)
 from arxiv_browser.services.llm_service import (
     generate_summary,
     score_relevance_once,
@@ -17,6 +24,11 @@ from arxiv_browser.services.llm_service import (
 )
 
 __all__ = [
+    "AppServices",
+    "ArxivApiService",
+    "DownloadService",
+    "LlmService",
+    "build_default_app_services",
     "download_pdf",
     "enforce_rate_limit",
     "fetch_page",

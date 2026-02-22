@@ -290,35 +290,18 @@ from arxiv_browser.semantic_scholar import (
     save_s2_citation_graph,
     save_s2_recommendations,
 )
-from arxiv_browser.services.arxiv_api_service import (
-    enforce_rate_limit as _enforce_arxiv_api_rate_limit,
-)
-from arxiv_browser.services.arxiv_api_service import (
-    fetch_page as _fetch_arxiv_api_page_service,
-)
-from arxiv_browser.services.arxiv_api_service import (
-    format_query_label as _format_arxiv_query_label,
-)
-from arxiv_browser.services.download_service import (
-    download_pdf as _download_pdf_service,
-)
 from arxiv_browser.services.enrichment_service import (
     load_or_fetch_hf_daily_cached as _load_or_fetch_hf_daily_cached,
 )
 from arxiv_browser.services.enrichment_service import (
     load_or_fetch_s2_paper_cached as _load_or_fetch_s2_paper_cached,
 )
+from arxiv_browser.services.interfaces import (
+    AppServices,
+    build_default_app_services,
+)
 from arxiv_browser.services.llm_service import (
     LLMExecutionError as _LLMExecutionError,
-)
-from arxiv_browser.services.llm_service import (
-    generate_summary as _generate_summary_service,
-)
-from arxiv_browser.services.llm_service import (
-    score_relevance_once as _score_relevance_once_service,
-)
-from arxiv_browser.services.llm_service import (
-    suggest_tags_once as _suggest_tags_once_service,
 )
 from arxiv_browser.similarity import *  # noqa: F403
 from arxiv_browser.similarity import (  # noqa: F401
@@ -740,6 +723,7 @@ class ArxivBrowser(App):
         history_files: list[tuple[date, Path]] | None = None,
         current_date_index: int = 0,
         ascii_icons: bool = False,
+        services: AppServices | None = None,
     ) -> None:
         super().__init__()
         # Register all Textual themes so $th-* CSS variables resolve before compose()
@@ -758,6 +742,7 @@ class ArxivBrowser(App):
         self._badges_dirty: set[str] = set()
         self._badge_timer: Timer | None = None
         self._sort_index: int = 0  # Index into SORT_OPTIONS
+        self._services: AppServices = services or build_default_app_services()
 
         # Configuration and persistence
         self._config = config or UserConfig()
@@ -882,6 +867,14 @@ class ArxivBrowser(App):
             refresh_detail_pane=self._refresh_detail_pane,
             refresh_current_list_item=self._refresh_current_list_item,
         )
+
+    def _get_services(self) -> AppServices:
+        """Return app service interfaces, lazily creating defaults for test doubles."""
+        services = getattr(self, "_services", None)
+        if services is None:
+            services = build_default_app_services()
+            self._services = services
+        return services
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -1933,15 +1926,14 @@ class ArxivBrowser(App):
             on_search,
         )
 
-    @staticmethod
-    def _format_arxiv_search_label(request: ArxivSearchRequest) -> str:
+    def _format_arxiv_search_label(self, request: ArxivSearchRequest) -> str:
         """Build a human-readable query label for API mode UI."""
-        return _format_arxiv_query_label(request)
+        return self._get_services().arxiv_api.format_query_label(request)
 
     async def _apply_arxiv_rate_limit(self) -> None:
         """Sleep as needed to respect arXiv API rate limits."""
         loop = asyncio.get_running_loop()
-        new_last_request_at, wait_seconds = await _enforce_arxiv_api_rate_limit(
+        new_last_request_at, wait_seconds = await self._get_services().arxiv_api.enforce_rate_limit(
             last_request_at=self._last_arxiv_api_request_at,
             min_interval_seconds=ARXIV_API_MIN_INTERVAL_SECONDS,
             now=loop.time,
@@ -1962,7 +1954,7 @@ class ArxivBrowser(App):
     ) -> list[Paper]:
         """Fetch one page of results from arXiv API."""
         await self._apply_arxiv_rate_limit()
-        return await _fetch_arxiv_api_page_service(
+        return await self._get_services().arxiv_api.fetch_page(
             client=self._http_client,
             request=request,
             start=start,
@@ -3791,7 +3783,7 @@ class ArxivBrowser(App):
             if use_full_paper_content:
                 self.notify("Fetching paper content...", title="AI Summary")
 
-            summary, error = await _generate_summary_service(
+            summary, error = await self._get_services().llm.generate_summary(
                 paper=paper,
                 prompt_template=prompt_template,
                 provider=self._llm_provider,
@@ -3826,9 +3818,16 @@ class ArxivBrowser(App):
             # Config/template errors — show the descriptive message directly
             logger.warning("Summary config error for %s: %s", arxiv_id, e)
             self.notify(str(e), title="AI Summary", severity="error", timeout=10)
+        except (OSError, RuntimeError) as e:
+            logger.warning(
+                "Summary generation runtime failure for %s: %s", arxiv_id, e, exc_info=True
+            )
+            self.notify("Summary failed", title="AI Summary", severity="error")
         except Exception as e:
-            logger.warning("Summary generation failed for %s", arxiv_id, exc_info=True)
-            self.notify(f"Summary failed: {e}", title="AI Summary", severity="error")
+            logger.warning(
+                "Unexpected summary generation failure for %s: %s", arxiv_id, e, exc_info=True
+            )
+            self.notify("Summary failed", title="AI Summary", severity="error")
         finally:
             self._summary_loading.discard(arxiv_id)
             if not generated_summary and arxiv_id not in self._paper_summaries:
@@ -3990,7 +3989,7 @@ class ArxivBrowser(App):
                 self._update_footer()
 
                 try:
-                    parsed = await _score_relevance_once_service(
+                    parsed = await self._get_services().llm.score_relevance_once(
                         paper=paper,
                         interests=interests,
                         provider=self._llm_provider,
@@ -4017,10 +4016,19 @@ class ArxivBrowser(App):
                     self._update_relevance_badge(paper.arxiv_id)
                     scored += 1
 
-                except Exception:
+                except (OSError, RuntimeError, ValueError) as exc:
                     logger.warning(
-                        "Relevance scoring error for %s",
+                        "Relevance scoring error for %s: %s",
                         paper.arxiv_id,
+                        exc,
+                        exc_info=True,
+                    )
+                    failed += 1
+                except Exception as exc:
+                    logger.warning(
+                        "Unexpected relevance scoring error for %s: %s",
+                        paper.arxiv_id,
+                        exc,
                         exc_info=True,
                     )
                     failed += 1
@@ -4046,8 +4054,11 @@ class ArxivBrowser(App):
             self._mark_badges_dirty("relevance")
             self._refresh_detail_pane()
 
-        except Exception:
-            logger.warning("Relevance batch scoring failed", exc_info=True)
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.warning("Relevance batch scoring failed: %s", exc, exc_info=True)
+            self.notify("Relevance scoring failed", title="Relevance", severity="error")
+        except Exception as exc:
+            logger.warning("Unexpected relevance batch scoring failure: %s", exc, exc_info=True)
             self.notify("Relevance scoring failed", title="Relevance", severity="error")
         finally:
             self._relevance_scoring_active = False
@@ -4196,7 +4207,7 @@ class ArxivBrowser(App):
             return None
 
         try:
-            tags = await _suggest_tags_once_service(
+            tags = await self._get_services().llm.suggest_tags_once(
                 paper=paper,
                 taxonomy=taxonomy,
                 provider=self._llm_provider,
@@ -4204,6 +4215,16 @@ class ArxivBrowser(App):
             )
         except _LLMExecutionError as exc:
             logger.warning("Auto-tag failed for %s: %s", paper.arxiv_id, str(exc)[:200])
+            return None
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.warning(
+                "Auto-tag runtime failure for %s: %s", paper.arxiv_id, exc, exc_info=True
+            )
+            return None
+        except Exception as exc:
+            logger.warning(
+                "Unexpected auto-tag failure for %s: %s", paper.arxiv_id, exc, exc_info=True
+            )
             return None
 
         if tags is None:
@@ -4511,7 +4532,7 @@ class ArxivBrowser(App):
         Returns:
             True if download succeeded, False otherwise.
         """
-        success = await _download_pdf_service(
+        success = await self._get_services().download.download_pdf(
             paper=paper,
             config=self._config,
             client=client,
@@ -4541,8 +4562,16 @@ class ArxivBrowser(App):
         try:
             success = await self._download_pdf_async(paper, self._http_client)
             self._download_results[paper.arxiv_id] = success
-        except Exception:
-            logger.warning("Download failed for %s", paper.arxiv_id, exc_info=True)
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.warning("Download failed for %s: %s", paper.arxiv_id, exc, exc_info=True)
+            self._download_results[paper.arxiv_id] = False
+        except Exception as exc:
+            logger.warning(
+                "Unexpected download failure for %s: %s",
+                paper.arxiv_id,
+                exc,
+                exc_info=True,
+            )
             self._download_results[paper.arxiv_id] = False
         finally:
             self._downloading.discard(paper.arxiv_id)

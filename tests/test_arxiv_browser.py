@@ -4574,6 +4574,62 @@ class TestCommandTrustGuardrails:
         cmd_hash = app._trust_hash(viewer_cmd)
         assert cmd_hash in app._config.trusted_pdf_viewer_hashes
 
+    def test_ensure_llm_trusted_cancel_callback_does_not_persist_or_run(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        app = self._make_mock_app(llm_command="custom-tool {prompt}")
+        on_trusted = MagicMock()
+        command_template = "custom-tool {prompt}"
+
+        monkeypatch.setattr("arxiv_browser.app.save_config", lambda _config: True)
+
+        def fake_push_screen(_modal, callback):
+            callback(False)
+
+        app.push_screen = fake_push_screen
+
+        trusted_now = app._ensure_llm_command_trusted(command_template, on_trusted)
+        assert trusted_now is False
+        on_trusted.assert_not_called()
+        assert app._config.trusted_llm_command_hashes == []
+        assert "LLM command cancelled" in str(app.notify.call_args)
+
+    def test_ensure_llm_trusted_warns_when_trust_persistence_fails(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        app = self._make_mock_app(llm_command="custom-tool {prompt}")
+        on_trusted = MagicMock()
+        command_template = "custom-tool {prompt}"
+
+        monkeypatch.setattr("arxiv_browser.app.save_config", lambda _config: False)
+
+        def fake_push_screen(_modal, callback):
+            callback(True)
+
+        app.push_screen = fake_push_screen
+
+        trusted_now = app._ensure_llm_command_trusted(command_template, on_trusted)
+        assert trusted_now is False
+        on_trusted.assert_called_once()
+        assert app._config.trusted_llm_command_hashes == [app._trust_hash(command_template)]
+        assert "session only" in str(app.notify.call_args)
+
+    def test_ensure_llm_trusted_bypasses_prompt_when_already_trusted(self):
+        from unittest.mock import MagicMock
+
+        command_template = "custom-tool {prompt}"
+        trusted_hash = self._make_mock_app()._trust_hash(command_template)
+        app = self._make_mock_app(
+            llm_command=command_template,
+            trusted_llm_command_hashes=[trusted_hash],
+        )
+        app.push_screen = MagicMock()
+
+        trusted_now = app._ensure_llm_command_trusted(command_template, MagicMock())
+
+        assert trusted_now is True
+        app.push_screen.assert_not_called()
+
     def test_ensure_llm_trusted_cancels_when_prompt_unavailable(self):
         from unittest.mock import MagicMock
 
@@ -4584,6 +4640,21 @@ class TestCommandTrustGuardrails:
         on_trusted = MagicMock()
 
         trusted_now = app._ensure_llm_command_trusted("custom-tool {prompt}", on_trusted)
+
+        assert trusted_now is False
+        on_trusted.assert_not_called()
+        assert "action cancelled" in str(app.notify.call_args)
+
+    def test_ensure_pdf_viewer_trusted_cancels_when_prompt_unavailable(self):
+        from unittest.mock import MagicMock
+
+        from textual.app import ScreenStackError
+
+        app = self._make_mock_app()
+        app.push_screen = MagicMock(side_effect=ScreenStackError("no screen"))
+        on_trusted = MagicMock()
+
+        trusted_now = app._ensure_pdf_viewer_trusted("open -a Preview {path}", on_trusted)
 
         assert trusted_now is False
         on_trusted.assert_not_called()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
 
@@ -9,6 +10,8 @@ import httpx
 
 from arxiv_browser.export import get_pdf_download_path, get_pdf_url
 from arxiv_browser.models import Paper, UserConfig
+
+logger = logging.getLogger(__name__)
 
 
 async def download_pdf(
@@ -52,12 +55,26 @@ async def download_pdf(
 
         os.replace(tmp_path, path)
         return True
-    except (httpx.HTTPError, OSError):
+    except (httpx.HTTPError, OSError) as exc:
+        logger.warning(
+            "PDF download failed for %s from %s to %s: %s",
+            paper.arxiv_id,
+            url,
+            path,
+            exc,
+            exc_info=True,
+        )
         if tmp_path:
             try:
                 os.unlink(tmp_path)
-            except OSError:
-                pass
+            except OSError as cleanup_exc:
+                logger.warning(
+                    "Failed to clean temp PDF file %s after error for %s: %s",
+                    tmp_path,
+                    paper.arxiv_id,
+                    cleanup_exc,
+                    exc_info=True,
+                )
         return False
 
 

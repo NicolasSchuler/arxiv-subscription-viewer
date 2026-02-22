@@ -37,7 +37,7 @@ class _StreamContext:
 
 
 @pytest.mark.asyncio
-async def test_download_pdf_success_and_failure(make_paper, tmp_path) -> None:
+async def test_download_pdf_success_and_failure(make_paper, tmp_path, caplog) -> None:
     paper = make_paper(arxiv_id="2401.50001")
     target = tmp_path / "pdfs" / "2401.50001.pdf"
 
@@ -70,6 +70,8 @@ async def test_download_pdf_success_and_failure(make_paper, tmp_path) -> None:
         ),
         patch("arxiv_browser.services.download_service.get_pdf_download_path", return_value=target),
     ):
+        caplog.clear()
+        caplog.set_level("WARNING", logger="arxiv_browser.services.download_service")
         client.stream = MagicMock(side_effect=OSError("network"))
         ok = await download_pdf(
             paper=paper,
@@ -80,3 +82,36 @@ async def test_download_pdf_success_and_failure(make_paper, tmp_path) -> None:
 
     assert ok is False
     assert list(target.parent.glob(".*.tmp")) == []
+    assert "PDF download failed for 2401.50001" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_download_pdf_replace_failure_cleans_temp_file(make_paper, tmp_path, caplog) -> None:
+    paper = make_paper(arxiv_id="2401.50002")
+    target = tmp_path / "pdfs" / "2401.50002.pdf"
+    response = _FakeResponse([b"%PDF-1.4", b" body"])
+    client = SimpleNamespace(stream=MagicMock(return_value=_StreamContext(response)))
+
+    with (
+        patch(
+            "arxiv_browser.services.download_service.get_pdf_url",
+            return_value="https://example/pdf",
+        ),
+        patch("arxiv_browser.services.download_service.get_pdf_download_path", return_value=target),
+        patch(
+            "arxiv_browser.services.download_service.os.replace", side_effect=OSError("disk full")
+        ),
+    ):
+        caplog.clear()
+        caplog.set_level("WARNING", logger="arxiv_browser.services.download_service")
+        ok = await download_pdf(
+            paper=paper,
+            config=UserConfig(),
+            client=client,
+            timeout_seconds=30,
+        )
+
+    assert ok is False
+    assert target.exists() is False
+    assert list(target.parent.glob(".*.tmp")) == []
+    assert "PDF download failed for 2401.50002" in caplog.text

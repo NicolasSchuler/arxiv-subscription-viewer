@@ -375,12 +375,9 @@ class TestRelevanceBatchCoverage:
         app._relevance_scoring_active = True
         app._scoring_progress = None
         app._llm_provider = object()
-
-        with (
-            patch("arxiv_browser.app._load_all_relevance_scores", return_value={}),
-            patch(
-                "arxiv_browser.app._score_relevance_once_service",
-                new=AsyncMock(
+        app._services = SimpleNamespace(
+            llm=SimpleNamespace(
+                score_relevance_once=AsyncMock(
                     side_effect=[
                         (9, "great match"),
                         None,
@@ -388,8 +385,12 @@ class TestRelevanceBatchCoverage:
                         RuntimeError("provider crash"),
                         (6, "partial match"),
                     ]
-                ),
-            ),
+                )
+            )
+        )
+
+        with (
+            patch("arxiv_browser.app._load_all_relevance_scores", return_value={}),
             patch("arxiv_browser.app._save_relevance_score", return_value=None),
         ):
             await app._score_relevance_batch_async(papers, "cmd {prompt}", "relevance interests")
@@ -918,14 +919,16 @@ class TestDownloadClipboardAndOpenCoverage:
         app._config = UserConfig()
         paper = make_paper(arxiv_id="2401.50001")
         client = object()
+        service_mock = AsyncMock(return_value=True)
+        app._services = SimpleNamespace(download=SimpleNamespace(download_pdf=service_mock))
 
-        with patch("arxiv_browser.app._download_pdf_service", return_value=True) as service_mock:
-            ok = await app._download_pdf_async(paper, client)
+        ok = await app._download_pdf_async(paper, client)
         assert ok is True
         service_mock.assert_awaited_once()
 
-        with patch("arxiv_browser.app._download_pdf_service", return_value=False) as service_mock:
-            ok = await app._download_pdf_async(paper, client)
+        service_mock.reset_mock()
+        service_mock.return_value = False
+        ok = await app._download_pdf_async(paper, client)
         assert ok is False
         service_mock.assert_awaited_once()
 
@@ -934,6 +937,26 @@ class TestDownloadClipboardAndOpenCoverage:
         app = _new_app()
         paper = make_paper(arxiv_id="2401.50002")
         app._download_pdf_async = AsyncMock(return_value=False)
+        app._download_results = {}
+        app._download_total = 1
+        app._downloading = {paper.arxiv_id}
+        app._update_download_progress = MagicMock()
+        app._start_downloads = MagicMock()
+        app._finish_download_batch = MagicMock()
+
+        await app._process_single_download(paper)
+
+        assert app._download_results[paper.arxiv_id] is False
+        assert paper.arxiv_id not in app._downloading
+        app._update_download_progress.assert_called_once_with(1, 1)
+        app._start_downloads.assert_called_once()
+        app._finish_download_batch.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_process_single_download_handles_download_exception(self, make_paper):
+        app = _new_app()
+        paper = make_paper(arxiv_id="2401.50003")
+        app._download_pdf_async = AsyncMock(side_effect=RuntimeError("boom"))
         app._download_results = {}
         app._download_total = 1
         app._downloading = {paper.arxiv_id}
@@ -1254,22 +1277,53 @@ class TestStatusCommandPaletteAndChatCoverage:
 
 class TestArxivApiAndSimilarityCoverage:
     @pytest.mark.asyncio
+    async def test_arxiv_api_service_injection_controls_label_rate_limit_and_page(self, make_paper):
+        from arxiv_browser.models import ArxivSearchRequest
+
+        request = ArxivSearchRequest(query="transformers", field="all", category="")
+        app = _new_app()
+        app.notify = MagicMock()
+        app._last_arxiv_api_request_at = 1.0
+        app._http_client = object()
+        app._services = SimpleNamespace(
+            arxiv_api=SimpleNamespace(
+                format_query_label=MagicMock(return_value="custom-label"),
+                enforce_rate_limit=AsyncMock(return_value=(4.5, 1.2)),
+                fetch_page=AsyncMock(return_value=[make_paper(arxiv_id="2401.70000")]),
+            )
+        )
+
+        label = app._format_arxiv_search_label(request)
+        assert label == "custom-label"
+
+        await app._apply_arxiv_rate_limit()
+        assert app._last_arxiv_api_request_at == 4.5
+        assert "Waiting 1.2s for arXiv API rate limit" in app.notify.call_args[0][0]
+
+        papers = await app._fetch_arxiv_api_page(request, start=0, max_results=5)
+        assert [paper.arxiv_id for paper in papers] == ["2401.70000"]
+
+    @pytest.mark.asyncio
     async def test_fetch_arxiv_api_page_with_and_without_shared_client(self, make_paper):
         request = SimpleNamespace(query="transformers", field="all", category="")
 
         app = _new_app()
         app._apply_arxiv_rate_limit = AsyncMock()
         app._http_client = object()
+        app._services = SimpleNamespace(
+            arxiv_api=SimpleNamespace(fetch_page=AsyncMock(return_value=[make_paper()]))
+        )
 
-        with patch("arxiv_browser.app._fetch_arxiv_api_page_service", return_value=[make_paper()]):
-            papers = await app._fetch_arxiv_api_page(request, start=0, max_results=5)
+        papers = await app._fetch_arxiv_api_page(request, start=0, max_results=5)
         assert len(papers) == 1
 
         app2 = _new_app()
         app2._apply_arxiv_rate_limit = AsyncMock()
         app2._http_client = None
-        with patch("arxiv_browser.app._fetch_arxiv_api_page_service", return_value=[make_paper()]):
-            papers2 = await app2._fetch_arxiv_api_page(request, start=0, max_results=5)
+        app2._services = SimpleNamespace(
+            arxiv_api=SimpleNamespace(fetch_page=AsyncMock(return_value=[make_paper()]))
+        )
+        papers2 = await app2._fetch_arxiv_api_page(request, start=0, max_results=5)
         assert len(papers2) == 1
 
     def test_show_similar_actions_dispatch_and_local_paths(self, make_paper):
@@ -1538,22 +1592,21 @@ class TestAutoTagAndPdfOpenCoverage:
         app.notify = MagicMock()
         app._llm_provider = object()
         paper = make_paper(arxiv_id="2401.90001")
+        suggest_tags = AsyncMock(side_effect=app_mod._LLMExecutionError("bad command"))
+        app._services = SimpleNamespace(llm=SimpleNamespace(suggest_tags_once=suggest_tags))
 
-        with patch(
-            "arxiv_browser.app._suggest_tags_once_service",
-            side_effect=app_mod._LLMExecutionError("bad command"),
-        ):
-            result = await app._call_auto_tag_llm(paper, ["topic:ml"])
+        result = await app._call_auto_tag_llm(paper, ["topic:ml"])
         assert result is None
         app.notify.assert_not_called()
 
-        with patch("arxiv_browser.app._suggest_tags_once_service", return_value=None):
-            result = await app._call_auto_tag_llm(paper, ["topic:ml"])
+        suggest_tags.side_effect = None
+        suggest_tags.return_value = None
+        result = await app._call_auto_tag_llm(paper, ["topic:ml"])
         assert result is None
         assert "Could not parse LLM response" in app.notify.call_args[0][0]
 
-        with patch("arxiv_browser.app._suggest_tags_once_service", return_value=["topic:ml"]):
-            result = await app._call_auto_tag_llm(paper, ["topic:ml"])
+        suggest_tags.return_value = ["topic:ml"]
+        result = await app._call_auto_tag_llm(paper, ["topic:ml"])
         assert result == ["topic:ml"]
 
         app._config = UserConfig()
@@ -1763,6 +1816,37 @@ class TestLlmProviderGuards:
         app._llm_provider = None
         result = await app._call_auto_tag_llm(make_paper(), ["topic:ml"])
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_generate_summary_uses_injected_llm_service(self, make_paper, tmp_path):
+        app = _new_app()
+        paper = make_paper(arxiv_id="2401.90999")
+        app._llm_provider = object()
+        app._summary_loading = {paper.arxiv_id}
+        app._paper_summaries = {}
+        app._summary_mode_label = {}
+        app._summary_command_hash = {}
+        app._summary_db_path = tmp_path / "summaries.db"
+        app._update_abstract_display = MagicMock()
+        app.notify = MagicMock()
+        app._http_client = None
+        generate_summary = AsyncMock(return_value=("service summary", None))
+        app._services = SimpleNamespace(llm=SimpleNamespace(generate_summary=generate_summary))
+
+        with patch("arxiv_browser.app.asyncio.to_thread", new=AsyncMock(return_value=None)):
+            await app._generate_summary_async(
+                paper,
+                "prompt_template",
+                "hash123",
+                mode_label="Q",
+                use_full_paper_content=False,
+            )
+
+        assert app._paper_summaries[paper.arxiv_id] == "service summary"
+        assert app._summary_mode_label[paper.arxiv_id] == "Q"
+        assert app._summary_command_hash[paper.arxiv_id] == "hash123"
+        assert paper.arxiv_id not in app._summary_loading
+        generate_summary.assert_awaited_once()
 
 
 # ============================================================================
