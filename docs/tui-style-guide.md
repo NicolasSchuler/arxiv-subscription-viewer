@@ -50,7 +50,7 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 - Search footer should emphasize immediate flow:
 - `type to search`, `Enter apply`, `Esc clear`, `↑↓ move`, `? help`.
 - API footer should emphasize mode exits and paging:
-- `[/] page`, `Ctrl+e exit`, `A new query`, `o open`, `? help`.
+- `[/] page`, `Esc/Ctrl+e exit`, `A new query`, `o open`, `? help`.
 - API empty states must mention both recovery paths:
 - Pagination keys (`[` and `]`) and exit keys (`Esc` or `Ctrl+e`).
 
@@ -74,9 +74,13 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 - Optional detail: `<count/location/context>.`
 - Progress template:
 - `<Action> <progress-bar> <done>/<total>`
+- Confirmation template:
+- Body explains impact only; do not embed key legends in the message body.
+- Confirm/cancel hints belong in modal chrome (for example `Confirm: y  Cancel: n / Esc`).
 - Empty-state template:
 - `No <entity> found.`
 - `Try: <next command or filter adjustment>.`
+- Edit/manage modals must include a `Try:` next step when empty.
 
 ## 8. Tables, Lists, Truncation, Wrapping
 
@@ -86,6 +90,8 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 - arXiv ID, category, and high-value badges (for example relevance/version).
 - In compact status mode, keep only immediate context:
 - primary count/query, selection count, sort, API page/loading, S2, HF.
+- Compact token casing rules:
+- Use `API p<N>` for API page and `Loading...` for active loading tokens.
 - Omit lower-priority compact tokens such as preview/version details.
 
 ## 9. Help And Discoverability
@@ -106,9 +112,11 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 
 - [ ] New or changed UI copy uses the terminology canon.
 - [ ] `Ctrl+e` copy uses canonical browse/API wording.
+- [ ] API footer copy uses `Esc/Ctrl+e exit`.
 - [ ] Footer preserves the capped hierarchy and context-slot policy.
 - [ ] `Ctrl+p palette` and `? help` remain visible in browse contexts.
 - [ ] Every empty state includes a concrete `Try:` next step.
+- [ ] Confirm modals keep impact text in body and key hints in modal chrome.
 - [ ] Error text includes actionable recovery guidance.
 - [ ] Non-color/ASCII compatibility remains intact.
 - [ ] Tests cover changed help/footer/status/empty/error strings.

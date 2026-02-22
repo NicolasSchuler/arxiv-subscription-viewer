@@ -39,7 +39,7 @@ _SEARCH_FOOTER_BINDINGS: tuple[tuple[str, str], ...] = (
 
 _API_FOOTER_BINDINGS: tuple[tuple[str, str], ...] = (
     ("[/]", "page"),
-    ("Ctrl+e", "exit"),
+    ("Esc/Ctrl+e", "exit"),
     ("A", "new query"),
     ("o", "open"),
     ("?", "help"),
@@ -231,7 +231,7 @@ def _compact_flag_segment(*, active: bool, loading: bool, count: int, label: str
     if not active:
         return None
     if loading:
-        return f"{label} loading"
+        return f"{label} Loading..."
     if count > 0:
         return f"{label}:{count}"
     return label
@@ -285,9 +285,9 @@ def _build_compact_status_parts(
     if selected_count > 0:
         parts.insert(1, f"{selected_count} selected")
     if in_arxiv_api_mode and api_page is not None:
-        parts.extend([f"api p{api_page}"])
+        parts.extend([f"API p{api_page}"])
         if arxiv_api_loading:
-            parts.append("loading")
+            parts.append("Loading...")
 
     s2_segment = _compact_flag_segment(
         active=s2_active, loading=s2_loading, count=s2_count, label="S2"

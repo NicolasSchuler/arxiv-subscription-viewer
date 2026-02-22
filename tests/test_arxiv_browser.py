@@ -1692,7 +1692,8 @@ class TestStatusFilterRegressions:
             max_width=80,
         )
         assert " | " in status
-        assert "api p2" in status
+        assert "API p2" in status
+        assert "Loading..." in status
         assert "preview" not in status.lower()
         assert "updated" not in status.lower()
         assert len(status) <= 83  # allow tiny ellipsis overhead
@@ -5054,6 +5055,16 @@ class TestBatchConfirmationThreshold:
 
         modal = ConfirmModal("Test message?")
         assert modal._message == "Test message?"
+
+    def test_confirm_modal_compose_copy(self):
+        import inspect
+
+        from arxiv_browser.modals import ConfirmModal
+
+        source = inspect.getsource(ConfirmModal.compose)
+        assert "Confirm (y)" in source
+        assert "Cancel (Esc)" in source
+        assert "Confirm: y  Cancel: n / Esc" in source
 
 
 @pytest.mark.integration
@@ -10720,6 +10731,8 @@ class TestExportMenuModal:
         binding_keys = {b.key for b in ExportMenuModal.BINDINGS}
         expected = {"escape", "c", "b", "m", "r", "v", "t", "B", "R", "C"}
         assert expected <= binding_keys
+        binding_descriptions = {b.key: b.description for b in ExportMenuModal.BINDINGS}
+        assert binding_descriptions["t"] == "Markdown table"
 
     def test_action_cancel_dismisses_empty_string(self):
         from unittest.mock import MagicMock
@@ -10870,6 +10883,15 @@ class TestExportMenuModal:
         from arxiv_browser.modals import ExportMenuModal
 
         assert "Cancel: Esc" in inspect.getsource(ExportMenuModal.compose)
+
+    def test_compose_uses_markdown_table_copy(self):
+        import inspect
+
+        from arxiv_browser.modals import ExportMenuModal
+
+        source = inspect.getsource(ExportMenuModal.compose)
+        assert "Markdown table" in source
+        assert "Md table" not in source
 
 
 # ============================================================================
@@ -12228,7 +12250,7 @@ class TestFooterDiscoverability:
         assert ("Esc", "clear") in FOOTER_CONTEXTS["search"]
         assert ("↑↓", "move") in FOOTER_CONTEXTS["search"]
         assert ("[/]", "page") in FOOTER_CONTEXTS["api"]
-        assert ("Ctrl+e", "exit") in FOOTER_CONTEXTS["api"]
+        assert ("Esc/Ctrl+e", "exit") in FOOTER_CONTEXTS["api"]
         assert ("A", "new query") in FOOTER_CONTEXTS["api"]
 
     def test_footer_context_alias_matches_chrome_builders(self):

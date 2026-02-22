@@ -169,15 +169,24 @@ class TestIoActionHelpers:
 
         assert requires_batch_confirmation(4, 3) is True
         assert requires_batch_confirmation(3, 3) is False
-        assert "Open 4 papers in your browser?" in build_open_papers_confirmation_prompt(4)
-        assert "This may open many tabs." in build_open_papers_confirmation_prompt(4)
-        assert "Open 5 PDFs in your browser?" in build_open_pdfs_confirmation_prompt(5)
-        assert "viewer windows" in build_open_pdfs_confirmation_prompt(5)
-        assert "Download 6 PDFs?" in build_download_pdfs_confirmation_prompt(6)
-        assert (
-            "Already-downloaded files will be skipped."
-            in build_download_pdfs_confirmation_prompt(6)
-        )
+        open_papers_prompt = build_open_papers_confirmation_prompt(4)
+        open_pdfs_prompt = build_open_pdfs_confirmation_prompt(5)
+        download_prompt = build_download_pdfs_confirmation_prompt(6)
+
+        assert "Open 4 papers in your browser?" in open_papers_prompt
+        assert "This may open many tabs." in open_papers_prompt
+        assert "[y]" not in open_papers_prompt
+        assert "[n/Esc]" not in open_papers_prompt
+
+        assert "Open 5 PDFs in your browser?" in open_pdfs_prompt
+        assert "viewer windows" in open_pdfs_prompt
+        assert "[y]" not in open_pdfs_prompt
+        assert "[n/Esc]" not in open_pdfs_prompt
+
+        assert "Download 6 PDFs?" in download_prompt
+        assert "Already-downloaded files will be skipped." in download_prompt
+        assert "[y]" not in download_prompt
+        assert "[n/Esc]" not in download_prompt
         assert build_open_papers_notification(1) == "Opening 1 paper in your browser..."
         assert build_open_papers_notification(2) == "Opening 2 papers in your browser..."
         assert build_open_pdfs_notification(1) == "Opening 1 PDF..."

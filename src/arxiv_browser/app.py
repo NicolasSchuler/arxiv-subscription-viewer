@@ -3613,8 +3613,8 @@ class ArxivBrowser(App):
                 ConfirmModal(
                     f"{prompt_heading}\n"
                     f"{command_preview}\n\n"
-                    "This command executes on your machine.\n\n"
-                    f"[y] Trust & {trust_button_label}  [n/Esc] Cancel"
+                    "This command executes on your machine.\n"
+                    f"Confirm to trust and {trust_button_label.lower()}."
                 ),
                 _on_decision,
             )

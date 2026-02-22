@@ -36,8 +36,7 @@ def build_open_papers_confirmation_prompt(item_count: int) -> str:
     """Build confirmation prompt text for opening paper URLs."""
     return (
         f"Open {item_count} paper{'s' if item_count != 1 else ''} in your browser?\n"
-        "This may open many tabs.\n\n"
-        "[y] Confirm  [n/Esc] Cancel"
+        "This may open many tabs."
     )
 
 
@@ -45,8 +44,7 @@ def build_open_pdfs_confirmation_prompt(item_count: int) -> str:
     """Build confirmation prompt text for opening PDF URLs."""
     return (
         f"Open {item_count} PDF{'s' if item_count != 1 else ''} in your browser?\n"
-        "This may open many tabs or viewer windows.\n\n"
-        "[y] Confirm  [n/Esc] Cancel"
+        "This may open many tabs or viewer windows."
     )
 
 
@@ -54,8 +52,7 @@ def build_download_pdfs_confirmation_prompt(item_count: int) -> str:
     """Build confirmation prompt text for starting PDF downloads."""
     return (
         f"Download {item_count} PDF{'s' if item_count != 1 else ''}?\n"
-        "Already-downloaded files will be skipped.\n\n"
-        "[y] Download  [n/Esc] Cancel"
+        "Already-downloaded files will be skipped."
     )
 
 

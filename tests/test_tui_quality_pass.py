@@ -537,6 +537,8 @@ async def test_watch_list_modal_add_update_delete_and_save(make_paper):
             match_type = modal.query_one("#watch-type", Select)
             case = modal.query_one("#watch-case", Checkbox)
             list_view = modal.query_one("#watch-list", ListView)
+            empty_hint = modal.query_one("#watch-empty", Static)
+            assert empty_hint.has_class("visible") is False
 
             modal.notify = MagicMock()
             pattern.value = ""
@@ -575,6 +577,10 @@ async def test_watch_list_modal_update_delete_require_selection(make_paper):
     with patch("arxiv_browser.app.save_config", return_value=True):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
+            empty_hint = modal.query_one("#watch-empty", Static)
+            assert "No watch entries yet." in str(empty_hint.content)
+            assert "Try:" in str(empty_hint.content)
+            assert empty_hint.has_class("visible")
             modal.notify = MagicMock()
             modal.on_update_pressed()
             assert "Select a watch entry to update" in modal.notify.call_args[0][0]

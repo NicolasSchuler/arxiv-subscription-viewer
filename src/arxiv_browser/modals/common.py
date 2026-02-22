@@ -175,8 +175,8 @@ class ConfirmModal(ModalScreen[bool]):
     """Modal dialog for confirming batch operations."""
 
     BINDINGS = [
-        Binding("y", "confirm", "Yes"),
-        Binding("n", "cancel", "No"),
+        Binding("y", "confirm", "Confirm"),
+        Binding("n", "cancel", "Cancel"),
         Binding("escape", "cancel", "Cancel"),
     ]
 
@@ -208,6 +208,11 @@ class ConfirmModal(ModalScreen[bool]):
     #confirm-buttons Button {
         margin-left: 1;
     }
+
+    #confirm-footer {
+        color: $th-muted;
+        margin-top: 1;
+    }
     """
 
     def __init__(self, message: str) -> None:
@@ -218,8 +223,9 @@ class ConfirmModal(ModalScreen[bool]):
         with Vertical(id="confirm-dialog"):
             yield Label(self._message, id="confirm-message")
             with Horizontal(id="confirm-buttons"):
-                yield Button("Yes (y)", variant="warning", id="confirm-yes")
-                yield Button("No (n)", variant="default", id="confirm-no")
+                yield Button("Confirm (y)", variant="warning", id="confirm-yes")
+                yield Button("Cancel (Esc)", variant="default", id="confirm-no")
+            yield Static("Confirm: y  Cancel: n / Esc", id="confirm-footer")
 
     def action_confirm(self) -> None:
         self.dismiss(True)
@@ -251,7 +257,7 @@ class ExportMenuModal(ModalScreen[str]):
         Binding("m", "do_clipboard_markdown", "Markdown", show=False),
         Binding("r", "do_clipboard_ris", "RIS", show=False),
         Binding("v", "do_clipboard_csv", "CSV", show=False),
-        Binding("t", "do_clipboard_mdtable", "Md table", show=False),
+        Binding("t", "do_clipboard_mdtable", "Markdown table", show=False),
         Binding("B", "do_file_bibtex", "BibTeX file", show=False),
         Binding("R", "do_file_ris", "RIS file", show=False),
         Binding("C", "do_file_csv", "CSV file", show=False),
@@ -308,7 +314,7 @@ class ExportMenuModal(ModalScreen[str]):
             yield Static(
                 f"  [{g}]c[/]  Plain text     [{g}]b[/]  BibTeX\n"
                 f"  [{g}]m[/]  Markdown       [{g}]r[/]  RIS\n"
-                f"  [{g}]v[/]  CSV            [{g}]t[/]  Md table",
+                f"  [{g}]v[/]  CSV            [{g}]t[/]  Markdown table",
                 classes="export-keys",
             )
             yield Label("[bold]File[/bold]", classes="export-section")
@@ -396,11 +402,27 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
     }
 
     #watch-list {
-        width: 2fr;
+        width: 100%;
         height: 1fr;
         background: $th-panel;
         border: none;
+    }
+
+    #watch-list-column {
+        width: 2fr;
+        height: 1fr;
         margin-right: 2;
+    }
+
+    #watch-empty {
+        color: $th-muted;
+        padding: 0 1;
+        margin-top: 1;
+        display: none;
+    }
+
+    #watch-empty.visible {
+        display: block;
     }
 
     #watch-form {
@@ -465,7 +487,12 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
         with Vertical(id="watch-dialog"):
             yield Label("Watch List Manager", id="watch-title")
             with Horizontal(id="watch-body"):
-                yield ListView(id="watch-list")
+                with Vertical(id="watch-list-column"):
+                    yield ListView(id="watch-list")
+                    yield Static(
+                        "No watch entries yet.\nTry: add a pattern on the right, then press Add.",
+                        id="watch-empty",
+                    )
                 with Vertical(id="watch-form"):
                     yield Label("Pattern")
                     yield Input(placeholder="e.g., diffusion", id="watch-pattern")
@@ -489,6 +516,7 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
 
     def _refresh_list(self) -> None:
         list_view = self.query_one("#watch-list", ListView)
+        empty_hint = self.query_one("#watch-empty", Static)
         list_view.clear()
         for entry in self._entries:
             label = f"{entry.match_type}: {entry.pattern}"
@@ -498,6 +526,9 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
         if list_view.children:
             list_view.index = 0
             self._populate_form(list_view.highlighted_child)
+            empty_hint.remove_class("visible")
+        else:
+            empty_hint.add_class("visible")
 
     def _populate_form(self, item: ListItem | None) -> None:
         if not isinstance(item, WatchListItem):
