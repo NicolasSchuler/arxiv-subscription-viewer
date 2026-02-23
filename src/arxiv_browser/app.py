@@ -51,6 +51,8 @@ Search filters:
     AND/OR/NOT      - Combine terms with boolean operators
 """
 
+# ruff: noqa: F401
+
 import asyncio
 import hashlib
 import logging
@@ -96,7 +98,7 @@ from arxiv_browser.action_messages import (
 from arxiv_browser.cli import (
     _configure_color_mode,
     _configure_logging,
-    _resolve_legacy_fallback,  # noqa: F401
+    _resolve_legacy_fallback,
     _resolve_papers,
     _validate_interactive_tty,
 )
@@ -104,7 +106,7 @@ from arxiv_browser.cli import (
     main as _cli_main,
 )
 from arxiv_browser.config import *  # noqa: F403
-from arxiv_browser.config import (  # noqa: F401
+from arxiv_browser.config import (
     CONFIG_APP_NAME,
     CONFIG_FILENAME,
     _coerce_arxiv_api_max_results,
@@ -158,7 +160,7 @@ from arxiv_browser.io_actions import (
     write_timestamped_export_file,
 )
 from arxiv_browser.llm import *  # noqa: F403
-from arxiv_browser.llm import (  # noqa: F401
+from arxiv_browser.llm import (
     AUTO_TAG_PROMPT_TEMPLATE,
     CHAT_SYSTEM_PROMPT,
     DEFAULT_LLM_PROMPT,
@@ -304,7 +306,7 @@ from arxiv_browser.services.llm_service import (
     LLMExecutionError as _LLMExecutionError,
 )
 from arxiv_browser.similarity import *  # noqa: F403
-from arxiv_browser.similarity import (  # noqa: F401
+from arxiv_browser.similarity import (
     SIMILARITY_READ_PENALTY,
     SIMILARITY_RECENCY_DAYS,
     SIMILARITY_RECENCY_WEIGHT,
@@ -1419,25 +1421,14 @@ class ArxivBrowser(App):
         self._pending_detail_started_at = None
 
     def action_toggle_search(self) -> None:
-        """Toggle search input visibility."""
-        container = self._get_search_container_widget()
-        if "visible" in container.classes:
-            container.remove_class("visible")
-        else:
-            container.add_class("visible")
-            self._get_search_input_widget().focus()
-        self._update_footer()
+        from arxiv_browser.actions import search_api_actions as _actions
+
+        return _actions.action_toggle_search(self)
 
     def action_cancel_search(self) -> None:
-        """Cancel search and hide input."""
-        container = self._get_search_container_widget()
-        if "visible" in container.classes:
-            container.remove_class("visible")
-            search_input = self._get_search_input_widget()
-            search_input.value = ""
-            self._apply_filter("")
-        if self._in_arxiv_api_mode:
-            self.action_exit_arxiv_search_mode()
+        from arxiv_browser.actions import search_api_actions as _actions
+
+        return _actions.action_cancel_search(self)
 
     def _capture_local_browse_snapshot(self) -> LocalBrowseSnapshot | None:
         """Capture local browsing state before entering API search mode."""
@@ -1504,92 +1495,24 @@ class ArxivBrowser(App):
             self._track_task(self._update_bookmark_bar())
 
     def action_ctrl_e_dispatch(self) -> None:
-        """Context-sensitive Ctrl+e: exit API mode if active, else toggle S2."""
-        if self._in_arxiv_api_mode:
-            self.action_exit_arxiv_search_mode()
-        else:
-            self.action_toggle_s2()
+        from arxiv_browser.actions import ui_actions as _actions
+
+        return _actions.action_ctrl_e_dispatch(self)
 
     def action_toggle_s2(self) -> None:
-        """Toggle Semantic Scholar enrichment and persist the setting."""
-        prev_state = self._s2_active
-        self._s2_active = not self._s2_active
-        self._config.s2_enabled = self._s2_active
-        if not save_config(self._config):
-            self._s2_active = prev_state
-            self._config.s2_enabled = prev_state
-            self.notify(
-                "Failed to save Semantic Scholar setting",
-                title="S2",
-                severity="error",
-            )
-            return
-        state = "enabled" if self._s2_active else "disabled"
-        self.notify(f"Semantic Scholar {state}", title="S2")
-        self._update_status_bar()
-        self._get_ui_refresh_coordinator().refresh_detail_pane()
-        self._mark_badges_dirty("s2", immediate=True)
+        from arxiv_browser.actions import ui_actions as _actions
+
+        return _actions.action_toggle_s2(self)
 
     async def action_fetch_s2(self) -> None:
-        """Fetch Semantic Scholar data for the currently highlighted paper."""
-        if not self._s2_active:
-            self.notify("S2 is disabled (Ctrl+e to enable)", title="S2", severity="warning")
-            return
-        paper = self._get_current_paper()
-        if not paper:
-            return
-        aid = paper.arxiv_id
-        if aid in self._s2_loading:
-            return  # Already fetching
-        if aid in self._s2_cache:
-            self.notify("S2 data already loaded", title="S2")
-            return
-        self._s2_loading.add(aid)
-        self._get_ui_refresh_coordinator().refresh_detail_pane()  # Show loading indicator immediately
-        # Try SQLite cache first (off main thread)
-        try:
-            cached = await asyncio.to_thread(
-                load_s2_paper, self._s2_db_path, aid, self._config.s2_cache_ttl_days
-            )
-        except Exception:
-            self._s2_loading.discard(aid)
-            logger.warning("S2 cache lookup failed for %s", aid, exc_info=True)
-            self.notify("S2 fetch failed", title="S2", severity="error")
-            return
-        if cached:
-            self._s2_cache[aid] = cached
-            self._s2_loading.discard(aid)
-            self._get_ui_refresh_coordinator().refresh_detail_and_list_item()
-            return
-        # Fetch from API
-        try:
-            self._track_task(self._fetch_s2_paper_async(aid))
-        except Exception:
-            self._s2_loading.discard(aid)
-            raise
+        from arxiv_browser.actions import ui_actions as _actions
+
+        return await _actions.action_fetch_s2(self)
 
     async def _fetch_s2_paper_async(self, arxiv_id: str) -> None:
-        """Fetch S2 paper data and update UI on completion."""
-        try:
-            result = await _load_or_fetch_s2_paper_cached(
-                arxiv_id=arxiv_id,
-                db_path=self._s2_db_path,
-                cache_ttl_days=self._config.s2_cache_ttl_days,
-                client=self._http_client,
-                api_key=self._config.s2_api_key,
-            )
-            if result is None:
-                self.notify("No S2 data found", title="S2", severity="warning")
-                return
-            # Cache in memory + SQLite
-            self._s2_cache[arxiv_id] = result
-            # Update UI if still relevant
-            self._get_ui_refresh_coordinator().refresh_detail_and_list_item()
-        except Exception:
-            logger.warning("S2 fetch failed for %s", arxiv_id, exc_info=True)
-            self.notify("S2 fetch failed", title="S2", severity="error")
-        finally:
-            self._s2_loading.discard(arxiv_id)
+        from arxiv_browser.actions import ui_actions as _actions
+
+        return await _actions._fetch_s2_paper_async(self, arxiv_id)
 
     def _s2_state_for(self, arxiv_id: str) -> tuple[SemanticScholarPaper | None, bool]:
         """Return (s2_data, s2_loading) for a paper, respecting the active toggle."""
@@ -1602,85 +1525,19 @@ class ArxivBrowser(App):
     # ========================================================================
 
     async def action_toggle_hf(self) -> None:
-        """Toggle HuggingFace trending on/off and persist the setting."""
-        prev_state = self._hf_active
-        self._hf_active = not self._hf_active
-        self._config.hf_enabled = self._hf_active
-        if not save_config(self._config):
-            self._hf_active = prev_state
-            self._config.hf_enabled = prev_state
-            self.notify(
-                "Failed to save HuggingFace setting",
-                title="HF",
-                severity="error",
-            )
-            return
-        if self._hf_active:
-            self.notify("HuggingFace trending enabled", title="HF")
-            if not self._hf_cache:
-                await self._fetch_hf_daily()
-        else:
-            self.notify("HuggingFace trending disabled", title="HF")
-        self._update_status_bar()
-        self._get_ui_refresh_coordinator().refresh_detail_pane()
-        self._mark_badges_dirty("hf", immediate=True)
+        from arxiv_browser.actions import ui_actions as _actions
+
+        return await _actions.action_toggle_hf(self)
 
     async def _fetch_hf_daily(self) -> None:
-        """Fetch HF daily papers list and update caches."""
-        if self._hf_loading:
-            return
-        self._hf_loading = True
-        self._update_status_bar()
-        # Try SQLite cache first
-        try:
-            cached = await asyncio.to_thread(
-                load_hf_daily_cache, self._hf_db_path, self._config.hf_cache_ttl_hours
-            )
-        except Exception:
-            self._hf_loading = False
-            self._update_status_bar()
-            logger.warning("HF cache lookup failed", exc_info=True)
-            self.notify("HF fetch failed", title="HF", severity="error")
-            return
-        if cached is not None:
-            self._hf_cache = cached
-            self._hf_loading = False
-            self._get_ui_refresh_coordinator().refresh_detail_pane()
-            self._mark_badges_dirty("hf")
-            matched = count_hf_matches(self._hf_cache, self._papers_by_id)
-            self.notify(f"HF: {matched} trending papers matched", title="HF")
-            self._update_status_bar()
-            return
-        # Fetch from API
-        try:
-            self._track_task(self._fetch_hf_daily_async())
-        except Exception:
-            self._hf_loading = False
-            self._update_status_bar()
-            raise
+        from arxiv_browser.actions import ui_actions as _actions
+
+        return await _actions._fetch_hf_daily(self)
 
     async def _fetch_hf_daily_async(self) -> None:
-        """Background task: fetch HF daily papers and update UI."""
-        try:
-            papers = await _load_or_fetch_hf_daily_cached(
-                db_path=self._hf_db_path,
-                cache_ttl_hours=self._config.hf_cache_ttl_hours,
-                client=self._http_client,
-            )
-            if not papers:
-                self.notify("No HF trending data found", title="HF", severity="warning")
-                return
-            self._hf_cache = {p.arxiv_id: p for p in papers}
-            self._get_ui_refresh_coordinator().refresh_detail_pane()
-            self._mark_badges_dirty("hf")
-            matched = count_hf_matches(self._hf_cache, self._papers_by_id)
-            self.notify(f"HF: {matched} trending papers matched", title="HF")
-        except Exception:
-            logger.warning("HF daily fetch failed", exc_info=True)
-            self.notify("HF fetch failed", title="HF", severity="error")
-        finally:
-            self._hf_loading = False
-            self._update_status_bar()
+        from arxiv_browser.actions import ui_actions as _actions
+
+        return await _actions._fetch_hf_daily_async(self)
 
     def _hf_state_for(self, arxiv_id: str) -> HuggingFacePaper | None:
         """Return HF data for a paper if HF is active, else None."""
@@ -1775,23 +1632,9 @@ class ArxivBrowser(App):
     VERSION_CHECK_BATCH_SIZE = 40  # IDs per API request (URL length safe)
 
     async def action_check_versions(self) -> None:
-        """Check starred papers for newer arXiv versions."""
-        if self._version_checking:
-            self.notify("Version check already in progress", title="Versions")
-            return
+        from arxiv_browser.actions import ui_actions as _actions
 
-        starred_ids = get_starred_paper_ids_for_version_check(self._config.paper_metadata)
-        if not starred_ids:
-            self.notify("No starred papers to check", title="Versions")
-            return
-
-        self._version_checking = True
-        self._update_status_bar()
-        self.notify(
-            f"Checking {len(starred_ids)} starred papers...",
-            title="Versions",
-        )
-        self._track_task(self._check_versions_async(starred_ids))
+        return await _actions.action_check_versions(self)
 
     async def _check_versions_async(self, arxiv_ids: set[str]) -> None:
         """Background task: check starred papers for newer arXiv versions."""
@@ -1886,65 +1729,24 @@ class ArxivBrowser(App):
             self._update_option_at_index(idx)
 
     def action_exit_arxiv_search_mode(self) -> None:
-        """Exit API search mode and restore local papers."""
-        if not self._in_arxiv_api_mode:
-            return
+        from arxiv_browser.actions import search_api_actions as _actions
 
-        # Invalidate in-flight responses from older requests.
-        self._arxiv_api_request_token += 1
-
-        self._in_arxiv_api_mode = False
-        self._arxiv_search_state = None
-        self._arxiv_api_fetch_inflight = False
-        self._arxiv_api_loading = False
-        self._restore_local_browse_snapshot()
-        self._local_browse_snapshot = None
-        self._update_header()
-        self.notify("Exited arXiv API mode", title="arXiv Search")
+        return _actions.action_exit_arxiv_search_mode(self)
 
     def action_arxiv_search(self) -> None:
-        """Open modal to search all arXiv."""
-        default_query = ""
-        default_field = "all"
-        default_category = ""
-        if self._arxiv_search_state is not None:
-            default_query = self._arxiv_search_state.request.query
-            default_field = self._arxiv_search_state.request.field
-            default_category = self._arxiv_search_state.request.category
+        from arxiv_browser.actions import search_api_actions as _actions
 
-        def on_search(request: ArxivSearchRequest | None) -> None:
-            if request is None:
-                return
-            self._track_task(self._run_arxiv_search(request, start=0))
-
-        self.push_screen(
-            ArxivSearchModal(
-                initial_query=default_query,
-                initial_field=default_field,
-                initial_category=default_category,
-            ),
-            on_search,
-        )
+        return _actions.action_arxiv_search(self)
 
     def _format_arxiv_search_label(self, request: ArxivSearchRequest) -> str:
-        """Build a human-readable query label for API mode UI."""
-        return self._get_services().arxiv_api.format_query_label(request)
+        from arxiv_browser.actions import search_api_actions as _actions
+
+        return _actions._format_arxiv_search_label(self, request)
 
     async def _apply_arxiv_rate_limit(self) -> None:
-        """Sleep as needed to respect arXiv API rate limits."""
-        loop = asyncio.get_running_loop()
-        new_last_request_at, wait_seconds = await self._get_services().arxiv_api.enforce_rate_limit(
-            last_request_at=self._last_arxiv_api_request_at,
-            min_interval_seconds=ARXIV_API_MIN_INTERVAL_SECONDS,
-            now=loop.time,
-            sleep=asyncio.sleep,
-        )
-        if wait_seconds > 0:
-            self.notify(
-                f"Waiting {wait_seconds:.1f}s for arXiv API rate limit",
-                title="arXiv Search",
-            )
-        self._last_arxiv_api_request_at = new_last_request_at
+        from arxiv_browser.actions import search_api_actions as _actions
+
+        return await _actions._apply_arxiv_rate_limit(self)
 
     async def _fetch_arxiv_api_page(
         self,
@@ -1952,16 +1754,9 @@ class ArxivBrowser(App):
         start: int,
         max_results: int,
     ) -> list[Paper]:
-        """Fetch one page of results from arXiv API."""
-        await self._apply_arxiv_rate_limit()
-        return await self._get_services().arxiv_api.fetch_page(
-            client=self._http_client,
-            request=request,
-            start=start,
-            max_results=max_results,
-            timeout_seconds=ARXIV_API_TIMEOUT,
-            user_agent="arxiv-subscription-viewer/1.0",
-        )
+        from arxiv_browser.actions import search_api_actions as _actions
+
+        return await _actions._fetch_arxiv_api_page(self, request, start, max_results)
 
     def _apply_arxiv_search_results(
         self,
@@ -1970,130 +1765,14 @@ class ArxivBrowser(App):
         max_results: int,
         papers: list[Paper],
     ) -> None:
-        """Switch UI to API mode and render fetched papers."""
-        was_in_api_mode = self._in_arxiv_api_mode
-        if not was_in_api_mode and self._local_browse_snapshot is None:
-            self._local_browse_snapshot = self._capture_local_browse_snapshot()
+        from arxiv_browser.actions import search_api_actions as _actions
 
-        self._in_arxiv_api_mode = True
-        self._arxiv_search_state = ArxivSearchModeState(
-            request=request,
-            start=start,
-            max_results=max_results,
-        )
-
-        # API mode has its own paper set and selection state.
-        self.all_papers = papers
-        self.filtered_papers = papers.copy()
-        self._papers_by_id = {paper.arxiv_id: paper for paper in papers}
-        self.selected_ids.clear()
-        if not was_in_api_mode:
-            # First API entry starts unfiltered; subsequent pages preserve user choice.
-            self._watch_filter_active = False
-        self._pending_query = ""
-        self._highlight_terms = {"title": [], "author": [], "abstract": []}
-        self._match_scores.clear()
-        try:
-            self._get_search_input_widget().value = ""
-        except NoMatches:
-            pass
-
-        self._compute_watched_papers()
-        if self._watch_filter_active:
-            self.filtered_papers = [
-                paper for paper in self.filtered_papers if paper.arxiv_id in self._watched_paper_ids
-            ]
-        self._sort_papers()
-        self._refresh_list_view()
-        self._update_header()
-
-        query_label = self._format_arxiv_search_label(request)
-        self.sub_title = f"API search · {truncate_text(query_label, 60)}"
-
-        try:
-            self._get_paper_list_widget().focus()
-        except NoMatches:
-            pass
+        return _actions._apply_arxiv_search_results(self, request, start, max_results, papers)
 
     async def _run_arxiv_search(self, request: ArxivSearchRequest, start: int) -> None:
-        """Execute an arXiv API search and display one results page."""
-        if self._arxiv_api_fetch_inflight:
-            self.notify("Search already in progress", title="arXiv Search")
-            return
+        from arxiv_browser.actions import search_api_actions as _actions
 
-        max_results = _coerce_arxiv_api_max_results(self._config.arxiv_api_max_results)
-        self._config.arxiv_api_max_results = max_results
-        start = max(0, start)
-
-        self._arxiv_api_request_token += 1
-        request_token = self._arxiv_api_request_token
-        self._arxiv_api_fetch_inflight = True
-        self._arxiv_api_loading = True
-        self._update_status_bar()
-
-        try:
-            papers = await self._fetch_arxiv_api_page(request, start, max_results)
-        except ValueError as exc:
-            self.notify(str(exc), title="arXiv Search", severity="error")
-            return
-        except httpx.HTTPStatusError as exc:
-            status_code = exc.response.status_code
-            if status_code == 429:
-                message = build_actionable_error(
-                    "run arXiv API search",
-                    why="arXiv API rate limit reached (HTTP 429)",
-                    next_step="wait a few seconds and retry with A",
-                )
-            elif status_code >= 500:
-                message = build_actionable_error(
-                    "run arXiv API search",
-                    why=f"arXiv API is unavailable right now (HTTP {status_code})",
-                    next_step="retry in a minute",
-                )
-            else:
-                message = build_actionable_error(
-                    "run arXiv API search",
-                    why=f"arXiv API rejected the request (HTTP {status_code})",
-                    next_step="refine the query and retry with A",
-                )
-            self.notify(message, title="arXiv Search", severity="error", timeout=8)
-            return
-        except (httpx.HTTPError, OSError) as exc:
-            self.notify(
-                build_actionable_error(
-                    "run arXiv API search",
-                    why="a network or I/O error occurred",
-                    next_step="check connectivity and retry with A",
-                ),
-                title="arXiv Search",
-                severity="error",
-                timeout=8,
-            )
-            logger.warning("arXiv search failed: %s", exc, exc_info=True)
-            return
-        finally:
-            if request_token == self._arxiv_api_request_token:
-                self._arxiv_api_fetch_inflight = False
-                self._arxiv_api_loading = False
-                self._update_status_bar()
-
-        # Ignore stale responses after mode exits or newer requests.
-        if request_token != self._arxiv_api_request_token:
-            return
-
-        if start > 0 and not papers:
-            self.notify("No more results", title="arXiv Search")
-            return
-
-        self._apply_arxiv_search_results(request, start, max_results, papers)
-        page_number = (start // max_results) + 1
-        if papers:
-            self.notify(
-                f"Loaded {len(papers)} results (page {page_number})",
-                title="arXiv Search",
-            )
-        else:
-            self.notify("No results found", title="arXiv Search")
+        return await _actions._run_arxiv_search(self, request, start)
 
     async def _change_arxiv_page(self, direction: int) -> None:
         """Move to the previous or next arXiv API results page."""
@@ -2112,14 +1791,14 @@ class ArxivBrowser(App):
         await self._run_arxiv_search(state.request, start=target_start)
 
     def action_cursor_down(self) -> None:
-        """Move cursor down (vim-style j key)."""
-        list_view = self._get_paper_list_widget()
-        list_view.action_cursor_down()
+        from arxiv_browser.actions import library_actions as _actions
+
+        return _actions.action_cursor_down(self)
 
     def action_cursor_up(self) -> None:
-        """Move cursor up (vim-style k key)."""
-        list_view = self._get_paper_list_widget()
-        list_view.action_cursor_up()
+        from arxiv_browser.actions import library_actions as _actions
+
+        return _actions.action_cursor_up(self)
 
     @on(Input.Submitted, "#search-input")
     def on_search_submitted(self, event: Input.Submitted) -> None:
@@ -2319,34 +1998,19 @@ class ArxivBrowser(App):
         self._apply_filter(self._pending_query)
 
     def action_toggle_select(self) -> None:
-        """Toggle selection of the currently highlighted paper."""
-        paper = self._get_current_paper()
-        if not paper:
-            return
-        aid = paper.arxiv_id
-        if aid in self.selected_ids:
-            self.selected_ids.discard(aid)
-        else:
-            self.selected_ids.add(aid)
-        idx = self._get_current_index()
-        if idx is not None:
-            self._update_option_at_index(idx)
-        self._update_header()
+        from arxiv_browser.actions import library_actions as _actions
+
+        return _actions.action_toggle_select(self)
 
     def action_select_all(self) -> None:
-        """Select all currently visible papers."""
-        for paper in self.filtered_papers:
-            self.selected_ids.add(paper.arxiv_id)
-        for i in range(len(self.filtered_papers)):
-            self._update_option_at_index(i)
-        self._update_header()
+        from arxiv_browser.actions import library_actions as _actions
+
+        return _actions.action_select_all(self)
 
     def action_clear_selection(self) -> None:
-        """Clear all selections."""
-        self.selected_ids.clear()
-        for i in range(len(self.filtered_papers)):
-            self._update_option_at_index(i)
-        self._update_header()
+        from arxiv_browser.actions import library_actions as _actions
+
+        return _actions.action_clear_selection(self)
 
     def _sort_papers(self) -> None:
         """Sort filtered_papers according to current sort order."""
@@ -2419,15 +2083,9 @@ class ArxivBrowser(App):
             pass
 
     def action_cycle_sort(self) -> None:
-        """Cycle through sort options: title, date, arxiv_id."""
-        self._sort_index = (self._sort_index + 1) % len(SORT_OPTIONS)
-        sort_key = SORT_OPTIONS[self._sort_index]
-        self.notify(f"Sorted by {sort_key}", title="Sort")
+        from arxiv_browser.actions import library_actions as _actions
 
-        # Re-sort and refresh the list
-        self._sort_papers()
-        self._refresh_list_view()
-        self._update_header()
+        return _actions.action_cycle_sort(self)
 
     # ========================================================================
     # Phase 2: Read/Star Status and Notes/Tags
@@ -2506,103 +2164,29 @@ class ArxivBrowser(App):
         self.notify(f"{len(self.selected_ids)} papers {status}", title=title)
 
     def action_toggle_read(self) -> None:
-        """Toggle read status of highlighted paper, or bulk toggle for selected papers."""
-        if self.selected_ids:
-            self._bulk_toggle_bool("is_read", "marked read", "marked unread", "Read Status")
-            return
+        from arxiv_browser.actions import library_actions as _actions
 
-        paper = self._get_current_paper()
-        if not paper:
-            return
-        metadata = self._get_or_create_metadata(paper.arxiv_id)
-        metadata.is_read = not metadata.is_read
-        idx = self._get_current_index()
-        if idx is not None:
-            self._update_option_at_index(idx)
-        status = "read" if metadata.is_read else "unread"
-        self.notify(f"Marked as {status}", title="Read Status")
+        return _actions.action_toggle_read(self)
 
     def action_toggle_star(self) -> None:
-        """Toggle star status of highlighted paper, or bulk toggle for selected papers."""
-        if self.selected_ids:
-            self._bulk_toggle_bool("starred", "starred", "unstarred", "Star")
-            return
+        from arxiv_browser.actions import library_actions as _actions
 
-        paper = self._get_current_paper()
-        if not paper:
-            return
-        metadata = self._get_or_create_metadata(paper.arxiv_id)
-        metadata.starred = not metadata.starred
-        idx = self._get_current_index()
-        if idx is not None:
-            self._update_option_at_index(idx)
-        status = "starred" if metadata.starred else "unstarred"
-        self.notify(f"Paper {status}", title="Star")
+        return _actions.action_toggle_star(self)
 
     def action_edit_notes(self) -> None:
-        """Open notes editor for the currently highlighted paper."""
-        paper = self._get_current_paper()
-        if not paper:
-            return
+        from arxiv_browser.actions import library_actions as _actions
 
-        arxiv_id = paper.arxiv_id
-        current_notes = ""
-        if arxiv_id in self._config.paper_metadata:
-            current_notes = self._config.paper_metadata[arxiv_id].notes
-
-        def on_notes_saved(notes: str | None) -> None:
-            if notes is None:
-                return
-            metadata = self._get_or_create_metadata(arxiv_id)
-            metadata.notes = notes
-            # Update the option display if still on the same paper
-            cur = self._get_current_paper()
-            if cur and cur.arxiv_id == arxiv_id:
-                idx = self._get_current_index()
-                if idx is not None:
-                    self._update_option_at_index(idx)
-            self.notify("Notes saved", title="Notes")
-
-        self.push_screen(NotesModal(arxiv_id, current_notes), on_notes_saved)
+        return _actions.action_edit_notes(self)
 
     def action_edit_tags(self) -> None:
-        """Open tags editor for the current paper, or bulk-tag selected papers."""
-        if self.selected_ids:
-            self._bulk_edit_tags()
-            return
+        from arxiv_browser.actions import library_actions as _actions
 
-        paper = self._get_current_paper()
-        if not paper:
-            return
-
-        arxiv_id = paper.arxiv_id
-        current_tags: list[str] = []
-        if arxiv_id in self._config.paper_metadata:
-            current_tags = self._config.paper_metadata[arxiv_id].tags.copy()
-
-        # Collect all unique tags across all paper metadata for suggestions
-        all_tags = self._collect_all_tags()
-
-        def on_tags_saved(tags: list[str] | None) -> None:
-            if tags is None:
-                return
-            metadata = self._get_or_create_metadata(arxiv_id)
-            metadata.tags = tags
-            # Update the option display if still on the same paper
-            cur = self._get_current_paper()
-            if cur and cur.arxiv_id == arxiv_id:
-                idx = self._get_current_index()
-                if idx is not None:
-                    self._update_option_at_index(idx)
-            self.notify(f"Tags: {', '.join(tags) if tags else 'none'}", title="Tags")
-
-        self.push_screen(TagsModal(arxiv_id, current_tags, all_tags=all_tags), on_tags_saved)
+        return _actions.action_edit_tags(self)
 
     def _collect_all_tags(self) -> list[str]:
-        """Collect all unique tags across all paper metadata."""
-        return list(
-            dict.fromkeys(tag for meta in self._config.paper_metadata.values() for tag in meta.tags)
-        )
+        from arxiv_browser.actions import llm_actions as _actions
+
+        return _actions._collect_all_tags(self)
 
     def _bulk_edit_tags(self) -> None:
         """Open tags editor for bulk-tagging all selected papers.
@@ -2701,46 +2285,14 @@ class ArxivBrowser(App):
         return arxiv_id in self._watched_paper_ids
 
     def action_toggle_watch_filter(self) -> None:
-        """Toggle filtering to show only watched papers."""
-        self._watch_filter_active = not self._watch_filter_active
+        from arxiv_browser.actions import library_actions as _actions
 
-        if self._watch_filter_active:
-            if not self._watched_paper_ids:
-                self.notify("Watch list is empty", title="Watch", severity="warning")
-                self._watch_filter_active = False
-                return
-            self.notify("Showing watched papers", title="Watch")
-        else:
-            self.notify("Showing all papers", title="Watch")
-
-        # Re-apply current filter with watch list consideration
-        query = self._get_search_input_widget().value.strip()
-        self._apply_filter(query)
+        return _actions.action_toggle_watch_filter(self)
 
     def action_manage_watch_list(self) -> None:
-        """Open the watch list manager."""
+        from arxiv_browser.actions import library_actions as _actions
 
-        def on_watch_list_updated(entries: list[WatchListEntry] | None) -> None:
-            if entries is None:
-                return
-            old_entries = list(self._config.watch_list)
-            self._config.watch_list = entries
-            if not save_config(self._config):
-                self._config.watch_list = old_entries
-                self.notify(
-                    "Failed to save watch list",
-                    title="Watch",
-                    severity="error",
-                )
-                return
-            self._compute_watched_papers()
-            if self._watch_filter_active and not self._watched_paper_ids:
-                self._watch_filter_active = False
-            query = self._get_search_input_widget().value.strip()
-            self._apply_filter(query)
-            self.notify("Watch list updated", title="Watch")
-
-        self.push_screen(WatchListModal(self._config.watch_list), on_watch_list_updated)
+        return _actions.action_manage_watch_list(self)
 
     # ========================================================================
     # Phase 4: Bookmarked Search Tabs
@@ -2752,57 +2304,19 @@ class ArxivBrowser(App):
         await bookmark_bar.update_bookmarks(self._config.bookmarks, self._active_bookmark_index)
 
     async def action_goto_bookmark(self, index: int) -> None:
-        """Switch to a bookmarked search query."""
-        if index < 0 or index >= len(self._config.bookmarks):
-            return
+        from arxiv_browser.actions import search_api_actions as _actions
 
-        bookmark = self._config.bookmarks[index]
-        self._active_bookmark_index = index
-
-        # Update search input and apply filter
-        search_input = self._get_search_input_widget()
-        search_input.value = bookmark.query
-        self._apply_filter(bookmark.query)
-
-        # Update bookmark bar to show active tab
-        await self._update_bookmark_bar()
-        self.notify(f"Bookmark: {bookmark.name}", title="Search")
+        return await _actions.action_goto_bookmark(self, index)
 
     async def action_add_bookmark(self) -> None:
-        """Add current search query as a bookmark."""
-        query = self._get_search_input_widget().value.strip()
+        from arxiv_browser.actions import search_api_actions as _actions
 
-        if not query:
-            self.notify("Enter a search query first", title="Bookmark", severity="warning")
-            return
-
-        if len(self._config.bookmarks) >= 9:
-            self.notify("Maximum 9 bookmarks allowed", title="Bookmark", severity="warning")
-            return
-
-        # Generate a short name from the query
-        name = truncate_text(query, BOOKMARK_NAME_MAX_LEN)
-
-        bookmark = SearchBookmark(name=name, query=query)
-        self._config.bookmarks.append(bookmark)
-        self._active_bookmark_index = len(self._config.bookmarks) - 1
-
-        await self._update_bookmark_bar()
-        self.notify(f"Added bookmark: {name}", title="Bookmark")
+        return await _actions.action_add_bookmark(self)
 
     async def action_remove_bookmark(self) -> None:
-        """Remove the currently active bookmark."""
-        if self._active_bookmark_index < 0 or self._active_bookmark_index >= len(
-            self._config.bookmarks
-        ):
-            self.notify("No active bookmark to remove", title="Bookmark", severity="warning")
-            return
+        from arxiv_browser.actions import search_api_actions as _actions
 
-        removed = self._config.bookmarks.pop(self._active_bookmark_index)
-        self._active_bookmark_index = -1
-
-        await self._update_bookmark_bar()
-        self.notify(f"Removed bookmark: {removed.name}", title="Bookmark")
+        return await _actions.action_remove_bookmark(self)
 
     # ========================================================================
     # Phase 5: Abstract Preview
@@ -2894,34 +2408,14 @@ class ArxivBrowser(App):
     # ========================================================================
 
     def action_copy_bibtex(self) -> None:
-        """Copy selected papers as BibTeX entries to clipboard."""
-        papers = self._get_target_papers()
-        if not papers:
-            self.notify("No paper selected", title="BibTeX", severity="warning")
-            return
+        from arxiv_browser.actions import external_io_actions as _actions
 
-        bibtex_entries = [format_paper_as_bibtex(p) for p in papers]
-        bibtex_text = "\n\n".join(bibtex_entries)
-
-        if self._copy_to_clipboard(bibtex_text):
-            count = len(papers)
-            self.notify(
-                f"Copied {count} BibTeX entr{'ies' if count > 1 else 'y'}",
-                title="BibTeX",
-            )
-        else:
-            self.notify("Failed to copy to clipboard", title="BibTeX", severity="error")
+        return _actions.action_copy_bibtex(self)
 
     def action_export_bibtex_file(self) -> None:
-        """Export selected papers to a BibTeX file for Zotero import."""
-        papers = self._get_target_papers()
-        if not papers:
-            self.notify("No paper selected", title="Export", severity="warning")
-            return
+        from arxiv_browser.actions import external_io_actions as _actions
 
-        bibtex_entries = [format_paper_as_bibtex(p) for p in papers]
-        content = "\n\n".join(bibtex_entries)
-        self._export_to_file(content, "bib", "BibTeX")
+        return _actions.action_export_bibtex_file(self)
 
     def _format_paper_as_markdown(self, paper: Paper) -> str:
         """Format a paper as Markdown."""
@@ -2929,184 +2423,64 @@ class ArxivBrowser(App):
         return format_paper_as_markdown(paper, abstract_text)
 
     def action_export_markdown(self) -> None:
-        """Export selected papers as Markdown to clipboard."""
-        papers = self._get_target_papers()
-        if not papers:
-            self.notify("No paper selected", title="Markdown", severity="warning")
-            return
+        from arxiv_browser.actions import external_io_actions as _actions
 
-        markdown_text = build_markdown_export_document(
-            [self._format_paper_as_markdown(paper) for paper in papers]
-        )
-
-        if self._copy_to_clipboard(markdown_text):
-            count = len(papers)
-            self.notify(
-                f"Copied {count} paper{'s' if count > 1 else ''} as Markdown",
-                title="Markdown",
-            )
-        else:
-            self.notify("Failed to copy to clipboard", title="Markdown", severity="error")
+        return _actions.action_export_markdown(self)
 
     def action_export_menu(self) -> None:
-        """Open the unified export menu modal."""
-        papers = self._get_target_papers()
-        if not papers:
-            self.notify("No paper selected", title="Export", severity="warning")
-            return
-        self.push_screen(
-            ExportMenuModal(len(papers)),
-            callback=lambda fmt: self._do_export(fmt, papers) if fmt else None,
-        )
+        from arxiv_browser.actions import external_io_actions as _actions
+
+        return _actions.action_export_menu(self)
 
     def _do_export(self, fmt: str, papers: list[Paper]) -> None:
-        """Dispatch export based on format string from ExportMenuModal."""
-        dispatch: dict[str, Callable[..., None]] = {
-            "clipboard-plain": lambda: self.action_copy_selected(),
-            "clipboard-bibtex": lambda: self.action_copy_bibtex(),
-            "clipboard-markdown": lambda: self.action_export_markdown(),
-            "clipboard-ris": lambda: self._export_clipboard_ris(papers),
-            "clipboard-csv": lambda: self._export_clipboard_csv(papers),
-            "clipboard-mdtable": lambda: self._export_clipboard_mdtable(papers),
-            "file-bibtex": lambda: self.action_export_bibtex_file(),
-            "file-ris": lambda: self._export_file_ris(papers),
-            "file-csv": lambda: self._export_file_csv(papers),
-        }
-        handler = dispatch.get(fmt)
-        if handler:
-            handler()
+        from arxiv_browser.actions import external_io_actions as _actions
+
+        return _actions._do_export(self, fmt, papers)
 
     def _get_export_dir(self) -> Path:
-        """Return the configured export directory path."""
-        return Path(self._config.bibtex_export_dir or Path.home() / DEFAULT_BIBTEX_EXPORT_DIR)
+        from arxiv_browser.actions import external_io_actions as _actions
+
+        return _actions._get_export_dir(self)
 
     def _export_to_file(self, content: str, extension: str, format_name: str) -> None:
-        """Write content to a timestamped file using atomic write."""
-        export_dir = self._get_export_dir()
-        try:
-            filepath = write_timestamped_export_file(
-                content=content,
-                export_dir=export_dir,
-                extension=extension,
-            )
-        except OSError as exc:
-            self.notify(
-                f"Failed to export {format_name}: {exc}",
-                title=f"{format_name} Export",
-                severity="error",
-            )
-            return
-        self.notify(
-            f"Exported to {filepath.name}",
-            title=f"{format_name} Export",
-        )
+        from arxiv_browser.actions import external_io_actions as _actions
+
+        return _actions._export_to_file(self, content, extension, format_name)
 
     def _export_clipboard_ris(self, papers: list[Paper]) -> None:
-        """Copy selected papers as RIS entries to clipboard."""
-        entries = []
-        for paper in papers:
-            abstract_text = self._get_abstract_text(paper, allow_async=False) or ""
-            entries.append(format_paper_as_ris(paper, abstract_text))
-        ris_text = "\n\n".join(entries)
-        if self._copy_to_clipboard(ris_text):
-            count = len(papers)
-            self.notify(
-                f"Copied {count} RIS entr{'ies' if count > 1 else 'y'}",
-                title="RIS",
-            )
-        else:
-            self.notify("Failed to copy to clipboard", title="RIS", severity="error")
+        from arxiv_browser.actions import external_io_actions as _actions
+
+        return _actions._export_clipboard_ris(self, papers)
 
     def _export_clipboard_csv(self, papers: list[Paper]) -> None:
-        """Copy selected papers as CSV to clipboard."""
-        csv_text = format_papers_as_csv(papers, self._config.paper_metadata)
-        if self._copy_to_clipboard(csv_text):
-            count = len(papers)
-            self.notify(
-                f"Copied {count} paper{'s' if count > 1 else ''} as CSV",
-                title="CSV",
-            )
-        else:
-            self.notify("Failed to copy to clipboard", title="CSV", severity="error")
+        from arxiv_browser.actions import external_io_actions as _actions
+
+        return _actions._export_clipboard_csv(self, papers)
 
     def _export_clipboard_mdtable(self, papers: list[Paper]) -> None:
-        """Copy selected papers as a Markdown table to clipboard."""
-        table_text = format_papers_as_markdown_table(papers)
-        if self._copy_to_clipboard(table_text):
-            count = len(papers)
-            self.notify(
-                f"Copied {count} paper{'s' if count > 1 else ''} as Markdown table",
-                title="Markdown Table",
-            )
-        else:
-            self.notify(
-                "Failed to copy to clipboard",
-                title="Markdown Table",
-                severity="error",
-            )
+        from arxiv_browser.actions import external_io_actions as _actions
+
+        return _actions._export_clipboard_mdtable(self, papers)
 
     def _export_file_ris(self, papers: list[Paper]) -> None:
-        """Export selected papers to an RIS file."""
-        entries = []
-        for paper in papers:
-            abstract_text = self._get_abstract_text(paper, allow_async=False) or ""
-            entries.append(format_paper_as_ris(paper, abstract_text))
-        content = "\n\n".join(entries)
-        self._export_to_file(content, "ris", "RIS")
+        from arxiv_browser.actions import external_io_actions as _actions
+
+        return _actions._export_file_ris(self, papers)
 
     def _export_file_csv(self, papers: list[Paper]) -> None:
-        """Export selected papers to a CSV file."""
-        content = format_papers_as_csv(papers, self._config.paper_metadata)
-        self._export_to_file(content, "csv", "CSV")
+        from arxiv_browser.actions import external_io_actions as _actions
+
+        return _actions._export_file_csv(self, papers)
 
     def action_export_metadata(self) -> None:
-        """Export all user metadata to a portable JSON file."""
-        import json as _json
+        from arxiv_browser.actions import external_io_actions as _actions
 
-        data = export_metadata(self._config)
-        content = _json.dumps(data, indent=2, ensure_ascii=False)
-        self._export_to_file(content, "json", "Metadata")
+        return _actions.action_export_metadata(self)
 
     def action_import_metadata(self) -> None:
-        """Import metadata from a JSON file in the export directory."""
-        import json as _json
+        from arxiv_browser.actions import external_io_actions as _actions
 
-        export_dir = self._get_export_dir()
-        json_files = sorted(export_dir.glob("arxiv-*.json"), reverse=True)
-        if not json_files:
-            self.notify(
-                f"No metadata files found in {export_dir}",
-                title="Import",
-                severity="warning",
-            )
-            return
-        filepath = json_files[0]
-        try:
-            raw = filepath.read_text(encoding="utf-8")
-            data = _json.loads(raw)
-            papers_n, watch_n, bk_n, col_n = import_metadata(data, self._config)
-        except (OSError, ValueError) as exc:
-            self.notify(f"Import failed: {exc}", title="Import", severity="error")
-            return
-        if not save_config(self._config):
-            self.notify(
-                "Import applied but failed to save to disk",
-                title="Import",
-                severity="warning",
-            )
-        self._compute_watched_papers()
-        self._refresh_list_view()
-        parts = []
-        if papers_n:
-            parts.append(f"{papers_n} papers")
-        if watch_n:
-            parts.append(f"{watch_n} watch entries")
-        if bk_n:
-            parts.append(f"{bk_n} bookmarks")
-        if col_n:
-            parts.append(f"{col_n} collections")
-        summary = ", ".join(parts) or "nothing new"
-        self.notify(f"Imported {summary} from {filepath.name}", title="Import")
+        return _actions.action_import_metadata(self)
 
     def _get_target_papers(self) -> list[Paper]:
         """Get papers to export (selected or current)."""
@@ -3123,19 +2497,9 @@ class ArxivBrowser(App):
     # ========================================================================
 
     def action_show_similar(self) -> None:
-        """Show papers similar to the currently highlighted paper."""
-        paper = self._get_current_paper()
-        if not paper:
-            self.notify("No paper selected", title="Similar", severity="warning")
-            return
+        from arxiv_browser.actions import ui_actions as _actions
 
-        if self._s2_active:
-            self.push_screen(
-                RecommendationSourceModal(),
-                callback=lambda source: self._show_recommendations(paper, source),
-            )
-        else:
-            self._show_recommendations(paper, "local")
+        return _actions.action_show_similar(self)
 
     def _show_recommendations(self, paper: Paper, source: str | None) -> None:
         """Dispatcher for local or S2 recommendations."""
@@ -3263,25 +2627,9 @@ class ArxivBrowser(App):
         )
 
     async def _fetch_s2_recommendations_async(self, arxiv_id: str) -> list[SemanticScholarPaper]:
-        """Fetch S2 recommendations with SQLite cache."""
-        cached = await asyncio.to_thread(
-            load_s2_recommendations,
-            self._s2_db_path,
-            arxiv_id,
-            S2_REC_CACHE_TTL_DAYS,
-        )
-        if cached:
-            return cached
-        client = self._http_client
-        if client is None:
-            return []
-        recs = await fetch_s2_recommendations(arxiv_id, client, api_key=self._config.s2_api_key)
-        if recs:
-            try:
-                await asyncio.to_thread(save_s2_recommendations, self._s2_db_path, arxiv_id, recs)
-            except (OSError, sqlite3.Error):
-                logger.warning("Failed to cache S2 recommendations for %s", arxiv_id, exc_info=True)
-        return recs
+        from arxiv_browser.actions import ui_actions as _actions
+
+        return await _actions._fetch_s2_recommendations_async(self, arxiv_id)
 
     @staticmethod
     def _s2_recs_to_paper_tuples(
@@ -3311,18 +2659,9 @@ class ArxivBrowser(App):
     # ========================================================================
 
     def action_citation_graph(self) -> None:
-        """Open the citation graph modal for the current paper."""
-        if not self._s2_active:
-            self.notify("S2 is disabled (Ctrl+e to enable)", title="S2", severity="warning")
-            return
-        paper = self._get_current_paper()
-        if not paper:
-            return
-        # Determine S2 paper ID: prefer cached S2 data, fallback to ARXIV:id
-        s2_data = self._s2_cache.get(paper.arxiv_id)
-        paper_id = s2_data.s2_paper_id if s2_data else f"ARXIV:{paper.arxiv_id}"
-        self.notify("Fetching citation graph...", title="Citations")
-        self._track_task(self._show_citation_graph(paper_id, paper.title))
+        from arxiv_browser.actions import ui_actions as _actions
+
+        return _actions.action_citation_graph(self)
 
     async def _show_citation_graph(self, paper_id: str, title: str) -> None:
         """Fetch citation graph data and push the CitationGraphScreen."""
@@ -3350,197 +2689,51 @@ class ArxivBrowser(App):
     async def _fetch_citation_graph(
         self, paper_id: str
     ) -> tuple[list[CitationEntry], list[CitationEntry]]:
-        """Fetch references + citations with SQLite cache."""
-        cache_hit = await asyncio.to_thread(
-            has_s2_citation_graph_cache,
-            self._s2_db_path,
-            paper_id,
-            S2_CITATION_GRAPH_CACHE_TTL_DAYS,
-        )
-        if cache_hit:
-            cached_refs = await asyncio.to_thread(
-                load_s2_citation_graph,
-                self._s2_db_path,
-                paper_id,
-                "references",
-                S2_CITATION_GRAPH_CACHE_TTL_DAYS,
-            )
-            cached_cites = await asyncio.to_thread(
-                load_s2_citation_graph,
-                self._s2_db_path,
-                paper_id,
-                "citations",
-                S2_CITATION_GRAPH_CACHE_TTL_DAYS,
-            )
-            return cached_refs, cached_cites
+        from arxiv_browser.actions import ui_actions as _actions
 
-        # Fetch from API
-        client = self._http_client
-        if client is None:
-            return [], []
-        api_key = self._config.s2_api_key
-        refs, refs_ok = await fetch_s2_references(
-            paper_id,
-            client,
-            api_key=api_key,
-            include_status=True,
-        )
-        cites, cites_ok = await fetch_s2_citations(
-            paper_id,
-            client,
-            api_key=api_key,
-            include_status=True,
-        )
-
-        # Cache only when both directions completed cleanly.
-        if refs_ok and cites_ok:
-            await asyncio.to_thread(
-                save_s2_citation_graph,
-                self._s2_db_path,
-                paper_id,
-                "references",
-                refs,
-            )
-            await asyncio.to_thread(
-                save_s2_citation_graph,
-                self._s2_db_path,
-                paper_id,
-                "citations",
-                cites,
-            )
-        else:
-            logger.info(
-                "Skipping citation graph cache write for %s due to fetch error "
-                "(refs_ok=%s cites_ok=%s)",
-                paper_id,
-                refs_ok,
-                cites_ok,
-            )
-        return refs, cites
+        return await _actions._fetch_citation_graph(self, paper_id)
 
     def _on_citation_graph_selected(self, arxiv_id: str | None) -> None:
         """Handle selection from the citation graph modal (jump to local paper)."""
         self._on_recommendation_selected(arxiv_id)
 
     def action_cycle_theme(self) -> None:
-        """Cycle through available color themes."""
-        current = self._config.theme_name
-        try:
-            idx = THEME_NAMES.index(current)
-        except ValueError:
-            idx = 0
-        next_idx = (idx + 1) % len(THEME_NAMES)
-        self._config.theme_name = THEME_NAMES[next_idx]
-        self._apply_theme_overrides()
-        self._apply_category_overrides()
-        try:
-            self._get_paper_details_widget().clear_cache()
-        except NoMatches:
-            pass
-        self._refresh_list_view()
-        self._refresh_detail_pane()
-        self._update_status_bar()
-        self._save_config_or_warn("theme preference")
-        self.notify(f"Theme: {THEME_NAMES[next_idx]}", title="Theme")
+        from arxiv_browser.actions import ui_actions as _actions
+
+        return _actions.action_cycle_theme(self)
 
     def action_toggle_sections(self) -> None:
-        """Open the section toggle modal to collapse/expand detail pane sections."""
+        from arxiv_browser.actions import ui_actions as _actions
 
-        def _on_result(result: list[str] | None) -> None:
-            if result is not None:
-                self._config.collapsed_sections = result
-                self._save_config_or_warn("section toggle")
-                self._refresh_detail_pane()
-
-        self.push_screen(SectionToggleModal(self._config.collapsed_sections), _on_result)
+        return _actions.action_toggle_sections(self)
 
     def _build_help_sections(self) -> list[tuple[str, list[tuple[str, str]]]]:
         """Build help sections from the runtime key binding table."""
         return build_help_sections(self.BINDINGS)
 
     def action_show_help(self) -> None:
-        """Show the help overlay with all keyboard shortcuts."""
-        self.push_screen(
-            HelpScreen(
-                sections=self._build_help_sections(),
-            )
-        )
+        from arxiv_browser.actions import ui_actions as _actions
+
+        return _actions.action_show_help(self)
 
     def action_command_palette(self) -> None:
-        """Open the fuzzy-searchable command palette."""
+        from arxiv_browser.actions import ui_actions as _actions
 
-        def _on_command_selected(action_name: str | None) -> None:
-            if not action_name:
-                return
-            method = getattr(self, f"action_{action_name}", None)
-            if method is not None:
-                try:
-                    result = method()
-                    if asyncio.iscoroutine(result):
-                        self._track_task(result)
-                except Exception:
-                    logger.warning("Command palette action %s failed", action_name, exc_info=True)
-                    self.notify(f"Command failed: {action_name}", title="Error", severity="error")
-            else:
-                logger.warning("Unknown command palette action: %s", action_name)
-
-        self.push_screen(CommandPaletteModal(COMMAND_PALETTE_COMMANDS), _on_command_selected)
+        return _actions.action_command_palette(self)
 
     # ========================================================================
     # Paper Collections
     # ========================================================================
 
     def action_collections(self) -> None:
-        """Open the collections manager modal."""
-        modal = CollectionsModal(self._config.collections, self._papers_by_id)
+        from arxiv_browser.actions import ui_actions as _actions
 
-        def _save_collections(result: str | None) -> None:
-            if result != "save":
-                return
-            self._config.collections = modal.collections
-            self._save_config_or_warn("collections")
-            count = len(self._config.collections)
-            self.notify(
-                f"Saved {count} collection{'s' if count != 1 else ''}",
-                title="Collections",
-            )
-
-        self.push_screen(modal, _save_collections)
+        return _actions.action_collections(self)
 
     def action_add_to_collection(self) -> None:
-        """Add selected papers to a collection."""
-        if not self._config.collections:
-            self.notify(
-                "No collections. Press Ctrl+k to create one.",
-                title="Collections",
-                severity="warning",
-            )
-            return
-        papers = self._get_target_papers()
-        if not papers:
-            return
-        paper_ids = [p.arxiv_id for p in papers]
+        from arxiv_browser.actions import ui_actions as _actions
 
-        def _on_collection_selected(name: str | None) -> None:
-            if not name:
-                return
-            for col in self._config.collections:
-                if col.name == name:
-                    existing = set(col.paper_ids)
-                    added = 0
-                    for pid in paper_ids:
-                        if pid not in existing and len(col.paper_ids) < MAX_PAPERS_PER_COLLECTION:
-                            col.paper_ids.append(pid)
-                            existing.add(pid)
-                            added += 1
-                    self._save_config_or_warn("collection update")
-                    self.notify(
-                        f"Added {added} paper{'s' if added != 1 else ''} to '{name}'",
-                        title="Collections",
-                    )
-                    break
-
-        self.push_screen(AddToCollectionModal(self._config.collections), _on_collection_selected)
+        return _actions.action_add_to_collection(self)
 
     # ========================================================================
     # LLM Summary Generation
@@ -3548,8 +2741,9 @@ class ArxivBrowser(App):
 
     @staticmethod
     def _trust_hash(command_template: str) -> str:
-        """Return a stable short hash for trusted command templates."""
-        return hashlib.sha256(command_template.encode("utf-8")).hexdigest()[:16]
+        from arxiv_browser.actions import llm_actions as _actions
+
+        return _actions._trust_hash(command_template)
 
     def _remember_trusted_hash(
         self,
@@ -3557,35 +2751,19 @@ class ArxivBrowser(App):
         trusted_hashes: list[str],
         title: str,
     ) -> bool:
-        """Persist command trust hash. Returns True when trusted in-memory."""
-        cmd_hash = self._trust_hash(command_template)
-        if cmd_hash in trusted_hashes:
-            return True
-        trusted_hashes.append(cmd_hash)
-        if save_config(self._config):
-            return True
-        self.notify(
-            "Could not save trust preference. Command trusted for this session only.",
-            title=title,
-            severity="warning",
-        )
-        return True
+        from arxiv_browser.actions import llm_actions as _actions
+
+        return _actions._remember_trusted_hash(self, command_template, trusted_hashes, title)
 
     def _is_llm_command_trusted(self, command_template: str) -> bool:
-        """Return whether an LLM command template is trusted."""
-        config = getattr(self, "_config", None)
-        if not isinstance(config, UserConfig) or (not config.llm_command and not config.llm_preset):
-            return True
-        if not config.llm_command and command_template == LLM_PRESETS.get(config.llm_preset, ""):
-            return True
-        return self._trust_hash(command_template) in config.trusted_llm_command_hashes
+        from arxiv_browser.actions import llm_actions as _actions
+
+        return _actions._is_llm_command_trusted(self, command_template)
 
     def _is_pdf_viewer_trusted(self, viewer_cmd: str) -> bool:
-        """Return whether a PDF viewer command is trusted."""
-        config = getattr(self, "_config", None)
-        if not isinstance(config, UserConfig):
-            return True
-        return self._trust_hash(viewer_cmd) in config.trusted_pdf_viewer_hashes
+        from arxiv_browser.actions import llm_actions as _actions
+
+        return _actions._is_pdf_viewer_trusted(self, viewer_cmd)
 
     def _ensure_command_trusted(
         self,
@@ -3598,172 +2776,58 @@ class ArxivBrowser(App):
         trusted_hashes: list[str],
         on_trusted: Callable[[], None],
     ) -> bool:
-        """Show trust prompt for a custom command and persist approval on confirm."""
-        command_preview = truncate_text(command_template, 120)
+        from arxiv_browser.actions import llm_actions as _actions
 
-        def _on_decision(confirmed: bool | None) -> None:
-            if not confirmed:
-                self.notify(cancel_message, title=title, severity="warning")
-                return
-            if self._remember_trusted_hash(command_template, trusted_hashes, title):
-                on_trusted()
-
-        try:
-            self.push_screen(
-                ConfirmModal(
-                    f"{prompt_heading}\n"
-                    f"{command_preview}\n\n"
-                    "This command executes on your machine.\n"
-                    f"Confirm to trust and {trust_button_label.lower()}."
-                ),
-                _on_decision,
-            )
-            return False
-        except ScreenStackError:
-            logger.debug("Unable to show %s trust prompt", title, exc_info=True)
-            self.notify(
-                f"Could not confirm {title.lower()} command trust; action cancelled.",
-                title=title,
-                severity="warning",
-            )
-            return False
+        return _actions._ensure_command_trusted(
+            self,
+            command_template=command_template,
+            title=title,
+            prompt_heading=prompt_heading,
+            trust_button_label=trust_button_label,
+            cancel_message=cancel_message,
+            trusted_hashes=trusted_hashes,
+            on_trusted=on_trusted,
+        )
 
     def _ensure_llm_command_trusted(
         self,
         command_template: str,
         on_trusted: Callable[[], None],
     ) -> bool:
-        """Ensure a custom LLM command is trusted before execution."""
-        if self._is_llm_command_trusted(command_template):
-            return True
-        return self._ensure_command_trusted(
-            command_template=command_template,
-            title="LLM",
-            prompt_heading="Run untrusted custom LLM command?",
-            trust_button_label="Run",
-            cancel_message="LLM command cancelled",
-            trusted_hashes=self._config.trusted_llm_command_hashes,
-            on_trusted=on_trusted,
-        )
+        from arxiv_browser.actions import llm_actions as _actions
+
+        return _actions._ensure_llm_command_trusted(self, command_template, on_trusted)
 
     def _ensure_pdf_viewer_trusted(
         self,
         viewer_cmd: str,
         on_trusted: Callable[[], None],
     ) -> bool:
-        """Ensure a custom PDF viewer command is trusted before execution."""
-        if self._is_pdf_viewer_trusted(viewer_cmd):
-            return True
-        return self._ensure_command_trusted(
-            command_template=viewer_cmd,
-            title="PDF",
-            prompt_heading="Run untrusted custom PDF viewer command?",
-            trust_button_label="Open",
-            cancel_message="PDF open cancelled",
-            trusted_hashes=self._config.trusted_pdf_viewer_hashes,
-            on_trusted=on_trusted,
-        )
+        from arxiv_browser.actions import llm_actions as _actions
+
+        return _actions._ensure_pdf_viewer_trusted(self, viewer_cmd, on_trusted)
 
     def _require_llm_command(self) -> str | None:
-        """Resolve LLM command, showing a notification if not configured.
+        from arxiv_browser.actions import llm_actions as _actions
 
-        Also refreshes self._llm_provider so it stays in sync with config.
-        Returns the command template string (needed for cache hashing).
-        """
-        command_template = _resolve_llm_command(self._config)
-        if not command_template:
-            preset = self._config.llm_preset
-            if preset and preset not in LLM_PRESETS:
-                valid = ", ".join(sorted(LLM_PRESETS))
-                msg = f"Unknown preset '{preset}'. Valid: {valid}"
-            else:
-                msg = f"Set llm_command or llm_preset in config.json ({get_config_path()})"
-            self.notify(msg, title="LLM not configured", severity="warning", timeout=8)
-            return None
-        self._llm_provider = CLIProvider(command_template)
-        return command_template
+        return _actions._require_llm_command(self)
 
     def action_generate_summary(self) -> None:
-        """Generate an AI summary for the currently highlighted paper."""
-        command_template = self._require_llm_command()
-        if not command_template:
-            return
-        if not self._ensure_llm_command_trusted(
-            command_template,
-            lambda: self._start_summary_flow(command_template),
-        ):
-            return
-        self._start_summary_flow(command_template)
+        from arxiv_browser.actions import llm_actions as _actions
+
+        return _actions.action_generate_summary(self)
 
     def _start_summary_flow(self, command_template: str) -> None:
-        """Start the summary mode flow after command trust checks pass."""
+        from arxiv_browser.actions import llm_actions as _actions
 
-        paper = self._get_current_paper()
-        if not paper:
-            self.notify("No paper selected", title="AI Summary", severity="warning")
-            return
-
-        if paper.arxiv_id in self._summary_loading:
-            self.notify("Summary already generating...", title="AI Summary")
-            return
-
-        self.push_screen(
-            SummaryModeModal(),
-            lambda mode: self._on_summary_mode_selected(mode, paper, command_template),
-        )
+        return _actions._start_summary_flow(self, command_template)
 
     def _on_summary_mode_selected(
         self, mode: str | None, paper: Paper, command_template: str
     ) -> None:
-        """Handle the mode chosen from SummaryModeModal."""
-        if not mode:
-            return
-        if mode not in SUMMARY_MODES:
-            self.notify(f"Unknown summary mode: {mode}", title="AI Summary", severity="error")
-            return
+        from arxiv_browser.actions import llm_actions as _actions
 
-        arxiv_id = paper.arxiv_id
-        if arxiv_id in self._summary_loading:
-            return
-
-        # Resolve prompt template for this mode
-        if mode == "default" and self._config.llm_prompt_template:
-            prompt_template = self._config.llm_prompt_template
-        else:
-            prompt_template = SUMMARY_MODES[mode][1]
-
-        cmd_hash = _compute_command_hash(command_template, prompt_template)
-        mode_label = mode.upper() if mode != "default" else ""
-        use_full_paper_content = mode != "quick"
-
-        # Check SQLite cache first
-        cached = _load_summary(self._summary_db_path, arxiv_id, cmd_hash)
-        if cached:
-            self._paper_summaries[arxiv_id] = cached
-            self._summary_mode_label[arxiv_id] = mode_label
-            self._summary_command_hash[arxiv_id] = cmd_hash
-            self._update_abstract_display(arxiv_id)
-            self.notify("Summary loaded from cache", title="AI Summary")
-            return
-
-        # Avoid showing stale content under a newly selected mode.
-        if self._summary_command_hash.get(arxiv_id) != cmd_hash:
-            self._paper_summaries.pop(arxiv_id, None)
-            self._summary_command_hash.pop(arxiv_id, None)
-
-        # Start async generation
-        self._summary_loading.add(arxiv_id)
-        self._summary_mode_label[arxiv_id] = mode_label
-        self._update_abstract_display(arxiv_id)
-        self._track_task(
-            self._generate_summary_async(
-                paper,
-                prompt_template,
-                cmd_hash,
-                mode_label=mode_label,
-                use_full_paper_content=use_full_paper_content,
-            )
-        )
+        return _actions._on_summary_mode_selected(self, mode, paper, command_template)
 
     async def _generate_summary_async(
         self,
@@ -3773,176 +2837,64 @@ class ArxivBrowser(App):
         mode_label: str = "",
         use_full_paper_content: bool = True,
     ) -> None:
-        """Run the LLM CLI tool asynchronously and update the UI."""
-        arxiv_id = paper.arxiv_id
-        generated_summary = False
-        try:
-            if self._llm_provider is None:
-                logger.warning("LLM provider unexpectedly None in _generate_summary_async")
-                return
-            if use_full_paper_content:
-                self.notify("Fetching paper content...", title="AI Summary")
+        from arxiv_browser.actions import llm_actions as _actions
 
-            summary, error = await self._get_services().llm.generate_summary(
-                paper=paper,
-                prompt_template=prompt_template,
-                provider=self._llm_provider,
-                use_full_paper_content=use_full_paper_content,
-                summary_timeout_seconds=LLM_COMMAND_TIMEOUT,
-                fetch_paper_content=lambda selected_paper: _fetch_paper_content_async(
-                    selected_paper,
-                    self._http_client,
-                    timeout=SUMMARY_HTML_TIMEOUT,
-                ),
-            )
-            if summary is None:
-                self.notify(
-                    (error or "LLM command failed")[:200],
-                    title="AI Summary",
-                    severity="error",
-                    timeout=8,
-                )
-                return
-
-            # Cache in memory and persist to SQLite
-            self._paper_summaries[arxiv_id] = summary
-            self._summary_mode_label[arxiv_id] = mode_label
-            self._summary_command_hash[arxiv_id] = cmd_hash
-            await asyncio.to_thread(
-                _save_summary, self._summary_db_path, arxiv_id, summary, cmd_hash
-            )
-            generated_summary = True
-            self.notify("Summary generated", title="AI Summary")
-
-        except ValueError as e:
-            # Config/template errors — show the descriptive message directly
-            logger.warning("Summary config error for %s: %s", arxiv_id, e)
-            self.notify(str(e), title="AI Summary", severity="error", timeout=10)
-        except (OSError, RuntimeError) as e:
-            logger.warning(
-                "Summary generation runtime failure for %s: %s", arxiv_id, e, exc_info=True
-            )
-            self.notify("Summary failed", title="AI Summary", severity="error")
-        except Exception as e:
-            logger.warning(
-                "Unexpected summary generation failure for %s: %s", arxiv_id, e, exc_info=True
-            )
-            self.notify("Summary failed", title="AI Summary", severity="error")
-        finally:
-            self._summary_loading.discard(arxiv_id)
-            if not generated_summary and arxiv_id not in self._paper_summaries:
-                self._summary_mode_label.pop(arxiv_id, None)
-                self._summary_command_hash.pop(arxiv_id, None)
-            self._update_abstract_display(arxiv_id)
+        return await _actions._generate_summary_async(
+            self, paper, prompt_template, cmd_hash, mode_label, use_full_paper_content
+        )
 
     # ========================================================================
     # Chat with Paper
     # ========================================================================
 
     def action_chat_with_paper(self) -> None:
-        """Open an interactive chat session about the current paper."""
-        command_template = self._require_llm_command()
-        if not command_template:
-            return
-        if not self._ensure_llm_command_trusted(
-            command_template,
-            lambda: self._start_chat_with_paper(),
-        ):
-            return
-        self._start_chat_with_paper()
+        from arxiv_browser.actions import llm_actions as _actions
+
+        return _actions.action_chat_with_paper(self)
 
     def _start_chat_with_paper(self) -> None:
-        """Start the chat flow after command trust checks pass."""
-        paper = self._get_current_paper()
-        if not paper:
-            self.notify("No paper selected", title="Chat", severity="warning")
-            return
-        if self._llm_provider is None:
-            logger.warning("LLM provider unexpectedly None in _start_chat_with_paper")
-            return
-        self.notify("Fetching paper content...", title="Chat")
-        self._track_task(self._open_chat_screen(paper, self._llm_provider))
+        from arxiv_browser.actions import llm_actions as _actions
+
+        return _actions._start_chat_with_paper(self)
 
     async def _open_chat_screen(self, paper: Paper, provider: CLIProvider) -> None:
-        """Fetch paper content and open the chat modal."""
-        paper_content = await _fetch_paper_content_async(paper, self._http_client)
-        self.push_screen(PaperChatScreen(paper, provider, paper_content))
+        from arxiv_browser.actions import llm_actions as _actions
+
+        return await _actions._open_chat_screen(self, paper, provider)
 
     # ========================================================================
     # Relevance Scoring
     # ========================================================================
 
     def action_score_relevance(self) -> None:
-        """Score all loaded papers for relevance using the configured LLM."""
-        command_template = self._require_llm_command()
-        if not command_template:
-            return
-        if not self._ensure_llm_command_trusted(
-            command_template,
-            lambda: self._start_score_relevance_flow(command_template),
-        ):
-            return
-        self._start_score_relevance_flow(command_template)
+        from arxiv_browser.actions import llm_actions as _actions
+
+        return _actions.action_score_relevance(self)
 
     def _start_score_relevance_flow(self, command_template: str) -> None:
-        """Start relevance scoring after command trust checks pass."""
+        from arxiv_browser.actions import llm_actions as _actions
 
-        if self._relevance_scoring_active:
-            self.notify("Relevance scoring already in progress", title="Relevance")
-            return
-
-        interests = self._config.research_interests
-        if not interests:
-            self.push_screen(
-                ResearchInterestsModal(),
-                lambda text: self._on_interests_saved_then_score(text, command_template),
-            )
-            return
-
-        self._start_relevance_scoring(command_template, interests)
+        return _actions._start_score_relevance_flow(self, command_template)
 
     def _on_interests_saved_then_score(self, interests: str | None, command_template: str) -> None:
-        """Callback after ResearchInterestsModal: save interests then start scoring."""
-        if not interests:
-            return
-        if self._relevance_scoring_active:
-            self.notify("Relevance scoring already in progress", title="Relevance")
-            return
-        self._config.research_interests = interests
-        self._save_config_or_warn("research interests")
-        self.notify("Research interests saved", title="Relevance")
-        self._start_relevance_scoring(command_template, interests)
+        from arxiv_browser.actions import llm_actions as _actions
+
+        return _actions._on_interests_saved_then_score(self, interests, command_template)
 
     def _start_relevance_scoring(self, command_template: str, interests: str) -> None:
-        """Begin batch relevance scoring for all loaded papers."""
-        if self._relevance_scoring_active:
-            self.notify("Relevance scoring already in progress", title="Relevance")
-            return
-        self._relevance_scoring_active = True
-        self._update_footer()
-        papers = list(self.all_papers)
-        self._track_task(self._score_relevance_batch_async(papers, command_template, interests))
+        from arxiv_browser.actions import llm_actions as _actions
+
+        return _actions._start_relevance_scoring(self, command_template, interests)
 
     def action_edit_interests(self) -> None:
-        """Edit research interests and clear relevance cache."""
-        self.push_screen(
-            ResearchInterestsModal(self._config.research_interests),
-            self._on_interests_edited,
-        )
+        from arxiv_browser.actions import llm_actions as _actions
+
+        return _actions.action_edit_interests(self)
 
     def _on_interests_edited(self, interests: str | None) -> None:
-        """Callback after editing interests: save and clear cache."""
-        if not interests or interests == self._config.research_interests:
-            return
-        self._config.research_interests = interests
-        self._save_config_or_warn("research interests")
-        self._relevance_scores.clear()
-        self._mark_badges_dirty("relevance", immediate=True)
-        self._refresh_detail_pane()
-        if interests:
-            self.notify("Research interests updated — press L to re-score", title="Relevance")
-        else:
-            self.notify("Research interests cleared", title="Relevance")
+        from arxiv_browser.actions import llm_actions as _actions
+
+        return _actions._on_interests_edited(self, interests)
 
     async def _score_relevance_batch_async(
         self,
@@ -3950,120 +2902,11 @@ class ArxivBrowser(App):
         command_template: str,
         interests: str,
     ) -> None:
-        """Background task: batch-score papers for relevance."""
-        try:
-            interests_hash = _compute_command_hash(command_template, interests)
+        from arxiv_browser.actions import llm_actions as _actions
 
-            # Bulk-load existing scores from SQLite
-            cached_scores = await asyncio.to_thread(
-                _load_all_relevance_scores, self._relevance_db_path, interests_hash
-            )
-
-            # Populate in-memory cache with DB-cached scores
-            for aid, score_data in cached_scores.items():
-                self._relevance_scores[aid] = score_data
-
-            # Refresh badges for cached papers
-            self._mark_badges_dirty("relevance")
-            self._refresh_detail_pane()
-
-            # Filter to uncached papers
-            uncached = [p for p in papers if p.arxiv_id not in cached_scores]
-
-            if not uncached:
-                self.notify(
-                    f"All {len(papers)} papers already scored",
-                    title="Relevance",
-                )
-                return
-
-            total = len(uncached)
-            scored = 0
-            failed = 0
-
-            if self._llm_provider is None:
-                logger.warning("LLM provider unexpectedly None in _score_relevance_batch")
-                return
-            for i, paper in enumerate(uncached):
-                self._scoring_progress = (i + 1, total)
-                self._update_footer()
-
-                try:
-                    parsed = await self._get_services().llm.score_relevance_once(
-                        paper=paper,
-                        interests=interests,
-                        provider=self._llm_provider,
-                        timeout_seconds=RELEVANCE_SCORE_TIMEOUT,
-                    )
-                    if parsed is None:
-                        failed += 1
-                        continue
-
-                    score, reason = parsed
-                    self._relevance_scores[paper.arxiv_id] = (score, reason)
-
-                    # Persist to SQLite
-                    await asyncio.to_thread(
-                        _save_relevance_score,
-                        self._relevance_db_path,
-                        paper.arxiv_id,
-                        interests_hash,
-                        score,
-                        reason,
-                    )
-
-                    # Update list item badge
-                    self._update_relevance_badge(paper.arxiv_id)
-                    scored += 1
-
-                except (OSError, RuntimeError, ValueError) as exc:
-                    logger.warning(
-                        "Relevance scoring error for %s: %s",
-                        paper.arxiv_id,
-                        exc,
-                        exc_info=True,
-                    )
-                    failed += 1
-                except Exception as exc:
-                    logger.warning(
-                        "Unexpected relevance scoring error for %s: %s",
-                        paper.arxiv_id,
-                        exc,
-                        exc_info=True,
-                    )
-                    failed += 1
-
-                # Progress notification every 5 papers
-                done = i + 1
-                if done % 5 == 0:
-                    self.notify(
-                        f"Scoring relevance {done}/{total}...",
-                        title="Relevance",
-                    )
-
-            # Final notification
-            msg = f"Relevance scoring complete: {scored} scored"
-            if failed:
-                msg += f", {failed} failed"
-            cached_count = len(papers) - total
-            if cached_count:
-                msg += f", {cached_count} cached"
-            self.notify(msg, title="Relevance")
-
-            # Refresh display
-            self._mark_badges_dirty("relevance")
-            self._refresh_detail_pane()
-
-        except (OSError, RuntimeError, ValueError) as exc:
-            logger.warning("Relevance batch scoring failed: %s", exc, exc_info=True)
-            self.notify("Relevance scoring failed", title="Relevance", severity="error")
-        except Exception as exc:
-            logger.warning("Unexpected relevance batch scoring failure: %s", exc, exc_info=True)
-            self.notify("Relevance scoring failed", title="Relevance", severity="error")
-        finally:
-            self._relevance_scoring_active = False
-            self._scoring_progress = None
-            self._update_footer()
+        return await _actions._score_relevance_batch_async(
+            self, papers, command_template, interests
+        )
 
     def _update_option_for_paper(self, arxiv_id: str) -> None:
         """Update the list option display for a specific paper by arXiv ID."""
@@ -4073,51 +2916,23 @@ class ArxivBrowser(App):
                 break
 
     def _update_relevance_badge(self, arxiv_id: str) -> None:
-        """Update a single list item's relevance badge."""
-        self._update_option_for_paper(arxiv_id)
+        from arxiv_browser.actions import llm_actions as _actions
+
+        return _actions._update_relevance_badge(self, arxiv_id)
 
     # ========================================================================
     # Auto-Tagging
     # ========================================================================
 
     def action_auto_tag(self) -> None:
-        """Auto-tag current or selected papers using the configured LLM."""
-        command_template = self._require_llm_command()
-        if not command_template:
-            return
-        if not self._ensure_llm_command_trusted(
-            command_template,
-            lambda: self._start_auto_tag_flow(),
-        ):
-            return
-        self._start_auto_tag_flow()
+        from arxiv_browser.actions import llm_actions as _actions
+
+        return _actions.action_auto_tag(self)
 
     def _start_auto_tag_flow(self) -> None:
-        """Start auto-tagging after command trust checks pass."""
+        from arxiv_browser.actions import llm_actions as _actions
 
-        if self._auto_tag_active:
-            self.notify("Auto-tagging already in progress", title="Auto-Tag")
-            return
-
-        taxonomy = self._collect_all_tags()
-        self._auto_tag_active = True
-
-        if self.selected_ids:
-            papers = [p for p in self.all_papers if p.arxiv_id in self.selected_ids]
-            if not papers:
-                self._auto_tag_active = False
-                self.notify("No selected papers found", title="Auto-Tag", severity="warning")
-                return
-            self._update_footer()
-            self._track_task(self._auto_tag_batch_async(papers, taxonomy))
-        else:
-            paper = self._get_current_paper()
-            if not paper:
-                self._auto_tag_active = False
-                self.notify("No paper selected", title="Auto-Tag", severity="warning")
-                return
-            current_tags = (self._tags_for(paper.arxiv_id) or [])[:]
-            self._track_task(self._auto_tag_single_async(paper, taxonomy, current_tags))
+        return _actions._start_auto_tag_flow(self)
 
     async def _auto_tag_single_async(
         self,
@@ -4125,80 +2940,18 @@ class ArxivBrowser(App):
         taxonomy: list[str],
         current_tags: list[str],
     ) -> None:
-        """Auto-tag a single paper: call LLM, show suggestion modal."""
-        try:
-            suggested = await self._call_auto_tag_llm(paper, taxonomy)
-            if suggested is None:
-                self.notify("Auto-tagging failed", title="Auto-Tag", severity="warning")
-                return
+        from arxiv_browser.actions import llm_actions as _actions
 
-            # Show modal for user to accept/modify
-            self.push_screen(
-                AutoTagSuggestModal(paper.title, suggested, current_tags),
-                lambda tags: self._on_auto_tag_accepted(tags, paper.arxiv_id),
-            )
-        except Exception:
-            logger.warning("Auto-tag single failed for %s", paper.arxiv_id, exc_info=True)
-            self.notify("Auto-tagging failed", title="Auto-Tag", severity="error")
-        finally:
-            self._auto_tag_active = False
-            self._update_footer()
+        return await _actions._auto_tag_single_async(self, paper, taxonomy, current_tags)
 
     async def _auto_tag_batch_async(
         self,
         papers: list[Paper],
         taxonomy: list[str],
     ) -> None:
-        """Batch auto-tag: call LLM for each paper, apply directly."""
-        try:
-            total = len(papers)
-            tagged = 0
-            failed = 0
+        from arxiv_browser.actions import llm_actions as _actions
 
-            for i, paper in enumerate(papers):
-                self._auto_tag_progress = (i + 1, total)
-                self._update_footer()
-
-                suggested = await self._call_auto_tag_llm(paper, taxonomy)
-                if suggested is None:
-                    failed += 1
-                    continue
-
-                # Apply tags directly in batch mode (merge with existing)
-                meta = self._get_or_create_metadata(paper.arxiv_id)
-                merged = list(dict.fromkeys(meta.tags + suggested))
-                meta.tags = merged
-                tagged += 1
-
-                # Update taxonomy for subsequent papers
-                for tag in suggested:
-                    if tag not in taxonomy:
-                        taxonomy.append(tag)
-
-            self._save_config_or_warn("auto-tag results")
-            self._mark_badges_dirty("tags", immediate=True)
-            self._refresh_detail_pane()
-
-            msg = f"Auto-tagged {tagged} paper{'s' if tagged != 1 else ''}"
-            if failed:
-                msg += f" ({failed} failed)"
-            self.notify(msg, title="Auto-Tag")
-
-        except Exception:
-            logger.error("Auto-tag batch failed after tagging %d papers", tagged, exc_info=True)
-            if tagged > 0:
-                self._save_config_or_warn("partial auto-tag results")
-            self.notify(
-                f"Auto-tagging failed ({tagged} tagged before error)"
-                if tagged
-                else "Auto-tagging failed",
-                title="Auto-Tag",
-                severity="error",
-            )
-        finally:
-            self._auto_tag_active = False
-            self._auto_tag_progress = None
-            self._update_footer()
+        return await _actions._auto_tag_batch_async(self, papers, taxonomy)
 
     async def _call_auto_tag_llm(self, paper: Paper, taxonomy: list[str]) -> list[str] | None:
         """Call the LLM to get tag suggestions for a paper. Returns tags or None on failure."""
@@ -4344,44 +3097,14 @@ class ArxivBrowser(App):
         return False
 
     def action_prev_date(self) -> None:
-        """Navigate to previous (older) date file."""
-        if self._in_arxiv_api_mode:
-            self._track_task(self._change_arxiv_page(-1))
-            return
+        from arxiv_browser.actions import search_api_actions as _actions
 
-        if not self._is_history_mode():
-            self.notify("Not in history mode", title="Navigate", severity="warning")
-            return
-
-        if self._current_date_index >= len(self._history_files) - 1:
-            self.notify("Already at oldest", title="Navigate")
-            return
-
-        if not self._set_history_index(self._current_date_index + 1):
-            return
-        current_date = self._get_current_date()
-        if current_date:
-            self.notify(f"Loaded {current_date.strftime(HISTORY_DATE_FORMAT)}", title="Navigate")
+        return _actions.action_prev_date(self)
 
     def action_next_date(self) -> None:
-        """Navigate to next (newer) date file."""
-        if self._in_arxiv_api_mode:
-            self._track_task(self._change_arxiv_page(1))
-            return
+        from arxiv_browser.actions import search_api_actions as _actions
 
-        if not self._is_history_mode():
-            self.notify("Not in history mode", title="Navigate", severity="warning")
-            return
-
-        if self._current_date_index <= 0:
-            self.notify("Already at newest", title="Navigate")
-            return
-
-        if not self._set_history_index(self._current_date_index - 1):
-            return
-        current_date = self._get_current_date()
-        if current_date:
-            self.notify(f"Loaded {current_date.strftime(HISTORY_DATE_FORMAT)}", title="Navigate")
+        return _actions.action_next_date(self)
 
     def _update_list_header(self, query: str) -> None:
         """Update the list header text for the current query/context."""
@@ -4545,48 +3268,18 @@ class ArxivBrowser(App):
         return success
 
     def _start_downloads(self) -> None:
-        """Start download tasks up to the concurrency limit."""
-        while self._download_queue and len(self._downloading) < MAX_CONCURRENT_DOWNLOADS:
-            paper = self._download_queue.popleft()
-            if paper.arxiv_id in self._downloading:
-                continue
-            self._downloading.add(paper.arxiv_id)
-            self._track_task(self._process_single_download(paper))
+        from arxiv_browser.actions import external_io_actions as _actions
+
+        return _actions._start_downloads(self)
 
     def _is_download_batch_active(self) -> bool:
         """Return True when a download batch is active or pending."""
         return bool(self._download_queue or self._downloading or self._download_total)
 
     async def _process_single_download(self, paper: Paper) -> None:
-        """Process a single download and update state."""
-        try:
-            success = await self._download_pdf_async(paper, self._http_client)
-            self._download_results[paper.arxiv_id] = success
-        except (OSError, RuntimeError, ValueError) as exc:
-            logger.warning("Download failed for %s: %s", paper.arxiv_id, exc, exc_info=True)
-            self._download_results[paper.arxiv_id] = False
-        except Exception as exc:
-            logger.warning(
-                "Unexpected download failure for %s: %s",
-                paper.arxiv_id,
-                exc,
-                exc_info=True,
-            )
-            self._download_results[paper.arxiv_id] = False
-        finally:
-            self._downloading.discard(paper.arxiv_id)
+        from arxiv_browser.actions import external_io_actions as _actions
 
-            # Update progress
-            completed = len(self._download_results)
-            total = self._download_total
-            self._update_download_progress(completed, total)
-
-            # Start more downloads if queue has items
-            self._start_downloads()
-
-            # Check if batch is complete
-            if completed == total:
-                self._finish_download_batch()
+        return await _actions._process_single_download(self, paper)
 
     def _update_download_progress(self, completed: int, total: int) -> None:
         """Update status bar and footer with download progress."""
@@ -4598,32 +3291,9 @@ class ArxivBrowser(App):
         self._update_footer()
 
     def _finish_download_batch(self) -> None:
-        """Handle completion of a download batch."""
-        if self._download_total <= 0:
-            return
+        from arxiv_browser.actions import external_io_actions as _actions
 
-        successes = sum(1 for v in self._download_results.values() if v)
-        failures = len(self._download_results) - successes
-
-        # Get download directory for notification
-        download_dir = self._config.pdf_download_dir or f"~/{DEFAULT_PDF_DOWNLOAD_DIR}"
-
-        if failures == 0:
-            self.notify(
-                f"Downloaded {successes} PDF{'s' if successes != 1 else ''} to {download_dir}",
-                title="Download Complete",
-            )
-        else:
-            self.notify(
-                f"Downloaded {successes}/{self._download_total} PDFs ({failures} failed)",
-                title="Download Complete",
-                severity="warning",
-            )
-
-        # Reset state
-        self._download_results.clear()
-        self._download_total = 0
-        self._update_status_bar()
+        return _actions._finish_download_batch(self)
 
     def _safe_browser_open(self, url: str) -> bool:
         """Open a URL in the browser with error handling. Returns True on success."""
@@ -4645,196 +3315,54 @@ class ArxivBrowser(App):
             return False
 
     def action_open_url(self) -> None:
-        """Open selected papers' URLs in the default browser."""
-        papers = self._get_target_papers()
-        if not papers:
-            return
-        if requires_batch_confirmation(len(papers), BATCH_CONFIRM_THRESHOLD):
-            self.push_screen(
-                ConfirmModal(build_open_papers_confirmation_prompt(len(papers))),
-                lambda confirmed: self._do_open_urls(papers) if confirmed else None,
-            )
-        else:
-            self._do_open_urls(papers)
+        from arxiv_browser.actions import external_io_actions as _actions
+
+        return _actions.action_open_url(self)
 
     def _do_open_urls(self, papers: list[Paper]) -> None:
-        """Open the given papers' URLs in the browser."""
-        for paper in papers:
-            self._safe_browser_open(get_paper_url(paper, prefer_pdf=self._config.prefer_pdf_url))
-        count = len(papers)
-        self.notify(build_open_papers_notification(count), title="Browser")
+        from arxiv_browser.actions import external_io_actions as _actions
+
+        return _actions._do_open_urls(self, papers)
 
     def action_open_pdf(self) -> None:
-        """Open selected papers' PDF URLs in the default browser."""
-        papers = self._get_target_papers()
-        if not papers:
-            return
-        if requires_batch_confirmation(len(papers), BATCH_CONFIRM_THRESHOLD):
-            self.push_screen(
-                ConfirmModal(build_open_pdfs_confirmation_prompt(len(papers))),
-                lambda confirmed: self._do_open_pdfs(papers) if confirmed else None,
-            )
-        else:
-            self._do_open_pdfs(papers)
+        from arxiv_browser.actions import external_io_actions as _actions
+
+        return _actions.action_open_pdf(self)
 
     def _do_open_pdfs(self, papers: list[Paper]) -> None:
-        """Open the given papers' PDF URLs in the browser or configured viewer."""
-        viewer = self._config.pdf_viewer.strip()
-        if viewer and not self._ensure_pdf_viewer_trusted(
-            viewer,
-            lambda: self._do_open_pdfs(papers),
-        ):
-            return
-        for paper in papers:
-            url = get_pdf_url(paper)
-            if viewer:
-                self._open_with_viewer(viewer, url)
-            else:
-                self._safe_browser_open(url)
-        count = len(papers)
-        self.notify(build_open_pdfs_notification(count), title="PDF")
+        from arxiv_browser.actions import external_io_actions as _actions
+
+        return _actions._do_open_pdfs(self, papers)
 
     def _open_with_viewer(self, viewer_cmd: str, url_or_path: str) -> bool:
-        """Open a URL/path with a configured external viewer command.
+        from arxiv_browser.actions import external_io_actions as _actions
 
-        The command template can use {url} or {path} as placeholders.
-        If no placeholder is found, the URL is appended as an argument.
-        """
-        try:
-            args = build_viewer_args(viewer_cmd, url_or_path)
-            # User-configured local viewer command execution is an explicit feature.
-            subprocess.Popen(  # nosec B603
-                args,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            return True
-        except (ValueError, OSError) as e:
-            logger.warning("Failed to open with viewer %r: %s", viewer_cmd, e)
-            self.notify(
-                build_actionable_error(
-                    "open the configured PDF viewer",
-                    why="the viewer command failed to launch",
-                    next_step="check pdf_viewer in config.json or use P to open in browser",
-                ),
-                title="PDF",
-                severity="error",
-                timeout=8,
-            )
-            return False
+        return _actions._open_with_viewer(self, viewer_cmd, url_or_path)
 
     def action_download_pdf(self) -> None:
-        """Download PDFs for selected papers (or current paper)."""
-        if self._is_download_batch_active():
-            self.notify("Download already in progress", title="Download", severity="warning")
-            return
+        from arxiv_browser.actions import external_io_actions as _actions
 
-        papers_to_download = self._get_target_papers()
-        if not papers_to_download:
-            self.notify("No papers to download", title="Download", severity="warning")
-            return
-
-        to_download, skipped_ids = filter_papers_needing_download(
-            papers_to_download,
-            lambda paper: get_pdf_download_path(paper, self._config),
-        )
-        for arxiv_id in skipped_ids:
-            logger.debug("Skipping %s: already downloaded", arxiv_id)
-
-        if not to_download:
-            self.notify("All PDFs already downloaded", title="Download")
-            return
-
-        if requires_batch_confirmation(len(to_download), BATCH_CONFIRM_THRESHOLD):
-            self.push_screen(
-                ConfirmModal(build_download_pdfs_confirmation_prompt(len(to_download))),
-                lambda confirmed: self._do_start_downloads(to_download) if confirmed else None,
-            )
-        else:
-            self._do_start_downloads(to_download)
+        return _actions.action_download_pdf(self)
 
     def _do_start_downloads(self, to_download: list[Paper]) -> None:
-        """Initialize and start batch PDF downloads."""
-        if self._is_download_batch_active():
-            self.notify("Download already in progress", title="Download", severity="warning")
-            return
+        from arxiv_browser.actions import external_io_actions as _actions
 
-        # Initialize download batch
-        self._download_queue.extend(to_download)
-        self._download_total = len(to_download)
-        self._download_results.clear()
-
-        # Notify and start downloads
-        self.notify(build_download_start_notification(len(to_download)), title="Download")
-        self._start_downloads()
+        return _actions._do_start_downloads(self, to_download)
 
     def _format_paper_for_clipboard(self, paper: Paper) -> str:
-        """Format a paper's metadata for clipboard export."""
-        abstract_text = self._get_abstract_text(paper, allow_async=False) or ""
-        return format_paper_for_clipboard(paper, abstract_text)
+        from arxiv_browser.actions import external_io_actions as _actions
+
+        return _actions._format_paper_for_clipboard(self, paper)
 
     def _copy_to_clipboard(self, text: str) -> bool:
-        """Copy text to system clipboard. Returns True on success.
+        from arxiv_browser.actions import external_io_actions as _actions
 
-        Uses platform-specific clipboard tools with timeout protection.
-        Logs failures at warning level for troubleshooting.
-        """
-        try:
-            system = platform.system()
-            plan = get_clipboard_command_plan(system)
-            if plan is None:
-                logger.warning("Clipboard copy failed: unsupported platform %s", system)
-                return False
-            commands, encoding = plan
-            payload = text.encode(encoding)
-            for index, command in enumerate(commands):
-                try:
-                    subprocess.run(  # nosec B603
-                        command,
-                        input=payload,
-                        check=True,
-                        shell=False,
-                        timeout=SUBPROCESS_TIMEOUT,
-                    )
-                    break
-                except (FileNotFoundError, subprocess.CalledProcessError):
-                    if index == len(commands) - 1:
-                        raise
-            return True
-        except (
-            subprocess.CalledProcessError,
-            FileNotFoundError,
-            subprocess.TimeoutExpired,
-            OSError,
-        ) as e:
-            logger.warning("Clipboard copy failed: %s", e)
-            return False
+        return _actions._copy_to_clipboard(self, text)
 
     def action_copy_selected(self) -> None:
-        """Copy selected papers' metadata to clipboard."""
-        papers_to_copy = self._get_target_papers()
-        if not papers_to_copy:
-            self.notify("No papers to copy", title="Copy", severity="warning")
-            return
+        from arxiv_browser.actions import external_io_actions as _actions
 
-        formatted = build_clipboard_payload(
-            [self._format_paper_for_clipboard(paper) for paper in papers_to_copy],
-            CLIPBOARD_SEPARATOR,
-        )
-
-        # Copy to clipboard
-        if self._copy_to_clipboard(formatted):
-            count = len(papers_to_copy)
-            self.notify(
-                f"Copied {count} paper{'s' if count > 1 else ''} to clipboard",
-                title="Copy",
-            )
-        else:
-            self.notify(
-                "Failed to copy to clipboard",
-                title="Copy",
-                severity="error",
-            )
+        return _actions.action_copy_selected(self)
 
 
 def main() -> int:

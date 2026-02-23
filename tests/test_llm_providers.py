@@ -70,7 +70,7 @@ class TestCLIProvider:
 
         provider = CLIProvider("echo {prompt}")
         with patch(
-            "arxiv_browser.llm_providers.asyncio.create_subprocess_shell",
+            "arxiv_browser.llm_providers.asyncio.create_subprocess_exec",
             new_callable=AsyncMock,
             side_effect=OSError("exec failed"),
         ):
@@ -88,7 +88,7 @@ class TestCLIProvider:
         proc.returncode = 1
 
         with patch(
-            "arxiv_browser.llm_providers.asyncio.create_subprocess_shell",
+            "arxiv_browser.llm_providers.asyncio.create_subprocess_exec",
             new_callable=AsyncMock,
             return_value=proc,
         ):
@@ -97,6 +97,24 @@ class TestCLIProvider:
         assert result.success is False
         # Error message includes stderr truncated to 200 chars
         assert len(result.error) < 250
+
+    async def test_shell_fallback_for_shell_syntax(self):
+        from unittest.mock import AsyncMock, patch
+
+        provider = CLIProvider("cat <<'EOF'\n{prompt}\nEOF")
+        proc = AsyncMock()
+        proc.communicate.return_value = (b"ok\n", b"")
+        proc.returncode = 0
+
+        with patch(
+            "arxiv_browser.llm_providers.asyncio.create_subprocess_shell",
+            new_callable=AsyncMock,
+            return_value=proc,
+        ) as shell_mock:
+            result = await provider.execute("hello", timeout=5)
+
+        assert result.success is True
+        shell_mock.assert_called_once()
 
 
 # ============================================================================

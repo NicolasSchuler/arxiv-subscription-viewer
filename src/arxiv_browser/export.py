@@ -24,6 +24,7 @@ DEFAULT_PDF_DOWNLOAD_DIR = "arxiv-pdfs"  # Relative to home directory
 
 # Matches 4-digit years (1900-2099) for BibTeX export
 _YEAR_PATTERN = re.compile(r"\b((?:19|20)\d{2})\b")
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
 
 
 def get_pdf_download_path(paper: Paper, config: UserConfig) -> Path:
@@ -43,7 +44,7 @@ def get_pdf_download_path(paper: Paper, config: UserConfig) -> Path:
         ValueError: If the arXiv ID would escape the download directory.
     """
     if config.pdf_download_dir:
-        base_dir = Path(config.pdf_download_dir).resolve()
+        base_dir = Path(config.pdf_download_dir).expanduser().resolve()
     else:
         base_dir = (Path.home() / DEFAULT_PDF_DOWNLOAD_DIR).resolve()
     result = (base_dir / f"{paper.arxiv_id}.pdf").resolve()
@@ -188,6 +189,12 @@ def format_papers_as_csv(
     if metadata is not None:
         header.extend(["starred", "read", "tags", "notes"])
     writer.writerow(header)
+
+    def _sanitize_csv_cell(value: str) -> str:
+        if value and value[0] in _CSV_FORMULA_PREFIXES:
+            return "'" + value
+        return value
+
     for paper in papers:
         row: list[str] = [
             paper.arxiv_id,
@@ -211,7 +218,7 @@ def format_papers_as_csv(
                 )
             else:
                 row.extend(["false", "false", "", ""])
-        writer.writerow(row)
+        writer.writerow([_sanitize_csv_cell(value) for value in row])
     return output.getvalue()
 
 

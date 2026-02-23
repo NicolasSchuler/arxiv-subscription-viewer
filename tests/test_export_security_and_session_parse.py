@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from arxiv_browser.app import Paper, UserConfig, _dict_to_config, get_pdf_download_path
+from arxiv_browser.app import (
+    ArxivBrowser,
+    Paper,
+    UserConfig,
+    _dict_to_config,
+    get_pdf_download_path,
+)
 
 
 def _make_paper(arxiv_id: str) -> Paper:
@@ -27,6 +35,23 @@ def test_get_pdf_download_path_allows_normal_id(tmp_path) -> None:
     path = get_pdf_download_path(_make_paper("2401.12345"), config)
 
     assert path == (base_dir / "2401.12345.pdf").resolve()
+
+
+def test_get_pdf_download_path_expands_user_home() -> None:
+    config = UserConfig(pdf_download_dir="~/arxiv-pdfs-test")
+
+    path = get_pdf_download_path(_make_paper("2401.12345"), config)
+
+    assert path == (Path.home() / "arxiv-pdfs-test" / "2401.12345.pdf").resolve()
+
+
+def test_get_export_dir_expands_user_home() -> None:
+    app = ArxivBrowser.__new__(ArxivBrowser)
+    app._config = UserConfig(bibtex_export_dir="~/arxiv-exports-test")
+
+    export_dir = app._get_export_dir()
+
+    assert export_dir == (Path.home() / "arxiv-exports-test")
 
 
 @pytest.mark.parametrize(

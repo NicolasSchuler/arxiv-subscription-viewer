@@ -441,6 +441,19 @@ class TestArxivApiSearchHelpers:
         with pytest.raises(ValueError, match="Invalid arXiv API XML response"):
             parse_arxiv_api_feed("<not xml")
 
+    def test_parse_arxiv_api_feed_rejects_unsafe_entities(self):
+        xml = """<?xml version="1.0"?>
+<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/2401.12345v1</id>
+    <title>&xxe;</title>
+    <summary>Unsafe</summary>
+  </entry>
+</feed>"""
+        with pytest.raises(ValueError, match="Invalid arXiv API XML response"):
+            parse_arxiv_api_feed(xml)
+
 
 # ============================================================================
 # Tests for Paper dataclass
@@ -6417,6 +6430,15 @@ class TestParseArxivVersionMap:
         result = parse_arxiv_version_map("<not valid xml")
         assert result == {}
 
+    def test_unsafe_entities_are_rejected(self):
+        xml = """<?xml version="1.0"?>
+<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry><id>http://arxiv.org/abs/2401.12345v1</id></entry>
+</feed>"""
+        result = parse_arxiv_version_map(xml)
+        assert result == {}
+
     def test_duplicate_ids_last_wins(self):
         """If the same ID appears twice, the last entry wins."""
         entries = """
@@ -6792,6 +6814,29 @@ class TestCSVFormat:
         rows = list(reader)
         # comments column (index 6)
         assert rows[1][6] == ""
+
+    def test_formula_like_cells_are_sanitized(self, make_paper):
+        papers = [make_paper(title="=SUM(1,2)", comments="@A1")]
+        meta = {
+            papers[0].arxiv_id: PaperMetadata(
+                arxiv_id=papers[0].arxiv_id,
+                notes="-cmd|' /C calc'!A0",
+                tags=["+danger"],
+            )
+        }
+        csv_text = format_papers_as_csv(papers, metadata=meta)
+
+        import csv as csv_mod
+        import io
+
+        reader = csv_mod.reader(io.StringIO(csv_text))
+        rows = list(reader)
+        data = rows[1]
+
+        assert data[1] == "'=SUM(1,2)"
+        assert data[6] == "'@A1"
+        assert data[9] == "'+danger"
+        assert data[10] == "'-cmd|' /C calc'!A0"
 
 
 class TestCSVExportMethods:

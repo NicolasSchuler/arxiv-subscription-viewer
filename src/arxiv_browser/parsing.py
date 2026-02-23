@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import logging
 import re
-import xml.etree.ElementTree as ET
 from datetime import date, datetime
 from html.parser import HTMLParser
 from pathlib import Path
+from typing import Any
+
+from defusedxml import ElementTree as ET
+from defusedxml.common import DefusedXmlException
 
 from arxiv_browser.models import Paper, PaperMetadata
 
@@ -268,7 +271,7 @@ def _format_arxiv_api_date(raw_date: str) -> str:
         return cleaned
 
 
-def _atom_text(node: ET.Element, path: str) -> str:
+def _atom_text(node: Any, path: str) -> str:
     """Extract normalized text from an Atom XML node path."""
     found = node.find(path, ATOM_NS)
     if found is None or found.text is None:
@@ -312,7 +315,7 @@ def parse_arxiv_api_feed(xml_text: str) -> list[Paper]:
 
     try:
         root = ET.fromstring(xml_text)
-    except ET.ParseError as exc:
+    except (ET.ParseError, DefusedXmlException) as exc:
         raise ValueError("Invalid arXiv API XML response") from exc
 
     papers: list[Paper] = []
@@ -381,7 +384,7 @@ def parse_arxiv_version_map(xml_text: str) -> dict[str, int]:
 
     try:
         root = ET.fromstring(xml_text)
-    except ET.ParseError:
+    except (ET.ParseError, DefusedXmlException):
         logger.warning("Failed to parse arXiv version check response")
         return {}
 
