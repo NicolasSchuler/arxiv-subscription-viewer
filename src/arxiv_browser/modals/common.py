@@ -71,7 +71,7 @@ class HelpScreen(ModalScreen[None]):
         (
             "Actions",
             [
-                ("o", "Open in browser"),
+                ("o", "Open in Browser"),
                 ("P", "Open as PDF"),
                 ("n", "Edit notes"),
                 ("t", "Edit tags"),

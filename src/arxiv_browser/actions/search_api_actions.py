@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from arxiv_browser.action_messages import build_actionable_error, build_actionable_warning
 from arxiv_browser.actions._runtime import *
 
 if TYPE_CHECKING:
@@ -291,11 +292,25 @@ async def action_add_bookmark(app: "ArxivBrowser") -> None:
     query = app._get_search_input_widget().value.strip()
 
     if not query:
-        app.notify("Enter a search query first", title="Bookmark", severity="warning")
+        app.notify(
+            build_actionable_warning(
+                "Bookmark requires an active search query",
+                next_step="type a query with /, then press Ctrl+b",
+            ),
+            title="Bookmark",
+            severity="warning",
+        )
         return
 
     if len(app._config.bookmarks) >= 9:
-        app.notify("Maximum 9 bookmarks allowed", title="Bookmark", severity="warning")
+        app.notify(
+            build_actionable_warning(
+                "Maximum 9 bookmarks allowed",
+                next_step="remove one with Ctrl+Shift+b, then add a new bookmark",
+            ),
+            title="Bookmark",
+            severity="warning",
+        )
         return
 
     # Generate a short name from the query
@@ -313,7 +328,14 @@ async def action_remove_bookmark(app: "ArxivBrowser") -> None:
     """Remove the currently active bookmark."""
     _sync_app_globals()
     if app._active_bookmark_index < 0 or app._active_bookmark_index >= len(app._config.bookmarks):
-        app.notify("No active bookmark to remove", title="Bookmark", severity="warning")
+        app.notify(
+            build_actionable_warning(
+                "No active bookmark is selected",
+                next_step="press 1-9 to activate one, then press Ctrl+Shift+b",
+            ),
+            title="Bookmark",
+            severity="warning",
+        )
         return
 
     removed = app._config.bookmarks.pop(app._active_bookmark_index)

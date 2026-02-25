@@ -781,7 +781,8 @@ class TestS2AndHfCoverage:
 
         app._s2_active = False
         await app.action_fetch_s2()
-        assert "S2 is disabled" in app.notify.call_args[0][0]
+        assert "Semantic Scholar is disabled" in app.notify.call_args[0][0]
+        assert "Next step:" in app.notify.call_args[0][0]
 
         app._s2_active = True
         with patch("arxiv_browser.app.load_s2_paper", return_value=_make_s2_paper(paper.arxiv_id)):
@@ -811,7 +812,7 @@ class TestS2AndHfCoverage:
 
         with patch("arxiv_browser.app.load_s2_paper", side_effect=RuntimeError("db error")):
             await app.action_fetch_s2()
-        assert "S2 fetch failed" in app.notify.call_args[0][0]
+        assert "Could not fetch Semantic Scholar data." in app.notify.call_args[0][0]
         assert paper.arxiv_id not in app._s2_loading
 
         tracked = []
@@ -853,7 +854,7 @@ class TestS2AndHfCoverage:
         app._s2_loading.add("2401.30004")
         with patch("arxiv_browser.app._load_or_fetch_s2_paper_cached", return_value=None):
             await app._fetch_s2_paper_async("2401.30004")
-        assert "No S2 data found" in app.notify.call_args[0][0]
+        assert "No Semantic Scholar data was found for this paper." in app.notify.call_args[0][0]
         assert "2401.30004" not in app._s2_loading
 
     @pytest.mark.asyncio
@@ -880,7 +881,7 @@ class TestS2AndHfCoverage:
         app._hf_loading = False
         with patch("arxiv_browser.app.load_hf_daily_cache", side_effect=RuntimeError("db")):
             await app._fetch_hf_daily()
-        assert "HF fetch failed" in app.notify.call_args[0][0]
+        assert "Could not fetch HuggingFace trending data." in app.notify.call_args[0][0]
 
         tracked = []
 
@@ -917,7 +918,7 @@ class TestS2AndHfCoverage:
         app._hf_loading = True
         with patch("arxiv_browser.app._load_or_fetch_hf_daily_cached", return_value=[]):
             await app._fetch_hf_daily_async()
-        assert "No HF trending data found" in app.notify.call_args[0][0]
+        assert "No HuggingFace trending data was returned." in app.notify.call_args[0][0]
         assert app._hf_loading is False
 
 
@@ -1342,7 +1343,7 @@ class TestArxivApiAndSimilarityCoverage:
         app._show_recommendations = MagicMock()
         app._get_current_paper = MagicMock(return_value=None)
         app.action_show_similar()
-        assert "No paper selected" in app.notify.call_args[0][0]
+        assert "No paper is selected." in app.notify.call_args[0][0]
 
         paper = make_paper(arxiv_id="2401.70001")
         app._get_current_paper = MagicMock(return_value=paper)
@@ -1389,7 +1390,7 @@ class TestArxivApiAndSimilarityCoverage:
 
         with patch("arxiv_browser.app.find_similar_papers", return_value=[]):
             app._show_local_recommendations(paper)
-        assert "No similar papers found" in app.notify.call_args[0][0]
+        assert "No similar papers were found." in app.notify.call_args[0][0]
 
         app.notify.reset_mock()
         with patch(
@@ -1408,7 +1409,7 @@ class TestArxivApiAndSimilarityCoverage:
 
         app._fetch_s2_recommendations_async = AsyncMock(return_value=[])
         await app._show_s2_recommendations(paper)
-        assert "No S2 recommendations found" in app.notify.call_args[0][0]
+        assert "No Semantic Scholar recommendations were found." in app.notify.call_args[0][0]
 
         app.notify.reset_mock()
         app._fetch_s2_recommendations_async = AsyncMock(return_value=[_make_s2_paper("2401.70007")])
@@ -1421,7 +1422,7 @@ class TestArxivApiAndSimilarityCoverage:
         app.notify.reset_mock()
         app._fetch_s2_recommendations_async = AsyncMock(side_effect=RuntimeError("s2 error"))
         await app._show_s2_recommendations(paper)
-        assert "S2 recommendations failed" in app.notify.call_args[0][0]
+        assert "Could not fetch Semantic Scholar recommendations." in app.notify.call_args[0][0]
 
         app.notify.reset_mock()
         app._s2_active = False
@@ -1429,7 +1430,7 @@ class TestArxivApiAndSimilarityCoverage:
         app._s2_cache = {}
         app._track_task = MagicMock()
         app.action_citation_graph()
-        assert "S2 is disabled" in app.notify.call_args[0][0]
+        assert "Semantic Scholar is disabled" in app.notify.call_args[0][0]
 
         app._s2_active = True
         app.notify.reset_mock()
@@ -1440,7 +1441,7 @@ class TestArxivApiAndSimilarityCoverage:
         app.notify.reset_mock()
         app._fetch_citation_graph = AsyncMock(return_value=([], []))
         await app._show_citation_graph("ARXIV:2401.70006", "Test")
-        assert "No citation data found" in app.notify.call_args[0][0]
+        assert "No citation graph data was found." in app.notify.call_args[0][0]
 
         refs = [
             CitationEntry(
@@ -1461,7 +1462,7 @@ class TestArxivApiAndSimilarityCoverage:
         app.notify.reset_mock()
         app._fetch_citation_graph = AsyncMock(side_effect=RuntimeError("boom"))
         await app._show_citation_graph("ARXIV:2401.70006", "Test")
-        assert "Citation graph failed" in app.notify.call_args[0][0]
+        assert "Could not load the citation graph." in app.notify.call_args[0][0]
 
 
 class TestBookmarkRelevanceAndCopyCoverage:
@@ -1478,7 +1479,7 @@ class TestBookmarkRelevanceAndCopyCoverage:
         search_input = SimpleNamespace(value="")
         app.query_one = MagicMock(return_value=search_input)
         await app.action_add_bookmark()
-        assert "Enter a search query first" in app.notify.call_args[0][0]
+        assert "Bookmark requires an active search query." in app.notify.call_args[0][0]
 
         search_input.value = "graph transformers"
         await app.action_add_bookmark()
@@ -1491,7 +1492,7 @@ class TestBookmarkRelevanceAndCopyCoverage:
 
         app._active_bookmark_index = -1
         await app.action_remove_bookmark()
-        assert "No active bookmark to remove" in app.notify.call_args[0][0]
+        assert "No active bookmark is selected." in app.notify.call_args[0][0]
 
         app._active_bookmark_index = 0
         await app.action_remove_bookmark()

@@ -6,6 +6,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from arxiv_browser.action_messages import (
+    build_actionable_error,
+    build_actionable_success,
+    build_actionable_warning,
+)
 from arxiv_browser.actions._runtime import *
 
 if TYPE_CHECKING:
@@ -15,6 +20,18 @@ if TYPE_CHECKING:
 def _sync_app_globals() -> None:
     """Sync patched globals from arxiv_browser.app without importing it."""
     sync_app_globals(globals())
+
+
+def _notify_hf_matches(app: "ArxivBrowser", matched: int) -> None:
+    """Notify with canonical HuggingFace match success copy."""
+    app.notify(
+        build_actionable_success(
+            "HuggingFace trending data loaded",
+            detail=f"{matched} paper{'s' if matched != 1 else ''} matched your list",
+            next_step="press Ctrl+h to hide HF badges if you want a cleaner view",
+        ),
+        title="HF",
+    )
 
 
 def action_ctrl_e_dispatch(app: "ArxivBrowser") -> None:
@@ -52,7 +69,14 @@ async def action_fetch_s2(app: "ArxivBrowser") -> None:
     """Fetch Semantic Scholar data for the currently highlighted paper."""
     _sync_app_globals()
     if not app._s2_active:
-        app.notify("S2 is disabled (Ctrl+e to enable)", title="S2", severity="warning")
+        app.notify(
+            build_actionable_warning(
+                "Semantic Scholar is disabled",
+                next_step="press Ctrl+e to enable S2, then press e again",
+            ),
+            title="S2",
+            severity="warning",
+        )
         return
     paper = app._get_current_paper()
     if not paper:
@@ -73,7 +97,15 @@ async def action_fetch_s2(app: "ArxivBrowser") -> None:
     except Exception:
         app._s2_loading.discard(aid)
         logger.warning("S2 cache lookup failed for %s", aid, exc_info=True)
-        app.notify("S2 fetch failed", title="S2", severity="error")
+        app.notify(
+            build_actionable_error(
+                "fetch Semantic Scholar data",
+                why="local cache lookup failed",
+                next_step="press e to retry, or press Ctrl+e to temporarily disable S2",
+            ),
+            title="S2",
+            severity="error",
+        )
         return
     if cached:
         app._s2_cache[aid] = cached
@@ -100,7 +132,14 @@ async def _fetch_s2_paper_async(app: "ArxivBrowser", arxiv_id: str) -> None:
             api_key=app._config.s2_api_key,
         )
         if result is None:
-            app.notify("No S2 data found", title="S2", severity="warning")
+            app.notify(
+                build_actionable_warning(
+                    "No Semantic Scholar data was found for this paper",
+                    next_step="press e to retry later or continue with local metadata",
+                ),
+                title="S2",
+                severity="warning",
+            )
             return
         # Cache in memory + SQLite
         app._s2_cache[arxiv_id] = result
@@ -108,7 +147,15 @@ async def _fetch_s2_paper_async(app: "ArxivBrowser", arxiv_id: str) -> None:
         app._get_ui_refresh_coordinator().refresh_detail_and_list_item()
     except Exception:
         logger.warning("S2 fetch failed for %s", arxiv_id, exc_info=True)
-        app.notify("S2 fetch failed", title="S2", severity="error")
+        app.notify(
+            build_actionable_error(
+                "fetch Semantic Scholar data",
+                why="an API or network error occurred",
+                next_step="press e to retry after a moment",
+            ),
+            title="S2",
+            severity="error",
+        )
     finally:
         app._s2_loading.discard(arxiv_id)
 
@@ -155,7 +202,15 @@ async def _fetch_hf_daily(app: "ArxivBrowser") -> None:
         app._hf_loading = False
         app._update_status_bar()
         logger.warning("HF cache lookup failed", exc_info=True)
-        app.notify("HF fetch failed", title="HF", severity="error")
+        app.notify(
+            build_actionable_error(
+                "fetch HuggingFace trending data",
+                why="local cache lookup failed",
+                next_step="retry in a moment or press Ctrl+h to disable HF",
+            ),
+            title="HF",
+            severity="error",
+        )
         return
     if cached is not None:
         app._hf_cache = cached
@@ -163,7 +218,7 @@ async def _fetch_hf_daily(app: "ArxivBrowser") -> None:
         app._get_ui_refresh_coordinator().refresh_detail_pane()
         app._mark_badges_dirty("hf")
         matched = count_hf_matches(app._hf_cache, app._papers_by_id)
-        app.notify(f"HF: {matched} trending papers matched", title="HF")
+        _notify_hf_matches(app, matched)
         app._update_status_bar()
         return
     # Fetch from API
@@ -185,16 +240,31 @@ async def _fetch_hf_daily_async(app: "ArxivBrowser") -> None:
             client=app._http_client,
         )
         if not papers:
-            app.notify("No HF trending data found", title="HF", severity="warning")
+            app.notify(
+                build_actionable_warning(
+                    "No HuggingFace trending data was returned",
+                    next_step="retry later or press Ctrl+h to disable HF",
+                ),
+                title="HF",
+                severity="warning",
+            )
             return
         app._hf_cache = {p.arxiv_id: p for p in papers}
         app._get_ui_refresh_coordinator().refresh_detail_pane()
         app._mark_badges_dirty("hf")
         matched = count_hf_matches(app._hf_cache, app._papers_by_id)
-        app.notify(f"HF: {matched} trending papers matched", title="HF")
+        _notify_hf_matches(app, matched)
     except Exception:
         logger.warning("HF daily fetch failed", exc_info=True)
-        app.notify("HF fetch failed", title="HF", severity="error")
+        app.notify(
+            build_actionable_error(
+                "fetch HuggingFace trending data",
+                why="an API or network error occurred",
+                next_step="retry later or press Ctrl+h to disable HF",
+            ),
+            title="HF",
+            severity="error",
+        )
     finally:
         app._hf_loading = False
         app._update_status_bar()
@@ -204,12 +274,26 @@ async def action_check_versions(app: "ArxivBrowser") -> None:
     """Check starred papers for newer arXiv versions."""
     _sync_app_globals()
     if app._version_checking:
-        app.notify("Version check already in progress", title="Versions")
+        app.notify(
+            build_actionable_warning(
+                "Version check is already in progress",
+                next_step="wait for completion before pressing V again",
+            ),
+            title="Versions",
+            severity="warning",
+        )
         return
 
     starred_ids = get_starred_paper_ids_for_version_check(app._config.paper_metadata)
     if not starred_ids:
-        app.notify("No starred papers to check", title="Versions")
+        app.notify(
+            build_actionable_warning(
+                "No starred papers are available for version checks",
+                next_step="star papers with x, then press V",
+            ),
+            title="Versions",
+            severity="warning",
+        )
         return
 
     app._version_checking = True
@@ -226,7 +310,14 @@ def action_show_similar(app: "ArxivBrowser") -> None:
     _sync_app_globals()
     paper = app._get_current_paper()
     if not paper:
-        app.notify("No paper selected", title="Similar", severity="warning")
+        app.notify(
+            build_actionable_warning(
+                "No paper is selected",
+                next_step="move with j/k to a paper, then press R",
+            ),
+            title="Similar",
+            severity="warning",
+        )
         return
 
     if app._s2_active:
@@ -267,7 +358,14 @@ def action_citation_graph(app: "ArxivBrowser") -> None:
     """Open the citation graph modal for the current paper."""
     _sync_app_globals()
     if not app._s2_active:
-        app.notify("S2 is disabled (Ctrl+e to enable)", title="S2", severity="warning")
+        app.notify(
+            build_actionable_warning(
+                "Semantic Scholar is disabled",
+                next_step="press Ctrl+e to enable S2, then press G again",
+            ),
+            title="S2",
+            severity="warning",
+        )
         return
     paper = app._get_current_paper()
     if not paper:

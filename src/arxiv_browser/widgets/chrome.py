@@ -279,15 +279,20 @@ def _build_compact_status_parts(
             filtered=filtered,
             query=query,
             watch_filter_active=watch_filter_active,
-        ),
-        f"sort:{sort_label}",
+        )
     ]
-    if selected_count > 0:
-        parts.insert(1, f"{selected_count} selected")
     if in_arxiv_api_mode and api_page is not None:
-        parts.extend([f"API p{api_page}"])
+        api_segment = f"API p{api_page}"
         if arxiv_api_loading:
-            parts.append("Loading...")
+            api_segment += " loading"
+        parts.append(api_segment)
+    elif arxiv_api_loading:
+        parts.append("API loading")
+
+    if selected_count > 0:
+        parts.append(f"{selected_count} sel")
+
+    parts.append(f"sort:{sort_label}")
 
     s2_segment = _compact_flag_segment(
         active=s2_active, loading=s2_loading, count=s2_count, label="S2"

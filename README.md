@@ -114,6 +114,7 @@ arxiv-viewer --help
 arxiv-viewer --list-dates
 
 # Full TUI requires an interactive terminal (use --list-dates in CI/non-TTY contexts)
+# In-app guidance: empty states include `Try:` and `Next:` hints; press `?` for help and `Ctrl+p` for command palette.
 
 # Open specific date
 arxiv-viewer --date 2026-01-23

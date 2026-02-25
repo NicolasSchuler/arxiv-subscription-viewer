@@ -21,6 +21,45 @@ from arxiv_browser.widgets.listing import _relevance_badge_parts
 # Maximum number of cached detail pane renderings (FIFO eviction)
 DETAIL_CACHE_MAX = 100
 
+_DETAIL_GLYPH_SETS: dict[str, dict[str, str]] = {
+    "unicode": {
+        "collapsed": "▸",
+        "expanded": "▾",
+        "summary_prefix": "🤖 ",
+        "summary_loading": "⏳ ",
+        "hf_upvotes": "↑",
+        "version_arrow": "→",
+    },
+    "ascii": {
+        "collapsed": ">",
+        "expanded": "v",
+        "summary_prefix": "",
+        "summary_loading": "",
+        "hf_upvotes": "^",
+        "version_arrow": "->",
+    },
+}
+_ACTIVE_DETAIL_GLYPH_MODE = "unicode"
+_ACTIVE_DETAIL_GLYPHS = _DETAIL_GLYPH_SETS[_ACTIVE_DETAIL_GLYPH_MODE]
+
+
+def set_ascii_glyphs(enabled: bool) -> None:
+    """Switch detail pane glyphs between Unicode and ASCII modes."""
+    global _ACTIVE_DETAIL_GLYPHS, _ACTIVE_DETAIL_GLYPH_MODE
+    _ACTIVE_DETAIL_GLYPH_MODE = "ascii" if enabled else "unicode"
+    _ACTIVE_DETAIL_GLYPHS = _DETAIL_GLYPH_SETS[_ACTIVE_DETAIL_GLYPH_MODE]
+
+
+def _relevance_symbol_for_mode(symbol: str) -> str:
+    """Convert relevance badge symbols to ASCII-safe equivalents when needed."""
+    if _ACTIVE_DETAIL_GLYPH_MODE != "ascii":
+        return symbol
+    return {
+        "\u2605": "*",  # ★
+        "\u25b8": ">",  # ▸
+        "\u00b7": ".",  # ·
+    }.get(symbol, symbol)
+
 
 def _detail_cache_key(
     paper: Paper,
@@ -88,6 +127,7 @@ def _detail_cache_key(
         relevance,
         tuple(collapsed_sections) if collapsed_sections else (),
         tuple(sorted(THEME_COLORS.items())),
+        _ACTIVE_DETAIL_GLYPH_MODE,
     )
 
 
@@ -197,13 +237,15 @@ class PaperDetails(Static):
         highlight_terms: list[str] | None,
         is_collapsed: bool,
     ) -> str:
+        collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
+        expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
         if is_collapsed:
-            return "[dim]▸ Abstract[/]"
+            return f"[dim]{collapsed_glyph} Abstract[/]"
         if highlight_terms:
             safe_abstract = highlight_text(abstract_text, highlight_terms, THEME_COLORS["accent"])
         else:
             safe_abstract = escape_rich_text(abstract_text)
-        lines = [f"[bold {THEME_COLORS['orange']}]▾ Abstract[/]"]
+        lines = [f"[bold {THEME_COLORS['orange']}]{expanded_glyph} Abstract[/]"]
         if loading:
             lines.append("  [dim italic]Loading abstract...[/]")
         elif abstract_text:
@@ -213,20 +255,24 @@ class PaperDetails(Static):
         return "\n".join(lines)
 
     def _render_authors(self, paper: Paper, is_collapsed: bool) -> str:
+        collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
+        expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
         if is_collapsed:
-            return "[dim]▸ Authors[/]"
+            return f"[dim]{collapsed_glyph} Authors[/]"
         safe_authors = escape_rich_text(paper.authors)
         return (
-            f"[bold {THEME_COLORS['green']}]▾ Authors[/]\n"
+            f"[bold {THEME_COLORS['green']}]{expanded_glyph} Authors[/]\n"
             f"  [{THEME_COLORS['text']}]{safe_authors}[/]"
         )
 
     def _render_tags(self, tags: list[str] | None, is_collapsed: bool) -> str:
+        collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
+        expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
         if not tags:
             return ""
         if is_collapsed:
-            return f"[dim]▸ Tags ({len(tags)})[/]"
-        lines = [f"[bold {THEME_COLORS['accent']}]▾ Tags[/]"]
+            return f"[dim]{collapsed_glyph} Tags ({len(tags)})[/]"
+        lines = [f"[bold {THEME_COLORS['accent']}]{expanded_glyph} Tags[/]"]
         namespaced: dict[str, list[str]] = {}
         unnamespaced: list[str] = []
         for tag in tags:
@@ -251,10 +297,13 @@ class PaperDetails(Static):
             return ""
         rel_score, rel_reason = relevance
         score_color, score_sym = _relevance_badge_parts(rel_score)
+        score_sym = _relevance_symbol_for_mode(score_sym)
+        collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
+        expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
         if is_collapsed:
-            return f"[dim]▸ Relevance ({score_sym}{rel_score}/10)[/]"
+            return f"[dim]{collapsed_glyph} Relevance ({score_sym}{rel_score}/10)[/]"
         lines = [
-            f"[bold {THEME_COLORS['accent']}]▾ Relevance[/]",
+            f"[bold {THEME_COLORS['accent']}]{expanded_glyph} Relevance[/]",
             f"  [bold {THEME_COLORS['accent']}]Score:[/] [{score_color}]{score_sym}{rel_score}/10[/]",
         ]
         if rel_reason:
@@ -274,17 +323,24 @@ class PaperDetails(Static):
             summary_header += f" ({summary_mode})"
         if not summary_loading and not summary:
             return ""
+        collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
+        expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
+        summary_prefix = _ACTIVE_DETAIL_GLYPHS["summary_prefix"]
+        summary_loading_prefix = _ACTIVE_DETAIL_GLYPHS["summary_loading"]
         if is_collapsed:
             hint = " (loaded)" if summary else ""
-            return f"[dim]▸ {summary_header}{hint}[/]"
+            return f"[dim]{collapsed_glyph} {summary_header}{hint}[/]"
         if summary_loading:
             return (
-                f"[bold {THEME_COLORS['purple']}]▾ 🤖 {summary_header}[/]\n"
-                "  [dim italic]⏳ Generating summary...[/]"
+                f"[bold {THEME_COLORS['purple']}]{expanded_glyph} {summary_prefix}{summary_header}[/]\n"
+                f"  [dim italic]{summary_loading_prefix}Generating summary...[/]"
             )
         if summary:
             rendered_summary = format_summary_as_rich(summary)
-            return f"[bold {THEME_COLORS['purple']}]▾ 🤖 {summary_header}[/]\n{rendered_summary}"
+            return (
+                f"[bold {THEME_COLORS['purple']}]{expanded_glyph} {summary_prefix}{summary_header}[/]\n"
+                f"{rendered_summary}"
+            )
         return ""
 
     def _render_s2(
@@ -295,19 +351,21 @@ class PaperDetails(Static):
     ) -> str:
         if not s2_loading and not s2_data:
             return ""
+        collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
+        expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
         if is_collapsed:
             hint = ""
             if s2_data:
                 hint = f" ({s2_data.citation_count} cites)"
-            return f"[dim]▸ Semantic Scholar{hint}[/]"
+            return f"[dim]{collapsed_glyph} Semantic Scholar{hint}[/]"
         if s2_loading:
             return (
-                f"[bold {THEME_COLORS['green']}]▾ Semantic Scholar[/]\n"
+                f"[bold {THEME_COLORS['green']}]{expanded_glyph} Semantic Scholar[/]\n"
                 "  [dim italic]Fetching data...[/]"
             )
         if s2_data:
             lines = [
-                f"[bold {THEME_COLORS['green']}]▾ Semantic Scholar[/]",
+                f"[bold {THEME_COLORS['green']}]{expanded_glyph} Semantic Scholar[/]",
                 (
                     f"  [bold {THEME_COLORS['accent']}]Citations:[/] {s2_data.citation_count}"
                     f"  [bold {THEME_COLORS['accent']}]Influential:[/] {s2_data.influential_citation_count}"
@@ -327,9 +385,12 @@ class PaperDetails(Static):
     def _render_hf(self, hf_data: HuggingFacePaper | None, is_collapsed: bool) -> str:
         if not hf_data:
             return ""
+        collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
+        expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
+        hf_upvotes = _ACTIVE_DETAIL_GLYPHS["hf_upvotes"]
         if is_collapsed:
-            return f"[dim]▸ HuggingFace (↑{hf_data.upvotes})[/]"
-        lines = [f"[bold {THEME_COLORS['orange']}]▾ HuggingFace[/]"]
+            return f"[dim]{collapsed_glyph} HuggingFace ({hf_upvotes}{hf_data.upvotes})[/]"
+        lines = [f"[bold {THEME_COLORS['orange']}]{expanded_glyph} HuggingFace[/]"]
         hf_parts = [f"  [bold {THEME_COLORS['accent']}]Upvotes:[/] {hf_data.upvotes}"]
         if hf_data.num_comments > 0:
             hf_parts.append(f"  [bold {THEME_COLORS['accent']}]Comments:[/] {hf_data.num_comments}")
@@ -357,11 +418,14 @@ class PaperDetails(Static):
         if version_update is None:
             return ""
         old_v, new_v = version_update
+        collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
+        expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
+        version_arrow = _ACTIVE_DETAIL_GLYPHS["version_arrow"]
         if is_collapsed:
-            return f"[dim]▸ Version Update (v{old_v}→v{new_v})[/]"
+            return f"[dim]{collapsed_glyph} Version Update (v{old_v}{version_arrow}v{new_v})[/]"
         return (
-            f"[bold {THEME_COLORS['pink']}]▾ Version Update[/]\n"
-            f"  [bold {THEME_COLORS['accent']}]Updated:[/] [{THEME_COLORS['pink']}]v{old_v} → v{new_v}[/]\n"
+            f"[bold {THEME_COLORS['pink']}]{expanded_glyph} Version Update[/]\n"
+            f"  [bold {THEME_COLORS['accent']}]Updated:[/] [{THEME_COLORS['pink']}]v{old_v} {version_arrow} v{new_v}[/]\n"
             f"  [bold {THEME_COLORS['accent']}]View diff:[/] [{THEME_COLORS['accent']}]https://arxivdiff.org/abs/{paper.arxiv_id}[/]"
         )
 
@@ -382,4 +446,5 @@ class PaperDetails(Static):
 __all__ = [
     "DETAIL_CACHE_MAX",
     "PaperDetails",
+    "set_ascii_glyphs",
 ]

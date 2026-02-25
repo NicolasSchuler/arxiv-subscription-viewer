@@ -23,7 +23,41 @@ def build_actionable_error(
     lines = [f"Could not {action.strip()}."]
     if why:
         lines.append(f"Why: {_ensure_sentence(why)}")
-    lines.append(f"Next step: {_ensure_sentence(next_step)}")
+    lines.append(build_next_step_hint(next_step))
+    return "\n".join(lines)
+
+
+def build_next_step_hint(next_step: str) -> str:
+    """Build a canonical next-step guidance line."""
+    return f"Next step: {_ensure_sentence(next_step)}"
+
+
+def build_actionable_warning(
+    message: str,
+    *,
+    next_step: str,
+    why: str | None = None,
+) -> str:
+    """Build a 2-3 line actionable warning message."""
+    lines = [_ensure_sentence(message)]
+    if why:
+        lines.append(f"Why: {_ensure_sentence(why)}")
+    lines.append(build_next_step_hint(next_step))
+    return "\n".join(lines)
+
+
+def build_actionable_success(
+    message: str,
+    *,
+    detail: str | None = None,
+    next_step: str | None = None,
+) -> str:
+    """Build a concise success message with optional detail and next step."""
+    lines = [_ensure_sentence(message)]
+    if detail:
+        lines.append(_ensure_sentence(detail))
+    if next_step:
+        lines.append(build_next_step_hint(next_step))
     return "\n".join(lines)
 
 
@@ -73,8 +107,11 @@ def build_download_start_notification(item_count: int) -> str:
 
 __all__ = [
     "build_actionable_error",
+    "build_actionable_success",
+    "build_actionable_warning",
     "build_download_pdfs_confirmation_prompt",
     "build_download_start_notification",
+    "build_next_step_hint",
     "build_open_papers_confirmation_prompt",
     "build_open_papers_notification",
     "build_open_pdfs_confirmation_prompt",

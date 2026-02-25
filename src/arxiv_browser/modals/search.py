@@ -252,14 +252,17 @@ class CommandPaletteModal(ModalScreen[str]):
                     Option(
                         "[dim]No commands match "
                         f'[bold]"{safe_query}"[/bold].[/]\n'
-                        "[dim]Try a shorter term or press [bold]Esc[/bold] to close.[/]",
+                        "[dim]Try: use a shorter term.[/]\n"
+                        "[dim]Next: press [bold]Esc[/bold] to close or [bold]?[/bold] for shortcuts.[/]",
                         disabled=True,
                     )
                 )
             else:
                 option_list.add_option(
                     Option(
-                        "[dim]No commands available.[/]\n[dim]Press [bold]Esc[/bold] to close.[/]",
+                        "[dim]No commands available.[/]\n"
+                        "[dim]Try: reopen with [bold]Ctrl+p[/bold].[/]\n"
+                        "[dim]Next: press [bold]?[/bold] for shortcuts.[/]",
                         disabled=True,
                     )
                 )

@@ -87,6 +87,7 @@ from textual.widgets.option_list import Option, OptionDoesNotExist
 from arxiv_browser import widgets as _widgets
 from arxiv_browser.action_messages import (
     build_actionable_error,
+    build_actionable_warning,
     build_download_pdfs_confirmation_prompt,
     build_download_start_notification,
     build_open_papers_confirmation_prompt,
@@ -682,28 +683,32 @@ def build_list_empty_message(
     if query:
         return (
             "[dim italic]No papers match your search.[/]\n"
-            "[dim]Try: edit the query or press [bold]Esc[/bold] to clear search.[/]"
+            "[dim]Try: edit the query or press [bold]Esc[/bold] to clear search.[/]\n"
+            "[dim]Next: press [bold]?[/bold] for shortcuts or [bold]Ctrl+p[/bold] for commands.[/]"
         )
     if in_arxiv_api_mode:
         return (
             "[dim italic]No API results on this page.[/]\n"
             "[dim]Try: [bold]][/bold] next page, [bold][[/bold] previous page, "
-            "[bold]A[/bold] new query, or [bold]Esc[/bold]/[bold]Ctrl+e[/bold] "
-            "to exit API mode.[/]"
+            "or [bold]A[/bold] for a new query.[/]\n"
+            "[dim]Next: press [bold]Esc[/bold] or [bold]Ctrl+e[/bold] to exit API mode.[/]"
         )
     if watch_filter_active:
         return (
             "[dim italic]No watched papers found.[/]\n"
-            "[dim]Try: [bold]w[/bold] show all papers or [bold]W[/bold] manage watch list.[/]"
+            "[dim]Try: press [bold]w[/bold] to show all papers.[/]\n"
+            "[dim]Next: press [bold]W[/bold] to manage watch list patterns.[/]"
         )
     if history_mode:
         return (
-            "[dim italic]No papers available.[/]\n"
-            "[dim]Try: [bold]A[/bold] search arXiv or move to another history date.[/]"
+            "[dim italic]No papers available for this date.[/]\n"
+            "[dim]Try: press [bold][[/bold] or [bold]][/bold] to change dates.[/]\n"
+            "[dim]Next: press [bold]A[/bold] to search arXiv.[/]"
         )
     return (
         "[dim italic]No papers available.[/]\n"
-        "[dim]Try: [bold]A[/bold] search arXiv or load a history/input file.[/]"
+        "[dim]Try: press [bold]A[/bold] to search arXiv.[/]\n"
+        "[dim]Next: load a history file or run with [bold]-i[/bold] <file>.[/]"
     )
 
 
@@ -825,6 +830,7 @@ class ArxivBrowser(App):
         # Accessibility: allow ASCII-only indicators for terminals/fonts
         # that do not render emoji or box symbols well.
         _widget_listing.set_ascii_icons(ascii_icons)
+        _widget_details.set_ascii_glyphs(ascii_icons)
 
         # Semantic Scholar enrichment state
         self._s2_active: bool = False  # Runtime toggle (set from config in on_mount)
@@ -1699,7 +1705,15 @@ class ArxivBrowser(App):
                 self.notify("All starred papers are up to date", title="Versions")
         except Exception:
             logger.warning("Version check failed", exc_info=True)
-            self.notify("Version check failed", title="Versions", severity="error")
+            self.notify(
+                build_actionable_error(
+                    "check paper versions",
+                    why="an API or network error occurred",
+                    next_step="retry with V after a short delay",
+                ),
+                title="Versions",
+                severity="error",
+            )
         finally:
             self._version_checking = False
             self._version_progress = None
@@ -2533,7 +2547,14 @@ class ArxivBrowser(App):
             tfidf_index=tfidf_index,
         )
         if not similar_papers:
-            self.notify("No similar papers found", title="Similar", severity="warning")
+            self.notify(
+                build_actionable_warning(
+                    "No similar papers were found",
+                    next_step="try another paper, or broaden your search with /",
+                ),
+                title="Similar",
+                severity="warning",
+            )
             return
         self.push_screen(
             RecommendationsScreen(paper, similar_papers),
@@ -2566,7 +2587,15 @@ class ArxivBrowser(App):
             raise
         except Exception:
             logger.warning("Failed to build similarity index", exc_info=True)
-            self.notify("Similarity indexing failed", title="Similar", severity="error")
+            self.notify(
+                build_actionable_error(
+                    "build the similarity index",
+                    why="an indexing error occurred",
+                    next_step="retry with R after changing paper or filter scope",
+                ),
+                title="Similar",
+                severity="error",
+            )
             return
         finally:
             self._tfidf_build_task = None
@@ -2596,7 +2625,14 @@ class ArxivBrowser(App):
             self.notify("Fetching S2 recommendations...", title="S2")
             recs = await self._fetch_s2_recommendations_async(paper.arxiv_id)
             if not recs:
-                self.notify("No S2 recommendations found", title="S2", severity="warning")
+                self.notify(
+                    build_actionable_warning(
+                        "No Semantic Scholar recommendations were found",
+                        next_step="press R and choose local recommendations, or retry later",
+                    ),
+                    title="S2",
+                    severity="warning",
+                )
                 return
             similar = self._s2_recs_to_paper_tuples(recs)
             self.push_screen(
@@ -2609,7 +2645,15 @@ class ArxivBrowser(App):
                 paper.arxiv_id,
                 exc_info=True,
             )
-            self.notify("S2 recommendations failed", title="S2", severity="error")
+            self.notify(
+                build_actionable_error(
+                    "fetch Semantic Scholar recommendations",
+                    why="an API or network error occurred",
+                    next_step="retry with R, or switch to local recommendations",
+                ),
+                title="S2",
+                severity="error",
+            )
 
     def _on_recommendation_selected(self, arxiv_id: str | None) -> None:
         """Handle selection from the recommendations modal."""
@@ -2621,7 +2665,10 @@ class ArxivBrowser(App):
                 option_list.highlighted = i
                 return
         self.notify(
-            "Paper not in current view (try clearing filter)",
+            build_actionable_warning(
+                "That paper is not in the current filtered view",
+                next_step="clear or adjust the filter with /, then try again",
+            ),
             title="Similar",
             severity="warning",
         )
@@ -2668,7 +2715,14 @@ class ArxivBrowser(App):
         try:
             refs, cites = await self._fetch_citation_graph(paper_id)
             if not refs and not cites:
-                self.notify("No citation data found", title="Citations", severity="warning")
+                self.notify(
+                    build_actionable_warning(
+                        "No citation graph data was found",
+                        next_step="press G again later, or press Ctrl+e to toggle S2",
+                    ),
+                    title="Citations",
+                    severity="warning",
+                )
                 return
             local_ids = frozenset(self._papers_by_id.keys())
             self.push_screen(
@@ -2684,7 +2738,15 @@ class ArxivBrowser(App):
             )
         except Exception:
             logger.warning("Failed to show citation graph for %s", paper_id, exc_info=True)
-            self.notify("Citation graph failed", title="Citations", severity="error")
+            self.notify(
+                build_actionable_error(
+                    "load the citation graph",
+                    why="an API or network error occurred",
+                    next_step="retry with G after a moment",
+                ),
+                title="Citations",
+                severity="error",
+            )
 
     async def _fetch_citation_graph(
         self, paper_id: str

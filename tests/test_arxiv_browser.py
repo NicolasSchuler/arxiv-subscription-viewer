@@ -1705,11 +1705,84 @@ class TestStatusFilterRegressions:
             max_width=80,
         )
         assert " | " in status
-        assert "API p2" in status
-        assert "Loading..." in status
+        assert "API p2 loading" in status
+        assert "sort:relevance" in status
         assert "preview" not in status.lower()
         assert "updated" not in status.lower()
         assert len(status) <= 83  # allow tiny ellipsis overhead
+
+    def test_status_bar_compact_priority_across_width_tiers(self):
+        from arxiv_browser.widgets.chrome import build_status_bar_text
+
+        narrow = build_status_bar_text(
+            total=120,
+            filtered=32,
+            query="transformer",
+            watch_filter_active=False,
+            selected_count=4,
+            sort_label="date",
+            in_arxiv_api_mode=True,
+            api_page=3,
+            arxiv_api_loading=True,
+            show_abstract_preview=False,
+            s2_active=True,
+            s2_loading=False,
+            s2_count=8,
+            hf_active=True,
+            hf_loading=False,
+            hf_match_count=5,
+            version_checking=False,
+            version_update_count=0,
+            max_width=80,
+        )
+        medium = build_status_bar_text(
+            total=120,
+            filtered=32,
+            query="transformer",
+            watch_filter_active=False,
+            selected_count=4,
+            sort_label="date",
+            in_arxiv_api_mode=True,
+            api_page=3,
+            arxiv_api_loading=True,
+            show_abstract_preview=False,
+            s2_active=True,
+            s2_loading=False,
+            s2_count=8,
+            hf_active=True,
+            hf_loading=False,
+            hf_match_count=5,
+            version_checking=False,
+            version_update_count=0,
+            max_width=96,
+        )
+        wide = build_status_bar_text(
+            total=120,
+            filtered=32,
+            query="transformer",
+            watch_filter_active=False,
+            selected_count=4,
+            sort_label="date",
+            in_arxiv_api_mode=True,
+            api_page=3,
+            arxiv_api_loading=True,
+            show_abstract_preview=False,
+            s2_active=True,
+            s2_loading=False,
+            s2_count=8,
+            hf_active=True,
+            hf_loading=False,
+            hf_match_count=5,
+            version_checking=False,
+            version_update_count=0,
+            max_width=120,
+        )
+        assert "API p3 loading" in narrow
+        assert "4 sel" in narrow
+        assert "sort:date" in narrow
+        assert "HF:" not in narrow
+        assert "HF:5" in medium
+        assert "[dim]│[/]" in wide
 
     def test_empty_state_messages_include_try_guidance(self):
         from arxiv_browser.app import build_list_empty_message
@@ -1743,9 +1816,13 @@ class TestStatusFilterRegressions:
         assert "Try:" in api_msg
         assert "Try:" in watch_msg
         assert "Try:" in history_msg
+        assert "Next:" in query_msg
+        assert "Next:" in api_msg
+        assert "Next:" in watch_msg
+        assert "Next:" in history_msg
         assert "[bold]][/bold] next page" in api_msg
         assert "[bold][[/bold] previous page" in api_msg
-        assert "[bold]Esc[/bold]/[bold]Ctrl+e[/bold]" in api_msg
+        assert "[bold]Esc[/bold] or [bold]Ctrl+e[/bold]" in api_msg
 
     def test_actionable_error_template(self):
         from arxiv_browser.action_messages import build_actionable_error
@@ -1758,6 +1835,28 @@ class TestStatusFilterRegressions:
         assert "Could not run arXiv API search." in message
         assert "Why: rate limit reached (HTTP 429)." in message
         assert "Next step: retry in a few seconds." in message
+
+    def test_actionable_warning_template(self):
+        from arxiv_browser.action_messages import build_actionable_warning
+
+        message = build_actionable_warning(
+            "No active bookmark is selected",
+            next_step="press 1-9 to activate a bookmark",
+        )
+        assert "No active bookmark is selected." in message
+        assert "Next step: press 1-9 to activate a bookmark." in message
+
+    def test_actionable_success_template(self):
+        from arxiv_browser.action_messages import build_actionable_success
+
+        message = build_actionable_success(
+            "HuggingFace trending data loaded",
+            detail="3 papers matched your list",
+            next_step="press Ctrl+h to hide HF badges",
+        )
+        assert "HuggingFace trending data loaded." in message
+        assert "3 papers matched your list." in message
+        assert "Next step: press Ctrl+h to hide HF badges." in message
 
 
 # ============================================================================
@@ -10056,7 +10155,7 @@ class TestSelectionIntegration:
                 await pilot.press("a")
                 await pilot.pause(0.1)
                 status_text = str(status.content)
-                assert "3 selected" in status_text
+                assert "3 sel" in status_text or "3 selected" in status_text
 
 
 # ============================================================================
@@ -12994,6 +13093,36 @@ class TestPaperDetailsRenderHelpers:
         result = details._render_url(paper)
         assert "URL" in result
         assert "arxiv.org" in result
+
+    def test_ascii_mode_uses_ascii_safe_detail_glyphs(self, make_paper):
+        from arxiv_browser.huggingface import HuggingFacePaper
+        from arxiv_browser.widgets.details import set_ascii_glyphs
+
+        set_ascii_glyphs(True)
+        try:
+            details = self._make_details()
+            paper = make_paper(authors="Jane Doe")
+
+            assert "> Abstract" in details._render_abstract("Some text", False, None, True)
+            assert "v Authors" in details._render_authors(paper, False)
+            assert "> Relevance (*8/10)" in details._render_relevance((8, "fit"), True)
+            assert "v AI Summary" in details._render_summary("Summary text", False, "", False)
+            assert "^12" in details._render_hf(
+                HuggingFacePaper(
+                    arxiv_id="2401.00001",
+                    title="T",
+                    upvotes=12,
+                    num_comments=0,
+                    ai_summary="",
+                    ai_keywords=(),
+                    github_repo="",
+                    github_stars=0,
+                ),
+                True,
+            )
+            assert "v1->v3" in details._render_version(paper, (1, 3), True)
+        finally:
+            set_ascii_glyphs(False)
 
 
 class TestUpdatePaperParity:

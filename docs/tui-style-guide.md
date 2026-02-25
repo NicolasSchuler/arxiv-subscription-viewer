@@ -69,9 +69,14 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 - `Could not <action>.`
 - Optional: `Why: <short reason if known>.`
 - `Next step: <specific recovery action>.`
+- Warning template:
+- `<Short warning statement>.`
+- Optional: `Why: <short reason if known>.`
+- `Next step: <specific recovery action>.`
 - Success template:
 - `<Action complete>.`
 - Optional detail: `<count/location/context>.`
+- Optional: `Next step: <optional follow-up action>.`
 - Progress template:
 - `<Action> <progress-bar> <done>/<total>`
 - Confirmation template:
@@ -80,6 +85,7 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 - Empty-state template:
 - `No <entity> found.`
 - `Try: <next command or filter adjustment>.`
+- `Next: <follow-up command for discovery or recovery>.`
 - Edit/manage modals must include a `Try:` next step when empty.
 
 ## 8. Tables, Lists, Truncation, Wrapping
@@ -89,9 +95,9 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 - Preserve key metadata visibility under width pressure:
 - arXiv ID, category, and high-value badges (for example relevance/version).
 - In compact status mode, keep only immediate context:
-- primary count/query, selection count, sort, API page/loading, S2, HF.
+- primary count/query, API page/loading, selection count, sort, S2, HF.
 - Compact token casing rules:
-- Use `API p<N>` for API page and `Loading...` for active loading tokens.
+- Use `API p<N> loading` for active API fetches.
 - Omit lower-priority compact tokens such as preview/version details.
 
 ## 9. Help And Discoverability
@@ -116,6 +122,7 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 - [ ] Footer preserves the capped hierarchy and context-slot policy.
 - [ ] `Ctrl+p palette` and `? help` remain visible in browse contexts.
 - [ ] Every empty state includes a concrete `Try:` next step.
+- [ ] Empty states also include a concise `Next:` follow-up hint.
 - [ ] Confirm modals keep impact text in body and key hints in modal chrome.
 - [ ] Error text includes actionable recovery guidance.
 - [ ] Non-color/ASCII compatibility remains intact.
