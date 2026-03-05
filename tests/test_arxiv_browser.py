@@ -4810,6 +4810,22 @@ class TestBuildLlmShellCommand:
         with pytest.raises(ValueError, match=r"must contain.*\{prompt\}"):
             _build_llm_shell_command("claude", "hello")
 
+    def test_windows_prompt_uses_list2cmdline(self):
+        from unittest.mock import patch
+
+        from arxiv_browser.app import _build_llm_shell_command
+
+        with (
+            patch("arxiv_browser.llm.os.name", "nt"),
+            patch(
+                "arxiv_browser.llm.subprocess.list2cmdline", return_value='"safe ^& prompt"'
+            ) as quote_mock,
+        ):
+            result = _build_llm_shell_command("llm {prompt}", "safe ^& prompt")
+
+        quote_mock.assert_called_once_with(["safe ^& prompt"])
+        assert result == 'llm "safe ^& prompt"'
+
 
 class TestCommandHash:
     """Tests for command hash computation."""

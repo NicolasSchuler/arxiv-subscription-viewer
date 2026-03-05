@@ -740,6 +740,10 @@ class ArxivBrowser(App):
         self.filtered_papers = papers.copy()
         # Build O(1) lookup dict for papers by arxiv_id
         self._papers_by_id: dict[str, Paper] = {p.arxiv_id: p for p in papers}
+        # Track visible row indices for fast per-paper list updates.
+        self._visible_index_by_id: dict[str, int] = {
+            paper.arxiv_id: idx for idx, paper in enumerate(self.filtered_papers)
+        }
         self.selected_ids: set[str] = set()  # Track selected arxiv_ids
         self._search_timer: Timer | None = None
         self._pending_query: str = ""
@@ -1606,9 +1610,7 @@ class ArxivBrowser(App):
         if not dirty_ids:
             return list(range(len(self.filtered_papers)))
 
-        visible_index_by_id = {
-            paper.arxiv_id: idx for idx, paper in enumerate(self.filtered_papers)
-        }
+        visible_index_by_id = self._get_visible_index_map()
         return sorted(
             visible_index_by_id[paper_id]
             for paper_id in dirty_ids
@@ -1704,8 +1706,29 @@ class ArxivBrowser(App):
                 )
             else:
                 self.notify("All starred papers are up to date", title="Versions")
-        except Exception:
-            logger.warning("Version check failed", exc_info=True)
+        except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
+            logger.warning(
+                "Version check failed (%s): %s",
+                type(exc).__name__,
+                exc,
+                exc_info=True,
+            )
+            self.notify(
+                build_actionable_error(
+                    "check paper versions",
+                    why="an API or network error occurred",
+                    next_step="retry with V after a short delay",
+                ),
+                title="Versions",
+                severity="error",
+            )
+        except Exception as exc:
+            logger.warning(
+                "Unexpected version check failure (%s): %s",
+                type(exc).__name__,
+                exc,
+                exc_info=True,
+            )
             self.notify(
                 build_actionable_error(
                     "check paper versions",
@@ -2037,6 +2060,49 @@ class ArxivBrowser(App):
             hf_cache=self._hf_cache,
             relevance_cache=self._relevance_scores,
         )
+        self._rebuild_visible_index()
+
+    def _rebuild_visible_index(self) -> None:
+        """Rebuild the visible-paper index cache keyed by arXiv ID."""
+        self._visible_index_by_id = {
+            paper.arxiv_id: idx for idx, paper in enumerate(self.filtered_papers)
+        }
+
+    def _get_visible_index_map(self) -> dict[str, int]:
+        """Return visible-index cache, rebuilding when absent or stale-sized."""
+        visible_index_by_id = getattr(self, "_visible_index_by_id", None)
+        if not isinstance(visible_index_by_id, dict) or len(visible_index_by_id) != len(
+            self.filtered_papers
+        ):
+            self._rebuild_visible_index()
+            visible_index_by_id = self._visible_index_by_id
+        return visible_index_by_id
+
+    def _get_visible_index(self, arxiv_id: str) -> int | None:
+        """Return validated visible index for arxiv_id, if available."""
+        visible_index_by_id = self._get_visible_index_map()
+        cached_index = visible_index_by_id.get(arxiv_id)
+        if (
+            cached_index is not None
+            and 0 <= cached_index < len(self.filtered_papers)
+            and self.filtered_papers[cached_index].arxiv_id == arxiv_id
+        ):
+            return cached_index
+        return None
+
+    def _resolve_visible_index(self, arxiv_id: str) -> int | None:
+        """Resolve visible index for arxiv_id, repairing stale cache entries."""
+        cached_index = self._get_visible_index(arxiv_id)
+        if cached_index is not None:
+            return cached_index
+
+        visible_index_by_id = self._get_visible_index_map()
+        for index, paper in enumerate(self.filtered_papers):
+            if paper.arxiv_id == arxiv_id:
+                visible_index_by_id[arxiv_id] = index
+                return index
+        visible_index_by_id.pop(arxiv_id, None)
+        return None
 
     def _refresh_list_view(self) -> None:
         """Refresh the list view with current filtered papers.
@@ -2044,6 +2110,7 @@ class ArxivBrowser(App):
         Uses OptionList for virtual rendering — only visible lines are drawn.
         """
         self._cancel_pending_detail_update()
+        self._rebuild_visible_index()
         option_list = self._get_paper_list_widget()
         option_list.clear_options()
 
@@ -2405,11 +2472,11 @@ class ArxivBrowser(App):
 
         # Find and scroll to the paper in the current list
         option_list = self._get_paper_list_widget()
-        for i, p in enumerate(self.filtered_papers):
-            if p.arxiv_id == arxiv_id:
-                option_list.highlighted = i
-                self.notify(f"Jumped to mark '{letter}'", title="Mark")
-                return
+        visible_index = self._resolve_visible_index(arxiv_id)
+        if visible_index is not None:
+            option_list.highlighted = visible_index
+            self.notify(f"Jumped to mark '{letter}'", title="Mark")
+            return
 
         # Paper not in current filtered list
         self.notify(
@@ -2586,8 +2653,30 @@ class ArxivBrowser(App):
             index = await asyncio.to_thread(self._build_tfidf_index_for_similarity, papers_snapshot)
         except asyncio.CancelledError:
             raise
-        except Exception:
-            logger.warning("Failed to build similarity index", exc_info=True)
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.warning(
+                "Failed to build similarity index (%s): %s",
+                type(exc).__name__,
+                exc,
+                exc_info=True,
+            )
+            self.notify(
+                build_actionable_error(
+                    "build the similarity index",
+                    why="an indexing error occurred",
+                    next_step="retry with R after changing paper or filter scope",
+                ),
+                title="Similar",
+                severity="error",
+            )
+            return
+        except Exception as exc:
+            logger.warning(
+                "Unexpected similarity index build failure (%s): %s",
+                type(exc).__name__,
+                exc,
+                exc_info=True,
+            )
             self.notify(
                 build_actionable_error(
                     "build the similarity index",
@@ -2640,10 +2729,29 @@ class ArxivBrowser(App):
                 RecommendationsScreen(paper, similar),
                 self._on_recommendation_selected,
             )
-        except Exception:
+        except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
             logger.warning(
-                "Failed to show S2 recommendations for %s",
+                "Failed to show S2 recommendations for %s (%s): %s",
                 paper.arxiv_id,
+                type(exc).__name__,
+                exc,
+                exc_info=True,
+            )
+            self.notify(
+                build_actionable_error(
+                    "fetch Semantic Scholar recommendations",
+                    why="an API or network error occurred",
+                    next_step="retry with R, or switch to local recommendations",
+                ),
+                title="S2",
+                severity="error",
+            )
+        except Exception as exc:
+            logger.warning(
+                "Unexpected S2 recommendation failure for %s (%s): %s",
+                paper.arxiv_id,
+                type(exc).__name__,
+                exc,
                 exc_info=True,
             )
             self.notify(
@@ -2661,10 +2769,10 @@ class ArxivBrowser(App):
         if not arxiv_id:
             return
         option_list = self._get_paper_list_widget()
-        for i, p in enumerate(self.filtered_papers):
-            if p.arxiv_id == arxiv_id:
-                option_list.highlighted = i
-                return
+        visible_index = self._resolve_visible_index(arxiv_id)
+        if visible_index is not None:
+            option_list.highlighted = visible_index
+            return
         self.notify(
             build_actionable_warning(
                 "That paper is not in the current filtered view",
@@ -2737,8 +2845,31 @@ class ArxivBrowser(App):
                 ),
                 self._on_citation_graph_selected,
             )
-        except Exception:
-            logger.warning("Failed to show citation graph for %s", paper_id, exc_info=True)
+        except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
+            logger.warning(
+                "Failed to show citation graph for %s (%s): %s",
+                paper_id,
+                type(exc).__name__,
+                exc,
+                exc_info=True,
+            )
+            self.notify(
+                build_actionable_error(
+                    "load the citation graph",
+                    why="an API or network error occurred",
+                    next_step="retry with G after a moment",
+                ),
+                title="Citations",
+                severity="error",
+            )
+        except Exception as exc:
+            logger.warning(
+                "Unexpected citation graph failure for %s (%s): %s",
+                paper_id,
+                type(exc).__name__,
+                exc,
+                exc_info=True,
+            )
             self.notify(
                 build_actionable_error(
                     "load the citation graph",
@@ -2973,10 +3104,9 @@ class ArxivBrowser(App):
 
     def _update_option_for_paper(self, arxiv_id: str) -> None:
         """Update the list option display for a specific paper by arXiv ID."""
-        for i, paper in enumerate(self.filtered_papers):
-            if paper.arxiv_id == arxiv_id:
-                self._update_option_at_index(i)
-                break
+        visible_index = self._resolve_visible_index(arxiv_id)
+        if visible_index is not None:
+            self._update_option_at_index(visible_index)
 
     def _update_relevance_badge(self, arxiv_id: str) -> None:
         from arxiv_browser.actions import llm_actions as _actions

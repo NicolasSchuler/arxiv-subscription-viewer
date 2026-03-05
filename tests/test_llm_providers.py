@@ -116,6 +116,32 @@ class TestCLIProvider:
         assert result.success is True
         shell_mock.assert_called_once()
 
+    async def test_shell_fallback_uses_windows_prompt_quoting(self):
+        from unittest.mock import AsyncMock, patch
+
+        provider = CLIProvider("echo {prompt} | cat")
+        proc = AsyncMock()
+        proc.communicate.return_value = (b"ok\n", b"")
+        proc.returncode = 0
+
+        with (
+            patch("arxiv_browser.llm.os.name", "nt"),
+            patch(
+                "arxiv_browser.llm.subprocess.list2cmdline", return_value='"safe ^& prompt"'
+            ) as quote_mock,
+            patch(
+                "arxiv_browser.llm_providers.asyncio.create_subprocess_shell",
+                new_callable=AsyncMock,
+                return_value=proc,
+            ) as shell_mock,
+        ):
+            result = await provider.execute("safe ^& prompt", timeout=5)
+
+        assert result.success is True
+        quote_mock.assert_called_once_with(["safe ^& prompt"])
+        shell_mock.assert_called_once()
+        assert shell_mock.call_args.args[0] == 'echo "safe ^& prompt" | cat'
+
 
 # ============================================================================
 # resolve_provider
