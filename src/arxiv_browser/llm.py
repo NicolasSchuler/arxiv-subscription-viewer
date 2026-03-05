@@ -5,9 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 import shlex
 import sqlite3
+import subprocess
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
@@ -529,7 +531,8 @@ def _build_llm_shell_command(command_template: str, prompt: str) -> str:
         raise ValueError(
             f"LLM command template must contain {{prompt}} placeholder, got: {command_template!r}"
         )
-    escaped_prompt = shlex.quote(prompt)
+    # Use platform-native shell quoting semantics.
+    escaped_prompt = subprocess.list2cmdline([prompt]) if os.name == "nt" else shlex.quote(prompt)
     return command_template.replace("{prompt}", escaped_prompt)
 
 

@@ -94,9 +94,34 @@ async def action_fetch_s2(app: "ArxivBrowser") -> None:
         cached = await asyncio.to_thread(
             load_s2_paper, app._s2_db_path, aid, app._config.s2_cache_ttl_days
         )
-    except Exception:
+    except (OSError, RuntimeError, ValueError) as exc:
         app._s2_loading.discard(aid)
-        logger.warning("S2 cache lookup failed for %s", aid, exc_info=True)
+        logger.warning(
+            "S2 cache lookup failed for %s (%s): %s",
+            aid,
+            type(exc).__name__,
+            exc,
+            exc_info=True,
+        )
+        app.notify(
+            build_actionable_error(
+                "fetch Semantic Scholar data",
+                why="local cache lookup failed",
+                next_step="press e to retry, or press Ctrl+e to temporarily disable S2",
+            ),
+            title="S2",
+            severity="error",
+        )
+        return
+    except Exception as exc:
+        app._s2_loading.discard(aid)
+        logger.warning(
+            "Unexpected S2 cache lookup failure for %s (%s): %s",
+            aid,
+            type(exc).__name__,
+            exc,
+            exc_info=True,
+        )
         app.notify(
             build_actionable_error(
                 "fetch Semantic Scholar data",
@@ -115,8 +140,25 @@ async def action_fetch_s2(app: "ArxivBrowser") -> None:
     # Fetch from API
     try:
         app._track_task(app._fetch_s2_paper_async(aid))
-    except Exception:
+    except (RuntimeError, TypeError, ValueError) as exc:
         app._s2_loading.discard(aid)
+        logger.warning(
+            "Failed to schedule S2 fetch for %s (%s): %s",
+            aid,
+            type(exc).__name__,
+            exc,
+            exc_info=True,
+        )
+        raise
+    except Exception as exc:
+        app._s2_loading.discard(aid)
+        logger.warning(
+            "Unexpected failure scheduling S2 fetch for %s (%s): %s",
+            aid,
+            type(exc).__name__,
+            exc,
+            exc_info=True,
+        )
         raise
 
 
@@ -145,8 +187,31 @@ async def _fetch_s2_paper_async(app: "ArxivBrowser", arxiv_id: str) -> None:
         app._s2_cache[arxiv_id] = result
         # Update UI if still relevant
         app._get_ui_refresh_coordinator().refresh_detail_and_list_item()
-    except Exception:
-        logger.warning("S2 fetch failed for %s", arxiv_id, exc_info=True)
+    except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
+        logger.warning(
+            "S2 fetch failed for %s (%s): %s",
+            arxiv_id,
+            type(exc).__name__,
+            exc,
+            exc_info=True,
+        )
+        app.notify(
+            build_actionable_error(
+                "fetch Semantic Scholar data",
+                why="an API or network error occurred",
+                next_step="press e to retry after a moment",
+            ),
+            title="S2",
+            severity="error",
+        )
+    except Exception as exc:
+        logger.warning(
+            "Unexpected S2 fetch failure for %s (%s): %s",
+            arxiv_id,
+            type(exc).__name__,
+            exc,
+            exc_info=True,
+        )
         app.notify(
             build_actionable_error(
                 "fetch Semantic Scholar data",
@@ -198,10 +263,34 @@ async def _fetch_hf_daily(app: "ArxivBrowser") -> None:
         cached = await asyncio.to_thread(
             load_hf_daily_cache, app._hf_db_path, app._config.hf_cache_ttl_hours
         )
-    except Exception:
+    except (OSError, RuntimeError, ValueError) as exc:
         app._hf_loading = False
         app._update_status_bar()
-        logger.warning("HF cache lookup failed", exc_info=True)
+        logger.warning(
+            "HF cache lookup failed (%s): %s",
+            type(exc).__name__,
+            exc,
+            exc_info=True,
+        )
+        app.notify(
+            build_actionable_error(
+                "fetch HuggingFace trending data",
+                why="local cache lookup failed",
+                next_step="retry in a moment or press Ctrl+h to disable HF",
+            ),
+            title="HF",
+            severity="error",
+        )
+        return
+    except Exception as exc:
+        app._hf_loading = False
+        app._update_status_bar()
+        logger.warning(
+            "Unexpected HF cache lookup failure (%s): %s",
+            type(exc).__name__,
+            exc,
+            exc_info=True,
+        )
         app.notify(
             build_actionable_error(
                 "fetch HuggingFace trending data",
@@ -224,9 +313,25 @@ async def _fetch_hf_daily(app: "ArxivBrowser") -> None:
     # Fetch from API
     try:
         app._track_task(app._fetch_hf_daily_async())
-    except Exception:
+    except (RuntimeError, TypeError, ValueError) as exc:
         app._hf_loading = False
         app._update_status_bar()
+        logger.warning(
+            "Failed to schedule HF fetch (%s): %s",
+            type(exc).__name__,
+            exc,
+            exc_info=True,
+        )
+        raise
+    except Exception as exc:
+        app._hf_loading = False
+        app._update_status_bar()
+        logger.warning(
+            "Unexpected failure scheduling HF fetch (%s): %s",
+            type(exc).__name__,
+            exc,
+            exc_info=True,
+        )
         raise
 
 
@@ -254,8 +359,29 @@ async def _fetch_hf_daily_async(app: "ArxivBrowser") -> None:
         app._mark_badges_dirty("hf")
         matched = count_hf_matches(app._hf_cache, app._papers_by_id)
         _notify_hf_matches(app, matched)
-    except Exception:
-        logger.warning("HF daily fetch failed", exc_info=True)
+    except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
+        logger.warning(
+            "HF daily fetch failed (%s): %s",
+            type(exc).__name__,
+            exc,
+            exc_info=True,
+        )
+        app.notify(
+            build_actionable_error(
+                "fetch HuggingFace trending data",
+                why="an API or network error occurred",
+                next_step="retry later or press Ctrl+h to disable HF",
+            ),
+            title="HF",
+            severity="error",
+        )
+    except Exception as exc:
+        logger.warning(
+            "Unexpected HF daily fetch failure (%s): %s",
+            type(exc).__name__,
+            exc,
+            exc_info=True,
+        )
         app.notify(
             build_actionable_error(
                 "fetch HuggingFace trending data",
@@ -509,8 +635,23 @@ def action_command_palette(app: "ArxivBrowser") -> None:
                 result = method()
                 if asyncio.iscoroutine(result):
                     app._track_task(result)
-            except Exception:
-                logger.warning("Command palette action %s failed", action_name, exc_info=True)
+            except (OSError, RuntimeError, ValueError, TypeError) as exc:
+                logger.warning(
+                    "Command palette action %s failed (%s): %s",
+                    action_name,
+                    type(exc).__name__,
+                    exc,
+                    exc_info=True,
+                )
+                app.notify(f"Command failed: {action_name}", title="Error", severity="error")
+            except Exception as exc:
+                logger.warning(
+                    "Unexpected command palette action failure %s (%s): %s",
+                    action_name,
+                    type(exc).__name__,
+                    exc,
+                    exc_info=True,
+                )
                 app.notify(f"Command failed: {action_name}", title="Error", severity="error")
         else:
             logger.warning("Unknown command palette action: %s", action_name)

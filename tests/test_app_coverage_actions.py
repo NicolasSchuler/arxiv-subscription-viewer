@@ -28,6 +28,7 @@ from arxiv_browser.semantic_scholar import CitationEntry, SemanticScholarPaper
 def _new_app() -> ArxivBrowser:
     app = ArxivBrowser.__new__(ArxivBrowser)
     app._http_client = None
+    app._visible_index_by_id = {}
     return app
 
 
@@ -55,6 +56,21 @@ def _make_hf_paper(arxiv_id: str) -> HuggingFacePaper:
         github_repo="",
         github_stars=0,
     )
+
+
+class _DummyOptionList:
+    def __init__(self) -> None:
+        self.highlighted: int | None = None
+        self.option_count = 0
+
+    def clear_options(self) -> None:
+        self.option_count = 0
+
+    def add_options(self, options: list[object]) -> None:
+        self.option_count = len(options)
+
+    def add_option(self, _option: object) -> None:
+        self.option_count += 1
 
 
 class TestIoActionHelpers:
@@ -761,6 +777,73 @@ class TestImportCollectionAndTagsCoverage:
         assert "Removed shared" in msg
 
 
+class TestVisibleIndexCache:
+    def _build_index_ready_app(self, papers):
+        app = _new_app()
+        app.filtered_papers = papers.copy()
+        app.all_papers = papers.copy()
+        app._s2_cache = {}
+        app._hf_cache = {}
+        app._relevance_scores = {}
+        app._sort_index = app_mod.SORT_OPTIONS.index("arxiv_id")
+        app._cancel_pending_detail_update = MagicMock()
+        app._config = UserConfig()
+        app.selected_ids = set()
+        app._watched_paper_ids = set()
+        app._show_abstract_preview = False
+        app._highlight_terms = {"title": [], "author": [], "abstract": []}
+        app._s2_active = False
+        app._hf_active = False
+        app._version_updates = {}
+        app._get_active_query = MagicMock(return_value="")
+        app._in_arxiv_api_mode = False
+        app._watch_filter_active = False
+        app._is_history_mode = MagicMock(return_value=False)
+        app._get_abstract_text = MagicMock(return_value="")
+        app._get_paper_details_widget = MagicMock()
+        app._get_paper_list_widget = MagicMock(return_value=_DummyOptionList())
+        return app
+
+    def test_rebuilds_visible_index_during_sort_and_refresh(self, make_paper):
+        papers = [
+            make_paper(arxiv_id="2401.00001"),
+            make_paper(arxiv_id="2401.00002"),
+        ]
+        app = self._build_index_ready_app(papers)
+
+        app._sort_papers()
+        assert [paper.arxiv_id for paper in app.filtered_papers] == ["2401.00002", "2401.00001"]
+        assert app._visible_index_by_id == {"2401.00002": 0, "2401.00001": 1}
+
+        app._refresh_list_view()
+        assert app._visible_index_by_id == {"2401.00002": 0, "2401.00001": 1}
+
+    def test_update_option_for_paper_uses_cached_visible_index(self, make_paper):
+        first = make_paper(arxiv_id="2401.00011")
+        second = make_paper(arxiv_id="2401.00012")
+        app = _new_app()
+        app.filtered_papers = [first, second]
+        app._visible_index_by_id = {second.arxiv_id: 1}
+        app._update_option_at_index = MagicMock()
+
+        app._update_option_for_paper(second.arxiv_id)
+
+        app._update_option_at_index.assert_called_once_with(1)
+
+    def test_update_option_for_paper_falls_back_when_cache_is_stale(self, make_paper):
+        first = make_paper(arxiv_id="2401.00021")
+        second = make_paper(arxiv_id="2401.00022")
+        app = _new_app()
+        app.filtered_papers = [first, second]
+        app._visible_index_by_id = {second.arxiv_id: 0}
+        app._update_option_at_index = MagicMock()
+
+        app._update_option_for_paper(second.arxiv_id)
+
+        app._update_option_at_index.assert_called_once_with(1)
+        assert app._visible_index_by_id[second.arxiv_id] == 1
+
+
 class TestS2AndHfCoverage:
     @pytest.mark.asyncio
     async def test_action_fetch_s2_disabled_and_cache_paths(self, make_paper, tmp_path):
@@ -1240,15 +1323,25 @@ class TestStatusCommandPaletteAndChatCoverage:
         app.action_demo = action_demo
         app.action_boom = action_boom
 
-        app.action_command_palette()
-        callback = captured["callback"]
-        callback("demo")
-        callback("boom")
-        callback("missing")
-        callback(None)
+        with patch.object(app_mod, "logger") as logger_mock:
+            app.action_command_palette()
+            callback = captured["callback"]
+            callback("demo")
+            callback("boom")
+            callback("missing")
+            callback(None)
 
         app._track_task.assert_called_once()
         assert "Command failed: boom" in app.notify.call_args[0][0]
+        boom_warnings = [
+            call
+            for call in logger_mock.warning.call_args_list
+            if call.args and call.args[0].startswith("Command palette action")
+        ]
+        assert boom_warnings
+        assert any(
+            call.args[1] == "boom" and call.args[2] == "RuntimeError" for call in boom_warnings
+        )
 
     @pytest.mark.asyncio
     async def test_chat_and_summary_action_paths(self, make_paper):
