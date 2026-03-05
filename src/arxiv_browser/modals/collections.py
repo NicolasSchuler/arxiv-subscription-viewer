@@ -12,6 +12,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, ListItem, ListView
 
+from arxiv_browser.action_messages import build_actionable_warning
 from arxiv_browser.models import MAX_COLLECTIONS, Paper, PaperCollection
 
 logger = logging.getLogger(__name__)
@@ -165,6 +166,14 @@ class CollectionsModal(ModalScreen[str | None]):
             return None
         return idx
 
+    def _notify_warning(self, message: str, *, next_step: str) -> None:
+        """Emit a standardized collections warning with actionable next step."""
+        self.notify(
+            build_actionable_warning(message, next_step=next_step),
+            title="Collections",
+            severity="warning",
+        )
+
     def action_cancel(self) -> None:
         self.dismiss(None)
 
@@ -179,16 +188,21 @@ class CollectionsModal(ModalScreen[str | None]):
     def on_create_pressed(self) -> None:
         name = self.query_one("#col-name", Input).value.strip()
         if not name:
-            self.notify("Name cannot be empty", title="Collections", severity="warning")
+            self._notify_warning(
+                "Collection name cannot be empty",
+                next_step="enter a name, then press Create",
+            )
             return
         if any(c.name == name for c in self._collections):
-            self.notify(
-                f"Collection '{name}' already exists", title="Collections", severity="warning"
+            self._notify_warning(
+                f"Collection '{name}' already exists",
+                next_step="choose a different name or rename the existing collection",
             )
             return
         if len(self._collections) >= MAX_COLLECTIONS:
-            self.notify(
-                f"Maximum {MAX_COLLECTIONS} collections", title="Collections", severity="warning"
+            self._notify_warning(
+                f"Collection limit reached ({MAX_COLLECTIONS})",
+                next_step="delete an unused collection, then create a new one",
             )
             return
         desc = self.query_one("#col-desc", Input).value.strip()
@@ -205,11 +219,17 @@ class CollectionsModal(ModalScreen[str | None]):
     def on_rename_pressed(self) -> None:
         idx = self._get_selected_index()
         if idx is None:
-            self.notify("Select a collection", title="Collections")
+            self._notify_warning(
+                "No collection is selected",
+                next_step="highlight a collection in the list, then press Rename",
+            )
             return
         name = self.query_one("#col-name", Input).value.strip()
         if not name:
-            self.notify("Name cannot be empty", title="Collections", severity="warning")
+            self._notify_warning(
+                "Collection name cannot be empty",
+                next_step="enter a name, then press Rename",
+            )
             return
         desc = self.query_one("#col-desc", Input).value.strip()
         self._collections[idx].name = name
@@ -220,7 +240,10 @@ class CollectionsModal(ModalScreen[str | None]):
     def on_delete_pressed(self) -> None:
         idx = self._get_selected_index()
         if idx is None:
-            self.notify("Select a collection", title="Collections")
+            self._notify_warning(
+                "No collection is selected",
+                next_step="highlight a collection in the list, then press Delete",
+            )
             return
         self._collections.pop(idx)
         self._refresh_list()
@@ -229,7 +252,10 @@ class CollectionsModal(ModalScreen[str | None]):
     def on_view_pressed(self) -> None:
         idx = self._get_selected_index()
         if idx is None:
-            self.notify("Select a collection", title="Collections")
+            self._notify_warning(
+                "No collection is selected",
+                next_step="highlight a collection in the list, then press View",
+            )
             return
         col = self._collections[idx]
         self.app.push_screen(
@@ -344,12 +370,23 @@ class CollectionViewModal(ModalScreen[PaperCollection | None]):
     def action_cancel(self) -> None:
         self.dismiss(None)
 
+    def _notify_warning(self, message: str, *, next_step: str) -> None:
+        """Emit a standardized collection warning with actionable next step."""
+        self.notify(
+            build_actionable_warning(message, next_step=next_step),
+            title="Collection",
+            severity="warning",
+        )
+
     @on(Button.Pressed, "#colview-remove")
     def on_remove_pressed(self) -> None:
         list_view = self.query_one("#colview-list", ListView)
         idx = list_view.index
         if idx is None or idx < 0 or idx >= len(self._collection.paper_ids):
-            self.notify("Select a paper to remove", title="Collection")
+            self._notify_warning(
+                "No paper is selected",
+                next_step="highlight a paper in the list, then press Remove Selected",
+            )
             return
         self._collection.paper_ids.pop(idx)
         self._refresh_list()
@@ -369,6 +406,7 @@ class AddToCollectionModal(ModalScreen[str | None]):
 
     BINDINGS = [
         Binding("escape", "cancel", "Cancel"),
+        Binding("q", "cancel", "Cancel"),
     ]
 
     CSS = """
@@ -418,7 +456,7 @@ class AddToCollectionModal(ModalScreen[str | None]):
             yield Label("Add to Collection", id="addcol-title")
             yield ListView(id="addcol-list")
             with Horizontal(id="addcol-buttons"):
-                yield Button("Cancel", variant="default", id="addcol-cancel")
+                yield Button("Cancel (Esc/q)", variant="default", id="addcol-cancel")
 
     def on_mount(self) -> None:
         list_view = self.query_one("#addcol-list", ListView)

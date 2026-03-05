@@ -92,6 +92,8 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 
 - Keep list rows stable: title, authors, metadata badges, optional abstract preview.
 - Favor truncation with ellipsis over hard wrapping for dense list rows.
+- Use a deterministic metadata-line budget of 78 visible characters in list rows.
+- When metadata overflows, drop lowest-priority trailing badges and append `+N` to show hidden items.
 - Preserve key metadata visibility under width pressure:
 - arXiv ID, category, and high-value badges (for example relevance/version).
 - In compact status mode, keep only immediate context:
@@ -106,7 +108,7 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 - Search, move, select, open, command palette, full help.
 - Footer should prioritize immediate next actions for the current mode.
 - Modals should use consistent close/cancel hints:
-- `Close: Esc` for read-only views and `Cancel: Esc` for edit/confirm flows.
+- `Close: Esc/q` for read-only views and `Cancel: Esc` for edit/confirm flows.
 - Use consistent labels across footer/help/notifications:
 - `palette`, `history`, `help`, `search`, `open`, `export`.
 - Keep label density intentional:
@@ -118,6 +120,7 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 
 - [ ] New or changed UI copy uses the terminology canon.
 - [ ] `Ctrl+e` copy uses canonical browse/API wording.
+- [ ] Read-only overlays support `Esc/q` close while edit/input overlays keep `Esc` cancel.
 - [ ] API footer copy uses `Esc/Ctrl+e exit`.
 - [ ] Footer preserves the capped hierarchy and context-slot policy.
 - [ ] `Ctrl+p palette` and `? help` remain visible in browse contexts.

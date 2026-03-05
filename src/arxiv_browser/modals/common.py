@@ -252,6 +252,7 @@ class ExportMenuModal(ModalScreen[str]):
 
     BINDINGS = [
         Binding("escape", "cancel", "Cancel"),
+        Binding("q", "cancel", "Cancel"),
         Binding("c", "do_clipboard_plain", "Plain text", show=False),
         Binding("b", "do_clipboard_bibtex", "BibTeX", show=False),
         Binding("m", "do_clipboard_markdown", "Markdown", show=False),
@@ -322,7 +323,7 @@ class ExportMenuModal(ModalScreen[str]):
                 f"  [{g}]B[/]  BibTeX (.bib)  [{g}]R[/]  RIS (.ris)\n  [{g}]C[/]  CSV (.csv)",
                 classes="export-keys",
             )
-            yield Static("[dim]Cancel: Esc[/dim]", id="export-footer")
+            yield Static("[dim]Cancel: Esc/q[/dim]", id="export-footer")
 
     def action_cancel(self) -> None:
         self.dismiss("")
@@ -625,6 +626,7 @@ class SectionToggleModal(ModalScreen[list[str] | None]):
 
     BINDINGS = [
         Binding("escape", "cancel", "Cancel"),
+        Binding("q", "cancel", "Cancel"),
         Binding("enter", "save", "Save"),
         Binding("a", "toggle_a", "", show=False),
         Binding("b", "toggle_b", "", show=False),
@@ -677,7 +679,7 @@ class SectionToggleModal(ModalScreen[list[str] | None]):
                 self._render_list(), id="section-toggle-list", classes="section-toggle-list"
             )
             yield Static(
-                "[dim]Toggle: key \u00b7 Save: Enter \u00b7 Cancel: Esc[/]",
+                "[dim]Toggle: key | Save: Enter | Cancel: Esc/q[/]",
                 id="section-toggle-footer",
             )
 

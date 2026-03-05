@@ -829,6 +829,7 @@ class ArxivBrowser(App):
 
         # Accessibility: allow ASCII-only indicators for terminals/fonts
         # that do not render emoji or box symbols well.
+        _widget_chrome.set_ascii_glyphs(ascii_icons)
         _widget_listing.set_ascii_icons(ascii_icons)
         _widget_details.set_ascii_glyphs(ascii_icons)
 

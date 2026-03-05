@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from textual.app import ComposeResult
 from textual.css.query import NoMatches
 from textual.widgets import ListItem, Static
@@ -13,6 +15,8 @@ from arxiv_browser.semantic_scholar import SemanticScholarPaper
 from arxiv_browser.themes import THEME_COLORS, get_tag_color
 
 PREVIEW_ABSTRACT_MAX_LEN = 150  # Max abstract preview length in list items
+META_LINE_BUDGET = 78  # Visible character budget for list metadata row
+_RICH_TAG_RE = re.compile(r"\[[^\]]*]")
 
 _ICON_SETS: dict[str, dict[str, str]] = {
     "unicode": {
@@ -29,12 +33,112 @@ _ICON_SETS: dict[str, dict[str, str]] = {
     },
 }
 _ACTIVE_ICON_SET = _ICON_SETS["unicode"]
+_META_GLYPH_SETS: dict[str, dict[str, str]] = {
+    "unicode": {
+        "hf_upvotes": "\u2191",  # ↑
+        "version_arrow": "\u2192",  # →
+        "relevance_high": "\u2605",  # ★
+        "relevance_mid": "\u25b8",  # ▸
+        "relevance_low": "\u00b7",  # ·
+    },
+    "ascii": {
+        "hf_upvotes": "^",
+        "version_arrow": "->",
+        "relevance_high": "*",
+        "relevance_mid": ">",
+        "relevance_low": ".",
+    },
+}
+_ACTIVE_META_GLYPHS = _META_GLYPH_SETS["unicode"]
 
 
 def set_ascii_icons(enabled: bool) -> None:
     """Switch list indicators between Unicode and ASCII modes."""
-    global _ACTIVE_ICON_SET
+    global _ACTIVE_ICON_SET, _ACTIVE_META_GLYPHS
     _ACTIVE_ICON_SET = _ICON_SETS["ascii"] if enabled else _ICON_SETS["unicode"]
+    _ACTIVE_META_GLYPHS = _META_GLYPH_SETS["ascii"] if enabled else _META_GLYPH_SETS["unicode"]
+
+
+def _visible_text_length(text: str) -> int:
+    """Return printable width estimate by stripping simple Rich tags."""
+    return len(_RICH_TAG_RE.sub("", text))
+
+
+def _truncate_visible_text(text: str, max_width: int) -> str:
+    """Truncate Rich-ish text by visible length, returning plain fallback text."""
+    visible = _RICH_TAG_RE.sub("", text)
+    if len(visible) <= max_width:
+        return visible
+    if max_width <= 3:
+        return visible[:max_width]
+    return visible[: max_width - 3] + "..."
+
+
+def _join_meta_parts(parts: list[str]) -> str:
+    """Join metadata parts with stable spacing."""
+    return "  ".join(parts)
+
+
+def _compress_meta_parts(parts: list[str], budget: int = META_LINE_BUDGET) -> str:
+    """Compress metadata by dropping lowest-priority tail parts and showing +N."""
+    if not parts:
+        return ""
+    rendered = _join_meta_parts(parts)
+    if _visible_text_length(rendered) <= budget:
+        return rendered
+
+    kept = parts.copy()
+    removed = 0
+    while len(kept) > 1 and _visible_text_length(_join_meta_parts(kept)) > budget:
+        kept.pop()
+        removed += 1
+
+    if removed > 0:
+        summary = f"[dim]+{removed}[/]"
+        while len(kept) > 1 and _visible_text_length(_join_meta_parts([*kept, summary])) > budget:
+            kept.pop()
+            removed += 1
+            summary = f"[dim]+{removed}[/]"
+        candidate = _join_meta_parts([*kept, summary])
+        if _visible_text_length(candidate) <= budget:
+            return candidate
+
+    return _truncate_visible_text(_join_meta_parts(kept), budget)
+
+
+def _build_meta_parts(
+    *,
+    source: str,
+    arxiv_id: str,
+    categories: str,
+    tags: list[str] | None,
+    s2_data: SemanticScholarPaper | None,
+    hf_data: HuggingFacePaper | None,
+    version_update: tuple[int, int] | None,
+    relevance_score: tuple[int, str] | None,
+) -> list[str]:
+    """Build ordered metadata parts with deterministic priority."""
+    parts: list[str] = []
+    if source == "api":
+        parts.append(f"[{THEME_COLORS['orange']}]API[/]")
+    parts.extend([f"[dim]{arxiv_id}[/]", format_categories(categories)])
+    if tags:
+        tag_str = " ".join(f"[{get_tag_color(tag)}]#{escape_rich_text(tag)}[/]" for tag in tags)
+        parts.append(tag_str)
+    if s2_data is not None:
+        parts.append(f"[{THEME_COLORS['green']}]C{s2_data.citation_count}[/]")
+    if hf_data is not None:
+        hf_upvotes = _ACTIVE_META_GLYPHS["hf_upvotes"]
+        parts.append(f"[{THEME_COLORS['orange']}]{hf_upvotes}{hf_data.upvotes}[/]")
+    if version_update is not None:
+        old_v, new_v = version_update
+        version_arrow = _ACTIVE_META_GLYPHS["version_arrow"]
+        parts.append(f"[{THEME_COLORS['pink']}]v{old_v}{version_arrow}v{new_v}[/]")
+    if relevance_score is not None:
+        score, _ = relevance_score
+        color, sym = _relevance_badge_parts(score)
+        parts.append(f"[{color}]{sym}{score}/10[/]")
+    return parts
 
 
 def _render_title_line(
@@ -69,10 +173,10 @@ def _relevance_badge_parts(score: int) -> tuple[str, str]:
     to colorblind users (WCAG 1.4.1 — Use of Color).
     """
     if score >= 8:
-        return THEME_COLORS["green"], "\u2605"  # ★
+        return THEME_COLORS["green"], _ACTIVE_META_GLYPHS["relevance_high"]
     if score >= 5:
-        return THEME_COLORS["yellow"], "\u25b8"  # ▸
-    return THEME_COLORS["muted"], "\u00b7"  # ·
+        return THEME_COLORS["yellow"], _ACTIVE_META_GLYPHS["relevance_mid"]
+    return THEME_COLORS["muted"], _ACTIVE_META_GLYPHS["relevance_low"]
 
 
 def _render_meta_badges(
@@ -84,27 +188,17 @@ def _render_meta_badges(
     relevance_score: tuple[int, str] | None,
 ) -> str:
     """Build the meta line with arxiv_id, categories, and badges."""
-    parts: list[str] = []
-    if paper.source == "api":
-        parts.append(f"[{THEME_COLORS['orange']}]API[/]")
-    parts.extend([f"[dim]{paper.arxiv_id}[/]", format_categories(paper.categories)])
-    if metadata and metadata.tags:
-        tag_str = " ".join(
-            f"[{get_tag_color(tag)}]#{escape_rich_text(tag)}[/]" for tag in metadata.tags
-        )
-        parts.append(tag_str)
-    if s2_data is not None:
-        parts.append(f"[{THEME_COLORS['green']}]C{s2_data.citation_count}[/]")
-    if hf_data is not None:
-        parts.append(f"[{THEME_COLORS['orange']}]\u2191{hf_data.upvotes}[/]")
-    if version_update is not None:
-        old_v, new_v = version_update
-        parts.append(f"[{THEME_COLORS['pink']}]v{old_v}\u2192v{new_v}[/]")
-    if relevance_score is not None:
-        score, _ = relevance_score
-        color, sym = _relevance_badge_parts(score)
-        parts.append(f"[{color}]{sym}{score}/10[/]")
-    return "  ".join(parts)
+    parts = _build_meta_parts(
+        source=paper.source,
+        arxiv_id=paper.arxiv_id,
+        categories=paper.categories,
+        tags=metadata.tags if metadata else None,
+        s2_data=s2_data,
+        hf_data=hf_data,
+        version_update=version_update,
+        relevance_score=relevance_score,
+    )
+    return _compress_meta_parts(parts)
 
 
 def _render_abstract_preview(abstract_text: str | None, ht: dict[str, list[str]]) -> str:
@@ -265,43 +359,17 @@ class PaperListItem(ListItem):
 
     def _get_meta_text(self) -> str:
         """Get the formatted metadata text."""
-        parts = []
-        if self.paper.source == "api":
-            parts.append(f"[{THEME_COLORS['orange']}]API[/]")
-        parts.extend(
-            [
-                f"[dim]{self.paper.arxiv_id}[/]",
-                format_categories(self.paper.categories),
-            ]
+        parts = _build_meta_parts(
+            source=self.paper.source,
+            arxiv_id=self.paper.arxiv_id,
+            categories=self.paper.categories,
+            tags=self._metadata.tags if self._metadata else None,
+            s2_data=self._s2_data,
+            hf_data=self._hf_data,
+            version_update=self._version_update,
+            relevance_score=self._relevance_score,
         )
-
-        # Show tags if present (namespace-colored)
-        if self._metadata and self._metadata.tags:
-            tag_str = " ".join(
-                f"[{get_tag_color(tag)}]#{escape_rich_text(tag)}[/]" for tag in self._metadata.tags
-            )
-            parts.append(tag_str)
-
-        # S2 citation badge
-        if self._s2_data is not None:
-            parts.append(f"[{THEME_COLORS['green']}]C{self._s2_data.citation_count}[/]")
-
-        # HF trending badge
-        if self._hf_data is not None:
-            parts.append(f"[{THEME_COLORS['orange']}]\u2191{self._hf_data.upvotes}[/]")
-
-        # Version update badge
-        if self._version_update is not None:
-            old_v, new_v = self._version_update
-            parts.append(f"[{THEME_COLORS['pink']}]v{old_v}\u2192v{new_v}[/]")
-
-        # Relevance score badge
-        if self._relevance_score is not None:
-            score, _ = self._relevance_score
-            color, sym = _relevance_badge_parts(score)
-            parts.append(f"[{color}]{sym}{score}/10[/]")
-
-        return "  ".join(parts)
+        return _compress_meta_parts(parts)
 
     def _get_preview_text(self) -> str:
         """Get truncated abstract preview text.

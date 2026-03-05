@@ -10873,7 +10873,7 @@ class TestExportMenuModal:
         from arxiv_browser.modals import ExportMenuModal
 
         binding_keys = {b.key for b in ExportMenuModal.BINDINGS}
-        expected = {"escape", "c", "b", "m", "r", "v", "t", "B", "R", "C"}
+        expected = {"escape", "q", "c", "b", "m", "r", "v", "t", "B", "R", "C"}
         assert expected <= binding_keys
         binding_descriptions = {b.key: b.description for b in ExportMenuModal.BINDINGS}
         assert binding_descriptions["t"] == "Markdown table"
@@ -11026,7 +11026,7 @@ class TestExportMenuModal:
 
         from arxiv_browser.modals import ExportMenuModal
 
-        assert "Cancel: Esc" in inspect.getsource(ExportMenuModal.compose)
+        assert "Cancel: Esc/q" in inspect.getsource(ExportMenuModal.compose)
 
     def test_compose_uses_markdown_table_copy(self):
         import inspect
@@ -11348,7 +11348,7 @@ class TestSectionToggleModal:
         from arxiv_browser.modals import SectionToggleModal
 
         binding_keys = {b.key for b in SectionToggleModal.BINDINGS}
-        expected = {"escape", "enter", "a", "b", "t", "r", "s", "e", "h", "v"}
+        expected = {"escape", "q", "enter", "a", "b", "t", "r", "s", "e", "h", "v"}
         assert expected <= binding_keys
 
     def test_compose_footer_uses_cancel_esc_copy(self):
@@ -11356,7 +11356,7 @@ class TestSectionToggleModal:
 
         from arxiv_browser.modals import SectionToggleModal
 
-        assert "Cancel: Esc" in inspect.getsource(SectionToggleModal.compose)
+        assert "Cancel: Esc/q" in inspect.getsource(SectionToggleModal.compose)
 
 
 # ============================================================================

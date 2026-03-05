@@ -15,6 +15,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Label, ListItem, ListView, Static
 
+from arxiv_browser.action_messages import build_actionable_error
 from arxiv_browser.models import Paper
 from arxiv_browser.query import escape_rich_text, truncate_text
 from arxiv_browser.semantic_scholar import CitationEntry
@@ -30,6 +31,7 @@ class RecommendationSourceModal(ModalScreen[str]):
 
     BINDINGS = [
         Binding("escape", "cancel", "Cancel"),
+        Binding("q", "cancel", "Cancel"),
         Binding("l", "local", "Local", show=False),
         Binding("s", "s2", "S2", show=False),
     ]
@@ -62,6 +64,12 @@ class RecommendationSourceModal(ModalScreen[str]):
     #rec-source-buttons Button {
         margin: 0 1;
     }
+
+    #rec-source-footer {
+        color: $th-muted;
+        margin-top: 1;
+        text-align: center;
+    }
     """
 
     def compose(self) -> ComposeResult:
@@ -70,6 +78,7 @@ class RecommendationSourceModal(ModalScreen[str]):
             with Horizontal(id="rec-source-buttons"):
                 yield Button("Local (TF-IDF)", variant="default", id="local-btn")
                 yield Button("Semantic Scholar", variant="primary", id="s2-btn")
+            yield Static("Close: Esc/q", id="rec-source-footer")
 
     def action_cancel(self) -> None:
         self.dismiss("")
@@ -102,6 +111,7 @@ class RecommendationsScreen(ModalScreen[str | None]):
 
     BINDINGS = [
         Binding("escape", "cancel", "Close"),
+        Binding("q", "cancel", "Close"),
         Binding("enter", "select", "Select"),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
@@ -173,7 +183,7 @@ class RecommendationsScreen(ModalScreen[str | None]):
             yield Label(f"Similar to: {truncated_title}", id="recommendations-title")
             yield ListView(id="recommendations-list")
             with Horizontal(id="recommendations-buttons"):
-                yield Button("Close (Esc)", variant="default", id="close-btn")
+                yield Button("Close (Esc/q)", variant="default", id="close-btn")
                 yield Button("Go to Paper (Enter)", variant="primary", id="select-btn")
 
     def on_mount(self) -> None:
@@ -252,6 +262,7 @@ class CitationGraphScreen(ModalScreen[str | None]):
 
     BINDINGS = [
         Binding("escape", "back_or_close", "Back / Close"),
+        Binding("q", "back_or_close", "Back / Close"),
         Binding("enter", "drill_down", "Drill down"),
         Binding("o", "open_url", "Open in browser", show=False),
         Binding("j", "cursor_down", "Down", show=False),
@@ -371,7 +382,7 @@ class CitationGraphScreen(ModalScreen[str | None]):
                     yield ListView(id="cites-list", classes="citation-list")
             yield Static("", id="citation-graph-status")
             with Horizontal(id="citation-graph-buttons"):
-                yield Button("Close (Esc)", variant="default", id="cg-close-btn")
+                yield Button("Close (Esc/q)", variant="default", id="cg-close-btn")
                 yield Button("Drill Down (Enter)", variant="primary", id="cg-drill-btn")
 
     def on_mount(self) -> None:
@@ -394,8 +405,8 @@ class CitationGraphScreen(ModalScreen[str | None]):
                 classes="cite-title",
             ),
             Static(
-                f"[dim]{year_str}[/] · {escape_rich_text(authors_short)}"
-                f" · [{THEME_COLORS['accent']}]{entry.citation_count} cites[/]",
+                f"[dim]{year_str}[/] | {escape_rich_text(authors_short)}"
+                f" | [{THEME_COLORS['accent']}]{entry.citation_count} cites[/]",
                 classes="cite-meta",
             ),
             is_local=is_local,
@@ -446,8 +457,8 @@ class CitationGraphScreen(ModalScreen[str | None]):
         depth = len(self._stack)
         depth_str = f" [dim](depth {depth})[/]" if depth > 0 else ""
         self.query_one("#citation-graph-status", Static).update(
-            f"[dim]Tab: switch panel · Enter: drill down · "
-            f"o: open · g: go to local · Esc: back[/]"
+            f"[dim]Tab: switch panel | Enter: drill down | "
+            f"o: open | g: go to local | Esc/q: back[/]"
             f"  Active: [{THEME_COLORS['purple']}]{panel_name}[/]{depth_str}"
         )
 
@@ -512,7 +523,11 @@ class CitationGraphScreen(ModalScreen[str | None]):
                 exc_info=True,
             )
             self.app.notify(
-                "Failed to load citations. Check your connection.",
+                build_actionable_error(
+                    "load citation graph data",
+                    why="a network, API, or local cache error occurred",
+                    next_step="retry drill-down or return to browse mode and try again",
+                ),
                 severity="error",
             )
             # Undo the push

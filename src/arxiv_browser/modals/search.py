@@ -20,6 +20,19 @@ from arxiv_browser.themes import THEME_COLORS
 
 logger = logging.getLogger(__name__)
 
+PALETTE_NAME_MAX_LEN = 28
+PALETTE_DESC_MAX_LEN = 40
+PALETTE_KEY_MAX_LEN = 24
+
+
+def _truncate_palette_text(text: str, max_len: int) -> str:
+    """Clamp palette row text to a stable width-friendly length."""
+    if len(text) <= max_len:
+        return text
+    if max_len <= 3:
+        return text[:max_len]
+    return text[: max_len - 3] + "..."
+
 
 class ArxivSearchModal(ModalScreen[ArxivSearchRequest | None]):
     """Modal dialog for searching the full arXiv API."""
@@ -172,6 +185,7 @@ class CommandPaletteModal(ModalScreen[str]):
 
     BINDINGS = [
         Binding("escape", "cancel", "Close"),
+        Binding("q", "cancel", "Close"),
     ]
 
     DEFAULT_CSS = """
@@ -214,7 +228,7 @@ class CommandPaletteModal(ModalScreen[str]):
                 id="palette-search",
             )
             yield OptionList(id="palette-results")
-            yield Static("Close: Esc", id="palette-footer")
+            yield Static("↑↓ move   Enter run   Esc/q close   ? shortcuts", id="palette-footer")
 
     def on_mount(self) -> None:
         self._populate_results("")
@@ -253,7 +267,7 @@ class CommandPaletteModal(ModalScreen[str]):
                         "[dim]No commands match "
                         f'[bold]"{safe_query}"[/bold].[/]\n'
                         "[dim]Try: use a shorter term.[/]\n"
-                        "[dim]Next: press [bold]Esc[/bold] to close or [bold]?[/bold] for shortcuts.[/]",
+                        "[dim]Next: press [bold]Esc[/bold]/[bold]q[/bold] to close or [bold]?[/bold] for shortcuts.[/]",
                         disabled=True,
                     )
                 )
@@ -271,9 +285,9 @@ class CommandPaletteModal(ModalScreen[str]):
         accent = THEME_COLORS["accent"]
         muted = THEME_COLORS["muted"]
         for name, desc, key_hint, action in self._filtered:
-            safe_name = escape_rich_text(name)
-            safe_desc = escape_rich_text(desc)
-            safe_key = escape_rich_text(key_hint)
+            safe_name = escape_rich_text(_truncate_palette_text(name, PALETTE_NAME_MAX_LEN))
+            safe_desc = escape_rich_text(_truncate_palette_text(desc, PALETTE_DESC_MAX_LEN))
+            safe_key = escape_rich_text(_truncate_palette_text(key_hint, PALETTE_KEY_MAX_LEN))
             markup = f"[bold]{safe_name}[/]  [{muted}]{safe_desc}[/]\n  [{accent}]{safe_key}[/]"
             option_list.add_option(Option(markup, id=action))
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from unittest.mock import MagicMock
 
 from textual.css.query import NoMatches
@@ -12,16 +13,58 @@ from arxiv_browser.semantic_scholar import SemanticScholarPaper
 from arxiv_browser.widgets.listing import set_ascii_icons
 
 
+def _visible_text(text: str) -> str:
+    return re.sub(r"\[[^\]]*]", "", text)
+
+
 def test_set_ascii_icons_changes_rendered_selection_marker(make_paper):
     paper = make_paper(title="Selection Test")
 
     set_ascii_icons(True)
-    ascii_text = render_paper_option(paper, selected=True)
-    assert "[x]" in ascii_text
+    try:
+        ascii_text = render_paper_option(
+            paper,
+            selected=True,
+            hf_data=HuggingFacePaper(
+                arxiv_id=paper.arxiv_id,
+                title=paper.title,
+                upvotes=7,
+                num_comments=0,
+                ai_summary="",
+                ai_keywords=(),
+                github_repo="",
+                github_stars=0,
+            ),
+            version_update=(1, 2),
+            relevance_score=(9, "high"),
+        )
+        assert "[x]" in ascii_text
+        assert "^7" in ascii_text
+        assert "v1->v2" in ascii_text
+        assert "*9/10" in ascii_text
+    finally:
+        set_ascii_icons(False)
 
-    set_ascii_icons(False)
     unicode_text = render_paper_option(paper, selected=True)
     assert "●" in unicode_text
+    unicode_meta = render_paper_option(
+        paper,
+        hf_data=HuggingFacePaper(
+            arxiv_id=paper.arxiv_id,
+            title=paper.title,
+            upvotes=7,
+            num_comments=0,
+            ai_summary="",
+            ai_keywords=(),
+            github_repo="",
+            github_stars=0,
+        ),
+        version_update=(1, 2),
+        relevance_score=(9, "high"),
+    )
+    assert "↑7" in unicode_meta
+    assert "v1→v2" in unicode_meta
+    assert "★9/10" in unicode_meta
 
 
 def test_paper_list_item_title_and_authors_text(make_paper):
@@ -99,6 +142,54 @@ def test_paper_list_item_preview_text_branches(make_paper):
     item._abstract_text = "word " * 80
     preview = item._get_preview_text()
     assert preview.endswith("...[/]")
+
+
+def test_meta_badges_apply_budget_and_hidden_counter(make_paper):
+    paper = make_paper(
+        arxiv_id="2401.12345",
+        categories="cs.AI cs.CL cs.LG cs.CV cs.IR cs.NE",
+    )
+    metadata = PaperMetadata(
+        arxiv_id=paper.arxiv_id,
+        tags=[
+            "topic:transformers",
+            "topic:reasoning",
+            "status:to-read",
+            "method:distillation",
+            "priority:high",
+        ],
+    )
+    rendered = render_paper_option(
+        paper,
+        metadata=metadata,
+        s2_data=SemanticScholarPaper(
+            arxiv_id=paper.arxiv_id,
+            s2_paper_id="s2id",
+            citation_count=123,
+            influential_citation_count=7,
+            tldr="",
+            fields_of_study=(),
+            year=2024,
+            url="https://s2.example",
+        ),
+        hf_data=HuggingFacePaper(
+            arxiv_id=paper.arxiv_id,
+            title=paper.title,
+            upvotes=42,
+            num_comments=2,
+            ai_summary="",
+            ai_keywords=(),
+            github_repo="",
+            github_stars=0,
+        ),
+        version_update=(1, 3),
+        relevance_score=(8, "strong"),
+    )
+    meta_line = rendered.splitlines()[2]
+    visible_meta = _visible_text(meta_line)
+    assert len(visible_meta) <= 78
+    assert paper.arxiv_id in visible_meta
+    assert "+" in visible_meta
 
 
 def test_paper_list_item_setters_and_selection_refresh(make_paper):

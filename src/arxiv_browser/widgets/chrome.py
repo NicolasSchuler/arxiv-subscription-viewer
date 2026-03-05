@@ -17,6 +17,15 @@ from arxiv_browser.query import escape_rich_text, pill_label_for_token
 from arxiv_browser.themes import THEME_COLORS
 
 DATE_NAV_WINDOW_SIZE = 5
+_CHROME_GLYPH_SETS: dict[str, dict[str, str]] = {
+    "unicode": {
+        "pill_remove": "\u00d7",  # multiplication sign
+    },
+    "ascii": {
+        "pill_remove": "x",
+    },
+}
+_ACTIVE_CHROME_GLYPHS = _CHROME_GLYPH_SETS["unicode"]
 
 _SELECTION_FOOTER_BINDINGS: tuple[tuple[str, str], ...] = (
     ("o", "open"),
@@ -44,6 +53,14 @@ _API_FOOTER_BINDINGS: tuple[tuple[str, str], ...] = (
     ("o", "open"),
     ("?", "help"),
 )
+
+
+def set_ascii_glyphs(enabled: bool) -> None:
+    """Switch chrome glyphs between Unicode and ASCII modes."""
+    global _ACTIVE_CHROME_GLYPHS
+    _ACTIVE_CHROME_GLYPHS = (
+        _CHROME_GLYPH_SETS["ascii"] if enabled else _CHROME_GLYPH_SETS["unicode"]
+    )
 
 
 def build_selection_footer_base_bindings() -> list[tuple[str, str]]:
@@ -763,14 +780,15 @@ class FilterPillBar(Horizontal):
 
     async def update_pills(self, tokens: list[QueryToken], watch_active: bool) -> None:
         """Update the displayed filter pills."""
+        pill_remove = _ACTIVE_CHROME_GLYPHS["pill_remove"]
         desired: list[tuple[str, str, str]] = []
         for i, token in enumerate(tokens):
             if token.kind == "op":
                 continue
             label_text = escape_rich_text(pill_label_for_token(token))
-            desired.append((f"pill-{i}", f"{label_text} \u00d7", "filter-pill"))
+            desired.append((f"pill-{i}", f"{label_text} {pill_remove}", "filter-pill"))
         if watch_active:
-            desired.append(("pill-watch", "watched \u00d7", "filter-pill-watch"))
+            desired.append(("pill-watch", f"watched {pill_remove}", "filter-pill-watch"))
 
         existing_items = [
             child
@@ -837,4 +855,5 @@ __all__ = [
     "build_selection_footer_base_bindings",
     "build_selection_footer_bindings",
     "build_status_bar_text",
+    "set_ascii_glyphs",
 ]

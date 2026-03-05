@@ -136,6 +136,9 @@ arxiv-viewer --no-restore
 arxiv-viewer --color never --ascii
 arxiv-viewer --no-color
 
+# Read-only overlays (palette/recommendations/citation graph/export/section toggles)
+# support Esc or q to close. Edit/input overlays remain Esc-cancel.
+
 # Alternative: run as module (useful during development)
 uv run python -m arxiv_browser
 

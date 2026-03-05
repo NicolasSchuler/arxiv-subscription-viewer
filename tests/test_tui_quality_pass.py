@@ -119,7 +119,8 @@ async def test_collections_modal_validates_create_inputs(make_paper):
 
             name_input.value = ""
             modal.on_create_pressed()
-            assert "Name cannot be empty" in modal.notify.call_args[0][0]
+            assert "Collection name cannot be empty" in modal.notify.call_args[0][0]
+            assert "Next step:" in modal.notify.call_args[0][0]
 
             modal.notify.reset_mock()
             name_input.value = "Reading"
@@ -143,7 +144,7 @@ async def test_collections_modal_enforces_max_collection_count(make_paper):
             modal.query_one("#col-name", Input).value = "Overflow"
             modal.on_create_pressed()
             assert len(modal.collections) == MAX_COLLECTIONS
-            assert "Maximum" in modal.notify.call_args[0][0]
+            assert "Collection limit reached" in modal.notify.call_args[0][0]
 
 
 @pytest.mark.asyncio
@@ -183,7 +184,7 @@ async def test_collection_view_modal_requires_selection_for_remove(make_paper):
             await _open_modal(app, pilot, modal)
             modal.notify = MagicMock()
             modal.on_remove_pressed()
-            assert "Select a paper" in modal.notify.call_args[0][0]
+            assert "No paper is selected" in modal.notify.call_args[0][0]
 
 
 @pytest.mark.asyncio
@@ -388,9 +389,13 @@ async def test_citation_graph_drill_down_failure_restores_state(make_paper):
     with patch("arxiv_browser.app.save_config", return_value=True):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
+            app.notify = MagicMock()
             await modal.action_drill_down()
             assert modal._stack == []
             assert modal._current_paper_id == root.arxiv_id
+            app.notify.assert_called_once()
+            assert "Could not load citation graph data." in app.notify.call_args[0][0]
+            assert "Next step:" in app.notify.call_args[0][0]
 
 
 @pytest.mark.asyncio
@@ -483,7 +488,7 @@ async def test_command_palette_modal_filters_and_executes(make_paper):
             results = modal.query_one("#palette-results")
             assert "Command palette" in str(modal.query_one(Label).content)
             assert results.option_count == 3
-            assert "Close: Esc" in str(modal.query_one("#palette-footer", Static).content)
+            assert "Esc/q close" in str(modal.query_one("#palette-footer", Static).content)
 
             modal._populate_results("watch")
             assert results.option_count >= 1
@@ -506,6 +511,29 @@ async def test_command_palette_modal_filters_and_executes(make_paper):
             modal.dismiss.reset_mock()
             modal.action_cancel()
             modal.dismiss.assert_called_once_with("")
+
+
+def test_read_only_modals_support_q_close_binding():
+    from arxiv_browser.modals import (
+        AddToCollectionModal,
+        CitationGraphScreen,
+        ExportMenuModal,
+        RecommendationSourceModal,
+        RecommendationsScreen,
+        SectionToggleModal,
+    )
+
+    classes = [
+        RecommendationSourceModal,
+        RecommendationsScreen,
+        CitationGraphScreen,
+        AddToCollectionModal,
+        ExportMenuModal,
+        SectionToggleModal,
+    ]
+    for modal_cls in classes:
+        binding_keys = {binding.key for binding in modal_cls.BINDINGS}
+        assert "q" in binding_keys
 
 
 def test_help_screen_default_ctrl_e_copy():
@@ -652,6 +680,8 @@ def test_date_navigator_click_messages():
 
 @pytest.mark.asyncio
 async def test_filter_pill_bar_updates_in_place_and_click_events():
+    from arxiv_browser.widgets.chrome import set_ascii_glyphs as set_ascii_chrome_glyphs
+
     bar = FilterPillBar()
 
     def fake_mount(widget: Label):
@@ -667,6 +697,8 @@ async def test_filter_pill_bar_updates_in_place_and_click_events():
     tokens = tokenize_query("cat:cs.AI AND transformer")
     await bar.update_pills(tokens, watch_active=True)
     first_by_id = {child.id: child for child in bar.children if child.id is not None}
+    assert "\u00d7" in str(first_by_id["pill-0"].content)
+    assert "\u00d7" in str(first_by_id["pill-watch"].content)
 
     await bar.update_pills(tokens, watch_active=True)
     second_by_id = {child.id: child for child in bar.children if child.id is not None}
@@ -684,6 +716,15 @@ async def test_filter_pill_bar_updates_in_place_and_click_events():
     bar.on_click(_click(second_by_id["pill-watch"]))
     msg = bar.post_message.call_args[0][0]
     assert isinstance(msg, FilterPillBar.RemoveWatchFilter)
+
+    set_ascii_chrome_glyphs(True)
+    try:
+        await bar.update_pills(tokens, watch_active=True)
+        ascii_by_id = {child.id: child for child in bar.children if child.id is not None}
+        assert "x" in str(ascii_by_id["pill-0"].content)
+        assert "x" in str(ascii_by_id["pill-watch"].content)
+    finally:
+        set_ascii_chrome_glyphs(False)
 
     # Invalid pill index should be ignored safely.
     bar.post_message.reset_mock()
