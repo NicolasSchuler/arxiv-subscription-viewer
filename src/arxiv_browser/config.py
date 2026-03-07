@@ -81,6 +81,7 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
         "llm_command": config.llm_command,
         "llm_prompt_template": config.llm_prompt_template,
         "llm_preset": config.llm_preset,
+        "allow_llm_shell_fallback": config.allow_llm_shell_fallback,
         "arxiv_api_max_results": max_results,
         "s2_enabled": config.s2_enabled,
         "s2_api_key": config.s2_api_key,
@@ -312,6 +313,7 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         llm_command=_safe_get(data, "llm_command", "", str),
         llm_prompt_template=_safe_get(data, "llm_prompt_template", "", str),
         llm_preset=_safe_get(data, "llm_preset", "", str),
+        allow_llm_shell_fallback=_safe_get(data, "allow_llm_shell_fallback", True, bool),
         arxiv_api_max_results=_coerce_arxiv_api_max_results(
             data.get("arxiv_api_max_results", ARXIV_API_DEFAULT_MAX_RESULTS)
         ),

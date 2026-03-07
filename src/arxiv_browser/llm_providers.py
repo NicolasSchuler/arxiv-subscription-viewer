@@ -23,7 +23,7 @@ class _InvocationPlan:
     shell_command: str = ""
 
 
-def _requires_shell_execution(command_template: str) -> bool:
+def llm_command_requires_shell(command_template: str) -> bool:
     """Return True when the command template needs shell parsing semantics."""
     return any(char in command_template for char in _SHELL_META_CHARS)
 
@@ -38,14 +38,20 @@ def _strip_wrapping_quotes_windows(args: list[str]) -> list[str]:
     ]
 
 
-def _build_invocation_plan(command_template: str, prompt: str) -> _InvocationPlan:
+def _build_invocation_plan(
+    command_template: str, prompt: str, *, allow_shell: bool = True
+) -> _InvocationPlan:
     """Build argv-first invocation plan with controlled shell fallback."""
     if "{prompt}" not in command_template:
         raise ValueError(
             f"LLM command template must contain {{prompt}} placeholder, got: {command_template!r}"
         )
 
-    if _requires_shell_execution(command_template):
+    if llm_command_requires_shell(command_template):
+        if not allow_shell:
+            raise ValueError(
+                "LLM command requires shell execution, but allow_llm_shell_fallback is disabled"
+            )
         shell_command = _build_llm_shell_command(command_template, prompt)
         return _InvocationPlan(use_shell=True, shell_command=shell_command)
 
@@ -54,6 +60,10 @@ def _build_invocation_plan(command_template: str, prompt: str) -> _InvocationPla
     try:
         argv = shlex.split(templated, posix=os.name != "nt")
     except ValueError:
+        if not allow_shell:
+            raise ValueError(
+                "LLM command requires shell parsing, but allow_llm_shell_fallback is disabled"
+            ) from None
         shell_command = _build_llm_shell_command(command_template, prompt)
         return _InvocationPlan(use_shell=True, shell_command=shell_command)
 
@@ -91,10 +101,11 @@ class CLIProvider:
     Never raises — returns LLMResult with success=False on any error.
     """
 
-    __slots__ = ("_command_template",)
+    __slots__ = ("_allow_shell", "_command_template")
 
-    def __init__(self, command_template: str) -> None:
+    def __init__(self, command_template: str, *, allow_shell: bool = True) -> None:
         self._command_template = command_template
+        self._allow_shell = allow_shell
 
     @property
     def command_template(self) -> str:
@@ -104,7 +115,11 @@ class CLIProvider:
     async def execute(self, prompt: str, timeout: int) -> LLMResult:
         """Execute the LLM command and return the result."""
         try:
-            plan = _build_invocation_plan(self._command_template, prompt)
+            plan = _build_invocation_plan(
+                self._command_template,
+                prompt,
+                allow_shell=self._allow_shell,
+            )
         except ValueError as e:
             return LLMResult(output="", success=False, error=str(e))
 
@@ -153,12 +168,13 @@ def resolve_provider(config: UserConfig) -> CLIProvider | None:
     template = _resolve_llm_command(config)
     if not template:
         return None
-    return CLIProvider(template)
+    return CLIProvider(template, allow_shell=config.allow_llm_shell_fallback)
 
 
 __all__ = [
     "CLIProvider",
     "LLMProvider",
     "LLMResult",
+    "llm_command_requires_shell",
     "resolve_provider",
 ]

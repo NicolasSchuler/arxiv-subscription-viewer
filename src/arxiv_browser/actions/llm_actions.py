@@ -17,6 +17,17 @@ def _sync_app_globals() -> None:
     sync_app_globals(globals())
 
 
+_RECOVERABLE_ACTION_ERRORS = (OSError, RuntimeError, ValueError, TypeError)
+
+
+def _log_action_failure(action: str, exc: Exception, *, unexpected: bool = False) -> None:
+    """Log an action failure with a consistent message shape."""
+    _sync_app_globals()
+    qualifier = "Unexpected " if unexpected else ""
+    message = f"{qualifier}{action} failed ({type(exc).__name__}): {exc}"
+    logger.warning(message, exc_info=True)
+
+
 def _collect_all_tags(app: "ArxivBrowser") -> list[str]:
     """Collect all unique tags across all paper metadata."""
     _sync_app_globals()
@@ -171,7 +182,17 @@ def _require_llm_command(app: "ArxivBrowser") -> str | None:
             msg = f"Set llm_command or llm_preset in config.json ({get_config_path()})"
         app.notify(msg, title="LLM not configured", severity="warning", timeout=8)
         return None
-    app._llm_provider = CLIProvider(command_template)
+    if not app._config.allow_llm_shell_fallback and llm_command_requires_shell(command_template):
+        app.notify(
+            "LLM command uses shell syntax, but allow_llm_shell_fallback is disabled in config.json",
+            title="LLM command blocked",
+            severity="warning",
+            timeout=10,
+        )
+        return None
+    app._llm_provider = CLIProvider(
+        command_template, allow_shell=app._config.allow_llm_shell_fallback
+    )
     return command_template
 
 
@@ -313,13 +334,11 @@ async def _generate_summary_async(
         # Config/template errors — show the descriptive message directly
         logger.warning("Summary config error for %s: %s", arxiv_id, e)
         app.notify(str(e), title="AI Summary", severity="error", timeout=10)
-    except (OSError, RuntimeError) as e:
-        logger.warning("Summary generation runtime failure for %s: %s", arxiv_id, e, exc_info=True)
+    except _RECOVERABLE_ACTION_ERRORS as exc:
+        _log_action_failure(f"summary generation for {arxiv_id}", exc)
         app.notify("Summary failed", title="AI Summary", severity="error")
-    except Exception as e:
-        logger.warning(
-            "Unexpected summary generation failure for %s: %s", arxiv_id, e, exc_info=True
-        )
+    except Exception as exc:
+        _log_action_failure(f"summary generation for {arxiv_id}", exc, unexpected=True)
         app.notify("Summary failed", title="AI Summary", severity="error")
     finally:
         app._summary_loading.discard(arxiv_id)
@@ -523,21 +542,11 @@ async def _score_relevance_batch_async(
                 app._update_relevance_badge(paper.arxiv_id)
                 scored += 1
 
-            except (OSError, RuntimeError, ValueError) as exc:
-                logger.warning(
-                    "Relevance scoring error for %s: %s",
-                    paper.arxiv_id,
-                    exc,
-                    exc_info=True,
-                )
+            except _RECOVERABLE_ACTION_ERRORS as exc:
+                _log_action_failure(f"relevance scoring for {paper.arxiv_id}", exc)
                 failed += 1
             except Exception as exc:
-                logger.warning(
-                    "Unexpected relevance scoring error for %s: %s",
-                    paper.arxiv_id,
-                    exc,
-                    exc_info=True,
-                )
+                _log_action_failure(f"relevance scoring for {paper.arxiv_id}", exc, unexpected=True)
                 failed += 1
 
             # Progress notification every 5 papers
@@ -561,11 +570,11 @@ async def _score_relevance_batch_async(
         app._mark_badges_dirty("relevance")
         app._refresh_detail_pane()
 
-    except (OSError, RuntimeError, ValueError) as exc:
-        logger.warning("Relevance batch scoring failed: %s", exc, exc_info=True)
+    except _RECOVERABLE_ACTION_ERRORS as exc:
+        _log_action_failure("relevance batch scoring", exc)
         app.notify("Relevance scoring failed", title="Relevance", severity="error")
     except Exception as exc:
-        logger.warning("Unexpected relevance batch scoring failure: %s", exc, exc_info=True)
+        _log_action_failure("relevance batch scoring", exc, unexpected=True)
         app.notify("Relevance scoring failed", title="Relevance", severity="error")
     finally:
         app._relevance_scoring_active = False
@@ -641,8 +650,11 @@ async def _auto_tag_single_async(
             AutoTagSuggestModal(paper.title, suggested, current_tags),
             lambda tags: app._on_auto_tag_accepted(tags, paper.arxiv_id),
         )
-    except Exception:
-        logger.warning("Auto-tag single failed for %s", paper.arxiv_id, exc_info=True)
+    except _RECOVERABLE_ACTION_ERRORS as exc:
+        _log_action_failure(f"auto-tag single for {paper.arxiv_id}", exc)
+        app.notify("Auto-tagging failed", title="Auto-Tag", severity="error")
+    except Exception as exc:
+        _log_action_failure(f"auto-tag single for {paper.arxiv_id}", exc, unexpected=True)
         app.notify("Auto-tagging failed", title="Auto-Tag", severity="error")
     finally:
         app._auto_tag_active = False
@@ -690,8 +702,19 @@ async def _auto_tag_batch_async(
             msg += f" ({failed} failed)"
         app.notify(msg, title="Auto-Tag")
 
-    except Exception:
-        logger.error("Auto-tag batch failed after tagging %d papers", tagged, exc_info=True)
+    except _RECOVERABLE_ACTION_ERRORS as exc:
+        _log_action_failure("auto-tag batch", exc)
+        if tagged > 0:
+            app._save_config_or_warn("partial auto-tag results")
+        app.notify(
+            f"Auto-tagging failed ({tagged} tagged before error)"
+            if tagged
+            else "Auto-tagging failed",
+            title="Auto-Tag",
+            severity="error",
+        )
+    except Exception as exc:
+        _log_action_failure("auto-tag batch", exc, unexpected=True)
         if tagged > 0:
             app._save_config_or_warn("partial auto-tag results")
         app.notify(

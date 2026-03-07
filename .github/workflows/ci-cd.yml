@@ -81,6 +81,10 @@ jobs:
       - name: Dependency hygiene
         run: uv run deptry .
 
+      - name: Dependency CVE audit (non-blocking)
+        run: uv run pip-audit
+        continue-on-error: true
+
       - name: App size guardrail
         run: |
           APP_LINES=$(wc -l < src/arxiv_browser/app.py)

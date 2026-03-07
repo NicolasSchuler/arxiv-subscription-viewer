@@ -116,6 +116,12 @@ class TestCLIProvider:
         assert result.success is True
         shell_mock.assert_called_once()
 
+    async def test_shell_fallback_blocked_when_disabled(self):
+        provider = CLIProvider("echo {prompt} | cat", allow_shell=False)
+        result = await provider.execute("hello", timeout=5)
+        assert result.success is False
+        assert "allow_llm_shell_fallback" in result.error
+
     async def test_shell_fallback_uses_windows_prompt_quoting(self):
         from unittest.mock import AsyncMock, patch
 
@@ -182,6 +188,16 @@ class TestResolveProvider:
         result = resolve_provider(config)
         assert result is not None
         assert "custom" in result.command_template
+
+    async def test_resolve_provider_honors_shell_policy(self):
+        from arxiv_browser.models import UserConfig
+
+        config = UserConfig(llm_command="echo {prompt} | cat", allow_llm_shell_fallback=False)
+        result = resolve_provider(config)
+        assert result is not None
+        blocked = await result.execute("hello", timeout=5)
+        assert blocked.success is False
+        assert "allow_llm_shell_fallback" in blocked.error
 
 
 # ============================================================================
