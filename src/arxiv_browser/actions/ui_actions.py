@@ -58,8 +58,16 @@ def action_toggle_s2(app: "ArxivBrowser") -> None:
             severity="error",
         )
         return
-    state = "enabled" if app._s2_active else "disabled"
-    app.notify(f"Semantic Scholar {state}", title="S2")
+    if app._s2_active:
+        app.notify(
+            build_actionable_success(
+                "Semantic Scholar enabled",
+                next_step="press e on a paper to fetch Semantic Scholar data",
+            ),
+            title="S2",
+        )
+    else:
+        app.notify("Semantic Scholar disabled", title="S2")
     app._update_status_bar()
     app._get_ui_refresh_coordinator().refresh_detail_pane()
     app._mark_badges_dirty("s2", immediate=True)
@@ -241,7 +249,13 @@ async def action_toggle_hf(app: "ArxivBrowser") -> None:
         )
         return
     if app._hf_active:
-        app.notify("HuggingFace trending enabled", title="HF")
+        app.notify(
+            build_actionable_success(
+                "HuggingFace trending enabled",
+                next_step="badges and detail matches will populate automatically",
+            ),
+            title="HF",
+        )
         if not app._hf_cache:
             await app._fetch_hf_daily()
     else:
@@ -656,7 +670,9 @@ def action_command_palette(app: "ArxivBrowser") -> None:
         else:
             logger.warning("Unknown command palette action: %s", action_name)
 
-    app.push_screen(CommandPaletteModal(COMMAND_PALETTE_COMMANDS), _on_command_selected)
+    app.push_screen(
+        CommandPaletteModal(app._build_command_palette_commands()), _on_command_selected
+    )
 
 
 def action_collections(app: "ArxivBrowser") -> None:

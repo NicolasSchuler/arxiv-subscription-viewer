@@ -200,6 +200,7 @@ from arxiv_browser.modals import (
     ConfirmModal,
     ExportMenuModal,
     HelpScreen,
+    MetadataSnapshotPickerModal,
     NotesModal,
     PaperChatScreen,
     RecommendationSourceModal,
@@ -425,6 +426,7 @@ __all__ = [
     "FilterPillBar",
     "LLMResult",
     "LocalBrowseSnapshot",
+    "MetadataSnapshotPickerModal",
     "Paper",
     "PaperChatScreen",
     "PaperCollection",
@@ -553,32 +555,82 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
         "s",
         "cycle_sort",
     ),
-    ("Toggle Watch Filter", "Show only watched papers", "w", "toggle_watch_filter"),
+    (
+        "Show Watched Papers",
+        "Filter the list to papers matching your watch list",
+        "w",
+        "toggle_watch_filter",
+    ),
     ("Manage Watch List", "Add/remove watch list patterns", "W", "manage_watch_list"),
-    ("Toggle Preview", "Show/hide abstract preview in list", "p", "toggle_preview"),
+    (
+        "Show Abstract Preview",
+        "Reveal abstract snippets in the paper list",
+        "p",
+        "toggle_preview",
+    ),
     # Export
     ("Export Menu", "Export as BibTeX, Markdown, RIS, or CSV", "E", "export_menu"),
-    ("Export Metadata", "Export all annotations to portable JSON file", "", "export_metadata"),
-    ("Import Metadata", "Import annotations from JSON file", "", "import_metadata"),
+    ("Export Metadata", "Export all annotations to a JSON snapshot", "", "export_metadata"),
+    ("Import Metadata", "Import annotations from a chosen JSON snapshot", "", "import_metadata"),
     # Enrichment
-    ("Fetch S2 Data", "Fetch Semantic Scholar data for current paper", "e", "fetch_s2"),
     (
-        "Toggle S2 / Exit API",
-        "Toggle S2 in browse mode or exit API mode",
+        "Fetch S2 Data",
+        "Fetch Semantic Scholar data for the current paper (requires S2 enabled)",
+        "e",
+        "fetch_s2",
+    ),
+    (
+        "Toggle Semantic Scholar",
+        "Enable or disable Semantic Scholar enrichment",
         "Ctrl+e",
         "ctrl_e_dispatch",
     ),
-    ("Toggle HuggingFace", "Enable/disable HuggingFace trending", "Ctrl+h", "toggle_hf"),
+    (
+        "Enable HuggingFace Trending",
+        "Show HuggingFace badges and detail-pane matches",
+        "Ctrl+h",
+        "toggle_hf",
+    ),
     ("Check Versions", "Check starred papers for arXiv updates", "V", "check_versions"),
-    ("Citation Graph", "Explore citation graph (S2-powered)", "G", "citation_graph"),
+    (
+        "Citation Graph",
+        "Explore the citation graph for the current paper (requires S2 data)",
+        "G",
+        "citation_graph",
+    ),
     # AI features
-    ("AI Summary", "Generate LLM-powered paper summary", "Ctrl+s", "generate_summary"),
-    ("Chat with Paper", "Interactive Q&A about current paper", "C", "chat_with_paper"),
-    ("Score Relevance", "LLM-score papers by research interests", "L", "score_relevance"),
+    (
+        "AI Summary",
+        "Generate an LLM-powered paper summary (requires LLM configuration)",
+        "Ctrl+s",
+        "generate_summary",
+    ),
+    (
+        "Chat with Paper",
+        "Interactive Q&A about the current paper (requires LLM configuration)",
+        "C",
+        "chat_with_paper",
+    ),
+    (
+        "Score Relevance",
+        "LLM-score loaded papers by research interests (requires LLM configuration)",
+        "L",
+        "score_relevance",
+    ),
     ("Edit Interests", "Edit research interests for relevance scoring", "Ctrl+l", "edit_interests"),
-    ("Auto-Tag", "LLM-suggest tags for current or selected papers", "Ctrl+g", "auto_tag"),
+    (
+        "Auto-Tag",
+        "Suggest tags for current or selected papers (requires LLM configuration)",
+        "Ctrl+g",
+        "auto_tag",
+    ),
     # Recommendations
-    ("Similar Papers", "Find similar papers (local or S2)", "R", "show_similar"),
+    (
+        "Similar Papers",
+        "Find similar papers locally or via Semantic Scholar when available",
+        "R",
+        "show_similar",
+    ),
     # Bookmarks
     ("Add Bookmark", "Save current search as bookmark", "Ctrl+b", "add_bookmark"),
     # Collections
@@ -2904,6 +2956,48 @@ class ArxivBrowser(App):
     def _build_help_sections(self) -> list[tuple[str, list[tuple[str, str]]]]:
         """Build help sections from the runtime key binding table."""
         return build_help_sections(self.BINDINGS)
+
+    def _build_command_palette_commands(self) -> list[tuple[str, str, str, str]]:
+        """Return command palette rows with labels adapted to current app state."""
+        in_arxiv_api_mode = getattr(self, "_in_arxiv_api_mode", False)
+        hf_active = getattr(self, "_hf_active", False)
+        watch_filter_active = getattr(self, "_watch_filter_active", False)
+        show_abstract_preview = getattr(
+            getattr(self, "_config", None), "show_abstract_preview", False
+        )
+
+        commands: list[tuple[str, str, str, str]] = []
+        for name, description, key_hint, action_name in COMMAND_PALETTE_COMMANDS:
+            if action_name == "ctrl_e_dispatch":
+                if in_arxiv_api_mode:
+                    name = "Exit arXiv API Mode"
+                    description = "Return to your local or history papers"
+                else:
+                    name = "Toggle Semantic Scholar"
+                    description = "Enable or disable Semantic Scholar enrichment"
+            elif action_name == "toggle_hf":
+                if hf_active:
+                    name = "Disable HuggingFace Trending"
+                    description = "Hide HuggingFace badges and detail-pane matches"
+                else:
+                    name = "Enable HuggingFace Trending"
+                    description = "Show HuggingFace badges and detail-pane matches"
+            elif action_name == "toggle_watch_filter":
+                if watch_filter_active:
+                    name = "Show All Papers"
+                    description = "Return to the full paper list"
+                else:
+                    name = "Show Watched Papers"
+                    description = "Filter the list to papers matching your watch list"
+            elif action_name == "toggle_preview":
+                if show_abstract_preview:
+                    name = "Hide Abstract Preview"
+                    description = "Return to a denser paper list without snippets"
+                else:
+                    name = "Show Abstract Preview"
+                    description = "Reveal abstract snippets in the paper list"
+            commands.append((name, description, key_hint, action_name))
+        return commands
 
     def action_show_help(self) -> None:
         from arxiv_browser.actions import ui_actions as _actions

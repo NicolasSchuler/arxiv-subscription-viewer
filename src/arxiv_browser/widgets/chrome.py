@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
@@ -17,6 +18,17 @@ from arxiv_browser.query import escape_rich_text, pill_label_for_token
 from arxiv_browser.themes import THEME_COLORS
 
 DATE_NAV_WINDOW_SIZE = 5
+DATE_NAV_ARROW_WIDTH = 3
+DATE_NAV_ITEM_PADDING = 2
+DATE_NAV_CONTAINER_PADDING = 2
+DATE_NAV_LABEL_WITH_COUNTS = "with_counts"
+DATE_NAV_LABEL_MONTH_DAY = "month_day"
+DATE_NAV_LABEL_NUMERIC = "numeric"
+DATE_NAV_LABEL_MODES: tuple[str, ...] = (
+    DATE_NAV_LABEL_WITH_COUNTS,
+    DATE_NAV_LABEL_MONTH_DAY,
+    DATE_NAV_LABEL_NUMERIC,
+)
 _CHROME_GLYPH_SETS: dict[str, dict[str, str]] = {
     "unicode": {
         "pill_remove": "\u00d7",  # multiplication sign
@@ -94,24 +106,16 @@ def build_browse_footer_bindings(
     has_history_navigation: bool,
 ) -> list[tuple[str, str]]:
     """Build a capped default browsing footer with deterministic priority."""
+    _ = (s2_active, has_starred, llm_configured)
     slot_a = ("[/]", "history") if has_history_navigation else ("n", "notes")
-    if s2_active:
-        slot_b = ("e", "S2")
-    elif has_starred:
-        slot_b = ("V", "versions")
-    elif llm_configured:
-        slot_b = ("L", "relevance")
-    else:
-        slot_b = ("t", "tags")
-
     return [
         ("/", "search"),
+        ("A", "arxiv"),
         ("o", "open"),
         ("s", "sort"),
         ("r", "read"),
         ("x", "star"),
         slot_a,
-        slot_b,
         ("E", "export"),
         ("Ctrl+p", "palette"),
         ("?", "help"),
@@ -457,6 +461,78 @@ class ContextFooter(Static):
         self.update("  ".join(parts))
 
 
+def _compute_window_bounds(total: int, current_index: int, window_size: int) -> tuple[int, int]:
+    """Compute a centered sliding window clamped to history bounds."""
+    if total <= 0:
+        return (0, 0)
+    window_size = max(1, min(window_size, total))
+    half = window_size // 2
+    start = max(0, current_index - half)
+    end = min(total, start + window_size)
+    if end - start < window_size:
+        start = max(0, end - window_size)
+    return (start, end)
+
+
+def _format_date_nav_label(
+    current_date: date,
+    *,
+    count: int | None,
+    mode: str,
+) -> str:
+    """Format one date label using the requested compaction mode."""
+    if mode == DATE_NAV_LABEL_WITH_COUNTS:
+        safe_count = count or 0
+        return f"{current_date.strftime('%b %d')}({safe_count})"
+    if mode == DATE_NAV_LABEL_MONTH_DAY:
+        return current_date.strftime("%b %d")
+    return current_date.strftime("%m-%d")
+
+
+def _estimate_date_nav_width(labels: list[str]) -> int:
+    """Estimate the rendered width for arrows plus the given labels."""
+    return (
+        DATE_NAV_CONTAINER_PADDING
+        + (DATE_NAV_ARROW_WIDTH * 2)
+        + sum(len(label) + DATE_NAV_ITEM_PADDING for label in labels)
+    )
+
+
+def _compute_responsive_date_plan(
+    history_files: list[tuple[date, Path]],
+    current_index: int,
+    width: int,
+    get_count: Callable[[int], int],
+) -> tuple[int, int, str]:
+    """Choose a centered date window and label mode that fits the available width."""
+    total = len(history_files)
+    if total <= 0:
+        return (0, 0, DATE_NAV_LABEL_WITH_COUNTS)
+
+    if width <= 0:
+        start, end = _compute_window_bounds(total, current_index, min(DATE_NAV_WINDOW_SIZE, total))
+        return (start, end, DATE_NAV_LABEL_WITH_COUNTS)
+
+    max_window = min(DATE_NAV_WINDOW_SIZE, total)
+    for window_size in range(max_window, 0, -1):
+        start, end = _compute_window_bounds(total, current_index, window_size)
+        counts = {i: get_count(i) for i in range(start, end)}
+        for mode in DATE_NAV_LABEL_MODES:
+            labels = [
+                _format_date_nav_label(
+                    history_files[i][0],
+                    count=counts.get(i),
+                    mode=mode,
+                )
+                for i in range(start, end)
+            ]
+            if _estimate_date_nav_width(labels) <= width:
+                return (start, end, mode)
+
+    start, end = _compute_window_bounds(total, current_index, 1)
+    return (start, end, DATE_NAV_LABEL_NUMERIC)
+
+
 class DateNavigator(Horizontal):
     """Horizontal date strip showing available dates with sliding window."""
 
@@ -543,12 +619,7 @@ class DateNavigator(Horizontal):
 
     def _compute_window(self, total: int, current_index: int) -> tuple[int, int]:
         """Compute a centered sliding window clamped to history bounds."""
-        half = DATE_NAV_WINDOW_SIZE // 2
-        start = max(0, current_index - half)
-        end = min(total, start + DATE_NAV_WINDOW_SIZE)
-        if end - start < DATE_NAV_WINDOW_SIZE:
-            start = max(0, end - DATE_NAV_WINDOW_SIZE)
-        return (start, end)
+        return _compute_window_bounds(total, current_index, DATE_NAV_WINDOW_SIZE)
 
     def _build_desired_items(
         self,
@@ -556,13 +627,14 @@ class DateNavigator(Horizontal):
         current_index: int,
         start: int,
         end: int,
+        label_mode: str,
     ) -> list[tuple[str, str, bool]]:
         """Build desired date labels for the visible window."""
         desired: list[tuple[str, str, bool]] = []
         for i in range(start, end):
             d, _ = history_files[i]
-            count = self._get_paper_count(i)
-            label_text = f"{d.strftime('%b %d')}({count})"
+            count = self._get_paper_count(i) if label_mode == DATE_NAV_LABEL_WITH_COUNTS else None
+            label_text = _format_date_nav_label(d, count=count, mode=label_mode)
             desired.append((f"date-nav-{i}", label_text, i == current_index))
         return desired
 
@@ -638,8 +710,20 @@ class DateNavigator(Horizontal):
             return
 
         self.add_class("visible")
-        start, end = self._compute_window(len(history_files), current_index)
-        desired = self._build_desired_items(history_files, current_index, start, end)
+        width = getattr(getattr(self, "size", None), "width", 0)
+        start, end, label_mode = _compute_responsive_date_plan(
+            history_files,
+            current_index,
+            width,
+            self._get_paper_count,
+        )
+        desired = self._build_desired_items(
+            history_files,
+            current_index,
+            start,
+            end,
+            label_mode,
+        )
         existing_items = self._get_existing_date_items()
 
         if self._can_patch_in_place(existing_items, desired):

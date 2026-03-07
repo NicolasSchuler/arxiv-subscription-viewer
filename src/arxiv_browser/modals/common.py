@@ -1,12 +1,14 @@
 """General-purpose modal dialogs.
 
-HelpScreen, ConfirmModal, ExportMenuModal, SectionToggleModal,
-WatchListItem, and WatchListModal — extracted from app.py.
+HelpScreen, ConfirmModal, ExportMenuModal, MetadataSnapshotPickerModal,
+SectionToggleModal, WatchListItem, and WatchListModal — extracted from app.py.
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import datetime
+from pathlib import Path
 
 from textual import on
 from textual.app import ComposeResult
@@ -354,6 +356,120 @@ class ExportMenuModal(ModalScreen[str]):
 
     def action_do_file_csv(self) -> None:
         self.dismiss("file-csv")
+
+
+# ============================================================================
+# Metadata Snapshot Picker
+# ============================================================================
+
+
+class MetadataSnapshotItem(ListItem):
+    """List item for a metadata snapshot import choice."""
+
+    def __init__(self, snapshot_path: Path, *children, **kwargs) -> None:
+        super().__init__(*children, **kwargs)
+        self.snapshot_path = snapshot_path
+
+
+class MetadataSnapshotPickerModal(ModalScreen[Path | None]):
+    """Modal for choosing which metadata snapshot to import."""
+
+    BINDINGS = [
+        Binding("enter", "choose", "Import"),
+        Binding("escape", "cancel", "Cancel"),
+        Binding("q", "cancel", "Cancel"),
+    ]
+
+    CSS = """
+    MetadataSnapshotPickerModal {
+        align: center middle;
+    }
+
+    #metadata-snapshot-dialog {
+        width: 76;
+        height: 24;
+        min-width: 56;
+        background: $th-background;
+        border: tall $th-orange;
+        padding: 0 2;
+    }
+
+    #metadata-snapshot-title {
+        text-style: bold;
+        color: $th-orange;
+        margin-bottom: 1;
+    }
+
+    #metadata-snapshot-subtitle {
+        color: $th-muted;
+        margin-bottom: 1;
+    }
+
+    #metadata-snapshot-list {
+        height: 1fr;
+        background: $th-panel;
+        border: none;
+    }
+
+    #metadata-snapshot-list > ListItem {
+        padding: 0 1;
+    }
+
+    #metadata-snapshot-footer {
+        color: $th-muted;
+        margin-top: 1;
+    }
+    """
+
+    def __init__(self, snapshots: list[Path]) -> None:
+        super().__init__()
+        self._snapshots = list(snapshots)
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="metadata-snapshot-dialog"):
+            yield Label("Import Metadata Snapshot", id="metadata-snapshot-title")
+            yield Static(
+                "Choose the JSON snapshot to import. Newest snapshots appear first.",
+                id="metadata-snapshot-subtitle",
+            )
+            yield ListView(id="metadata-snapshot-list")
+            yield Static(
+                "[dim]Select: Enter | Cancel: Esc/q[/]",
+                id="metadata-snapshot-footer",
+            )
+
+    def on_mount(self) -> None:
+        list_view = self.query_one("#metadata-snapshot-list", ListView)
+        list_view.clear()
+        for snapshot in self._snapshots:
+            label = self._format_snapshot_label(snapshot)
+            list_view.mount(MetadataSnapshotItem(snapshot, Label(label)))
+        if list_view.children:
+            list_view.index = 0
+        list_view.focus()
+
+    @staticmethod
+    def _format_snapshot_label(snapshot: Path) -> str:
+        try:
+            modified = datetime.fromtimestamp(snapshot.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+        except OSError:
+            modified = "unknown time"
+        return f"{snapshot.name}  [{THEME_COLORS['muted']}]modified {modified}[/]"
+
+    def action_choose(self) -> None:
+        list_view = self.query_one("#metadata-snapshot-list", ListView)
+        if isinstance(list_view.highlighted_child, MetadataSnapshotItem):
+            self.dismiss(list_view.highlighted_child.snapshot_path)
+        else:
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    @on(ListView.Selected, "#metadata-snapshot-list")
+    def on_list_selected(self, event: ListView.Selected) -> None:
+        if isinstance(event.item, MetadataSnapshotItem):
+            self.dismiss(event.item.snapshot_path)
 
 
 # ============================================================================

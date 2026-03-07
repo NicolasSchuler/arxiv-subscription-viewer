@@ -131,7 +131,7 @@ def _export_to_file(app: "ArxivBrowser", content: str, extension: str, format_na
         )
         return
     app.notify(
-        f"Exported to {filepath.name}",
+        f"Exported to {filepath.resolve()}",
         title=f"{format_name} Export",
     )
 
@@ -217,28 +217,60 @@ def action_export_metadata(app: "ArxivBrowser") -> None:
 def action_import_metadata(app: "ArxivBrowser") -> None:
     """Import metadata from a JSON file in the export directory."""
     _sync_app_globals()
-    import json as _json
 
     export_dir = app._get_export_dir()
-    json_files = sorted(export_dir.glob("arxiv-*.json"), reverse=True)
+    json_files = _list_metadata_snapshots(export_dir)
     if not json_files:
         app.notify(
-            f"No metadata files found in {export_dir}",
+            f"No metadata snapshots found in {export_dir.resolve()}",
             title="Import",
             severity="warning",
         )
         return
-    filepath = json_files[0]
+    if len(json_files) == 1:
+        _import_metadata_file(app, json_files[0])
+        return
+
+    app.push_screen(
+        MetadataSnapshotPickerModal(json_files),
+        callback=lambda filepath: _import_metadata_file(app, filepath) if filepath else None,
+    )
+
+
+def _list_metadata_snapshots(export_dir: Path) -> list[Path]:
+    """Return metadata snapshots newest-first by modified time."""
+    _sync_app_globals()
+
+    def sort_key(path: Path) -> tuple[float, str]:
+        try:
+            modified = path.stat().st_mtime
+        except OSError:
+            modified = float("-inf")
+        return (modified, path.name)
+
+    return sorted(export_dir.glob("arxiv-*.json"), key=sort_key, reverse=True)
+
+
+def _import_metadata_file(app: "ArxivBrowser", filepath: Path) -> None:
+    """Import metadata from a chosen JSON snapshot file."""
+    _sync_app_globals()
+    import json as _json
+
+    resolved_path = filepath.resolve()
     try:
         raw = filepath.read_text(encoding="utf-8")
         data = _json.loads(raw)
         papers_n, watch_n, bk_n, col_n = import_metadata(data, app._config)
     except (OSError, ValueError) as exc:
-        app.notify(f"Import failed: {exc}", title="Import", severity="error")
+        app.notify(
+            f"Import failed from {resolved_path}: {exc}",
+            title="Import",
+            severity="error",
+        )
         return
     if not save_config(app._config):
         app.notify(
-            "Import applied but failed to save to disk",
+            f"Imported {resolved_path} but failed to save changes to disk",
             title="Import",
             severity="warning",
         )
@@ -254,7 +286,7 @@ def action_import_metadata(app: "ArxivBrowser") -> None:
     if col_n:
         parts.append(f"{col_n} collections")
     summary = ", ".join(parts) or "nothing new"
-    app.notify(f"Imported {summary} from {filepath.name}", title="Import")
+    app.notify(f"Imported {summary} from {resolved_path}", title="Import")
 
 
 def _start_downloads(app: "ArxivBrowser") -> None:

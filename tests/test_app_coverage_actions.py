@@ -685,7 +685,8 @@ class TestImportCollectionAndTagsCoverage:
         app = self._make_import_app(tmp_path)
         app.action_import_metadata()
         app.notify.assert_called_once()
-        assert "No metadata files found" in app.notify.call_args[0][0]
+        assert "No metadata snapshots found" in app.notify.call_args[0][0]
+        assert str(tmp_path.resolve()) in app.notify.call_args[0][0]
 
     def test_action_import_metadata_success_and_save_warning(self, tmp_path):
         app = self._make_import_app(tmp_path)
@@ -706,6 +707,7 @@ class TestImportCollectionAndTagsCoverage:
             "Imported 2 papers, 1 watch entries, 1 bookmarks, 1 collections" in msg
             for msg in messages
         )
+        assert any(str(export_file.resolve()) in msg for msg in messages)
 
     def test_action_import_metadata_handles_parse_error(self, tmp_path):
         app = self._make_import_app(tmp_path)
@@ -713,6 +715,63 @@ class TestImportCollectionAndTagsCoverage:
         export_file.write_text("{not-json", encoding="utf-8")
         app.action_import_metadata()
         assert "Import failed" in app.notify.call_args[0][0]
+        assert str(export_file.resolve()) in app.notify.call_args[0][0]
+
+    def test_action_import_metadata_prompts_for_snapshot_when_multiple_files(self, tmp_path):
+        from arxiv_browser.modals import MetadataSnapshotPickerModal
+
+        app = self._make_import_app(tmp_path)
+        older = tmp_path / "arxiv-2026-02-12.json"
+        newer = tmp_path / "arxiv-2026-02-13.json"
+        older.write_text("{}", encoding="utf-8")
+        newer.write_text("{}", encoding="utf-8")
+        older.touch()
+        newer.touch()
+
+        captured = {}
+        app.push_screen = lambda modal, callback: captured.update(modal=modal, callback=callback)
+
+        with patch("arxiv_browser.app.import_metadata", return_value=(1, 0, 0, 0)):
+            app.action_import_metadata()
+
+        assert isinstance(captured["modal"], MetadataSnapshotPickerModal)
+        assert captured["modal"]._snapshots == [newer, older]
+
+        with (
+            patch("arxiv_browser.app.import_metadata", return_value=(1, 0, 0, 0)),
+            patch("arxiv_browser.app.save_config", return_value=True),
+        ):
+            captured["callback"](older)
+
+        messages = [str(call.args[0]) for call in app.notify.call_args_list if call.args]
+        assert any(f"Imported 1 papers from {older.resolve()}" in msg for msg in messages)
+
+    def test_action_import_metadata_picker_cancel_leaves_config_unchanged(self, tmp_path):
+        app = self._make_import_app(tmp_path)
+        first = tmp_path / "arxiv-2026-02-12.json"
+        second = tmp_path / "arxiv-2026-02-13.json"
+        first.write_text("{}", encoding="utf-8")
+        second.write_text("{}", encoding="utf-8")
+
+        captured = {}
+        app.push_screen = lambda modal, callback: captured.update(modal=modal, callback=callback)
+
+        with patch("arxiv_browser.app.import_metadata") as import_mock:
+            app.action_import_metadata()
+            captured["callback"](None)
+
+        import_mock.assert_not_called()
+        app._compute_watched_papers.assert_not_called()
+        app._refresh_list_view.assert_not_called()
+
+    def test_export_to_file_notifies_absolute_path(self, tmp_path):
+        app = self._make_import_app(tmp_path)
+        export_file = tmp_path / "arxiv-2026-02-13.csv"
+
+        with patch("arxiv_browser.app.write_timestamped_export_file", return_value=export_file):
+            app._export_to_file("id,title\n", "csv", "CSV")
+
+        assert str(export_file.resolve()) in app.notify.call_args[0][0]
 
     def test_action_add_to_collection_adds_new_ids_without_duplicates(self, make_paper):
         app = _new_app()

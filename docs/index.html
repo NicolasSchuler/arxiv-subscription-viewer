@@ -195,56 +195,131 @@
 
   <!-- Quick Start Section -->
   <section class="py-20 bg-black/30">
-    <div class="max-w-4xl mx-auto px-6">
+    <div class="max-w-5xl mx-auto px-6">
       <h2 class="text-3xl font-bold text-center mb-4">Quick Start</h2>
-      <p class="text-gray-400 text-center mb-12">Get up and running in under a minute</p>
-      
-      <div class="space-y-6">
-        <!-- Step 1 -->
-        <div class="flex gap-4 items-start">
-          <div class="flex-shrink-0 w-10 h-10 bg-monokai-green text-monokai-bg rounded-full flex items-center justify-center font-bold text-lg">1</div>
-          <div class="flex-1">
-            <h3 class="font-semibold text-lg mb-2">Install</h3>
-            <div class="bg-black/50 border border-gray-700 rounded-lg px-4 py-3 mono text-sm">
-              <span class="text-gray-500">$</span> <span class="text-monokai-green">uv tool install arxiv-subscription-viewer</span><br>
-              <span class="text-gray-500"># or:</span> <span class="text-gray-400">pip install arxiv-subscription-viewer</span>
-            </div>
+      <p class="text-gray-400 text-center mb-12">Install once, then start either from your local digest archive or directly from arXiv's API.</p>
+
+      <div class="bg-black/50 border border-gray-700 rounded-xl px-5 py-4 mono text-sm mb-8">
+        <span class="text-gray-500">$</span> <span class="text-monokai-green">uv tool install arxiv-subscription-viewer</span><br>
+        <span class="text-gray-500"># or:</span> <span class="text-gray-400">pip install arxiv-subscription-viewer</span>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-6">
+        <div class="bg-black/40 border border-gray-800 rounded-xl p-6">
+          <div class="inline-flex items-center rounded-full bg-monokai-green/20 text-monokai-green px-3 py-1 text-xs font-semibold tracking-wide uppercase mb-4">Path 1</div>
+          <h3 class="text-xl font-semibold mb-3"><code class="mono text-monokai-green">history/</code> workflow</h3>
+          <p class="text-gray-400 text-sm mb-4">
+            <code class="mono text-gray-300">arxiv-viewer</code> loads <code class="mono text-gray-300">history/</code> from your current working directory. If you launch from <code class="mono text-gray-300">~/research/arxiv</code>, it will read <code class="mono text-gray-300">~/research/arxiv/history/</code>.
+          </p>
+          <div class="bg-black/50 border border-gray-700 rounded-lg px-4 py-3 mono text-sm">
+            <span class="text-gray-500">$</span> mkdir -p ~/research/arxiv/history<br>
+            <span class="text-gray-500">$</span> cd ~/research/arxiv<br>
+            <span class="text-gray-500"># Save digest as history/2026-02-13.txt</span><br>
+            <span class="text-gray-500">$</span> <span class="text-monokai-green">arxiv-viewer</span>
           </div>
+          <p class="text-gray-500 text-sm mt-3">
+            Tip: automate this by writing each digest to <code class="mono text-gray-400">history/YYYY-MM-DD.txt</code>.
+          </p>
         </div>
 
-        <!-- Step 2 -->
-        <div class="flex gap-4 items-start">
-          <div class="flex-shrink-0 w-10 h-10 bg-monokai-yellow text-monokai-bg rounded-full flex items-center justify-center font-bold text-lg">2</div>
-          <div class="flex-1">
-            <h3 class="font-semibold text-lg mb-2">Add (or auto-save) arXiv emails</h3>
-            <div class="bg-black/50 border border-gray-700 rounded-lg px-4 py-3 mono text-sm">
-              <span class="text-gray-500">$</span> mkdir -p history<br>
-              <span class="text-gray-500"># Save digest as history/2026-02-13.txt (manual or via mail rule)</span>
-            </div>
-            <p class="text-gray-500 text-sm mt-2">
-              Tip: automate this step by writing each digest to <code class="mono text-gray-400">history/YYYY-MM-DD.txt</code>.
-            </p>
-            <p class="text-gray-500 text-sm mt-1 mono">
-              No-email mode: <span class="text-gray-400">arxiv-viewer --api-category cs.AI</span>
-            </p>
+        <div class="bg-black/40 border border-gray-800 rounded-xl p-6">
+          <div class="inline-flex items-center rounded-full bg-monokai-blue/20 text-monokai-blue px-3 py-1 text-xs font-semibold tracking-wide uppercase mb-4">Path 2</div>
+          <h3 class="text-xl font-semibold mb-3">No-email / API workflow</h3>
+          <p class="text-gray-400 text-sm mb-4">
+            Skip email files entirely and launch from live arXiv results.
+          </p>
+          <div class="bg-black/50 border border-gray-700 rounded-lg px-4 py-3 mono text-sm">
+            <span class="text-gray-500">$</span> <span class="text-monokai-green">arxiv-viewer --api-category cs.AI</span><br>
+            <span class="text-gray-500"># or:</span> <span class="text-gray-400">arxiv-viewer --api-query "diffusion transformer" --api-field title</span>
           </div>
+          <p class="text-gray-500 text-sm mt-3">
+            Use this path when you want the latest matching papers without maintaining a local archive first.
+          </p>
+        </div>
+      </div>
+
+      <div class="mt-8 grid md:grid-cols-2 gap-4 text-sm">
+        <div class="bg-black/30 border border-gray-800 rounded-xl p-4">
+          <p class="text-gray-300 font-semibold mb-2">Useful launch flags</p>
+          <p class="text-gray-500 mono">arxiv-viewer --color never --ascii</p>
+          <p class="text-gray-500 mono mt-2">arxiv-viewer --list-dates</p>
+        </div>
+        <div class="bg-black/30 border border-gray-800 rounded-xl p-4">
+          <p class="text-gray-300 font-semibold mb-2">Default destinations</p>
+          <p class="text-gray-500">General exports: <code class="mono text-gray-400">~/arxiv-exports/</code></p>
+          <p class="text-gray-500">PDF downloads: <code class="mono text-gray-400">~/arxiv-pdfs/</code></p>
+          <p class="text-gray-500">Metadata portability: explicit timestamped JSON snapshots</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- First 2 Minutes Section -->
+  <section class="py-20">
+    <div class="max-w-5xl mx-auto px-6">
+      <h2 class="text-3xl font-bold text-center mb-4">First 2 Minutes</h2>
+      <p class="text-gray-400 text-center mb-12">A short keyboard-first walkthrough once the app is open.</p>
+
+      <div class="grid md:grid-cols-2 gap-4">
+        <div class="bg-black/30 border border-gray-800 rounded-xl p-5">
+          <p class="mono text-monokai-green text-sm mb-2">?</p>
+          <p class="text-gray-400 text-sm">Open the help overlay and scan the main shortcuts without leaving the paper list.</p>
+        </div>
+        <div class="bg-black/30 border border-gray-800 rounded-xl p-5">
+          <p class="mono text-monokai-green text-sm mb-2">/</p>
+          <p class="text-gray-400 text-sm">Open search, type something like <code class="mono text-gray-300">cat:cs.AI</code>, and narrow the visible papers immediately.</p>
+        </div>
+        <div class="bg-black/30 border border-gray-800 rounded-xl p-5">
+          <p class="mono text-monokai-green text-sm mb-2">Space</p>
+          <p class="text-gray-400 text-sm">Select the highlighted paper so browser, export, copy, and download actions can operate on it.</p>
+        </div>
+        <div class="bg-black/30 border border-gray-800 rounded-xl p-5">
+          <p class="mono text-monokai-green text-sm mb-2">o</p>
+          <p class="text-gray-400 text-sm">Open the current or selected paper in your browser.</p>
+        </div>
+        <div class="bg-black/30 border border-gray-800 rounded-xl p-5">
+          <p class="mono text-monokai-green text-sm mb-2">E</p>
+          <p class="text-gray-400 text-sm">Open the export menu for BibTeX, Markdown, RIS, CSV, and clipboard workflows. File exports go to <code class="mono text-gray-300">~/arxiv-exports/</code> by default.</p>
+        </div>
+        <div class="bg-black/30 border border-gray-800 rounded-xl p-5">
+          <p class="mono text-monokai-green text-sm mb-2">A</p>
+          <p class="text-gray-400 text-sm">Jump into an arXiv API search without restarting the app.</p>
+        </div>
+        <div class="bg-black/30 border border-gray-800 rounded-xl p-5">
+          <p class="mono text-monokai-green text-sm mb-2">Ctrl+p</p>
+          <p class="text-gray-400 text-sm">Open the command palette for metadata, collections, and advanced workflows.</p>
+        </div>
+        <div class="bg-black/30 border border-gray-800 rounded-xl p-5">
+          <p class="mono text-monokai-green text-sm mb-2">[ ]</p>
+          <p class="text-gray-400 text-sm">Move to the previous or next digest date when you are in <code class="mono text-gray-300">history/</code> mode.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Advanced Workflows Section -->
+  <section class="py-20 bg-black/30">
+    <div class="max-w-5xl mx-auto px-6">
+      <h2 class="text-3xl font-bold text-center mb-4">Advanced Workflows</h2>
+      <p class="text-gray-400 text-center mb-12">All enrichment is opt-in. Start with browse/search, then layer these in when you want more context.</p>
+
+      <div class="grid md:grid-cols-3 gap-6">
+        <div class="bg-black/40 border border-gray-800 rounded-xl p-6">
+          <h3 class="text-lg font-semibold mb-3">Semantic Scholar</h3>
+          <p class="text-gray-400 text-sm mb-3">Prerequisites: optional <code class="mono text-gray-300">s2_api_key</code> for higher rate limits, plus <code class="mono text-gray-300">Ctrl+e</code> at runtime or <code class="mono text-gray-300">"s2_enabled": true</code> in config.</p>
+          <p class="text-gray-500 text-sm">First use: press <code class="mono text-gray-300">Ctrl+e</code> to enable enrichment, then <code class="mono text-gray-300">e</code> on a paper to fetch citations, TLDR, and fields of study. Use <code class="mono text-gray-300">R</code> and <code class="mono text-gray-300">G</code> after that.</p>
         </div>
 
-        <!-- Step 3 -->
-        <div class="flex gap-4 items-start">
-          <div class="flex-shrink-0 w-10 h-10 bg-monokai-orange text-monokai-bg rounded-full flex items-center justify-center font-bold text-lg">3</div>
-          <div class="flex-1">
-            <h3 class="font-semibold text-lg mb-2">Run</h3>
-            <div class="bg-black/50 border border-gray-700 rounded-lg px-4 py-3 mono text-sm">
-              <span class="text-gray-500">$</span> <span class="text-monokai-green">arxiv-viewer</span>
-            </div>
-            <p class="text-gray-400 text-sm mt-3 mono">
-              Accessibility: <span class="text-monokai-green">arxiv-viewer --color never --ascii</span>
-            </p>
-            <p class="text-gray-500 text-sm mt-2 mono">
-              Non-interactive mode: <span class="text-gray-400">arxiv-viewer --list-dates</span>
-            </p>
-          </div>
+        <div class="bg-black/40 border border-gray-800 rounded-xl p-6">
+          <h3 class="text-lg font-semibold mb-3">HuggingFace Trending</h3>
+          <p class="text-gray-400 text-sm mb-3">Prerequisites: toggle with <code class="mono text-gray-300">Ctrl+h</code> or enable on startup with <code class="mono text-gray-300">"hf_enabled": true</code>.</p>
+          <p class="text-gray-500 text-sm">First use: press <code class="mono text-gray-300">Ctrl+h</code>, let the app cross-match the loaded papers, then inspect the HuggingFace section in the detail pane for upvotes, GitHub links, keywords, and summaries.</p>
+        </div>
+
+        <div class="bg-black/40 border border-gray-800 rounded-xl p-6">
+          <h3 class="text-lg font-semibold mb-3">AI Summary / Chat / Relevance / Auto-Tag</h3>
+          <p class="text-gray-400 text-sm mb-3">Prerequisites: configure <code class="mono text-gray-300">llm_preset</code> or <code class="mono text-gray-300">llm_command</code>; relevance scoring also uses <code class="mono text-gray-300">research_interests</code>.</p>
+          <p class="text-gray-500 text-sm">First use: try <code class="mono text-gray-300">Ctrl+s</code> for summaries, <code class="mono text-gray-300">C</code> for chat, <code class="mono text-gray-300">L</code> for relevance scoring, and <code class="mono text-gray-300">Ctrl+g</code> for auto-tagging. Custom LLM commands prompt for trust on first execution.</p>
         </div>
       </div>
     </div>

@@ -92,10 +92,13 @@ HELP_SEARCH_SYNTAX: list[tuple[str, str]] = [
 
 HELP_GETTING_STARTED: list[tuple[str, str]] = [
     ("/", "Search papers"),
+    ("A", "Search all arXiv"),
     ("j / k", "Move selection"),
     ("Space", "Select current paper"),
     ("o", "Open selected paper(s)"),
+    ("E", "Export current or selected papers"),
     ("Ctrl+p", "Open command palette"),
+    ("[ / ]", "Change dates (history mode)"),
     ("?", "Show full shortcuts"),
 ]
 

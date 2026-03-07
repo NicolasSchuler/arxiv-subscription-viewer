@@ -1648,14 +1648,34 @@ class TestStatusFilterRegressions:
         assert ("C", "Chat") in entries
         assert ("Ctrl+g", "Auto-Tag") in entries
 
-    def test_command_palette_ctrl_e_entry_is_contextual(self):
-        """Command palette Ctrl+e entry should mirror context-dependent behavior."""
-        from arxiv_browser.app import COMMAND_PALETTE_COMMANDS
+    def test_command_palette_entries_adapt_to_app_state(self):
+        """Command palette labels should reflect the current UI state."""
+        from arxiv_browser.app import ArxivBrowser
 
-        entry = next(cmd for cmd in COMMAND_PALETTE_COMMANDS if cmd[2] == "Ctrl+e")
-        assert entry[0] == "Toggle S2 / Exit API"
-        assert "browse mode" in entry[1]
-        assert entry[3] == "ctrl_e_dispatch"
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._in_arxiv_api_mode = True
+        app._hf_active = True
+        app._watch_filter_active = True
+        app._config = type("Config", (), {"show_abstract_preview": True})()
+
+        entries = {
+            action_name: (name, description, key_hint)
+            for name, description, key_hint, action_name in app._build_command_palette_commands()
+        }
+
+        assert entries["ctrl_e_dispatch"] == (
+            "Exit arXiv API Mode",
+            "Return to your local or history papers",
+            "Ctrl+e",
+        )
+        assert entries["toggle_hf"][0] == "Disable HuggingFace Trending"
+        assert entries["toggle_watch_filter"][0] == "Show All Papers"
+        assert entries["toggle_preview"][0] == "Hide Abstract Preview"
+        assert "requires S2 enabled" in entries["fetch_s2"][1]
+        assert "requires S2 data" in entries["citation_graph"][1]
+        assert "requires LLM configuration" in entries["generate_summary"][1]
+        assert "requires LLM configuration" in entries["chat_with_paper"][1]
+        assert "requires LLM configuration" in entries["score_relevance"][1]
 
     def test_help_sections_include_getting_started_shortcuts(self):
         """Help content should lead with a concise getting-started flow."""
@@ -1668,7 +1688,10 @@ class TestStatusFilterRegressions:
         getting_started_entries = set(sections[0][1])
         assert ("/", "Search papers") in getting_started_entries
         assert ("Space", "Select current paper") in getting_started_entries
+        assert ("A", "Search all arXiv") in getting_started_entries
+        assert ("E", "Export current or selected papers") in getting_started_entries
         assert ("Ctrl+p", "Open command palette") in getting_started_entries
+        assert ("[ / ]", "Change dates (history mode)") in getting_started_entries
         assert ("?", "Show full shortcuts") in getting_started_entries
 
     def test_binding_labels_use_long_form_naming(self):
@@ -5666,6 +5689,7 @@ class TestS2AppActions:
         save_mock.assert_called_once_with(app._config)
         app.notify.assert_called_once()
         assert "enabled" in app.notify.call_args[0][0]
+        assert "press e on a paper" in app.notify.call_args[0][0]
         app._mark_badges_dirty.assert_called_once_with("s2", immediate=True)
 
         with patch("arxiv_browser.app.save_config", return_value=True):
@@ -6118,6 +6142,7 @@ class TestHfAppState:
         assert app._hf_active is True
         assert app._config.hf_enabled is True
         app._fetch_hf_daily.assert_called_once()
+        assert "populate automatically" in app.notify.call_args[0][0]
 
     @pytest.mark.asyncio
     async def test_action_toggle_hf_reverts_when_save_fails(self):
@@ -7974,56 +7999,94 @@ class TestDateNavigator:
         from datetime import date as dt_date
         from pathlib import Path
 
-        from arxiv_browser.app import DATE_NAV_WINDOW_SIZE
+        from arxiv_browser.widgets.chrome import _compute_window_bounds
 
         # Create 10 fake history entries
         files = [(dt_date(2026, 1, i + 1), Path(f"/tmp/{i}.txt")) for i in range(10)]
-        # Window of 5 centered on index 5 should be [3..7]
-        total = len(files)
-        current = 5
-        half = DATE_NAV_WINDOW_SIZE // 2
-        start = max(0, current - half)
-        end = min(total, start + DATE_NAV_WINDOW_SIZE)
-        if end - start < DATE_NAV_WINDOW_SIZE:
-            start = max(0, end - DATE_NAV_WINDOW_SIZE)
-        assert end - start == DATE_NAV_WINDOW_SIZE
-        assert start <= current < end
+        start, end = _compute_window_bounds(len(files), 5, 5)
+        assert (start, end) == (3, 8)
 
     def test_window_clamps_at_edges(self):
         from datetime import date as dt_date
         from pathlib import Path
 
-        from arxiv_browser.app import DATE_NAV_WINDOW_SIZE
+        from arxiv_browser.widgets.chrome import _compute_window_bounds
 
         files = [(dt_date(2026, 1, i + 1), Path(f"/tmp/{i}.txt")) for i in range(10)]
-        # At index 0 (edge), window should start at 0
-        total = len(files)
-        current = 0
-        half = DATE_NAV_WINDOW_SIZE // 2
-        start = max(0, current - half)
-        end = min(total, start + DATE_NAV_WINDOW_SIZE)
-        if end - start < DATE_NAV_WINDOW_SIZE:
-            start = max(0, end - DATE_NAV_WINDOW_SIZE)
-        assert start == 0
-        assert end == DATE_NAV_WINDOW_SIZE
+        assert _compute_window_bounds(len(files), 0, 5) == (0, 5)
+        assert _compute_window_bounds(len(files), len(files) - 1, 5) == (5, 10)
 
     def test_small_file_list(self):
         from datetime import date as dt_date
         from pathlib import Path
 
-        from arxiv_browser.app import DATE_NAV_WINDOW_SIZE
+        from arxiv_browser.widgets.chrome import _compute_window_bounds
 
         # Only 3 files — window should show all of them
         files = [(dt_date(2026, 1, i + 1), Path(f"/tmp/{i}.txt")) for i in range(3)]
-        total = len(files)
-        current = 1
-        half = DATE_NAV_WINDOW_SIZE // 2
-        start = max(0, current - half)
-        end = min(total, start + DATE_NAV_WINDOW_SIZE)
-        if end - start < DATE_NAV_WINDOW_SIZE:
-            start = max(0, end - DATE_NAV_WINDOW_SIZE)
-        assert start == 0
-        assert end == 3  # Only 3 files, so window covers all
+        assert _compute_window_bounds(len(files), 1, 5) == (0, 3)
+
+    def test_responsive_plan_keeps_counts_when_wide(self):
+        from datetime import date as dt_date
+        from pathlib import Path
+
+        from arxiv_browser.widgets.chrome import (
+            DATE_NAV_LABEL_WITH_COUNTS,
+            _compute_responsive_date_plan,
+        )
+
+        files = [(dt_date(2026, 1, i + 1), Path(f"/tmp/{i}.txt")) for i in range(10)]
+        start, end, label_mode = _compute_responsive_date_plan(
+            files,
+            5,
+            width=90,
+            get_count=lambda _index: 382,
+        )
+
+        assert label_mode == DATE_NAV_LABEL_WITH_COUNTS
+        assert (start, end) == (3, 8)
+
+    def test_responsive_plan_drops_counts_before_dropping_dates(self):
+        from datetime import date as dt_date
+        from pathlib import Path
+
+        from arxiv_browser.widgets.chrome import (
+            DATE_NAV_LABEL_MONTH_DAY,
+            _compute_responsive_date_plan,
+        )
+
+        files = [(dt_date(2026, 1, i + 1), Path(f"/tmp/{i}.txt")) for i in range(10)]
+        start, end, label_mode = _compute_responsive_date_plan(
+            files,
+            5,
+            width=60,
+            get_count=lambda _index: 382,
+        )
+
+        assert label_mode == DATE_NAV_LABEL_MONTH_DAY
+        assert end - start == 5
+        assert start <= 5 < end
+
+    def test_responsive_plan_compacts_window_and_labels_when_narrow(self):
+        from datetime import date as dt_date
+        from pathlib import Path
+
+        from arxiv_browser.widgets.chrome import (
+            DATE_NAV_LABEL_NUMERIC,
+            _compute_responsive_date_plan,
+        )
+
+        files = [(dt_date(2026, 1, i + 1), Path(f"/tmp/{i}.txt")) for i in range(10)]
+        start, end, label_mode = _compute_responsive_date_plan(
+            files,
+            5,
+            width=30,
+            get_count=lambda _index: 382,
+        )
+
+        assert label_mode == DATE_NAV_LABEL_NUMERIC
+        assert end - start < 5
+        assert start <= 5 < end
 
     def test_count_cache_tracks_file_path_not_index(self, tmp_path):
         from datetime import date as dt_date
@@ -11055,6 +11118,63 @@ class TestExportMenuModal:
 
 
 # ============================================================================
+# Tests for MetadataSnapshotPickerModal
+# ============================================================================
+
+
+class TestMetadataSnapshotPickerModal:
+    """Tests for metadata snapshot selection modal behavior."""
+
+    def test_action_choose_dismisses_highlighted_snapshot(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from textual.widgets import Label
+
+        from arxiv_browser.modals.common import (
+            MetadataSnapshotItem,
+            MetadataSnapshotPickerModal,
+        )
+
+        snapshot = tmp_path / "arxiv-2026-03-07.json"
+        modal = MetadataSnapshotPickerModal([snapshot])
+        modal.dismiss = MagicMock()
+        modal.query_one = MagicMock(
+            return_value=type(
+                "ListViewStub",
+                (),
+                {"highlighted_child": MetadataSnapshotItem(snapshot, Label("x"))},
+            )()
+        )
+
+        modal.action_choose()
+
+        modal.dismiss.assert_called_once_with(snapshot)
+
+    def test_action_cancel_dismisses_none(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser.modals import MetadataSnapshotPickerModal
+
+        modal = MetadataSnapshotPickerModal([tmp_path / "arxiv-2026-03-07.json"])
+        modal.dismiss = MagicMock()
+
+        modal.action_cancel()
+
+        modal.dismiss.assert_called_once_with(None)
+
+    def test_format_snapshot_label_includes_name_and_modified_time(self, tmp_path):
+        from arxiv_browser.modals.common import MetadataSnapshotPickerModal
+
+        snapshot = tmp_path / "arxiv-2026-03-07.json"
+        snapshot.write_text("{}", encoding="utf-8")
+
+        label = MetadataSnapshotPickerModal._format_snapshot_label(snapshot)
+
+        assert snapshot.name in label
+        assert "modified" in label
+
+
+# ============================================================================
 # Tests for SummaryModeModal dismiss values
 # ============================================================================
 
@@ -12290,7 +12410,7 @@ class TestDetailPaneOrdering:
 
 
 class TestFooterDiscoverability:
-    """Tests for conditional feature hints in the footer."""
+    """Tests for default browsing footer discoverability."""
 
     @staticmethod
     def _make_footer_app(config):
@@ -12312,6 +12432,7 @@ class TestFooterDiscoverability:
         app._s2_active = False
         app._config = config
         app._history_files = []
+        app._watch_filter_active = False
         app._download_queue = []
         app._downloading = set()
         app._download_total = 0
@@ -12321,38 +12442,24 @@ class TestFooterDiscoverability:
         app.query_one = MagicMock(side_effect=NoMatches())
         return app
 
-    def test_footer_shows_version_hint_when_starred(self, make_paper):
-        from arxiv_browser.app import PaperMetadata, UserConfig
-
-        config = UserConfig(
-            paper_metadata={"2401.00001": PaperMetadata(arxiv_id="2401.00001", starred=True)}
-        )
-        app = self._make_footer_app(config)
-        bindings = app._get_footer_bindings()
-        keys = [k for k, _ in bindings]
-        assert "V" in keys
-        assert "t" not in keys
-
-    def test_footer_shows_relevance_hint_when_llm(self):
+    def test_footer_shows_default_browse_order(self):
         from arxiv_browser.app import UserConfig
 
-        config = UserConfig(llm_preset="claude")
+        config = UserConfig()
         app = self._make_footer_app(config)
         bindings = app._get_footer_bindings()
-        keys = [k for k, _ in bindings]
-        assert "L" in keys
-        assert "t" not in keys
-
-    def test_footer_hides_features_when_inactive(self):
-        from arxiv_browser.app import UserConfig
-
-        config = UserConfig()  # No starred papers, no LLM
-        app = self._make_footer_app(config)
-        bindings = app._get_footer_bindings()
-        keys = [k for k, _ in bindings]
-        assert "V" not in keys
-        assert "L" not in keys
-        assert "t" in keys
+        assert bindings == [
+            ("/", "search"),
+            ("A", "arxiv"),
+            ("o", "open"),
+            ("s", "sort"),
+            ("r", "read"),
+            ("x", "star"),
+            ("n", "notes"),
+            ("E", "export"),
+            ("Ctrl+p", "palette"),
+            ("?", "help"),
+        ]
 
     def test_footer_shows_export_hint(self):
         from arxiv_browser.app import UserConfig
@@ -12362,6 +12469,7 @@ class TestFooterDiscoverability:
         bindings = app._get_footer_bindings()
         keys = [k for k, _ in bindings]
         assert "E" in keys
+        assert "A" in keys
 
     def test_footer_is_capped_and_keeps_help_palette(self):
         from arxiv_browser.app import UserConfig
@@ -12381,8 +12489,18 @@ class TestFooterDiscoverability:
         app = self._make_footer_app(config)
         app._s2_active = True
         bindings = app._get_footer_bindings()
-        keys = [k for k, _ in bindings]
-        assert keys == ["/", "o", "s", "r", "x", "n", "e", "E", "Ctrl+p", "?"]
+        assert bindings == [
+            ("/", "search"),
+            ("A", "arxiv"),
+            ("o", "open"),
+            ("s", "sort"),
+            ("r", "read"),
+            ("x", "star"),
+            ("n", "notes"),
+            ("E", "export"),
+            ("Ctrl+p", "palette"),
+            ("?", "help"),
+        ]
 
     def test_footer_uses_palette_and_history_labels(self):
         from datetime import date as dt_date

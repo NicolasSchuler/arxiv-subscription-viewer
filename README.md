@@ -87,19 +87,47 @@ uv sync
 
 ## Quick Start
 
+Install once:
+
 ```bash
-# 1. Install
-pip install arxiv-subscription-viewer
+uv tool install arxiv-subscription-viewer
+# or: pip install arxiv-subscription-viewer
+```
 
-# 2. Place an arXiv email file in history/ (or use -i)
-mkdir -p history
-# Save your arXiv email as history/2026-02-12.txt
-# Tip: this step can be automated with a mail rule (see "Automating Email Ingestion")
-# Alternative (no email files): arxiv-viewer --api-category cs.AI
+Then choose one of these entry paths.
 
-# 3. Run
+### Path 1: `history/` workflow
+
+`arxiv-viewer` loads `history/` from your current working directory, not from the install location. For example, if you launch from `~/research/arxiv`, it will look for `~/research/arxiv/history/`.
+
+```bash
+mkdir -p ~/research/arxiv/history
+cd ~/research/arxiv
+# Save your digest as history/2026-02-12.txt
+# Tip: automate this with a mail rule (see "Automating Email Ingestion")
 arxiv-viewer
 ```
+
+### Path 2: no-email / API workflow
+
+Skip email files entirely and start from arXiv API results:
+
+```bash
+arxiv-viewer --api-category cs.AI
+# or:
+arxiv-viewer --api-query "diffusion transformer" --api-field title
+```
+
+### First 2 Minutes
+
+- `?` opens the help overlay so you can scan shortcuts without leaving the paper list.
+- `/` opens the search box; type a term like `cat:cs.AI` to immediately filter the loaded papers.
+- `Space` selects the highlighted paper so batch actions operate on it.
+- `o` opens the current or selected paper in your browser.
+- `E` opens the export menu for BibTeX/Markdown/RIS/CSV/clipboard actions. File exports default to `~/arxiv-exports/`.
+- `A` opens an arXiv API search prompt so you can pivot into live search without restarting.
+- `Ctrl+p` opens the command palette for metadata, collections, and advanced actions.
+- `[` and `]` move to the previous or next digest date when `history/` is available.
 
 ## Usage
 
@@ -248,6 +276,8 @@ history/
 └── 2026-01-23.txt
 ```
 
+- The app looks for `history/` in the directory where you run `arxiv-viewer`
+- Example: running `cd ~/research/arxiv && arxiv-viewer` loads `~/research/arxiv/history/`
 - App auto-discovers and loads the newest file on startup
 - Use `[` and `]` keys to navigate between dates
 - Session state (including current date) persists across runs
@@ -306,6 +336,12 @@ Press `d` to download PDFs for selected papers (or current paper) to your local 
 - Progress shown in status bar
 - Supports batch downloads with multi-select
 
+## Export Destinations
+
+- General file exports from `E` default to `~/arxiv-exports/` unless you configure a different `export_dir`
+- PDF downloads from `d` default to `~/arxiv-pdfs/` unless you configure `pdf_download_dir`
+- Metadata portability uses explicit, timestamped JSON snapshot files in the export directory
+
 ## Collections
 
 Use collections as lightweight reading lists:
@@ -319,8 +355,8 @@ Use collections as lightweight reading lists:
 
 Use metadata portability to back up or migrate annotations:
 
-- Use command palette (`Ctrl+p`) -> `Export Metadata` to write a timestamped JSON snapshot
-- Use command palette (`Ctrl+p`) -> `Import Metadata` to restore from a metadata snapshot
+- Use command palette (`Ctrl+p`) -> `Export Metadata` to write a timestamped JSON snapshot in `~/arxiv-exports/` by default
+- Use command palette (`Ctrl+p`) -> `Import Metadata` to restore from an explicit metadata JSON snapshot
 - Imported fields include paper notes/tags/read-star state, watch list, bookmarks, marks, and collections
 
 ## PDF Viewer Configuration
@@ -397,6 +433,28 @@ Optional config key:
 ```
 
 Values are clamped to a safe range (`1..200`).
+
+## Advanced Workflows
+
+These features are opt-in and work best once your basic browse/search flow feels comfortable.
+
+### Semantic Scholar
+
+- Prerequisites: optional `s2_api_key` for higher rate limits, plus either `Ctrl+e` at runtime or `"s2_enabled": true` in `config.json`
+- First use: press `Ctrl+e` to enable enrichment, then press `e` on a paper to fetch citation counts, TLDR, and fields of study
+- Next steps: use `R` for recommendations and `G` for the citation graph once S2 data is available
+
+### HuggingFace Trending
+
+- Prerequisites: enable with `Ctrl+h` on demand or set `"hf_enabled": true` in `config.json`
+- First use: press `Ctrl+h`, wait for cross-matched papers to populate, then inspect the HuggingFace section in the detail pane
+- What you get: upvote badges in the list plus HF Daily Papers metadata, keywords, GitHub links, and AI-generated summaries
+
+### AI Summary, Chat, Relevance, and Auto-Tag
+
+- Prerequisites: configure `llm_preset` or `llm_command` in `config.json`; relevance scoring also needs `research_interests`
+- First use: press `Ctrl+s` for a summary, `C` to chat with the current paper, `L` to score papers by relevance, or `Ctrl+g` to suggest tags
+- Trust flow: custom `llm_command` values prompt for trust on first execution and store the accepted command hash locally
 
 ### AI Summary Setup
 
