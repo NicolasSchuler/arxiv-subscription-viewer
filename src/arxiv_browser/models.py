@@ -260,6 +260,7 @@ class UserConfig:
     llm_command: str = ""  # Shell command template, e.g. 'claude -p {prompt}'
     llm_prompt_template: str = ""  # Empty = use DEFAULT_LLM_PROMPT
     llm_preset: str = ""  # "claude" | "codex" | "llm" | "" (custom)
+    allow_llm_shell_fallback: bool = True  # False = reject shell-only command templates
     arxiv_api_max_results: int = ARXIV_API_DEFAULT_MAX_RESULTS
     s2_enabled: bool = False  # Semantic Scholar enrichment (opt-in)
     s2_api_key: str = ""  # Optional S2 API key for higher rate limits

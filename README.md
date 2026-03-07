@@ -421,11 +421,13 @@ Or configure a custom command with `{prompt}` placeholder:
 ```json
 {
   "llm_command": "claude -p {prompt}",
-  "llm_prompt_template": "Summarize: {title}\n\n{paper_content}"
+  "llm_prompt_template": "Summarize: {title}\n\n{paper_content}",
+  "allow_llm_shell_fallback": true
 }
 ```
 
 Prompt placeholders: `{title}`, `{authors}`, `{categories}`, `{abstract}`, `{arxiv_id}`, `{paper_content}`.
+Set `"allow_llm_shell_fallback": false` to block command templates that require shell parsing (for stricter execution policy).
 
 Summaries are cached in a local SQLite database and persist across sessions.
 
@@ -506,6 +508,9 @@ uv run ruff check . && uv run ruff format --check . && uv run pyright
 
 # Full pre-commit gate used in this repo
 just check
+
+# Optional dependency CVE scan
+uv run pip-audit
 ```
 
 ## Dependencies

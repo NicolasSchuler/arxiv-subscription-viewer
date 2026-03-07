@@ -188,7 +188,12 @@ from arxiv_browser.llm import (
     get_relevance_db_path,
     get_summary_db_path,
 )
-from arxiv_browser.llm_providers import CLIProvider, LLMResult, resolve_provider
+from arxiv_browser.llm_providers import (
+    CLIProvider,
+    LLMResult,
+    llm_command_requires_shell,
+    resolve_provider,
+)
 from arxiv_browser.modals import (
     AddToCollectionModal,
     ArxivSearchModal,
