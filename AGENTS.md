@@ -1,15 +1,14 @@
 # Agent Instructions
 
-Instructions for AI agents working on this codebase.
+Quick-reference for AI agents. See `CLAUDE.md` for full architecture, patterns, and dependency DAG.
 
-## Quick Reference
+## Task Runner
 
-- **Task runner**: `just` (not `make`). Run `just` to list all recipes.
-- **Pre-commit checks**: `just check` (lint + types + tests)
-- **Docs drift check**: `just docs-check`
-- **Full quality suite**: `just quality`
-- **Quality dashboard**: `just report`
-- **Auto-fix formatting**: `just format`
+- **Pre-commit**: `just check` (lint + types + tests)
+- **Full suite**: `just quality`
+- **Auto-fix**: `just format`
+- **Docs drift**: `just docs-check`
+- **Dashboard**: `just report`
 
 ## Before Making Changes
 
@@ -17,57 +16,20 @@ Instructions for AI agents working on this codebase.
 2. Run `just check` to establish a clean baseline
 3. After changes, run `just check` again to verify nothing broke
 
-## Code Quality Standards
-
-### Must-pass gates (CI enforced)
+## Must-Pass Gates (CI enforced)
 
 - `just lint` — zero ruff errors, formatting matches
 - `just typecheck` — zero pyright errors (basic mode)
-- `just test` — all tests pass, total coverage >= 60% and `src/arxiv_browser/app.py` coverage >= 80%
+- `just test` — all tests pass, overall coverage >= 60%, `app.py` coverage >= 80%
 - `uv run xenon src/arxiv_browser/ --max-absolute C --max-modules C --max-average B`
-- `just dead-code` — zero vulture findings
-- `just security` — zero Bandit findings (use targeted `# nosec <rule-id>` only with inline justification)
-- `just deps` — no dependency issues
+- `just dead-code` / `just security` / `just deps` — zero findings each
 - `src/arxiv_browser/app.py` line-count guardrail: <= 5000 lines
 
-### Advisory checks (non-blocking quality targets)
-
-- `just report` dashboard metrics (coverage/complexity/maintainability trends)
-- Per-module coverage ratchets for extracted UI modules (`modals/*`, `widgets/*`)
-
-### Quality metrics to track
-
-Run `just report` for the full dashboard and trend tracking.
-
-Use these stable guardrails instead of hard-coded snapshots:
-
-- Coverage thresholds: overall >= 60%, `src/arxiv_browser/app.py` >= 80%
-- Complexity gate: `uv run xenon src/arxiv_browser/ --max-absolute C --max-modules C --max-average B`
-- App size guardrail: `src/arxiv_browser/app.py` <= 5000 lines
-- Hygiene gates: zero findings in `just dead-code`, `just security`, and `just deps`
-
-## Architecture Rules
+## Key Rules
 
 - **No circular imports**: Sub-modules must never import from `app.py`
-- **Dependency DAG**: See CLAUDE.md for the module dependency graph
-- **`app.py` re-exports**: All public symbols from sub-modules are re-exported via star imports in `app.py` for backward compatibility
 - **Test mock paths**: Patch at the module where the function is *resolved* (see CLAUDE.md Import Patterns)
-
-## Testing Conventions
-
-- All test imports use `from arxiv_browser.app import ...` (backward-compat bridge)
-- `make_paper` fixture in `conftest.py` sets `abstract_raw = abstract` to prevent async HTTP fetches
-- `conftest.py` autouse fixture resets mutable module-level state between tests
-- Use `pilot.pause()` for Textual integration tests that need debounce waits
-
-## File Organization
-
-```
-justfile                  # Task runner (quality checks, testing, CI)
-pyproject.toml            # Build config + all tool configurations
-vulture_whitelist.py      # Dead code detection false positive suppressions
-src/arxiv_browser/        # Application source
-tests/                    # Test suite
-docs/                     # Documentation assets
-.github/workflows/        # CI/CD pipeline
-```
+- **Modal test imports**: `from arxiv_browser.modals import X` (not `from arxiv_browser.app import X`)
+- **`make_paper` fixture**: Sets `abstract_raw = abstract` to prevent async HTTP fetches
+- **`conftest.py` autouse fixture**: Resets mutable module-level state between tests
+- **Textual integration tests**: Use `pilot.pause()` for debounce waits

@@ -32,27 +32,27 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 ## 4. Layout Hierarchy Rules
 
 - Preserve the three-zone structure:
-- Header: context and active dataset/date.
-- Content: list + details with selection/focus state.
-- Footer: immediate action hints and mode badges.
+  - Header: context and active dataset/date.
+  - Content: list + details with selection/focus state.
+  - Footer: immediate action hints and mode badges.
 - Narrow-width behavior:
-- Prefer compact status tokens and shorter labels before removing high-value hints.
-- Keep `? help` visible in all contexts.
+  - Prefer compact status tokens and shorter labels before removing high-value hints.
+  - Keep `? help` visible in all contexts.
 
 ## 5. Footer Hierarchy Rules
 
 - Default browse footer is capped at 10 hints.
 - Always include these core hints in order:
-- `/ search`, `o open`, `s sort`, `r read`, `x star`, `E export`, `Ctrl+p palette`, `? help`.
+  - `/ search`, `o open`, `s sort`, `r read`, `x star`, `E export`, `Ctrl+p palette`, `? help`.
 - Add exactly two context slots in order:
-- Slot A: `[/] history` if history navigation is available, else `n notes`.
-- Slot B: `e S2` if S2 is active, else `V versions` if starred papers exist, else `L relevance` if LLM is configured, else `t tags`.
+  - Slot A: `[/] history` if history navigation is available, else `n notes`.
+  - Slot B: `e S2` if S2 is active, else `V versions` if starred papers exist, else `L relevance` if LLM is configured, else `t tags`.
 - Search footer should emphasize immediate flow:
-- `type to search`, `Enter apply`, `Esc clear`, `↑↓ move`, `? help`.
+  - `type to search`, `Enter apply`, `Esc clear`, `↑↓ move`, `? help`.
 - API footer should emphasize mode exits and paging:
-- `[/] page`, `Esc/Ctrl+e exit`, `A new query`, `o open`, `? help`.
+  - `[/] page`, `Esc/Ctrl+e exit`, `A new query`, `o open`, `? help`.
 - API empty states must mention both recovery paths:
-- Pagination keys (`[` and `]`) and exit keys (`Esc` or `Ctrl+e`).
+  - Pagination keys (`[` and `]`) and exit keys (`Esc` or `Ctrl+e`).
 
 ## 6. Color And Icon Accessibility Rules
 
@@ -66,27 +66,27 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 ## 7. Message Templates
 
 - Error template:
-- `Could not <action>.`
-- Optional: `Why: <short reason if known>.`
-- `Next step: <specific recovery action>.`
+  - `Could not <action>.`
+  - Optional: `Why: <short reason if known>.`
+  - `Next step: <specific recovery action>.`
 - Warning template:
-- `<Short warning statement>.`
-- Optional: `Why: <short reason if known>.`
-- `Next step: <specific recovery action>.`
+  - `<Short warning statement>.`
+  - Optional: `Why: <short reason if known>.`
+  - `Next step: <specific recovery action>.`
 - Success template:
-- `<Action complete>.`
-- Optional detail: `<count/location/context>.`
-- Optional: `Next step: <optional follow-up action>.`
+  - `<Action complete>.`
+  - Optional detail: `<count/location/context>.`
+  - Optional: `Next step: <optional follow-up action>.`
 - Progress template:
-- `<Action> <progress-bar> <done>/<total>`
+  - `<Action> <progress-bar> <done>/<total>`
 - Confirmation template:
-- Body explains impact only; do not embed key legends in the message body.
-- Confirm/cancel hints belong in modal chrome (for example `Confirm: y  Cancel: n / Esc`).
+  - Body explains impact only; do not embed key legends in the message body.
+  - Confirm/cancel hints belong in modal chrome (for example `Confirm: y  Cancel: n / Esc`).
 - Empty-state template:
-- `No <entity> found.`
-- `Try: <next command or filter adjustment>.`
-- `Next: <follow-up command for discovery or recovery>.`
-- Edit/manage modals must include a `Try:` next step when empty.
+  - `No <entity> found.`
+  - `Try: <next command or filter adjustment>.`
+  - `Next: <follow-up command for discovery or recovery>.`
+  - Edit/manage modals must include a `Try:` next step when empty.
 
 ## 8. Tables, Lists, Truncation, Wrapping
 
@@ -105,14 +105,14 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 ## 9. Help And Discoverability
 
 - Help overlay must include a top `Getting Started` section with the core flow:
-- Search, move, select, open, command palette, full help.
+  - Search, move, select, open, command palette, full help.
 - Footer should prioritize immediate next actions for the current mode.
 - Modals should use consistent close/cancel hints:
-- `Close: Esc/q` for read-only views and `Cancel: Esc` for edit/confirm flows.
+  - `Close: Esc/q` for read-only views and `Cancel: Esc` for edit/confirm flows.
 - Use consistent labels across footer/help/notifications:
-- `palette`, `history`, `help`, `search`, `open`, `export`.
+  - `palette`, `history`, `help`, `search`, `open`, `export`.
 - Keep label density intentional:
-- Footer uses compact tokens while help/modal copy uses expanded phrasing.
+  - Footer uses compact tokens while help/modal copy uses expanded phrasing.
 - Keep close instructions concise in modals (for example `Close: ? / Esc / q`).
 - Command palette must provide a clear empty-state message with next-step guidance.
 

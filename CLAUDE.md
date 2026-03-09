@@ -14,21 +14,43 @@ Published on PyPI as `arxiv-subscription-viewer`. Install with `pip install arxi
 src/arxiv_browser/
 ├── __init__.py           # Re-exports public API from app.py
 ├── __main__.py           # python -m arxiv_browser support
-├── app.py                # ArxivBrowser app + CLI entrypoint/glue
-├── models.py             # Dataclasses: Paper, PaperMetadata, UserConfig, etc.
+├── action_messages.py    # Error/warning message builders
+├── actions/              # Extracted action methods (mixed into ArxivBrowser)
+│   ├── __init__.py       # Re-exports action mixins
+│   ├── _runtime.py       # Runtime context for action methods
+│   ├── external_io_actions.py  # Browser, PDF, clipboard, download actions
+│   ├── library_actions.py      # Read/star/notes/tags/collections actions
+│   ├── llm_actions.py          # Summary, relevance, auto-tag, chat actions
+│   ├── search_api_actions.py   # arXiv API search actions
+│   └── ui_actions.py           # Sort, theme, navigation, UI toggle actions
+├── app.py                # ArxivBrowser App class + re-export bridge
+├── cli.py                # CLI argument parsing + bootstrap
 ├── config.py             # Config persistence: load/save/export/import
-├── parsing.py            # arXiv parsing, LaTeX cleaning, history
+├── enrichment.py         # Enrichment toggle helpers
 ├── export.py             # BibTeX, RIS, CSV, Markdown export
-├── query.py              # Query tokenizer, matching, sorting, text utilities
+├── help_ui.py            # Help overlay section builder
+├── huggingface.py        # HF Daily Papers API client, SQLite cache
+├── io_actions.py         # I/O utilities (open URL, copy, viewer args)
 ├── llm.py                # LLM summary/relevance/auto-tag, SQLite cache
-├── llm_providers.py      # LLM provider Protocol + CLI subprocess implementation
+├── llm_providers.py      # LLM provider Protocol + CLI subprocess impl
+├── models.py             # Dataclasses: Paper, PaperMetadata, UserConfig, etc.
+├── parsing.py            # arXiv parsing, LaTeX cleaning, history
+├── query.py              # Query tokenizer, matching, sorting, text utilities
+├── semantic_scholar.py   # S2 API client, SQLite cache
+├── services/             # Service layer (async I/O, external APIs)
+│   ├── __init__.py       # Re-exports service functions
+│   ├── arxiv_api_service.py    # arXiv API search + feed parsing
+│   ├── download_service.py     # PDF download to local folder
+│   ├── enrichment_service.py   # S2 + HF batch enrichment
+│   ├── interfaces.py           # Service facade (unified API for app.py)
+│   └── llm_service.py          # LLM subprocess orchestration
 ├── similarity.py         # TF-IDF index, cosine + Jaccard similarity
 ├── themes.py             # Color palettes, category colors, Textual themes
-├── semantic_scholar.py   # S2 API client, SQLite cache
-├── huggingface.py        # HF Daily Papers API client, SQLite cache
+├── ui_constants.py       # App CSS + keybinding definitions
+├── ui_runtime.py         # Runtime UI state + refresh coordination
 ├── modals/               # ModalScreen subclasses, domain-grouped
 │   ├── __init__.py       # Re-exports all modals for flat imports
-│   ├── common.py         # HelpScreen, ConfirmModal, ExportMenuModal, WatchListModal, SectionToggleModal
+│   ├── common.py         # HelpScreen, ConfirmModal, ExportMenuModal, MetadataSnapshotPickerModal, WatchListModal, SectionToggleModal
 │   ├── editing.py        # NotesModal, TagsModal, AutoTagSuggestModal
 │   ├── search.py         # ArxivSearchModal, CommandPaletteModal
 │   ├── collections.py    # CollectionsModal, CollectionViewModal, AddToCollectionModal
@@ -47,6 +69,9 @@ src/arxiv_browser/
 ```
 models.py              ← 0 internal deps (leaf)
 themes.py              ← 0 internal deps (leaf)
+action_messages.py     ← 0 internal deps (leaf)
+ui_constants.py        ← 0 internal deps (leaf)
+help_ui.py             ← 0 internal deps (leaf)
 config.py              ← models
 parsing.py             ← models
 export.py              ← models
@@ -56,19 +81,29 @@ llm_providers.py       ← llm, models
 similarity.py          ← models
 semantic_scholar.py    ← models
 huggingface.py         ← models
+enrichment.py          ← models
+io_actions.py          ← models
+cli.py                 ← action_messages, config, models, parsing
+services/arxiv_api.py  ← models, parsing
+services/download.py   ← export, models
+services/enrichment.py ← huggingface, semantic_scholar
+services/llm.py        ← llm, llm_providers, models
+services/interfaces.py ← llm_providers, models, services.*
 modals/common.py       ← models, themes
 modals/editing.py      ← themes
 modals/search.py       ← models, parsing, query, themes
-modals/collections.py  ← models
-modals/citations.py    ← models, query, semantic_scholar, themes
+modals/collections.py  ← action_messages, models
+modals/citations.py    ← action_messages, models, query, semantic_scholar, themes
 modals/llm.py          ← llm, llm_providers, models, query, themes
 widgets/listing.py     ← models, query, themes, semantic_scholar, huggingface
 widgets/details.py     ← models, query, themes, semantic_scholar, huggingface, widgets/listing
 widgets/chrome.py      ← models, parsing, query, themes
+ui_runtime.py          ← widgets
+actions/*              ← action_messages, actions/_runtime
 app.py                 ← all above
 ```
 
-No module imports from `app.py` — this prevents circular dependencies. Modal and widget submodules follow the same DAG constraint. `app.py` re-exports all public symbols from sub-modules via `from arxiv_browser.X import *` for backward compatibility. `modals/__init__.py` and `widgets/__init__.py` provide flat imports for extracted UI classes.
+No module imports from `app.py` — this prevents circular dependencies. Modal, widget, action, and service submodules follow the same DAG constraint. `app.py` re-exports all public symbols from sub-modules via `from arxiv_browser.X import *` for backward compatibility. `modals/__init__.py`, `widgets/__init__.py`, and `services/__init__.py` provide flat imports for extracted classes.
 
 ### Data Models (`models.py`)
 
@@ -101,8 +136,8 @@ No module imports from `app.py` — this prevents circular dependencies. Modal a
 
 ### Modal Screens (`modals/`)
 
-19 ModalScreen subclasses organized by domain:
-- **common.py**: HelpScreen, ConfirmModal, ExportMenuModal, WatchListModal, SectionToggleModal
+20 ModalScreen subclasses organized by domain:
+- **common.py**: HelpScreen, ConfirmModal, ExportMenuModal, MetadataSnapshotPickerModal, WatchListModal, SectionToggleModal
 - **editing.py**: NotesModal, TagsModal, AutoTagSuggestModal
 - **search.py**: ArxivSearchModal, CommandPaletteModal
 - **collections.py**: CollectionsModal, CollectionViewModal, AddToCollectionModal
@@ -124,14 +159,40 @@ No module imports from `app.py` — this prevents circular dependencies. Modal a
 - **`semantic_scholar.py`**: S2 API client, `SemanticScholarPaper` / `CitationEntry` dataclasses, SQLite cache for papers, recommendations, and citation graphs
 - **`huggingface.py`**: HuggingFace Daily Papers API client, `HuggingFacePaper` dataclass, SQLite cache
 
-### Test Suite
+### Test Suite (23 files)
 
-- **`tests/test_arxiv_browser.py`**: Core parsing, similarity, export, config, UI integration, WCAG contrast
-- **`tests/test_integration.py`**: End-to-end workflows with real arXiv email fixtures, export validation, resource cleanup, debug logging
-- **`tests/test_semantic_scholar.py`**: S2 response parsing, serialization, cache CRUD, API fetch functions, citation graph
-- **`tests/test_huggingface.py`**: HF response parsing, cache, API fetch functions
-- **`tests/test_llm_providers.py`**: LLMProvider protocol, CLIProvider subprocess wrapper, resolve_provider factory
-- **`tests/test_benchmarks.py`**: Performance regression tests (marked `@pytest.mark.slow`, excluded from default runs)
+**Core:**
+- **`test_arxiv_browser.py`**: Parsing, similarity, export, config, UI integration, WCAG contrast
+- **`test_integration.py`**: End-to-end workflows, fixtures, export validation, debug logging
+- **`test_config_import_and_load.py`**: Config import/load edge cases
+- **`test_export_security_and_session_parse.py`**: Export security, session state parsing
+- **`test_main_module.py`**: `__main__.py` entry point
+
+**Services:**
+- **`test_services_arxiv_api.py`**: arXiv API search service
+- **`test_services_download.py`**: PDF download service
+- **`test_services_enrichment.py`**: S2 + HF enrichment service
+- **`test_services_interfaces.py`**: Service facade
+- **`test_services_llm.py`**: LLM service orchestration
+
+**External APIs:**
+- **`test_semantic_scholar.py`**: S2 response parsing, cache, API, citation graph
+- **`test_huggingface.py`**: HF response parsing, cache, API
+- **`test_llm_providers.py`**: LLM provider protocol, CLI subprocess
+- **`test_llm_command_guards.py`**: LLM command safety guards
+
+**UI:**
+- **`test_app_coverage_actions.py`**: App action method coverage
+- **`test_modals_editing.py`**: Editing modals
+- **`test_modals_llm.py`**: LLM modals
+- **`test_widgets_listing.py`**: Widget listing
+- **`test_tui_quality_pass.py`**: TUI quality checks
+- **`test_io_actions_viewer_args.py`**: I/O actions, viewer arguments
+
+**Other:**
+- **`test_properties.py`**: Property-based tests (Hypothesis)
+- **`test_sqlite_connection_lifecycle.py`**: SQLite connection management
+- **`test_benchmarks.py`**: Performance regression (marked `@pytest.mark.slow`)
 
 ## Code Style
 
@@ -269,43 +330,13 @@ uv run mutmut run --paths-to-mutate=src/arxiv_browser/huggingface.py
 ## Running the Application
 
 ```bash
-# History mode: auto-loads newest file from history/
-uv run arxiv-viewer
-
-# List available dates
-uv run arxiv-viewer --list-dates
-
-# Open specific date
-uv run arxiv-viewer --date 2026-01-23
-
-# Custom input file (disables history mode)
-uv run arxiv-viewer -i <file>
-
-# Start fresh session (no restore)
-uv run arxiv-viewer --no-restore
-
-# Enable debug logging (writes to ~/.config/arxiv-browser/debug.log)
-uv run arxiv-viewer --debug
-
-# Alternative: run as module
-uv run python -m arxiv_browser
+uv run arxiv-viewer              # History mode: auto-loads newest from history/
+uv run arxiv-viewer -i <file>    # Custom input file
+uv run arxiv-viewer --debug      # Debug logging to ~/.config/arxiv-browser/debug.log
+uv run python -m arxiv_browser   # Alternative: run as module
 ```
 
-## History Mode
-
-Store arXiv emails in `history/` directory with `YYYY-MM-DD.txt` filenames:
-
-```
-history/
-├── 2026-01-20.txt
-├── 2026-01-21.txt
-└── 2026-01-23.txt
-```
-
-- App auto-discovers and loads newest file
-- Use `[` and `]` keys to navigate between dates
-- Falls back to `arxiv.txt` if no history directory exists
-- Limited to 365 most recent files (`MAX_HISTORY_FILES`)
+See `docs/history-mode.md` for history directory setup, date navigation, and all CLI flags.
 
 ## Configuration Storage
 
@@ -318,90 +349,15 @@ BibTeX exports default to `~/arxiv-exports/` (configurable).
 
 LLM summaries are cached in a SQLite database (`summaries.db`) in the same config directory. Summaries are invalidated when the LLM command or prompt template changes.
 
-## LLM Summary Configuration
+## Feature Configuration
 
-Generate AI-powered paper summaries using any CLI tool. The default prompt produces accessible, explanatory summaries aimed at CS students (Problem / Approach / Results / Limitations / Key Takeaway). The full paper content is automatically fetched from the arXiv HTML version and passed to the LLM.
+Detailed setup and usage for each feature is in `docs/`:
 
-Add to `config.json`:
-
-```json
-{
-  "llm_preset": "copilot"
-}
-```
-
-Available presets:
-
-- `claude`: `claude -p {prompt}`
-- `codex`: `codex exec {prompt}`
-- `llm`: `llm {prompt}`
-- `copilot`: `copilot --model gpt-5-mini -p {prompt}`
-- `opencode`: `opencode run -m zai-coding-plan/glm-4.7 -- {prompt}`
-
-Or use a custom command:
-
-```json
-{
-  "llm_command": "claude -p {prompt}",
-  "llm_prompt_template": "Summarize in 3 sentences: {title}\n\n{paper_content}"
-}
-```
-
-Prompt template placeholders: `{title}`, `{authors}`, `{categories}`, `{abstract}`, `{arxiv_id}`, `{paper_content}`.
-
-The `{paper_content}` placeholder is replaced with the full paper text (fetched from arXiv HTML), falling back to the abstract if unavailable.
-
-## Semantic Scholar Integration
-
-Optional enrichment with citation counts, fields of study, TLDRs, and S2-powered recommendations. Fully opt-in and on-demand.
-
-Add to `config.json`:
-
-```json
-{
-  "s2_enabled": true,
-  "s2_api_key": "",
-  "s2_cache_ttl_days": 7
-}
-```
-
-- `s2_enabled`: Enable S2 enrichment on startup (default: `false`)
-- `s2_api_key`: Optional API key for higher rate limits
-- `s2_cache_ttl_days`: Days to cache S2 data in SQLite (default: `7`)
-
-Usage: Press `Ctrl+e` to toggle S2 on/off, then `e` on any paper to fetch citation data. Press `R` for recommendations (local or S2-powered when enabled). Press `G` for citation graph exploration (drill-down through references and citations). Sort by citations with `s`.
-
-## HuggingFace Trending Integration
-
-Optional trending signal from HuggingFace Daily Papers — shows community upvotes, comments, GitHub info, AI summaries, and keywords. Fully opt-in with auto-fetch.
-
-Add to `config.json`:
-
-```json
-{
-  "hf_enabled": true,
-  "hf_cache_ttl_hours": 6
-}
-```
-
-- `hf_enabled`: Enable HF trending on startup (default: `false`)
-- `hf_cache_ttl_hours`: Hours to cache HF daily data in SQLite (default: `6`)
-
-Usage: Press `Ctrl+h` to toggle HF on/off. When enabled, the daily papers list is auto-fetched and cross-matched against loaded papers. Trending papers show upvote badges in the list and a HuggingFace section in the detail pane. Sort by trending with `s`.
-
-## Relevance Scoring
-
-LLM-powered relevance scoring lets you define research interests and have the configured LLM score each paper 1-10. Requires an LLM preset or command configured (same as AI summaries). Scores are cached in SQLite (`relevance.db`) keyed by `(arxiv_id, interests_hash)`.
-
-Add to `config.json`:
-
-```json
-{
-  "research_interests": "efficient LLM inference, quantization, speculative decoding"
-}
-```
-
-Usage: Press `L` to score all loaded papers (prompts for interests on first use). Press `Ctrl+l` to edit interests (clears cached scores). Sort by relevance with `s`. Papers show colored score badges: green (8-10), yellow (5-7), dim (1-4).
+- **LLM summaries, relevance scoring, auto-tag**: `docs/llm-setup.md` — presets, custom commands, prompt templates
+- **Semantic Scholar**: `docs/semantic-scholar.md` — citation counts, TLDRs, recommendations, citation graph
+- **HuggingFace trending**: `docs/huggingface.md` — community upvotes, keywords, auto-fetch
+- **Export & PDF**: `docs/export.md` — BibTeX, RIS, CSV, Markdown, PDF download config
+- **Search & filters**: `docs/search-filters.md` — query syntax, sort orders, filter pills
 
 ## CI/CD
 
@@ -425,49 +381,49 @@ git push origin v0.2.0            # CD publishes to PyPI on tag push
 
 ## Key Bindings Reference
 
-```
-/       - Toggle search (fuzzy matching)
-Escape  - Cancel search / exit API mode
-A       - Search all arXiv (API mode)
-o       - Open selected paper(s) in browser
-P       - Open selected paper(s) as PDF
-c       - Copy selected paper(s) to clipboard
-d       - Download PDF(s) to local folder
-E       - Export menu (BibTeX, Markdown, RIS, CSV + more)
-space   - Toggle selection
-a       - Select all visible
-u       - Clear selection
-s       - Cycle sort order (title/date/arxiv_id/citations/trending/relevance)
-j/k     - Navigate down/up (vim-style)
-r       - Toggle read status
-x       - Toggle star
-n       - Edit notes
-t       - Edit tags (namespace:value supported, e.g., topic:ml, status:to-read)
-w       - Toggle watch list filter
-W       - Manage watch list
-p       - Toggle abstract preview
-m       - Set mark (then press a-z)
-'       - Jump to mark (then press a-z)
-R       - Show similar papers (local or Semantic Scholar)
-G       - Citation graph (S2-powered, drill-down navigation)
-V       - Check starred papers for version updates
-e       - Fetch Semantic Scholar data for current paper
-Ctrl+e  - Exit API mode (in API mode) / toggle Semantic Scholar enrichment (otherwise)
-Ctrl+h  - Toggle HuggingFace trending on/off
-Ctrl+s  - Generate AI summary (mode selector: default/TLDR/methods/results/comparison)
-C       - Chat with current paper (LLM-powered)
-Ctrl+g  - Auto-tag current/selected papers (LLM-powered)
-L       - Score papers by relevance (LLM-powered)
-Ctrl+l  - Edit research interests
-1-9     - Jump to bookmark
-Ctrl+b  - Add current search as bookmark
-Ctrl+Shift+b - Remove active bookmark
-Ctrl+t  - Cycle color theme (Monokai / Catppuccin / Solarized)
-Ctrl+d  - Toggle detail pane sections
-Ctrl+k  - Manage paper collections (reading lists)
-Ctrl+p  - Open command palette
-[       - Go to previous (older) date (history mode)
-]       - Go to next (newer) date (history mode)
-?       - Show help overlay
-q       - Quit
-```
+| Key | Action |
+|-----|--------|
+| `/` | Toggle search (fuzzy matching) |
+| `Escape` | Cancel search / exit API mode |
+| `A` | Search all arXiv (API mode) |
+| `o` | Open selected paper(s) in browser |
+| `P` | Open selected paper(s) as PDF |
+| `c` | Copy selected paper(s) to clipboard |
+| `d` | Download PDF(s) to local folder |
+| `E` | Export menu (BibTeX, Markdown, RIS, CSV + more) |
+| `space` | Toggle selection |
+| `a` | Select all visible |
+| `u` | Clear selection |
+| `s` | Cycle sort order (title/date/arxiv_id/citations/trending/relevance) |
+| `j`/`k` | Navigate down/up (vim-style) |
+| `r` | Toggle read status |
+| `x` | Toggle star |
+| `n` | Edit notes |
+| `t` | Edit tags (namespace:value, e.g. topic:ml, status:to-read) |
+| `w` | Toggle watch list filter |
+| `W` | Manage watch list |
+| `p` | Toggle abstract preview |
+| `m` | Set mark (then press a-z) |
+| `'` | Jump to mark (then press a-z) |
+| `R` | Show similar papers (local or Semantic Scholar) |
+| `G` | Citation graph (S2-powered, drill-down navigation) |
+| `V` | Check starred papers for version updates |
+| `e` | Fetch Semantic Scholar data for current paper |
+| `Ctrl+e` | Exit API mode (in API mode) / toggle S2 enrichment (otherwise) |
+| `Ctrl+h` | Toggle HuggingFace trending on/off |
+| `Ctrl+s` | Generate AI summary (mode selector: default/TLDR/methods/results/comparison) |
+| `C` | Chat with current paper (LLM-powered) |
+| `Ctrl+g` | Auto-tag current/selected papers (LLM-powered) |
+| `L` | Score papers by relevance (LLM-powered) |
+| `Ctrl+l` | Edit research interests |
+| `1-9` | Jump to bookmark |
+| `Ctrl+b` | Add current search as bookmark |
+| `Ctrl+Shift+b` | Remove active bookmark |
+| `Ctrl+t` | Cycle color theme (Monokai / Catppuccin / Solarized / High Contrast) |
+| `Ctrl+d` | Toggle detail pane sections |
+| `Ctrl+k` | Manage paper collections (reading lists) |
+| `Ctrl+p` | Open command palette |
+| `[` | Go to previous (older) date (history mode) |
+| `]` | Go to next (newer) date (history mode) |
+| `?` | Show help overlay |
+| `q` | Quit |

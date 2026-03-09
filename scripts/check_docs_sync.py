@@ -12,6 +12,7 @@ APP_PATH = ROOT / "src/arxiv_browser/app.py"
 LLM_PATH = ROOT / "src/arxiv_browser/llm.py"
 README_PATH = ROOT / "README.md"
 CLAUDE_PATH = ROOT / "CLAUDE.md"
+DOCS_DIR = ROOT / "docs"
 
 REQUIRED_KEYBINDINGS: set[str] = {
     "/",
@@ -99,24 +100,49 @@ def _split_key_field(key_field: str) -> set[str]:
     return {cleaned}
 
 
-def _extract_readme_keys(readme_text: str) -> set[str]:
-    start = readme_text.find("## Keyboard Shortcuts")
-    if start == -1:
-        return set()
-    remainder = readme_text[start + len("## Keyboard Shortcuts") :]
-    end = remainder.find("\n## ")
-    section = remainder if end == -1 else remainder[:end]
+def _extract_table_keys(text: str) -> set[str]:
+    """Extract keybinding keys from all markdown tables in the given text.
 
+    Handles single-column tables (| Key | Action |) and double-column
+    tables (| Key | Action | | Key | Action |) as used in the README.
+    Also extracts backtick-wrapped keys from any table column that looks
+    like a keybinding (e.g. | `Ctrl+s` | Generate summary |).
+    """
     keys: set[str] = set()
-    for line in section.splitlines():
+    # Match backtick-wrapped keybindings anywhere in table rows
+    backtick_key_re = re.compile(r"`([^`]+)`")
+    key_like_re = re.compile(r"^(Ctrl\+|Escape|Space|[A-Z]$|[a-z]$|/|\\?|\[|\]|[0-9]|')")
+
+    for line in text.splitlines():
         if not line.startswith("|"):
             continue
         cols = [c.strip() for c in line.strip("|").split("|")]
         if len(cols) < 2:
             continue
-        if cols[0] in {"Key", "-----"}:
+        # Skip header/separator rows
+        if all(c.startswith("-") or c in {"Key", "-----", "---", ""} for c in cols):
             continue
-        keys.update(_split_key_field(cols[0]))
+
+        # Strategy 1: first column (and 4th column for double-width tables)
+        for idx in (0, 3):
+            if idx < len(cols) and cols[idx] not in {"", "Key", "-----", "---"}:
+                keys.update(_split_key_field(cols[idx]))
+
+        # Strategy 2: backtick-wrapped keys in any column
+        for col in cols:
+            for m in backtick_key_re.finditer(col):
+                candidate = m.group(1).strip()
+                if key_like_re.match(candidate):
+                    keys.update(_split_key_field(candidate))
+    return keys
+
+
+def _extract_readme_keys(readme_text: str) -> set[str]:
+    """Extract keys from README tables and all docs/*.md files."""
+    keys = _extract_table_keys(readme_text)
+    if DOCS_DIR.is_dir():
+        for doc_file in DOCS_DIR.glob("*.md"):
+            keys.update(_extract_table_keys(doc_file.read_text(encoding="utf-8")))
     return keys
 
 
@@ -126,6 +152,12 @@ def _extract_claude_keys(claude_text: str) -> set[str]:
         return set()
     remainder = claude_text[start + len("## Key Bindings Reference") :]
 
+    # Try markdown table first (| `key` | action |)
+    table_keys = _extract_table_keys(remainder)
+    if table_keys:
+        return table_keys
+
+    # Fall back to code block format (key - description)
     block_match = re.search(r"```\n(.*?)\n```", remainder, re.DOTALL)
     if not block_match:
         return set()
@@ -142,10 +174,15 @@ def _extract_claude_keys(claude_text: str) -> set[str]:
 
 
 def _check_cli_flags(readme_text: str, cli_text: str) -> list[str]:
+    # Combine README + docs for flag lookup
+    docs_text = ""
+    if DOCS_DIR.is_dir():
+        docs_text = "\n".join(f.read_text(encoding="utf-8") for f in DOCS_DIR.glob("*.md"))
+    combined = readme_text + "\n" + docs_text
     return [
-        f"README is missing CLI option group: {' / '.join(group)}"
+        f"README/docs is missing CLI option group: {' / '.join(group)}"
         for group in _extract_cli_flag_groups(cli_text)
-        if not any(flag in readme_text for flag in group)
+        if not any(flag in combined for flag in group)
     ]
 
 
@@ -155,12 +192,19 @@ def _check_llm_presets(readme_text: str, claude_text: str, llm_text: str) -> lis
     if not presets:
         return ["Could not parse LLM_PRESETS from src/arxiv_browser/llm.py"]
 
+    # Collect all docs text for preset lookup
+    docs_text = ""
+    if DOCS_DIR.is_dir():
+        docs_text = "\n".join(f.read_text(encoding="utf-8") for f in DOCS_DIR.glob("*.md"))
+    combined_readme = readme_text + "\n" + docs_text
+    combined_claude = claude_text + "\n" + docs_text
+
     for preset in sorted(presets):
         needle = f"`{preset}`"
-        if needle not in readme_text:
-            errors.append(f"README is missing preset: {needle}")
-        if needle not in claude_text:
-            errors.append(f"CLAUDE.md is missing preset: {needle}")
+        if needle not in combined_readme:
+            errors.append(f"README/docs is missing preset: {needle}")
+        if needle not in combined_claude:
+            errors.append(f"CLAUDE.md/docs is missing preset: {needle}")
     return errors
 
 
