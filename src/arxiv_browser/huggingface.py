@@ -25,10 +25,8 @@ __all__ = [
     "save_hf_daily_cache",
 ]
 
-import asyncio
 import json
 import logging
-import random
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
@@ -39,6 +37,7 @@ from typing import Any
 import httpx
 from platformdirs import user_config_dir
 
+from arxiv_browser.http_retry import retry_with_backoff
 from arxiv_browser.models import CONFIG_APP_NAME
 
 logger = logging.getLogger(__name__)
@@ -145,62 +144,48 @@ async def fetch_hf_daily_papers(
 
     Returns empty list on failure. Never raises.
     """
-    backoff = HF_INITIAL_BACKOFF
-    for attempt in range(HF_MAX_RETRIES):
-        try:
-            response = await client.get(HF_API_BASE, timeout=timeout)
-            if response.status_code == 200:
-                try:
-                    data = response.json()
-                except ValueError:
-                    logger.warning("HF API returned invalid JSON", exc_info=True)
-                    return []
-                if not isinstance(data, list):
-                    logger.warning("HF API returned non-list response")
-                    return []
-                papers: list[HuggingFacePaper] = []
-                for item in data:
-                    if not isinstance(item, dict):
-                        continue
-                    parsed = parse_hf_paper_response(item)
-                    if parsed is not None:
-                        papers.append(parsed)
-                return papers
-            if response.status_code == 404:
-                logger.info("HF daily papers endpoint not found")
-                return []
-            if response.status_code in (429, 500, 502, 503, 504) and attempt < HF_MAX_RETRIES - 1:
-                jitter = random.uniform(0, backoff * 0.5)
-                logger.info(
-                    "HF API %d, retrying in %.1fs (attempt %d/%d)",
-                    response.status_code,
-                    backoff + jitter,
-                    attempt + 1,
-                    HF_MAX_RETRIES,
-                )
-                await asyncio.sleep(backoff + jitter)
-                backoff *= 2
-                continue
-            logger.warning("HF API returned %d", response.status_code)
-            return []
-        except httpx.TimeoutException:
-            if attempt < HF_MAX_RETRIES - 1:
-                logger.info(
-                    "HF API timeout, retrying (attempt %d/%d)",
-                    attempt + 1,
-                    HF_MAX_RETRIES,
-                )
-                jitter = random.uniform(0, backoff * 0.5)
-                await asyncio.sleep(backoff + jitter)
-                backoff *= 2
-                continue
-            logger.warning("HF API timeout after %d retries", HF_MAX_RETRIES)
-            return []
-        except httpx.HTTPError:
-            logger.warning("HF API HTTP error", exc_info=True)
-            return []
 
-    return []
+    async def _do_request() -> httpx.Response:
+        response = await client.get(HF_API_BASE, timeout=timeout)
+        response.raise_for_status()
+        return response
+
+    try:
+        response = await retry_with_backoff(
+            _do_request,
+            max_retries=HF_MAX_RETRIES - 1,
+            backoff_base=HF_INITIAL_BACKOFF,
+            operation="HF daily papers",
+        )
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            logger.info("HF daily papers endpoint not found")
+        else:
+            logger.warning("HF API returned %d", exc.response.status_code)
+        return []
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.ReadError):
+        logger.warning("HF API timeout/connection error after retries")
+        return []
+    except httpx.HTTPError:
+        logger.warning("HF API HTTP error", exc_info=True)
+        return []
+
+    try:
+        data = response.json()
+    except ValueError:
+        logger.warning("HF API returned invalid JSON", exc_info=True)
+        return []
+    if not isinstance(data, list):
+        logger.warning("HF API returned non-list response")
+        return []
+    papers: list[HuggingFacePaper] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        parsed = parse_hf_paper_response(item)
+        if parsed is not None:
+            papers.append(parsed)
+    return papers
 
 
 def _coerce_int(value: Any, default: int = 0) -> int:

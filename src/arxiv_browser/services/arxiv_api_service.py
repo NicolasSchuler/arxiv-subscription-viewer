@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 
 import httpx
 
+from arxiv_browser.http_retry import retry_with_backoff
 from arxiv_browser.models import ArxivSearchRequest, Paper
 from arxiv_browser.parsing import build_arxiv_search_query, parse_arxiv_api_feed
 
@@ -61,23 +62,26 @@ async def fetch_page(
     }
     headers = {"User-Agent": user_agent}
 
-    if client is not None:
-        response = await client.get(
-            ARXIV_API_URL,
-            params=params,
-            headers=headers,
-            timeout=timeout_seconds,
-        )
-    else:
-        async with httpx.AsyncClient() as tmp_client:
-            response = await tmp_client.get(
+    async def _do_request() -> httpx.Response:
+        if client is not None:
+            resp = await client.get(
                 ARXIV_API_URL,
                 params=params,
                 headers=headers,
                 timeout=timeout_seconds,
             )
+        else:
+            async with httpx.AsyncClient() as tmp_client:
+                resp = await tmp_client.get(
+                    ARXIV_API_URL,
+                    params=params,
+                    headers=headers,
+                    timeout=timeout_seconds,
+                )
+        resp.raise_for_status()
+        return resp
 
-    response.raise_for_status()
+    response = await retry_with_backoff(_do_request, operation="arXiv API search")
     return parse_arxiv_api_feed(response.text)
 
 

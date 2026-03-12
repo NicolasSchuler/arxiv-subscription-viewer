@@ -365,6 +365,9 @@ class TestFetchS2Paper:
     async def test_429_retries(self) -> None:
         mock_429 = MagicMock(spec=httpx.Response)
         mock_429.status_code = 429
+        mock_429.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "429", request=httpx.Request("GET", "https://api.semanticscholar.org"), response=mock_429
+        )
         mock_200 = MagicMock(spec=httpx.Response)
         mock_200.status_code = 200
         mock_200.json.return_value = {
@@ -375,7 +378,7 @@ class TestFetchS2Paper:
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.get.side_effect = [mock_429, mock_200]
 
-        with patch("asyncio.sleep", new_callable=AsyncMock):
+        with patch("arxiv_browser.http_retry.asyncio.sleep", new_callable=AsyncMock):
             result = await fetch_s2_paper("2401.12345", mock_client)
 
         assert result is not None
@@ -393,7 +396,7 @@ class TestFetchS2Paper:
             mock_200,
         ]
 
-        with patch("asyncio.sleep", new_callable=AsyncMock):
+        with patch("arxiv_browser.http_retry.asyncio.sleep", new_callable=AsyncMock):
             result = await fetch_s2_paper("2401.12345", mock_client)
 
         assert result is not None
@@ -403,11 +406,14 @@ class TestFetchS2Paper:
     async def test_max_retries_exhausted(self) -> None:
         mock_429 = MagicMock(spec=httpx.Response)
         mock_429.status_code = 429
+        mock_429.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "429", request=httpx.Request("GET", "https://api.semanticscholar.org"), response=mock_429
+        )
 
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.get.return_value = mock_429
 
-        with patch("asyncio.sleep", new_callable=AsyncMock):
+        with patch("arxiv_browser.http_retry.asyncio.sleep", new_callable=AsyncMock):
             result = await fetch_s2_paper("2401.12345", mock_client)
 
         assert result is None
@@ -418,7 +424,8 @@ class TestFetchS2Paper:
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.get.side_effect = httpx.ConnectError("connection refused")
 
-        result = await fetch_s2_paper("2401.12345", mock_client)
+        with patch("arxiv_browser.http_retry.asyncio.sleep", new_callable=AsyncMock):
+            result = await fetch_s2_paper("2401.12345", mock_client)
         assert result is None
 
     @pytest.mark.asyncio
@@ -576,6 +583,9 @@ class TestFetchS2Recommendations:
     async def test_429_retries(self) -> None:
         mock_429 = MagicMock(spec=httpx.Response)
         mock_429.status_code = 429
+        mock_429.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "429", request=httpx.Request("GET", "https://api.semanticscholar.org"), response=mock_429
+        )
         mock_200 = MagicMock(spec=httpx.Response)
         mock_200.status_code = 200
         mock_200.json.return_value = {"recommendedPapers": []}
@@ -583,7 +593,7 @@ class TestFetchS2Recommendations:
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.get.side_effect = [mock_429, mock_200]
 
-        with patch("asyncio.sleep", new_callable=AsyncMock):
+        with patch("arxiv_browser.http_retry.asyncio.sleep", new_callable=AsyncMock):
             result = await fetch_s2_recommendations("2401.12345", mock_client)
 
         assert result == []

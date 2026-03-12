@@ -34,10 +34,8 @@ __all__ = [
     "save_s2_recommendations",
 ]
 
-import asyncio
 import json
 import logging
-import random
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
@@ -48,6 +46,7 @@ from typing import Any, Literal, overload
 import httpx
 from platformdirs import user_config_dir
 
+from arxiv_browser.http_retry import retry_with_backoff
 from arxiv_browser.models import CONFIG_APP_NAME
 
 logger = logging.getLogger(__name__)
@@ -203,49 +202,30 @@ async def _s2_get_with_retry(
     if api_key:
         headers["x-api-key"] = api_key
 
-    backoff = S2_INITIAL_BACKOFF
-    for attempt in range(S2_MAX_RETRIES):
-        try:
-            response = await client.get(url, params=params, headers=headers, timeout=timeout)
-            if response.status_code == 200:
-                return response
-            if response.status_code == 404:
-                logger.info("%s not found", label)
-                return None
-            if response.status_code in (429, 500, 502, 503, 504) and attempt < S2_MAX_RETRIES - 1:
-                jitter = random.uniform(0, backoff * 0.5)
-                logger.info(
-                    "%s %d, retrying in %.1fs (attempt %d/%d)",
-                    label,
-                    response.status_code,
-                    backoff + jitter,
-                    attempt + 1,
-                    S2_MAX_RETRIES,
-                )
-                await asyncio.sleep(backoff + jitter)
-                backoff *= 2
-                continue
-            logger.warning("%s returned %d", label, response.status_code)
-            return None
-        except httpx.TimeoutException:
-            if attempt < S2_MAX_RETRIES - 1:
-                logger.info(
-                    "%s timeout, retrying (attempt %d/%d)",
-                    label,
-                    attempt + 1,
-                    S2_MAX_RETRIES,
-                )
-                jitter = random.uniform(0, backoff * 0.5)
-                await asyncio.sleep(backoff + jitter)
-                backoff *= 2
-                continue
-            logger.warning("%s timeout after %d retries", label, S2_MAX_RETRIES)
-            return None
-        except httpx.HTTPError:
-            logger.warning("%s HTTP error", label, exc_info=True)
-            return None
+    async def _do_request() -> httpx.Response:
+        response = await client.get(url, params=params, headers=headers, timeout=timeout)
+        response.raise_for_status()
+        return response
 
-    return None
+    try:
+        return await retry_with_backoff(
+            _do_request,
+            max_retries=S2_MAX_RETRIES - 1,
+            backoff_base=S2_INITIAL_BACKOFF,
+            operation=label,
+        )
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            logger.info("%s not found", label)
+        else:
+            logger.warning("%s returned %d", label, exc.response.status_code)
+        return None
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.ReadError):
+        logger.warning("%s timeout/connection error after retries", label)
+        return None
+    except httpx.HTTPError:
+        logger.warning("%s HTTP error", label, exc_info=True)
+        return None
 
 
 def _parse_json_object(response: httpx.Response, label: str) -> dict[str, Any] | None:

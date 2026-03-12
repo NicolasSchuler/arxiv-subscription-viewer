@@ -426,10 +426,13 @@ class TestFetchHfDailyPapers:
         assert result == []
 
     @pytest.mark.asyncio
-    @patch("arxiv_browser.huggingface.asyncio.sleep", new_callable=AsyncMock)
+    @patch("arxiv_browser.http_retry.asyncio.sleep", new_callable=AsyncMock)
     async def test_429_retries(self, mock_sleep) -> None:
         mock_429 = MagicMock()
         mock_429.status_code = 429
+        mock_429.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "429", request=httpx.Request("GET", "https://huggingface.co"), response=mock_429
+        )
         mock_200 = MagicMock()
         mock_200.status_code = 200
         mock_200.json.return_value = [_make_api_item()]
@@ -442,7 +445,7 @@ class TestFetchHfDailyPapers:
         assert mock_sleep.called
 
     @pytest.mark.asyncio
-    @patch("arxiv_browser.huggingface.asyncio.sleep", new_callable=AsyncMock)
+    @patch("arxiv_browser.http_retry.asyncio.sleep", new_callable=AsyncMock)
     async def test_timeout_retries(self, mock_sleep) -> None:
         mock_200 = MagicMock()
         mock_200.status_code = 200
@@ -455,7 +458,8 @@ class TestFetchHfDailyPapers:
         assert len(result) == 1
 
     @pytest.mark.asyncio
-    async def test_http_error_returns_empty(self) -> None:
+    @patch("arxiv_browser.http_retry.asyncio.sleep", new_callable=AsyncMock)
+    async def test_http_error_returns_empty(self, mock_sleep) -> None:
         client = AsyncMock(spec=httpx.AsyncClient)
         client.get.side_effect = httpx.ConnectError("connection failed")
 
@@ -463,10 +467,13 @@ class TestFetchHfDailyPapers:
         assert result == []
 
     @pytest.mark.asyncio
-    @patch("arxiv_browser.huggingface.asyncio.sleep", new_callable=AsyncMock)
+    @patch("arxiv_browser.http_retry.asyncio.sleep", new_callable=AsyncMock)
     async def test_exhausted_retries_returns_empty(self, mock_sleep) -> None:
         mock_500 = MagicMock()
         mock_500.status_code = 500
+        mock_500.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "500", request=httpx.Request("GET", "https://huggingface.co"), response=mock_500
+        )
 
         client = AsyncMock(spec=httpx.AsyncClient)
         client.get.return_value = mock_500
