@@ -20,24 +20,27 @@
 pip install arxiv-subscription-viewer
 # or: uv tool install arxiv-subscription-viewer
 
-# Browse latest cs.AI papers
-arxiv-viewer --api-category cs.AI
+# Browse latest cs.AI papers from the API
+arxiv-viewer search --category cs.AI
 
 # Search by topic
-arxiv-viewer --api-query "diffusion transformer" --api-field title
+arxiv-viewer search --query "diffusion transformer" --field title
 
 # Browse from email digest files (see docs/history-mode.md)
-arxiv-viewer
+arxiv-viewer browse
+
+# List local history dates
+arxiv-viewer dates
 ```
 
-> **Requires Python 3.13+** · Press `?` in-app for help · `Ctrl+p` opens the command palette
+> **Requires Python 3.13+** · Press `?` in-app for help · `Ctrl+p` opens commands
 
 ## ✨ Highlights
 
 | | Feature | Key |
 |---|---------|-----|
 | 🔍 | **Fuzzy search** with filters (`cat:cs.AI`, `tag:`, `unread`, `starred`) | `/` |
-| 🤖 | **AI summaries & chat** via any LLM CLI (Claude, Copilot, llm, …) | `Ctrl+s` / `C` |
+| 🤖 | **AI summaries, chat & auto-tag** via any LLM CLI (Claude, Copilot, llm, …) | `Ctrl+s` / `C` / `Ctrl+g` |
 | 📊 | **Citation graph** and recommendations via Semantic Scholar | `G` / `R` |
 | 🔥 | **HuggingFace trending** — upvotes, keywords, GitHub links | `Ctrl+h` |
 | 🏷️ | **Tags, notes, stars** — organize your reading | `t` / `n` / `x` |
@@ -45,6 +48,7 @@ arxiv-viewer
 | 📥 | **Export** — BibTeX, Markdown, RIS, CSV, PDF download | `E` / `d` |
 | 🎯 | **Relevance scoring** — LLM scores papers against your interests | `L` |
 | 📅 | **History mode** — navigate daily email digests with `[` / `]` | |
+| ⌨️ | **Command palette** — quick access to all commands | `Ctrl+p` |
 | 🎨 | **4 themes** — Monokai, Catppuccin, Solarized, High Contrast | `Ctrl+t` |
 
 ## ⌨️ Key Bindings
@@ -59,10 +63,14 @@ arxiv-viewer
 | `r` | Toggle read | | `Ctrl+s` | AI summary |
 | `x` | Toggle star | | `C` | Chat with paper |
 | `n` | Notes | | `L` | Relevance score |
+| `p` | Abstract preview | | `Ctrl+p` | Command palette |
 | `t` | Tags | | `G` | Citation graph |
 | `V` | Check versions | | `R` | Recommendations |
-| `Ctrl+p` | Command palette | | `?` | Help |
-| `Ctrl+e` | Toggle S2 | | `q` | Quit |
+| `Ctrl+b` | Save bookmark | | `1-9` | Jump to bookmark |
+| `m` / `'` | Set / jump to mark | | `w` / `W` | Watch list |
+| `Ctrl+k` | Collections | | `Ctrl+g` | Auto-tag (LLM) |
+| `Ctrl+d` | Detail pane sections | | `Ctrl+h` | HuggingFace trending |
+| `Ctrl+e` | Toggle S2 / Exit search results | | `?` | Help / shortcuts |
 
 ## ⚙️ Configuration
 
@@ -76,6 +84,22 @@ See the **[full documentation](docs/)** for:
 - 📅 [History mode & email ingestion](docs/history-mode.md)
 - 🔍 [Search filters & advanced queries](docs/search-filters.md)
 - 📥 [Export & PDF configuration](docs/export.md)
+- 🛠️ [Troubleshooting](docs/troubleshooting.md)
+
+## 🐚 Shell Completions
+
+Enable tab completion for subcommands and flags:
+
+```bash
+# Bash (add to ~/.bashrc)
+eval "$(arxiv-viewer completions bash)"
+
+# Zsh (add to ~/.zshrc)
+eval "$(arxiv-viewer completions zsh)"
+
+# Fish (add to ~/.config/fish/config.fish)
+arxiv-viewer completions fish | source
+```
 
 ## 🛠️ Development
 

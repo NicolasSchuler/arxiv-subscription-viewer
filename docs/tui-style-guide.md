@@ -20,14 +20,14 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 
 - Use `Search` for query input interactions.
 - Use `Selection` for multi-paper operations.
-- Use `Command palette` for `Ctrl+p`.
+- Use `Commands` for compact `Ctrl+p` prompts and `Command palette` for the modal title.
 - Use `Help overlay` for `?`.
 - Use `Semantic Scholar` in help text and `S2` in compact status/footer hints.
 - Use `History` for date navigation context.
 - Compact-vs-long naming policy:
-- Footer stays compact (`o open`, `Ctrl+p palette`) for 80-col scan speed.
+- Footer stays compact (`o open`, `Ctrl+p commands`) for 80-col scan speed.
 - Help/modals/binding descriptions use long-form labels (`Open in Browser`, `Command palette`).
-- Canonical `Ctrl+e` wording: `Toggle S2 (browse) / Exit API (API mode)`.
+- `Ctrl+e` is context-sensitive: `Toggle S2` in browse mode and `Exit Search Results` in arXiv search-results mode.
 
 ## 4. Layout Hierarchy Rules
 
@@ -41,14 +41,13 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 
 ## 5. Footer Hierarchy Rules
 
-- Default browse footer is capped at 10 hints.
+- Default browse footer is capped at 9 hints.
 - Always include these core hints in order:
-  - `/ search`, `o open`, `s sort`, `r read`, `x star`, `E export`, `Ctrl+p palette`, `? help`.
-- Add exactly two context slots in order:
-  - Slot A: `[/] history` if history navigation is available, else `n notes`.
-  - Slot B: `e S2` if S2 is active, else `V versions` if starred papers exist, else `L relevance` if LLM is configured, else `t tags`.
+  - `/ search`, `Space select`, `o open`, `s sort`, `r read`, context slot, `E export`, `Ctrl+p commands`, `? help`.
+- The context slot is:
+  - `[/] dates` if history navigation is available, else `x star`.
 - Search footer should emphasize immediate flow:
-  - `type to search`, `Enter apply`, `Esc clear`, `↑↓ move`, `? help`.
+  - `type to search`, `Enter apply`, `Esc close`, `↑↓ move`, `? help`.
 - API footer should emphasize mode exits and paging:
   - `[/] page`, `Esc/Ctrl+e exit`, `A new query`, `o open`, `? help`.
 - API empty states must mention both recovery paths:
@@ -104,26 +103,95 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 
 ## 9. Help And Discoverability
 
+### Keybinding Tiers
+
+All keybindings are categorised into three progressive tiers so that new users see only the essentials while power users can discover advanced shortcuts on demand.
+
+| Tier | Size | Visibility | Purpose |
+|------|------|-----------|---------|
+| **Core** | ~12 keys | Default footer | Navigation, search, open, read/star, export, sort, help, quit |
+| **Standard** | ~15-20 keys | Prominent in help overlay | Selection, notes, tags, copy, download, PDF, watch, bookmarks, API search |
+| **Power** | remaining | Command palette (`Ctrl+P`) | Marks, similarity, citations, LLM features, themes, collections, enrichment toggles |
+
+Rules:
+- Core keys always appear in the footer (capped at 9 visible hints per §5).
+- Standard keys appear under "Standard · _group_" headers in the help overlay.
+- Power keys appear under "Power · _group_" headers in the help overlay and are always accessible via the command palette.
+- Moving a key between tiers requires updating the tier table in `ui_constants.py` and the corresponding help sections in `help_ui.py`.
+
+### General discoverability rules
+
 - Help overlay must include a top `Getting Started` section with the core flow:
   - Search, move, select, open, command palette, full help.
 - Footer should prioritize immediate next actions for the current mode.
 - Modals should use consistent close/cancel hints:
   - `Close: Esc/q` for read-only views and `Cancel: Esc` for edit/confirm flows.
 - Use consistent labels across footer/help/notifications:
-  - `palette`, `history`, `help`, `search`, `open`, `export`.
+  - `commands`, `dates`, `help`, `search`, `open`, `export`.
 - Keep label density intentional:
   - Footer uses compact tokens while help/modal copy uses expanded phrasing.
 - Keep close instructions concise in modals (for example `Close: ? / Esc / q`).
 - Command palette must provide a clear empty-state message with next-step guidance.
 
-## 10. PR Checklist
+## 10. Keybinding Conventions
+
+### Shift-Key Mnemonic Pattern
+
+An observed convention in the existing bindings: **lowercase keys tend to perform quick actions on the current paper or toggle local state**, while **uppercase (Shift) keys tend to open management screens, advanced features, or broader-scope operations**.
+
+This is a convention, not a strict rule — some exceptions exist for historical reasons and mnemonic clarity.
+
+### Case-Sensitive Pairs
+
+**✅ Fits the pattern:**
+
+| Lower | Action | Upper | Action | Why it fits |
+|-------|--------|-------|--------|-------------|
+| `e` | Fetch S2 data for current paper | `E` | Open export menu | Single-paper enrichment vs multi-format management screen |
+| `w` | Toggle watch-list filter | `W` | Manage watch list | Quick filter toggle vs configuration modal |
+
+**⚠️ Partial fit:**
+
+| Lower | Action | Upper | Action | Notes |
+|-------|--------|-------|--------|-------|
+| `r` | Toggle read status | `R` | Show similar papers | Both act on the current paper, but `R` opens an advanced discovery screen |
+| `p` | Toggle abstract preview | `P` | Open PDF in viewer | Both are current-paper actions; `P` for PDF is a strong mnemonic |
+
+**❌ Exceptions (mnemonic wins over pattern):**
+
+| Lower | Action | Upper | Action | Rationale |
+|-------|--------|-------|--------|-----------|
+| `c` | Copy to clipboard | `C` | Chat with paper (LLM) | `C` for Chat is more discoverable than any pattern-consistent alternative |
+| `v` | Toggle detail mode | `V` | Check version updates | `V` for Versions is a natural mnemonic; both could be considered quick actions |
+
+### Standalone Uppercase Keys
+
+These have no lowercase counterpart and all represent advanced or broad-scope features:
+
+| Key | Action | Category |
+|-----|--------|----------|
+| `A` | Search all of arXiv (API mode) | Broad scope — switches mode entirely |
+| `G` | Citation graph (S2-powered) | Advanced feature — opens drill-down screen |
+| `L` | Score papers by relevance (LLM) | Multi-paper operation |
+
+### Guidance for Future Keybindings
+
+When adding a new keybinding:
+
+1. **Prefer lowercase for quick single-paper actions** (toggles, fetches, in-place updates).
+2. **Prefer uppercase for management screens or multi-paper operations** (modals, configuration, batch actions).
+3. **If the mnemonic letter matters more than the convention**, prioritize discoverability over consistency. A binding that users can guess is better than one that fits a pattern nobody remembers.
+4. **All keybindings must be discoverable** via the help overlay (`?`) and the command palette (`Ctrl+P`).
+5. **Check for conflicts** before assigning — the `APP_BINDINGS` list in `ui_constants.py` is the single source of truth.
+
+## 11. PR Checklist
 
 - [ ] New or changed UI copy uses the terminology canon.
 - [ ] `Ctrl+e` copy uses canonical browse/API wording.
 - [ ] Read-only overlays support `Esc/q` close while edit/input overlays keep `Esc` cancel.
 - [ ] API footer copy uses `Esc/Ctrl+e exit`.
 - [ ] Footer preserves the capped hierarchy and context-slot policy.
-- [ ] `Ctrl+p palette` and `? help` remain visible in browse contexts.
+- [ ] `Ctrl+p commands` and `? help` remain visible in browse contexts.
 - [ ] Every empty state includes a concrete `Try:` next step.
 - [ ] Empty states also include a concise `Next:` follow-up hint.
 - [ ] Confirm modals keep impact text in body and key hints in modal chrome.
@@ -132,7 +200,7 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 - [ ] Tests cover changed help/footer/status/empty/error strings.
 - [ ] No keybinding behavior changed unless explicitly intended.
 
-## 11. UI Direction Options
+## 12. UI Direction Options
 
 ### Minimalist Direction (default)
 

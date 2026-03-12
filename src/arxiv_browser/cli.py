@@ -37,6 +37,19 @@ ARXIV_API_URL = "https://export.arxiv.org/api/query"
 ARXIV_API_TIMEOUT = 30
 ARXIV_API_USER_AGENT = "arxiv-subscription-viewer/1.0"
 ARXIV_API_MIN_INTERVAL_SECONDS = 3.0
+CLI_COMMANDS = ("browse", "search", "dates", "completions")
+CLI_ROOT_DESCRIPTION = "Browse and search arXiv papers from your terminal."
+CLI_ROOT_EPILOG = """Examples:
+  arxiv-viewer
+  arxiv-viewer browse --date 2026-01-23
+  arxiv-viewer browse --input papers.txt
+  arxiv-viewer search --category cs.AI
+  arxiv-viewer search --query "diffusion transformer" --field title
+  arxiv-viewer dates
+  eval "$(arxiv-viewer completions bash)"
+"""
+
+_ROOT_FLAG_OPTIONS = frozenset({"--debug", "--ascii", "--no-color"})
 
 
 def _fetch_arxiv_api_papers(
@@ -76,7 +89,9 @@ def _fetch_latest_arxiv_digest(
     """Fetch all papers from the newest matching arXiv day.
 
     This mirrors email-digest behavior: collect papers from the latest
-    available day, then stop when older days begin.
+    available day, then stop when older days begin. Paginates through the
+    arXiv API with ``max_results``-sized pages, sleeping between requests
+    to respect rate limits.
     """
     start = 0
     target_day: date | None = None
@@ -119,8 +134,17 @@ def _fetch_latest_arxiv_digest(
 
 
 def _api_mode_requested(args: argparse.Namespace) -> bool:
-    """Return True when CLI flags request startup via arXiv API."""
+    """Return True when CLI args request startup via arXiv API."""
+    if getattr(args, "command", None) == "search":
+        return True
     return bool(getattr(args, "api_query", None) is not None or getattr(args, "api_category", None))
+
+
+def _get_api_arg(args: argparse.Namespace, name: str, legacy_name: str, default: Any = None) -> Any:
+    """Return the active CLI value for API startup/search settings."""
+    if getattr(args, "command", None) == "search":
+        return getattr(args, name, default)
+    return getattr(args, legacy_name, default)
 
 
 def _resolve_arxiv_api_mode(
@@ -135,11 +159,14 @@ def _resolve_arxiv_api_mode(
     if not _api_mode_requested(args):
         return None
 
-    api_query = (getattr(args, "api_query", None) or "").strip()
-    api_category = (getattr(args, "api_category", None) or "").strip()
-    api_field = str(getattr(args, "api_field", "all"))
-    api_page_mode = bool(getattr(args, "api_page_mode", False))
-    max_results_arg = getattr(args, "api_max_results", None)
+    api_query = str(_get_api_arg(args, "query", "api_query", "") or "").strip()
+    api_category = str(_get_api_arg(args, "category", "api_category", "") or "").strip()
+    api_field = str(_get_api_arg(args, "field", "api_field", "all"))
+    search_mode = str(_get_api_arg(args, "mode", "api_mode", "latest"))
+    api_page_mode = search_mode == "page" or bool(
+        _get_api_arg(args, "page_mode", "api_page_mode", False)
+    )
+    max_results_arg = _get_api_arg(args, "max_results", "api_max_results", None)
     max_results = _coerce_arxiv_api_max_results(
         max_results_arg if max_results_arg is not None else config.arxiv_api_max_results
     )
@@ -177,7 +204,7 @@ def _resolve_arxiv_api_mode(
         else:
             print(
                 f"Error: arXiv API rejected the request (HTTP {status_code}). "
-                "Check --api-query/--api-category and retry.",
+                "Check --query/--category and retry.",
                 file=sys.stderr,
             )
         return 1
@@ -189,7 +216,7 @@ def _resolve_arxiv_api_mode(
         return 1
 
     if not papers:
-        print("Error: No papers found for the requested arXiv API query.", file=sys.stderr)
+        print("Error: No papers found for the requested search.", file=sys.stderr)
         return 1
 
     return (papers, [], 0)
@@ -252,7 +279,7 @@ def _resolve_legacy_fallback(base_dir: Path) -> list[Paper] | int:
                 why="no history files or arxiv.txt were found in the current directory",
                 next_step=(
                     "create history/YYYY-MM-DD.txt, create arxiv.txt, "
-                    "or use --api-query/--api-category"
+                    'or run "arxiv-viewer search --category cs.AI"'
                 ),
             ),
             file=sys.stderr,
@@ -274,9 +301,18 @@ def _resolve_papers(
     config: UserConfig,
     history_files: list[tuple[date, Path]],
 ) -> ResolvePapersResult:
-    """Resolve which papers to load based on CLI args."""
-    if args.input is not None:
-        result = _resolve_input_file(args.input)
+    """Resolve which papers to load based on CLI args.
+
+    Returns:
+        A ``(papers, history_files, date_index)`` tuple on success, or an
+        ``int`` exit code on failure.
+    """
+    input_path = getattr(args, "input", None)
+    selected_date = getattr(args, "date", None)
+    no_restore = bool(getattr(args, "no_restore", False))
+
+    if input_path is not None:
+        result = _resolve_input_file(input_path)
         if isinstance(result, int):
             return result
         return (result, [], 0)
@@ -287,12 +323,12 @@ def _resolve_papers(
 
     if history_files:
         current_date_index = 0
-        if args.date:
-            idx = _resolve_history_date(history_files, args.date)
+        if selected_date:
+            idx = _resolve_history_date(history_files, selected_date)
             if idx is None:
                 return 1
             current_date_index = idx
-        elif not args.no_restore and config.session.current_date:
+        elif not no_restore and config.session.current_date:
             try:
                 saved_date = datetime.strptime(
                     config.session.current_date, HISTORY_DATE_FORMAT
@@ -363,73 +399,13 @@ def _validate_interactive_tty() -> bool:
     return bool(sys.stdin.isatty() and sys.stdout.isatty())
 
 
-def main(
-    argv: list[str] | None = None,
-    *,
-    load_config_fn: Callable[[], UserConfig] = load_config,
-    discover_history_files_fn: Callable[[Path], list[tuple[date, Path]]] = discover_history_files,
-    resolve_papers_fn: Callable[
-        [argparse.Namespace, Path, UserConfig, list[tuple[date, Path]]],
-        ResolvePapersResult,
-    ] = _resolve_papers,
-    configure_logging_fn: Callable[[bool], None] = _configure_logging,
-    configure_color_mode_fn: Callable[[str], None] = _configure_color_mode,
-    validate_interactive_tty_fn: Callable[[], bool] = _validate_interactive_tty,
-    app_factory: Callable[..., Any] | None = None,
-) -> int:
-    """Main entry point. Returns exit code."""
-    parser = argparse.ArgumentParser(description="Browse arXiv papers from a text file in a TUI")
-    parser.add_argument(
-        "-i",
-        "--input",
-        type=Path,
-        default=None,
-        help="Input file containing arXiv metadata (overrides history mode)",
-    )
-    parser.add_argument(
-        "--no-restore",
-        action="store_true",
-        help="Start with fresh session (ignore saved scroll position, filters, etc.)",
-    )
-    parser.add_argument(
-        "--date",
-        type=str,
-        default=None,
-        help="Open specific date in YYYY-MM-DD format (history mode only)",
-    )
-    parser.add_argument(
-        "--list-dates",
-        action="store_true",
-        help="List available dates in history/ and exit",
-    )
-    parser.add_argument(
-        "--api-query",
-        type=str,
-        default=None,
-        help="Fetch startup papers from arXiv API using this query text",
-    )
-    parser.add_argument(
-        "--api-field",
-        choices=sorted(ARXIV_QUERY_FIELDS),
-        default="all",
-        help="Field for --api-query: all, title, author, abstract (default: all)",
-    )
-    parser.add_argument(
-        "--api-category",
-        type=str,
-        default=None,
-        help="Optional arXiv category filter for API mode (for example: cs.AI)",
-    )
-    parser.add_argument(
-        "--api-max-results",
-        type=int,
-        default=None,
-        help=(f"API request page size (1-{ARXIV_API_MAX_RESULTS_LIMIT}; default: config value)"),
-    )
-    parser.add_argument(
-        "--api-page-mode",
-        action="store_true",
-        help="Load a single API page (default mode loads the latest matching day)",
+def _build_cli_parser() -> argparse.ArgumentParser:
+    """Build the top-level subcommand parser."""
+    parser = argparse.ArgumentParser(
+        prog="arxiv-viewer",
+        description=CLI_ROOT_DESCRIPTION,
+        epilog=CLI_ROOT_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--debug",
@@ -452,17 +428,143 @@ def main(
         action="store_true",
         help="Use ASCII-only status icons for compatibility with limited terminals",
     )
-    args = parser.parse_args(argv)
-    api_mode = _api_mode_requested(args)
-    if api_mode and args.list_dates:
-        print(
-            "Error: --list-dates cannot be combined with --api-query/--api-category",
-            file=sys.stderr,
-        )
-        return 1
-    if api_mode and args.date:
-        print("Error: --date cannot be combined with --api-query/--api-category", file=sys.stderr)
-        return 1
+
+    subparsers = parser.add_subparsers(dest="command", metavar="command")
+
+    browse_parser = subparsers.add_parser(
+        "browse",
+        help="Open local history or a local paper file",
+        description="Browse local digest history or a specific input file.",
+    )
+    browse_parser.add_argument(
+        "-i",
+        "--input",
+        type=Path,
+        default=None,
+        help="Input file containing arXiv metadata (overrides history mode)",
+    )
+    browse_parser.add_argument(
+        "--no-restore",
+        action="store_true",
+        help="Start with fresh session (ignore saved scroll position, filters, etc.)",
+    )
+    browse_parser.add_argument(
+        "--date",
+        type=str,
+        default=None,
+        help="Open specific history date in YYYY-MM-DD format",
+    )
+
+    search_parser = subparsers.add_parser(
+        "search",
+        help="Fetch startup papers from the arXiv API",
+        description="Search arXiv online and open the results directly in the TUI.",
+    )
+    search_parser.add_argument(
+        "--query",
+        type=str,
+        default="",
+        help="Query text for the arXiv API search",
+    )
+    search_parser.add_argument(
+        "--field",
+        choices=sorted(ARXIV_QUERY_FIELDS),
+        default="all",
+        help="Field for --query: all, title, author, abstract (default: all)",
+    )
+    search_parser.add_argument(
+        "--category",
+        type=str,
+        default="",
+        help="Optional arXiv category filter (for example: cs.AI)",
+    )
+    search_parser.add_argument(
+        "--mode",
+        choices=["latest", "page"],
+        default="latest",
+        help="latest collects the newest matching day; page loads a single API page",
+    )
+    search_parser.add_argument(
+        "--max-results",
+        type=int,
+        default=None,
+        help=(f"API request page size (1-{ARXIV_API_MAX_RESULTS_LIMIT}; default: config value)"),
+    )
+
+    subparsers.add_parser(
+        "dates",
+        help="List available local history dates and exit",
+        description="Print the available YYYY-MM-DD history files and exit.",
+    )
+
+    completions_parser = subparsers.add_parser(
+        "completions",
+        help="Generate shell completion scripts",
+        description=(
+            "Print a shell completion script to stdout.\n\n"
+            'Usage: eval "$(arxiv-viewer completions bash)"'
+        ),
+    )
+    completions_parser.add_argument(
+        "shell",
+        choices=("bash", "zsh", "fish"),
+        help="Target shell (bash, zsh, or fish)",
+    )
+
+    return parser
+
+
+def _normalize_cli_argv(argv: list[str] | None) -> list[str]:
+    """Insert the browse subcommand for bare or browse-style invocations."""
+    args = list(sys.argv[1:] if argv is None else argv)
+    if not args:
+        return ["browse"]
+
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token in CLI_COMMANDS or token in {"-h", "--help"}:
+            return args
+        if token in _ROOT_FLAG_OPTIONS:
+            index += 1
+            continue
+        if token == "--color":
+            if index + 1 >= len(args):
+                return args
+            index += 2
+            continue
+        if token.startswith("--color="):
+            index += 1
+            continue
+        break
+
+    return [*args[:index], "browse", *args[index:]]
+
+
+def main(
+    argv: list[str] | None = None,
+    *,
+    load_config_fn: Callable[[], UserConfig] = load_config,
+    discover_history_files_fn: Callable[[Path], list[tuple[date, Path]]] = discover_history_files,
+    resolve_papers_fn: Callable[
+        [argparse.Namespace, Path, UserConfig, list[tuple[date, Path]]],
+        ResolvePapersResult,
+    ] = _resolve_papers,
+    configure_logging_fn: Callable[[bool], None] = _configure_logging,
+    configure_color_mode_fn: Callable[[str], None] = _configure_color_mode,
+    validate_interactive_tty_fn: Callable[[], bool] = _validate_interactive_tty,
+    app_factory: Callable[..., Any] | None = None,
+) -> int:
+    """Main entry point. Returns exit code."""
+    parser = _build_cli_parser()
+    args = parser.parse_args(_normalize_cli_argv(argv))
+
+    # Handle `completions` early (no config/history/TTY needed)
+    if getattr(args, "command", None) == "completions":
+        from arxiv_browser.completions import get_completion_script
+
+        print(get_completion_script(args.shell))
+        return 0
 
     color_mode = "never" if args.no_color else args.color
     configure_color_mode_fn(color_mode)
@@ -477,14 +579,17 @@ def main(
     # Discover history files
     history_files = discover_history_files_fn(base_dir)
 
-    # Handle --list-dates
-    if args.list_dates:
+    # Handle `dates`
+    if getattr(args, "command", None) == "dates":
         if not history_files:
             print(
                 build_actionable_error(
                     "list history dates",
                     why="no history files were found in history/",
-                    next_step="add history/YYYY-MM-DD.txt files or run --api-category cs.AI",
+                    next_step=(
+                        "add history/YYYY-MM-DD.txt files "
+                        'or run "arxiv-viewer search --category cs.AI"'
+                    ),
                 ),
                 file=sys.stderr,
             )
@@ -505,7 +610,7 @@ def main(
             build_actionable_error(
                 "start arxiv-viewer",
                 why="the selected source contained no papers",
-                next_step="choose another input/date or run --api-category cs.AI",
+                next_step='choose another input/date or run "arxiv-viewer search --category cs.AI"',
             ),
             file=sys.stderr,
         )
@@ -518,8 +623,11 @@ def main(
         )
         print("Next steps:", file=sys.stderr)
         print("  - Run arxiv-viewer directly in a terminal session", file=sys.stderr)
-        print("  - Use --list-dates for non-interactive output", file=sys.stderr)
-        print("  - Use --date YYYY-MM-DD in an interactive terminal", file=sys.stderr)
+        print("  - Use arxiv-viewer dates for non-interactive output", file=sys.stderr)
+        print(
+            "  - Use arxiv-viewer browse --date YYYY-MM-DD in an interactive terminal",
+            file=sys.stderr,
+        )
         print("  - Use --help for command documentation", file=sys.stderr)
         return 2
 
@@ -534,7 +642,9 @@ def main(
     app = app_factory(
         papers,
         config=config,
-        restore_session=not args.no_restore,
+        restore_session=False
+        if getattr(args, "command", None) == "search"
+        else not bool(getattr(args, "no_restore", False)),
         history_files=history_files,
         current_date_index=current_date_index,
         ascii_icons=args.ascii,
@@ -545,11 +655,14 @@ def main(
 
 __all__ = [
     "_api_mode_requested",
+    "_build_cli_parser",
     "_configure_color_mode",
     "_configure_logging",
     "_fetch_arxiv_api_papers",
     "_fetch_latest_arxiv_digest",
     "_find_history_index",
+    "_get_api_arg",
+    "_normalize_cli_argv",
     "_resolve_arxiv_api_mode",
     "_resolve_history_date",
     "_resolve_input_file",

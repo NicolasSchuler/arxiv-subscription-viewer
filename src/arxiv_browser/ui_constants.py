@@ -89,6 +89,11 @@ Header {
     border: tall $th-accent-alt;
 }
 
+#search-hint {
+    color: $th-muted;
+    padding: 0 1 1 1;
+}
+
 #paper-list > .option-list--option-highlighted {
     background: $th-highlight;
 }
@@ -118,6 +123,33 @@ VerticalScroll {
 }
 """
 
+# ---------------------------------------------------------------------------
+# Keybinding Tiers
+# ---------------------------------------------------------------------------
+# Bindings are categorised into three tiers so that new users see only the
+# essentials while power users can discover advanced shortcuts progressively.
+#
+# Core (~12 keys) - shown in the default footer.
+#   /  search          j/k  navigate       Space  select
+#   o  open            r    read           x      star
+#   E  export          s    sort           ?      help
+#   Ctrl+p  commands   q    quit           [/]    dates (history)
+#
+# Standard (~15-20 keys) - prominent in help overlay.
+#   a  select all      u  clear selection  n  notes       t  tags
+#   c  copy            d  download         P  PDF         p  preview
+#   v  detail mode     w  watch filter     W  watch list  A  API search
+#   1-9  bookmarks     Ctrl+b  add bookmark
+#
+# Power (remaining) - discoverable via command palette (Ctrl+p).
+#   m/'  marks          R  similar          G  citation graph
+#   V    versions       e  S2 fetch         Ctrl+s  AI summary
+#   C    chat           L  relevance        Ctrl+g  auto-tag
+#   Ctrl+t  theme       Ctrl+d  sections    Ctrl+k  collections
+#   Ctrl+h  HF toggle   Ctrl+e  S2 toggle   Ctrl+l  interests
+#   Ctrl+Shift+b  remove bookmark
+# ---------------------------------------------------------------------------
+
 APP_BINDINGS: list[BindingType] = [
     Binding("q", "quit", "Quit", show=False),
     Binding("slash", "toggle_search", "Search", show=False),
@@ -138,15 +170,15 @@ APP_BINDINGS: list[BindingType] = [
     Binding("u", "clear_selection", "Clear Selection", show=False),
     Binding("j", "cursor_down", "Down", show=False),
     Binding("k", "cursor_up", "Up", show=False),
-    # Phase 2: Read/Star status and Notes/Tags
+    # Paper management
     Binding("r", "toggle_read", "Read", show=False),
     Binding("x", "toggle_star", "Star", show=False),
     Binding("n", "edit_notes", "Notes", show=False),
     Binding("t", "edit_tags", "Tags", show=False),
-    # Phase 3: Watch list
+    # Watch list
     Binding("w", "toggle_watch_filter", "Watch", show=False),
     Binding("W", "manage_watch_list", "Watch List", show=False),
-    # Phase 4: Bookmarked search tabs
+    # Bookmarked search tabs
     Binding("1", "goto_bookmark(0)", "Bookmark 1", show=False),
     Binding("2", "goto_bookmark(1)", "Bookmark 2", show=False),
     Binding("3", "goto_bookmark(2)", "Bookmark 3", show=False),
@@ -158,15 +190,16 @@ APP_BINDINGS: list[BindingType] = [
     Binding("9", "goto_bookmark(8)", "Bookmark 9", show=False),
     Binding("ctrl+b", "add_bookmark", "Add Bookmark", show=False),
     Binding("ctrl+shift+b", "remove_bookmark", "Del Bookmark", show=False),
-    # Phase 5: Abstract preview
+    # Abstract preview
     Binding("p", "toggle_preview", "Preview", show=False),
-    # Phase 7: Vim-style marks
+    Binding("v", "toggle_detail_mode", "Detail Mode", show=False),
+    # Vim-style marks
     Binding("m", "start_mark", "Mark", show=False),
     Binding("apostrophe", "start_goto_mark", "Goto Mark", show=False),
-    # Phase 8: Export features (b/B/M accessible via E -> export menu)
+    # Export features (b/B/M accessible via E -> export menu)
     Binding("E", "export_menu", "Export...", show=False),
     Binding("d", "download_pdf", "Download", show=False),
-    # Phase 9: Paper similarity
+    # Paper similarity
     Binding("R", "show_similar", "Similar", show=False),
     # LLM summary & chat
     Binding("ctrl+s", "generate_summary", "AI Summary", show=False),

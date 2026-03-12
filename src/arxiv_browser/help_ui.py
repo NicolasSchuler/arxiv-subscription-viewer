@@ -9,53 +9,48 @@ from textual.binding import Binding
 
 HELP_SECTION_ACTIONS: list[tuple[str, list[str]]] = [
     (
-        "Navigation",
-        [
-            "cursor_down",
-            "cursor_up",
-            "prev_date",
-            "next_date",
-            "goto_bookmark",
-            "start_mark",
-            "start_goto_mark",
-        ],
-    ),
-    (
-        "Search & Filter",
+        "Core Actions",
         [
             "toggle_search",
-            "cancel_search",
-            "arxiv_search",
-            "ctrl_e_dispatch",
-            "toggle_watch_filter",
-            "manage_watch_list",
-            "add_bookmark",
-            "remove_bookmark",
-        ],
-    ),
-    (
-        "Selection & Core Actions",
-        [
+            "cursor_down",
+            "cursor_up",
             "toggle_select",
             "select_all",
             "clear_selection",
             "open_url",
             "open_pdf",
-            "copy_selected",
             "cycle_sort",
+            "copy_selected",
+            "export_menu",
+            "download_pdf",
+            "command_palette",
+            "show_help",
+        ],
+    ),
+    (
+        "Standard · Organize",
+        [
             "toggle_read",
             "toggle_star",
             "edit_notes",
             "edit_tags",
+            "toggle_watch_filter",
+            "manage_watch_list",
+            "goto_bookmark",
+            "add_bookmark",
+            "remove_bookmark",
+            "collections",
         ],
     ),
     (
-        "Research & AI",
+        "Power · Research Tools",
         [
+            "arxiv_search",
+            "ctrl_e_dispatch",
+            "fetch_s2",
             "show_similar",
             "citation_graph",
             "check_versions",
-            "fetch_s2",
             "toggle_hf",
             "generate_summary",
             "chat_with_paper",
@@ -65,16 +60,16 @@ HELP_SECTION_ACTIONS: list[tuple[str, list[str]]] = [
         ],
     ),
     (
-        "View & Utilities",
+        "Power · Advanced",
         [
+            "prev_date",
+            "next_date",
             "toggle_preview",
-            "export_menu",
-            "download_pdf",
-            "collections",
-            "command_palette",
+            "toggle_detail_mode",
             "cycle_theme",
             "toggle_sections",
-            "show_help",
+            "start_mark",
+            "start_goto_mark",
             "quit",
         ],
     ),
@@ -96,18 +91,20 @@ HELP_GETTING_STARTED: list[tuple[str, str]] = [
     ("j / k", "Move selection"),
     ("Space", "Select current paper"),
     ("o", "Open selected paper(s)"),
+    ("r / x", "Read or star the current paper"),
     ("E", "Export current or selected papers"),
-    ("Ctrl+p", "Open command palette"),
+    ("Ctrl+p", "Open commands"),
     ("[ / ]", "Change dates (history mode)"),
     ("?", "Show full shortcuts"),
 ]
 
 HELP_DESCRIPTION_OVERRIDES: dict[str, str] = {
     "ctrl_e_dispatch": "Toggle S2 (browse) / Exit API (API mode)",
-    "command_palette": "Command palette",
+    "command_palette": "Commands",
     "show_help": "Help overlay",
     "open_url": "Open in Browser",
     "open_pdf": "Open PDF",
+    "toggle_detail_mode": "Toggle detail density (scan/full)",
 }
 
 
@@ -160,12 +157,20 @@ def _binding_for_help_action(
 
 def build_help_sections(
     bindings: Sequence[Binding | tuple[Any, ...]],
+    *,
+    search_first: bool = False,
 ) -> list[tuple[str, list[tuple[str, str]]]]:
     """Build help sections from runtime key bindings."""
+    from arxiv_browser._ascii import is_ascii_mode
+
     sections: list[tuple[str, list[tuple[str, str]]]] = [
         ("Getting Started", list(HELP_GETTING_STARTED))
     ]
+    if search_first:
+        sections.append(("Search Syntax", HELP_SEARCH_SYNTAX))
     for section_name, actions in HELP_SECTION_ACTIONS:
+        # Replace middle-dot separator with ASCII dash when in ASCII mode
+        display_name = section_name.replace("\u00b7", "-") if is_ascii_mode() else section_name
         entries: list[tuple[str, str]] = []
         for action_name in actions:
             if action_name == "goto_bookmark":
@@ -177,9 +182,10 @@ def build_help_sections(
             key = _format_help_key(binding.key)
             description = HELP_DESCRIPTION_OVERRIDES.get(action_name, binding.description)
             entries.append((key, description))
-        sections.append((section_name, entries))
+        sections.append((display_name, entries))
 
-    sections.append(("Search Syntax", HELP_SEARCH_SYNTAX))
+    if not search_first:
+        sections.insert(1, ("Search Syntax", HELP_SEARCH_SYNTAX))
     return sections
 
 
