@@ -42,44 +42,48 @@ class HelpScreen(ModalScreen[None]):
 
     _DEFAULT_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         (
-            "Navigation",
+            "Getting Started",
             [
-                ("j / k", "Navigate down / up"),
-                ("[ / ]", "Previous / next date"),
-                ("1-9", "Jump to bookmark"),
-                ("m then a-z", "Set mark"),
-                ("' then a-z", "Jump to mark"),
+                ("/", "Search papers"),
+                ("A", "Search all arXiv"),
+                ("j / k", "Move selection"),
+                ("Space", "Select current paper"),
+                ("o", "Open selected paper(s)"),
+                ("Ctrl+p", "Open commands"),
+                ("?", "Show full shortcuts"),
             ],
         ),
         (
-            "Search & Filter",
+            "Search Syntax",
             [
-                ("/", "Toggle search"),
-                ("Esc", "Clear search / exit API"),
-                ("A", "Search all arXiv (API mode)"),
-                ("Ctrl+e", "Toggle S2 (browse) / Exit API (API mode)"),
-                ("w", "Toggle watch list filter"),
-                ("Ctrl+b", "Save search as bookmark"),
+                ("cat:cs.AI", "Category filter"),
+                ("author:hinton", "Author filter"),
+                ("unread / starred", "State filters"),
+                ("AND / OR / NOT", "Boolean operators"),
             ],
         ),
         (
-            "Selection",
+            "Core Actions",
             [
                 ("Space", "Toggle selection"),
                 ("a", "Select all visible"),
                 ("u", "Clear selection"),
+                ("o", "Open in Browser"),
+                ("P", "Open as PDF"),
+                ("E", "Export menu"),
+                ("d", "Download PDFs"),
+                ("v", "Toggle detail density (scan/full)"),
+                ("?", "Help overlay"),
             ],
         ),
         (
-            "Actions",
+            "Standard · Organize",
             [
-                ("o", "Open in Browser"),
-                ("P", "Open as PDF"),
+                ("r", "Toggle read"),
+                ("x", "Toggle star"),
                 ("n", "Edit notes"),
                 ("t", "Edit tags"),
-                ("E", "Export menu"),
-                ("d", "Download PDFs"),
-                ("?", "Help overlay"),
+                ("Ctrl+b", "Save search as bookmark"),
             ],
         ),
     ]
@@ -113,6 +117,14 @@ class HelpScreen(ModalScreen[None]):
         margin-bottom: 1;
     }
 
+    #help-filter {
+        margin-bottom: 1;
+    }
+
+    #help-sections {
+        height: auto;
+    }
+
     .help-section {
         margin-bottom: 1;
     }
@@ -127,6 +139,12 @@ class HelpScreen(ModalScreen[None]):
         color: $th-text;
     }
 
+    #help-no-matches {
+        text-align: center;
+        color: $th-muted;
+        margin: 2 0;
+    }
+
     #help-footer {
         text-align: center;
         color: $th-muted;
@@ -139,29 +157,95 @@ class HelpScreen(ModalScreen[None]):
         sections: list[tuple[str, list[tuple[str, str]]]] | None = None,
         footer_note: str = "Close: ? / Esc / q",
     ) -> None:
+        """Initialise the help screen with optional custom sections and footer."""
         super().__init__()
-        self._sections = sections or list(self._DEFAULT_SECTIONS)
+        raw = sections or list(self._DEFAULT_SECTIONS)
+        # Replace middle-dot separator with ASCII dash when in ASCII mode
+        from arxiv_browser._ascii import is_ascii_mode
+
+        if is_ascii_mode():
+            raw = [
+                (name.replace("\u00b7", "-"), entries) for name, entries in raw
+            ]
+        self._sections = raw
         self._footer_note = footer_note
 
     @staticmethod
     def _render_section_lines(entries: list[tuple[str, str]]) -> str:
+        """Render key-description pairs as theme-coloured markup lines."""
         green = THEME_COLORS["green"]
         lines = [f"  [{green}]{key}[/]  {description}" for key, description in entries]
         return "\n".join(lines)
 
+    def _filter_sections(
+        self, query: str
+    ) -> list[tuple[str, list[tuple[str, str]]]]:
+        """Return sections filtered to entries matching the query (case-insensitive)."""
+        if not query:
+            return self._sections
+        q = query.lower()
+        filtered: list[tuple[str, list[tuple[str, str]]]] = []
+        for section_name, entries in self._sections:
+            matching = [
+                (key, desc)
+                for key, desc in entries
+                if q in key.lower() or q in desc.lower()
+            ]
+            if matching:
+                filtered.append((section_name, matching))
+        return filtered
+
     def compose(self) -> ComposeResult:
+        """Yield a scrollable dialog with a filter input and categorised shortcut tables."""
         with VerticalScroll(id="help-dialog"):
             yield Label("Keyboard Shortcuts", id="help-title")
-            for section_name, entries in self._sections:
-                if not entries:
-                    continue
-                yield Label(
+            yield Input(
+                placeholder="Filter help... (type to search)",
+                id="help-filter",
+            )
+            yield Vertical(id="help-sections")
+            yield Label(self._footer_note, id="help-footer")
+
+    async def on_mount(self) -> None:
+        """Populate help sections and focus the filter input."""
+        await self._populate_sections("")
+        self.query_one("#help-filter", Input).focus()
+
+    @on(Input.Changed, "#help-filter")
+    async def _on_filter_changed(self, event: Input.Changed) -> None:
+        """Re-filter help sections when the filter input changes."""
+        await self._populate_sections(event.value.strip())
+
+    async def _populate_sections(self, query: str) -> None:
+        """Rebuild the help section widgets based on the current filter query."""
+        container = self.query_one("#help-sections", Vertical)
+        await container.remove_children()
+
+        filtered = self._filter_sections(query)
+
+        if not filtered and query:
+            safe = query.replace("[", "\\[")
+            await container.mount(
+                Static(
+                    f'[dim]No matches for [bold]"{safe}"[/bold][/]',
+                    id="help-no-matches",
+                )
+            )
+            return
+
+        widgets: list[Label | Static] = []
+        for section_name, entries in filtered:
+            widgets.append(
+                Label(
                     f"[{THEME_COLORS['accent']}]{section_name}[/]",
                     classes="help-section-title",
                 )
-                yield Static(self._render_section_lines(entries), classes="help-keys")
-
-            yield Label(self._footer_note, id="help-footer")
+            )
+            widgets.append(
+                Static(self._render_section_lines(entries), classes="help-keys")
+            )
+        if widgets:
+            await container.mount(*widgets)
 
     def action_dismiss(self) -> None:
         """Close the help screen."""
@@ -188,8 +272,7 @@ class ConfirmModal(ModalScreen[bool]):
     }
 
     #confirm-dialog {
-        width: 50%;
-        min-width: 40;
+        width: 52;
         height: auto;
         background: $th-background;
         border: tall $th-orange;
@@ -218,10 +301,12 @@ class ConfirmModal(ModalScreen[bool]):
     """
 
     def __init__(self, message: str) -> None:
+        """Initialise the confirmation modal with the given prompt message."""
         super().__init__()
         self._message = message
 
     def compose(self) -> ComposeResult:
+        """Yield the confirmation message, confirm/cancel buttons, and footer hint."""
         with Vertical(id="confirm-dialog"):
             yield Label(self._message, id="confirm-message")
             with Horizontal(id="confirm-buttons"):
@@ -230,17 +315,21 @@ class ConfirmModal(ModalScreen[bool]):
             yield Static("Confirm: y  Cancel: n / Esc", id="confirm-footer")
 
     def action_confirm(self) -> None:
+        """Dismiss the modal with a positive (True) result."""
         self.dismiss(True)
 
     def action_cancel(self) -> None:
+        """Dismiss the modal with a negative (False) result."""
         self.dismiss(False)
 
     @on(Button.Pressed, "#confirm-yes")
     def on_yes(self) -> None:
+        """Handle the Confirm button press by dismissing with True."""
         self.dismiss(True)
 
     @on(Button.Pressed, "#confirm-no")
     def on_no(self) -> None:
+        """Handle the Cancel button press by dismissing with False."""
         self.dismiss(False)
 
 
@@ -302,10 +391,12 @@ class ExportMenuModal(ModalScreen[str]):
     """
 
     def __init__(self, paper_count: int) -> None:
+        """Initialise the export menu with the number of selected papers."""
         super().__init__()
         self._paper_count = paper_count
 
     def compose(self) -> ComposeResult:
+        """Yield the export dialog with clipboard and file format options."""
         s = "s" if self._paper_count != 1 else ""
         with Vertical(id="export-dialog"):
             yield Label(
@@ -328,33 +419,43 @@ class ExportMenuModal(ModalScreen[str]):
             yield Static("[dim]Cancel: Esc/q[/dim]", id="export-footer")
 
     def action_cancel(self) -> None:
+        """Close the export menu without selecting a format."""
         self.dismiss("")
 
     def action_do_clipboard_plain(self) -> None:
+        """Export selected papers as plain text to the clipboard."""
         self.dismiss("clipboard-plain")
 
     def action_do_clipboard_bibtex(self) -> None:
+        """Export selected papers as BibTeX to the clipboard."""
         self.dismiss("clipboard-bibtex")
 
     def action_do_clipboard_markdown(self) -> None:
+        """Export selected papers as Markdown to the clipboard."""
         self.dismiss("clipboard-markdown")
 
     def action_do_clipboard_ris(self) -> None:
+        """Export selected papers as RIS to the clipboard."""
         self.dismiss("clipboard-ris")
 
     def action_do_clipboard_csv(self) -> None:
+        """Export selected papers as CSV to the clipboard."""
         self.dismiss("clipboard-csv")
 
     def action_do_clipboard_mdtable(self) -> None:
+        """Export selected papers as a Markdown table to the clipboard."""
         self.dismiss("clipboard-mdtable")
 
     def action_do_file_bibtex(self) -> None:
+        """Export selected papers to a BibTeX (.bib) file."""
         self.dismiss("file-bibtex")
 
     def action_do_file_ris(self) -> None:
+        """Export selected papers to a RIS (.ris) file."""
         self.dismiss("file-ris")
 
     def action_do_file_csv(self) -> None:
+        """Export selected papers to a CSV (.csv) file."""
         self.dismiss("file-csv")
 
 
@@ -367,6 +468,7 @@ class MetadataSnapshotItem(ListItem):
     """List item for a metadata snapshot import choice."""
 
     def __init__(self, snapshot_path: Path, *children, **kwargs) -> None:
+        """Initialise with the filesystem path to a metadata snapshot."""
         super().__init__(*children, **kwargs)
         self.snapshot_path = snapshot_path
 
@@ -386,9 +488,8 @@ class MetadataSnapshotPickerModal(ModalScreen[Path | None]):
     }
 
     #metadata-snapshot-dialog {
-        width: 76;
+        width: 52;
         height: 24;
-        min-width: 56;
         background: $th-background;
         border: tall $th-orange;
         padding: 0 2;
@@ -422,10 +523,12 @@ class MetadataSnapshotPickerModal(ModalScreen[Path | None]):
     """
 
     def __init__(self, snapshots: list[Path]) -> None:
+        """Initialise the picker with a list of available snapshot paths."""
         super().__init__()
         self._snapshots = list(snapshots)
 
     def compose(self) -> ComposeResult:
+        """Yield the snapshot list dialog with title, subtitle, and footer."""
         with Vertical(id="metadata-snapshot-dialog"):
             yield Label("Import Metadata Snapshot", id="metadata-snapshot-title")
             yield Static(
@@ -439,6 +542,7 @@ class MetadataSnapshotPickerModal(ModalScreen[Path | None]):
             )
 
     def on_mount(self) -> None:
+        """Populate the list view with snapshot entries and focus it."""
         list_view = self.query_one("#metadata-snapshot-list", ListView)
         list_view.clear()
         for snapshot in self._snapshots:
@@ -450,6 +554,7 @@ class MetadataSnapshotPickerModal(ModalScreen[Path | None]):
 
     @staticmethod
     def _format_snapshot_label(snapshot: Path) -> str:
+        """Format a snapshot filename with its last-modified timestamp."""
         try:
             modified = datetime.fromtimestamp(snapshot.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
         except OSError:
@@ -457,6 +562,7 @@ class MetadataSnapshotPickerModal(ModalScreen[Path | None]):
         return f"{snapshot.name}  [{THEME_COLORS['muted']}]modified {modified}[/]"
 
     def action_choose(self) -> None:
+        """Dismiss with the currently highlighted snapshot path."""
         list_view = self.query_one("#metadata-snapshot-list", ListView)
         if isinstance(list_view.highlighted_child, MetadataSnapshotItem):
             self.dismiss(list_view.highlighted_child.snapshot_path)
@@ -464,10 +570,12 @@ class MetadataSnapshotPickerModal(ModalScreen[Path | None]):
             self.dismiss(None)
 
     def action_cancel(self) -> None:
+        """Close the picker without selecting a snapshot."""
         self.dismiss(None)
 
     @on(ListView.Selected, "#metadata-snapshot-list")
     def on_list_selected(self, event: ListView.Selected) -> None:
+        """Handle list item selection by dismissing with the chosen snapshot."""
         if isinstance(event.item, MetadataSnapshotItem):
             self.dismiss(event.item.snapshot_path)
 
@@ -481,6 +589,7 @@ class WatchListItem(ListItem):
     """List item for watch list entries."""
 
     def __init__(self, entry: WatchListEntry, *children, **kwargs) -> None:
+        """Initialise with the associated watch list entry."""
         super().__init__(*children, **kwargs)
         self.entry = entry
 
@@ -499,9 +608,8 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
     }
 
     #watch-dialog {
-        width: 80%;
+        width: 70;
         height: 70%;
-        min-width: 60;
         min-height: 20;
         background: $th-background;
         border: tall $th-accent;
@@ -590,6 +698,7 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
     """
 
     def __init__(self, entries: list[WatchListEntry]) -> None:
+        """Initialise the modal with a defensive copy of watch list entries."""
         super().__init__()
         self._entries = [
             WatchListEntry(
@@ -601,6 +710,7 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
         ]
 
     def compose(self) -> ComposeResult:
+        """Yield the watch list view, entry form, and save/cancel buttons."""
         with Vertical(id="watch-dialog"):
             yield Label("Watch List Manager", id="watch-title")
             with Horizontal(id="watch-body"):
@@ -628,10 +738,12 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
                 yield Button("Save (Ctrl+S)", variant="primary", id="watch-save")
 
     def on_mount(self) -> None:
+        """Populate the list view and focus the pattern input on mount."""
         self._refresh_list()
         self.query_one("#watch-pattern", Input).focus()
 
     def _refresh_list(self) -> None:
+        """Rebuild the list view from the current entries and update the empty hint."""
         list_view = self.query_one("#watch-list", ListView)
         empty_hint = self.query_one("#watch-empty", Static)
         list_view.clear()
@@ -648,6 +760,7 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
             empty_hint.add_class("visible")
 
     def _populate_form(self, item: ListItem | None) -> None:
+        """Fill the pattern, match-type, and case-sensitivity fields from a list item."""
         if not isinstance(item, WatchListItem):
             return
         self.query_one("#watch-pattern", Input).value = item.entry.pattern
@@ -655,6 +768,7 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
         self.query_one("#watch-case", Checkbox).value = item.entry.case_sensitive
 
     def _build_entry_from_form(self) -> WatchListEntry | None:
+        """Read form fields and return a new WatchListEntry, or None if invalid."""
         pattern = self.query_one("#watch-pattern", Input).value.strip()
         match_value = self.query_one("#watch-type", Select).value
         match_type = match_value if isinstance(match_value, str) else "author"
@@ -671,17 +785,21 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
         )
 
     def action_save(self) -> None:
+        """Dismiss the modal and return the current list of entries."""
         self.dismiss(self._entries)
 
     def action_cancel(self) -> None:
+        """Dismiss the modal without saving changes."""
         self.dismiss(None)
 
     @on(ListView.Highlighted, "#watch-list")
     def on_list_highlighted(self, event: ListView.Highlighted) -> None:
+        """Sync the form fields when a different list entry is highlighted."""
         self._populate_form(event.item)
 
     @on(Button.Pressed, "#watch-add")
     def on_add_pressed(self) -> None:
+        """Create a new watch entry from the form and append it to the list."""
         entry = self._build_entry_from_form()
         if not entry:
             return
@@ -690,6 +808,7 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
 
     @on(Button.Pressed, "#watch-update")
     def on_update_pressed(self) -> None:
+        """Replace the highlighted watch entry with current form values."""
         list_view = self.query_one("#watch-list", ListView)
         if not isinstance(list_view.highlighted_child, WatchListItem):
             self.notify("Select a watch entry to update", title="Watch")
@@ -703,6 +822,7 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
 
     @on(Button.Pressed, "#watch-delete")
     def on_delete_pressed(self) -> None:
+        """Remove the highlighted watch entry from the list."""
         list_view = self.query_one("#watch-list", ListView)
         if not isinstance(list_view.highlighted_child, WatchListItem):
             self.notify("Select a watch entry to delete", title="Watch")
@@ -713,10 +833,12 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
 
     @on(Button.Pressed, "#watch-save")
     def on_save_pressed(self) -> None:
+        """Handle the Save button press by delegating to action_save."""
         self.action_save()
 
     @on(Button.Pressed, "#watch-cancel")
     def on_cancel_pressed(self) -> None:
+        """Handle the Cancel button press by delegating to action_cancel."""
         self.action_cancel()
 
 
@@ -785,10 +907,12 @@ class SectionToggleModal(ModalScreen[list[str] | None]):
     """
 
     def __init__(self, collapsed: list[str]) -> None:
+        """Initialise with the list of currently collapsed section keys."""
         super().__init__()
         self._collapsed: set[str] = set(collapsed)
 
     def compose(self) -> ComposeResult:
+        """Yield the section toggle list with expand/collapse indicators."""
         with Vertical(id="section-toggle-dialog"):
             yield Label("Detail Pane Sections", id="section-toggle-title")
             yield Static(
@@ -800,6 +924,7 @@ class SectionToggleModal(ModalScreen[list[str] | None]):
             )
 
     def _render_list(self) -> str:
+        """Render all section names with their current expanded/collapsed state."""
         g = THEME_COLORS["green"]
         lines = []
         for key, section in _SECTION_TOGGLE_KEYS.items():
@@ -810,6 +935,7 @@ class SectionToggleModal(ModalScreen[list[str] | None]):
         return "\n".join(lines)
 
     def _toggle(self, key: str) -> None:
+        """Toggle a section's collapsed state by hotkey and refresh the display."""
         section = _SECTION_TOGGLE_KEYS.get(key)
         if section is None:
             return
@@ -823,31 +949,41 @@ class SectionToggleModal(ModalScreen[list[str] | None]):
             pass
 
     def action_toggle_a(self) -> None:
+        """Toggle the authors section."""
         self._toggle("a")
 
     def action_toggle_b(self) -> None:
+        """Toggle the abstract section."""
         self._toggle("b")
 
     def action_toggle_t(self) -> None:
+        """Toggle the tags section."""
         self._toggle("t")
 
     def action_toggle_r(self) -> None:
+        """Toggle the relevance section."""
         self._toggle("r")
 
     def action_toggle_s(self) -> None:
+        """Toggle the summary section."""
         self._toggle("s")
 
     def action_toggle_e(self) -> None:
+        """Toggle the Semantic Scholar section."""
         self._toggle("e")
 
     def action_toggle_h(self) -> None:
+        """Toggle the Hugging Face section."""
         self._toggle("h")
 
     def action_toggle_v(self) -> None:
+        """Toggle the version section."""
         self._toggle("v")
 
     def action_save(self) -> None:
+        """Dismiss and return the sorted list of collapsed section keys."""
         self.dismiss(sorted(self._collapsed))
 
     def action_cancel(self) -> None:
+        """Dismiss without applying any changes."""
         self.dismiss(None)

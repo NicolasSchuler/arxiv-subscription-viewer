@@ -474,10 +474,12 @@ async def test_arxiv_search_modal_validation_and_submit(make_paper):
 
 @pytest.mark.asyncio
 async def test_command_palette_modal_filters_and_executes(make_paper):
+    from arxiv_browser.modals import PaletteCommand
+
     commands = [
-        ("Open Paper", "Open selected paper", "o", "open"),
-        ("Toggle Watch", "Toggle watch filter", "w", "watch"),
-        ("Export CSV", "Export list as CSV", "E", "csv"),
+        PaletteCommand("Open Paper", "Open selected paper", "o", "open", "Core"),
+        PaletteCommand("Toggle Watch", "Toggle watch filter", "w", "watch", "Organize"),
+        PaletteCommand("Export CSV", "Export list as CSV", "E", "csv", "Core"),
     ]
     app = ArxivBrowser([make_paper()], restore_session=False)
     modal = CommandPaletteModal(commands)
@@ -487,7 +489,8 @@ async def test_command_palette_modal_filters_and_executes(make_paper):
             await _open_modal(app, pilot, modal)
             results = modal.query_one("#palette-results")
             assert "Command palette" in str(modal.query_one(Label).content)
-            assert results.option_count == 3
+            assert results.option_count == 4
+            assert "All commands" in str(results.get_option_at_index(0).prompt)
             assert "Esc/q close" in str(modal.query_one("#palette-footer", Static).content)
 
             modal._populate_results("watch")
@@ -536,12 +539,14 @@ def test_read_only_modals_support_q_close_binding():
         assert "q" in binding_keys
 
 
-def test_help_screen_default_ctrl_e_copy():
+def test_help_screen_default_sections_reflect_simplified_shortcuts():
     from arxiv_browser.modals.common import HelpScreen
 
     entries = {(key, desc) for _, pairs in HelpScreen._DEFAULT_SECTIONS for key, desc in pairs}
-    assert ("Ctrl+e", "Toggle S2 (browse) / Exit API (API mode)") in entries
-    assert ("Esc", "Clear search / exit API") in entries
+    assert ("Ctrl+p", "Open commands") in entries
+    assert ("Ctrl+b", "Save search as bookmark") in entries
+    assert ("v", "Toggle detail density (scan/full)") in entries
+    assert ("cat:cs.AI", "Category filter") in entries
 
 
 def test_help_screen_default_footer_copy():
@@ -549,6 +554,65 @@ def test_help_screen_default_footer_copy():
 
     modal = HelpScreen()
     assert modal._footer_note == "Close: ? / Esc / q"
+
+
+def test_help_screen_filter_sections():
+    """_filter_sections returns only entries matching the query."""
+    from arxiv_browser.modals.common import HelpScreen
+
+    modal = HelpScreen()
+
+    # Empty query returns all sections unchanged
+    assert modal._filter_sections("") is modal._sections
+
+    # "search" matches entries in Getting Started and Search Syntax
+    filtered = modal._filter_sections("search")
+    all_entries = [(k, d) for _, entries in filtered for k, d in entries]
+    assert len(all_entries) > 0
+    for key, desc in all_entries:
+        assert "search" in key.lower() or "search" in desc.lower()
+
+    # Nonsense query returns empty
+    assert modal._filter_sections("xyzzyplugh") == []
+
+
+@pytest.mark.asyncio
+async def test_help_screen_has_filter_input_and_filters(make_paper):
+    """HelpScreen contains a filter Input and dynamically filters sections."""
+    from arxiv_browser.modals.common import HelpScreen
+
+    app = ArxivBrowser([make_paper()], restore_session=False)
+    modal = HelpScreen()
+
+    with patch("arxiv_browser.app.save_config", return_value=True):
+        async with app.run_test() as pilot:
+            await _open_modal(app, pilot, modal)
+
+            # Input widget is present with the expected placeholder
+            filter_input = modal.query_one("#help-filter", Input)
+            assert "Filter help" in filter_input.placeholder
+
+            # Initially all sections are shown
+            from textual.containers import Vertical
+
+            container = modal.query_one("#help-sections", Vertical)
+            section_titles = container.query(".help-section-title")
+            assert len(section_titles) == len(modal._sections)
+
+            # Type a filter that narrows results
+            filter_input.value = "bookmark"
+            await pilot.pause(0.1)
+            section_titles = container.query(".help-section-title")
+            assert len(section_titles) >= 1
+            keys_widgets = container.query(".help-keys")
+            for widget in keys_widgets:
+                assert "bookmark" in widget.render().plain.lower()
+
+            # Nonsense query shows "No matches" message
+            filter_input.value = "xyzzyplugh"
+            await pilot.pause(0.1)
+            no_match = container.query_one("#help-no-matches", Static)
+            assert "No matches" in no_match.render().plain
 
 
 @pytest.mark.asyncio
