@@ -464,7 +464,7 @@ def _on_interests_edited(app: "ArxivBrowser", interests: str | None) -> None:
     app._mark_badges_dirty("relevance", immediate=True)
     app._refresh_detail_pane()
     if interests:
-        app.notify("Research interests updated — press L to re-score", title="Relevance")
+        app.notify("Research interests updated -- press L to re-score", title="Relevance")
     else:
         app.notify("Research interests cleared", title="Relevance")
 

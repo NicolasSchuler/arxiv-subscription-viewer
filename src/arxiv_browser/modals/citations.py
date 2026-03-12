@@ -42,7 +42,7 @@ class RecommendationSourceModal(ModalScreen[str]):
     }
 
     #rec-source-dialog {
-        width: 50;
+        width: 52;
         height: auto;
         background: $th-background;
         border: tall $th-orange;
@@ -73,6 +73,7 @@ class RecommendationSourceModal(ModalScreen[str]):
     """
 
     def compose(self) -> ComposeResult:
+        """Yield title label, local/S2 choice buttons, and footer hint."""
         with Vertical(id="rec-source-dialog"):
             yield Label("Recommendation Source", id="rec-source-title")
             with Horizontal(id="rec-source-buttons"):
@@ -81,20 +82,25 @@ class RecommendationSourceModal(ModalScreen[str]):
             yield Static("Close: Esc/q", id="rec-source-footer")
 
     def action_cancel(self) -> None:
+        """Dismiss the modal without making a selection."""
         self.dismiss("")
 
     def action_local(self) -> None:
+        """Dismiss the modal with 'local' as the chosen source."""
         self.dismiss("local")
 
     def action_s2(self) -> None:
+        """Dismiss the modal with 's2' as the chosen source."""
         self.dismiss("s2")
 
     @on(Button.Pressed, "#local-btn")
     def on_local_pressed(self) -> None:
+        """Handle the Local (TF-IDF) button press."""
         self.action_local()
 
     @on(Button.Pressed, "#s2-btn")
     def on_s2_pressed(self) -> None:
+        """Handle the Semantic Scholar button press."""
         self.action_s2()
 
 
@@ -102,6 +108,7 @@ class RecommendationListItem(ListItem):
     """A list item for the recommendations screen that stores a paper reference."""
 
     def __init__(self, paper: Paper, *children, **kwargs) -> None:
+        """Initialize with an associated paper reference."""
         super().__init__(*children, **kwargs)
         self.paper = paper
 
@@ -124,7 +131,7 @@ class RecommendationsScreen(ModalScreen[str | None]):
 
     #recommendations-dialog {
         width: 80%;
-        height: 80%;
+        height: 85%;
         min-width: 60;
         min-height: 20;
         background: $th-background;
@@ -173,11 +180,13 @@ class RecommendationsScreen(ModalScreen[str | None]):
     """
 
     def __init__(self, target_paper: Paper, similar_papers: list[tuple[Paper, float]]) -> None:
+        """Initialize with the target paper and its ranked similar papers."""
         super().__init__()
         self._target_paper = target_paper
         self._similar_papers = similar_papers
 
     def compose(self) -> ComposeResult:
+        """Yield title label, scrollable paper list, and close/select buttons."""
         with Vertical(id="recommendations-dialog"):
             truncated_title = truncate_text(self._target_paper.title, RECOMMENDATION_TITLE_MAX_LEN)
             yield Label(f"Similar to: {truncated_title}", id="recommendations-title")
@@ -187,6 +196,7 @@ class RecommendationsScreen(ModalScreen[str | None]):
                 yield Button("Go to Paper (Enter)", variant="primary", id="select-btn")
 
     def on_mount(self) -> None:
+        """Populate the list view with similar papers and focus it."""
         list_view = self.query_one("#recommendations-list", ListView)
         for paper, score in self._similar_papers:
             safe_title = escape_rich_text(paper.title)
@@ -205,9 +215,11 @@ class RecommendationsScreen(ModalScreen[str | None]):
         list_view.focus()
 
     def action_cancel(self) -> None:
+        """Dismiss the modal without selecting a paper."""
         self.dismiss(None)
 
     def action_select(self) -> None:
+        """Dismiss with the highlighted paper's arxiv_id, or None if nothing is highlighted."""
         list_view = self.query_one("#recommendations-list", ListView)
         if isinstance(list_view.highlighted_child, RecommendationListItem):
             self.dismiss(list_view.highlighted_child.paper.arxiv_id)
@@ -215,21 +227,26 @@ class RecommendationsScreen(ModalScreen[str | None]):
             self.dismiss(None)
 
     def action_cursor_down(self) -> None:
+        """Move the highlight down in the recommendations list."""
         self.query_one("#recommendations-list", ListView).action_cursor_down()
 
     def action_cursor_up(self) -> None:
+        """Move the highlight up in the recommendations list."""
         self.query_one("#recommendations-list", ListView).action_cursor_up()
 
     @on(Button.Pressed, "#close-btn")
     def on_close_pressed(self) -> None:
+        """Handle the close button press."""
         self.action_cancel()
 
     @on(Button.Pressed, "#select-btn")
     def on_select_pressed(self) -> None:
+        """Handle the select button press."""
         self.action_select()
 
     @on(ListView.Selected)
     def on_list_selected(self, event: ListView.Selected) -> None:
+        """Handle list item selection by dismissing with the chosen paper's arxiv_id."""
         if isinstance(event.item, RecommendationListItem):
             self.dismiss(event.item.paper.arxiv_id)
 
@@ -249,6 +266,7 @@ class CitationGraphListItem(ListItem):
         is_local: bool = False,
         **kwargs,
     ) -> None:
+        """Initialize with a citation entry and whether it exists locally."""
         super().__init__(*children, **kwargs)
         self.entry = entry
         self.is_local = is_local
@@ -277,7 +295,7 @@ class CitationGraphScreen(ModalScreen[str | None]):
     }
 
     #citation-graph-dialog {
-        width: 85%;
+        width: 80%;
         height: 85%;
         min-width: 60;
         min-height: 20;
@@ -355,6 +373,7 @@ class CitationGraphScreen(ModalScreen[str | None]):
         fetch_callback: Callable,
         local_arxiv_ids: frozenset[str],
     ) -> None:
+        """Initialize with root paper data, fetch callback, and local arxiv IDs."""
         super().__init__()
         self._root_title = root_title
         self._root_paper_id = root_paper_id
@@ -371,6 +390,7 @@ class CitationGraphScreen(ModalScreen[str | None]):
         self._loading = False
 
     def compose(self) -> ComposeResult:
+        """Yield breadcrumb, side-by-side references/citations panels, status bar, and buttons."""
         with Vertical(id="citation-graph-dialog"):
             yield Static("", id="citation-graph-breadcrumb")
             with Horizontal(id="citation-graph-panels"):
@@ -386,6 +406,7 @@ class CitationGraphScreen(ModalScreen[str | None]):
                 yield Button("Drill Down (Enter)", variant="primary", id="cg-drill-btn")
 
     def on_mount(self) -> None:
+        """Populate both citation lists and focus the references panel."""
         self._populate_lists()
         self._update_breadcrumb()
         refs_list = self.query_one("#refs-list", ListView)
@@ -440,7 +461,10 @@ class CitationGraphScreen(ModalScreen[str | None]):
         """Update the breadcrumb trail."""
         parts = [truncate_text(t, 40) for _, t, _, _ in self._stack]
         parts.append(truncate_text(self._current_title, 40))
-        breadcrumb = " → ".join(
+        from arxiv_browser._ascii import is_ascii_mode
+
+        arrow = " -> " if is_ascii_mode() else " \u2192 "
+        breadcrumb = arrow.join(
             f"[{THEME_COLORS['purple']}]{escape_rich_text(p)}[/]" for p in parts
         )
         self.query_one("#citation-graph-breadcrumb", Static).update(f"Citation Graph: {breadcrumb}")
@@ -566,16 +590,20 @@ class CitationGraphScreen(ModalScreen[str | None]):
             self.dismiss(item.entry.arxiv_id)
 
     def action_cursor_down(self) -> None:
+        """Move the highlight down in the active panel's list."""
         self._get_active_list().action_cursor_down()
 
     def action_cursor_up(self) -> None:
+        """Move the highlight up in the active panel's list."""
         self._get_active_list().action_cursor_up()
 
     @on(Button.Pressed, "#cg-close-btn")
     def on_close_pressed(self) -> None:
+        """Handle the close button press by navigating back or closing."""
         self.action_back_or_close()
 
     @on(Button.Pressed, "#cg-drill-btn")
     def on_drill_pressed(self) -> None:
+        """Handle the drill-down button press by invoking the async drill-down action."""
         # Button click needs to invoke the async action; use app's tracked task
         self.app._track_task(self.action_drill_down())  # type: ignore[attr-defined]

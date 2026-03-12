@@ -21,6 +21,7 @@ DATE_NAV_WINDOW_SIZE = 5
 DATE_NAV_ARROW_WIDTH = 3
 DATE_NAV_ITEM_PADDING = 2
 DATE_NAV_CONTAINER_PADDING = 2
+DATE_NAV_LABEL_WIDTH = 9
 DATE_NAV_LABEL_WITH_COUNTS = "with_counts"
 DATE_NAV_LABEL_MONTH_DAY = "month_day"
 DATE_NAV_LABEL_NUMERIC = "numeric"
@@ -32,9 +33,13 @@ DATE_NAV_LABEL_MODES: tuple[str, ...] = (
 _CHROME_GLYPH_SETS: dict[str, dict[str, str]] = {
     "unicode": {
         "pill_remove": "\u00d7",  # multiplication sign
+        "footer_arrows": "\u2191\u2193",  # ↑↓
+        "separator": "\u2502",  # │
     },
     "ascii": {
         "pill_remove": "x",
+        "footer_arrows": "^v",
+        "separator": "|",
     },
 }
 _ACTIVE_CHROME_GLYPHS = _CHROME_GLYPH_SETS["unicode"]
@@ -50,12 +55,11 @@ _SELECTION_FOOTER_BINDINGS: tuple[tuple[str, str], ...] = (
     ("?", "help"),
 )
 
-_SEARCH_FOOTER_BINDINGS: tuple[tuple[str, str], ...] = (
+_SEARCH_FOOTER_BINDINGS_BASE: tuple[tuple[str, str], ...] = (
     ("type to search", ""),
     ("Enter", "apply"),
-    ("Esc", "clear"),
-    ("↑↓", "move"),
-    ("?", "help"),
+    ("Esc", "close"),
+    # Arrow hint is inserted dynamically via build_search_footer_bindings()
 )
 
 _API_FOOTER_BINDINGS: tuple[tuple[str, str], ...] = (
@@ -82,7 +86,10 @@ def build_selection_footer_base_bindings() -> list[tuple[str, str]]:
 
 def build_search_footer_bindings() -> list[tuple[str, str]]:
     """Return canonical search-mode footer hints."""
-    return list(_SEARCH_FOOTER_BINDINGS)
+    bindings = list(_SEARCH_FOOTER_BINDINGS_BASE)
+    bindings.append((_ACTIVE_CHROME_GLYPHS["footer_arrows"], "move"))
+    bindings.append(("?", "help"))
+    return bindings
 
 
 def build_api_footer_bindings() -> list[tuple[str, str]]:
@@ -107,17 +114,16 @@ def build_browse_footer_bindings(
 ) -> list[tuple[str, str]]:
     """Build a capped default browsing footer with deterministic priority."""
     _ = (s2_active, has_starred, llm_configured)
-    slot_a = ("[/]", "history") if has_history_navigation else ("n", "notes")
+    slot_a = ("[/]", "dates") if has_history_navigation else ("x", "star")
     return [
         ("/", "search"),
-        ("A", "arxiv"),
+        ("Space", "select"),
         ("o", "open"),
         ("s", "sort"),
         ("r", "read"),
-        ("x", "star"),
         slot_a,
         ("E", "export"),
-        ("Ctrl+p", "palette"),
+        ("Ctrl+p", "commands"),
         ("?", "help"),
     ]
 
@@ -164,9 +170,11 @@ def build_status_bar_text(
     s2_active: bool,
     s2_loading: bool,
     s2_count: int,
+    s2_api_error: bool = False,
     hf_active: bool,
     hf_loading: bool,
     hf_match_count: int,
+    hf_api_error: bool = False,
     version_checking: bool,
     version_update_count: int,
     max_width: int | None = None,
@@ -187,9 +195,11 @@ def build_status_bar_text(
             s2_active=s2_active,
             s2_loading=s2_loading,
             s2_count=s2_count,
+            s2_api_error=s2_api_error,
             hf_active=hf_active,
             hf_loading=hf_loading,
             hf_match_count=hf_match_count,
+            hf_api_error=hf_api_error,
             version_checking=version_checking,
             version_update_count=version_update_count,
             max_width=max_width,
@@ -210,13 +220,16 @@ def build_status_bar_text(
         s2_active=s2_active,
         s2_loading=s2_loading,
         s2_count=s2_count,
+        s2_api_error=s2_api_error,
         hf_active=hf_active,
         hf_loading=hf_loading,
         hf_match_count=hf_match_count,
+        hf_api_error=hf_api_error,
         version_checking=version_checking,
         version_update_count=version_update_count,
     )
-    rendered = " [dim]│[/] ".join(parts)
+    sep = _ACTIVE_CHROME_GLYPHS["separator"]
+    rendered = f" [dim]{sep}[/] ".join(parts)
     return _truncate_rich_text(rendered, max_width)
 
 
@@ -247,10 +260,14 @@ def _full_primary_segment(
     return f"[dim]{total} papers[/]"
 
 
-def _compact_flag_segment(*, active: bool, loading: bool, count: int, label: str) -> str | None:
+def _compact_flag_segment(
+    *, active: bool, loading: bool, count: int, label: str, api_error: bool = False
+) -> str | None:
     """Return compact flag text like S2/HF status, or None when inactive."""
     if not active:
         return None
+    if api_error:
+        return f"{label}:err"
     if loading:
         return f"{label} Loading..."
     if count > 0:
@@ -259,11 +276,19 @@ def _compact_flag_segment(*, active: bool, loading: bool, count: int, label: str
 
 
 def _full_flag_segment(
-    *, active: bool, loading: bool, count: int, label: str, color: str
+    *,
+    active: bool,
+    loading: bool,
+    count: int,
+    label: str,
+    color: str,
+    api_error: bool = False,
 ) -> str | None:
     """Return rich-markup status text for S2/HF style toggles."""
     if not active:
         return None
+    if api_error:
+        return f"[{THEME_COLORS['orange']}]{label}:err[/]"
     if loading:
         return f"[{color}]{label} loading...[/]"
     if count > 0:
@@ -286,9 +311,11 @@ def _build_compact_status_parts(
     s2_active: bool,
     s2_loading: bool,
     s2_count: int,
+    s2_api_error: bool = False,
     hf_active: bool,
     hf_loading: bool,
     hf_match_count: int,
+    hf_api_error: bool = False,
     version_checking: bool,
     version_update_count: int,
     max_width: int,
@@ -316,14 +343,22 @@ def _build_compact_status_parts(
     parts.append(f"sort:{sort_label}")
 
     s2_segment = _compact_flag_segment(
-        active=s2_active, loading=s2_loading, count=s2_count, label="S2"
+        active=s2_active,
+        loading=s2_loading,
+        count=s2_count,
+        label="S2",
+        api_error=s2_api_error,
     )
     if s2_segment:
         parts.append(s2_segment)
 
     if max_width >= 90:
         hf_segment = _compact_flag_segment(
-            active=hf_active, loading=hf_loading, count=hf_match_count, label="HF"
+            active=hf_active,
+            loading=hf_loading,
+            count=hf_match_count,
+            label="HF",
+            api_error=hf_api_error,
         )
         if hf_segment:
             parts.append(hf_segment)
@@ -349,9 +384,11 @@ def _build_full_status_parts(
     s2_active: bool,
     s2_loading: bool,
     s2_count: int,
+    s2_api_error: bool = False,
     hf_active: bool,
     hf_loading: bool,
     hf_match_count: int,
+    hf_api_error: bool = False,
     version_checking: bool,
     version_update_count: int,
 ) -> list[str]:
@@ -385,6 +422,7 @@ def _build_full_status_parts(
         count=s2_count,
         label="S2",
         color=THEME_COLORS["green"],
+        api_error=s2_api_error,
     )
     if s2_segment:
         parts.append(s2_segment)
@@ -395,6 +433,7 @@ def _build_full_status_parts(
         count=hf_match_count,
         label="HF",
         color=THEME_COLORS["orange"],
+        api_error=hf_api_error,
     )
     if hf_segment:
         parts.append(hf_segment)
@@ -540,6 +579,7 @@ class DateNavigator(Horizontal):
         """Request to navigate by direction (+1 = older, -1 = newer)."""
 
         def __init__(self, direction: int) -> None:
+            """Initialize with a navigation direction (+1 older, -1 newer)."""
             super().__init__()
             self.direction = direction
 
@@ -547,6 +587,7 @@ class DateNavigator(Horizontal):
         """Request to jump to a specific date index."""
 
         def __init__(self, index: int) -> None:
+            """Initialize with the target date index to jump to."""
             super().__init__()
             self.index = index
 
@@ -560,6 +601,12 @@ class DateNavigator(Horizontal):
 
     DateNavigator.visible {
         display: block;
+    }
+
+    DateNavigator .chrome-label {
+        padding-right: 1;
+        color: $th-muted;
+        text-style: bold;
     }
 
     DateNavigator .date-nav-arrow {
@@ -591,16 +638,20 @@ class DateNavigator(Horizontal):
         history_files: list[tuple[date, Path]],
         current_index: int = 0,
     ) -> None:
+        """Initialize the date navigator with history files and selected index."""
         super().__init__()
         self._history_files = history_files
         self._current_index = current_index
         self._paper_counts: dict[Path, int] = {}
 
     def compose(self) -> ComposeResult:
+        """Compose the static label and navigation arrow widgets."""
+        yield Label("History", classes="chrome-label", id="date-nav-label")
         yield Label("<", classes="date-nav-arrow", id="date-nav-prev")
         yield Label(">", classes="date-nav-arrow", id="date-nav-next")
 
     def _get_paper_count(self, index: int) -> int:
+        """Return the cached paper count for the history file at index."""
         _, path = self._history_files[index]
         if path not in self._paper_counts:
             self._paper_counts[path] = count_papers_in_file(path)
@@ -714,7 +765,7 @@ class DateNavigator(Horizontal):
         start, end, label_mode = _compute_responsive_date_plan(
             history_files,
             current_index,
-            width,
+            max(0, width - DATE_NAV_LABEL_WIDTH),
             self._get_paper_count,
         )
         desired = self._build_desired_items(
@@ -763,6 +814,17 @@ class BookmarkTabBar(Horizontal):
         padding: 0 1;
         background: $th-panel;
         border-bottom: solid $th-panel-alt;
+        display: none;
+    }
+
+    BookmarkTabBar.visible {
+        display: block;
+    }
+
+    BookmarkTabBar .chrome-label {
+        padding-right: 1;
+        color: $th-muted;
+        text-style: bold;
     }
 
     BookmarkTabBar .bookmark-tab {
@@ -786,32 +848,66 @@ class BookmarkTabBar(Horizontal):
     }
 
     BookmarkTabBar .bookmark-add:hover {
-        color: $th-green;
+        color: $th-text;
+    }
+
+    BookmarkTabBar .bookmark-hint {
+        color: $th-muted;
+        padding: 0 1;
     }
     """
 
-    def __init__(self, bookmarks: list[SearchBookmark], active_index: int = -1) -> None:
+    def __init__(
+        self,
+        bookmarks: list[SearchBookmark],
+        active_index: int = -1,
+        active_search: bool = False,
+    ) -> None:
+        """Initialize the bookmark bar with bookmarks and active state."""
         super().__init__()
         self._bookmarks = bookmarks
         self._active_index = active_index
+        self._active_search = active_search
+        if bookmarks or active_search:
+            self.add_class("visible")
 
     def compose(self) -> ComposeResult:
-        for i, bookmark in enumerate(self._bookmarks[:9]):  # Max 9 bookmarks
-            classes = "bookmark-tab active" if i == self._active_index else "bookmark-tab"
-            yield Label(f"{i + 1}: {bookmark.name}", classes=classes, id=f"bookmark-{i}")
-        yield Label("[+]", classes="bookmark-add", id="bookmark-add")
+        """Compose the bookmark label, numbered tabs, and save hint."""
+        yield Label("Saved searches", classes="chrome-label", id="bookmark-label")
+        if self._bookmarks:
+            for i, bookmark in enumerate(self._bookmarks[:9]):  # Max 9 bookmarks
+                classes = "bookmark-tab active" if i == self._active_index else "bookmark-tab"
+                yield Label(f"{i + 1}: {bookmark.name}", classes=classes, id=f"bookmark-{i}")
+            yield Label("Ctrl+b save", classes="bookmark-add", id="bookmark-add")
+        elif self._active_search:
+            yield Label("Ctrl+b save current search", classes="bookmark-hint", id="bookmark-hint")
 
     async def update_bookmarks(
-        self, bookmarks: list[SearchBookmark], active_index: int = -1
+        self,
+        bookmarks: list[SearchBookmark],
+        active_index: int = -1,
+        active_search: bool = False,
     ) -> None:
         """Update the displayed bookmarks."""
         self._bookmarks = bookmarks
         self._active_index = active_index
+        self._active_search = active_search
         await self.remove_children()
-        for i, bookmark in enumerate(bookmarks[:9]):
-            classes = "bookmark-tab active" if i == self._active_index else "bookmark-tab"
-            self.mount(Label(f"{i + 1}: {bookmark.name}", classes=classes, id=f"bookmark-{i}"))
-        self.mount(Label("[+]", classes="bookmark-add", id="bookmark-add"))
+        if bookmarks or active_search:
+            self.add_class("visible")
+        else:
+            self.remove_class("visible")
+            return
+        self.mount(Label("Saved searches", classes="chrome-label", id="bookmark-label"))
+        if bookmarks:
+            for i, bookmark in enumerate(bookmarks[:9]):
+                classes = "bookmark-tab active" if i == self._active_index else "bookmark-tab"
+                self.mount(Label(f"{i + 1}: {bookmark.name}", classes=classes, id=f"bookmark-{i}"))
+            self.mount(Label("Ctrl+b save", classes="bookmark-add", id="bookmark-add"))
+        else:
+            self.mount(
+                Label("Ctrl+b save current search", classes="bookmark-hint", id="bookmark-hint")
+            )
 
 
 class FilterPillBar(Horizontal):
@@ -827,6 +923,12 @@ class FilterPillBar(Horizontal):
 
     FilterPillBar.visible {
         display: block;
+    }
+
+    FilterPillBar .chrome-label {
+        padding-right: 1;
+        color: $th-muted;
+        text-style: bold;
     }
 
     FilterPillBar .filter-pill {
@@ -856,11 +958,16 @@ class FilterPillBar(Horizontal):
         """Message sent when a filter pill is clicked to remove it."""
 
         def __init__(self, token_index: int) -> None:
+            """Initialize with the query token index to remove."""
             super().__init__()
             self.token_index = token_index
 
     class RemoveWatchFilter(Message):
         """Message sent when the watch filter pill is clicked to remove it."""
+
+    def compose(self) -> ComposeResult:
+        """Compose the filter label prefix widget."""
+        yield Label("Filters", classes="chrome-label", id="filter-pill-prefix")
 
     async def update_pills(self, tokens: list[QueryToken], watch_active: bool) -> None:
         """Update the displayed filter pills."""
@@ -896,7 +1003,8 @@ class FilterPillBar(Horizontal):
                     child.remove_class("filter-pill-watch")
                     child.add_class("filter-pill")
         else:
-            await self.remove_children()
+            for child in existing_items:
+                await child.remove()
             for item_id, text, class_name in desired:
                 self.mount(Label(text, classes=class_name, id=item_id))
 

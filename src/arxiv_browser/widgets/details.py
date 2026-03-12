@@ -13,6 +13,7 @@ from arxiv_browser.query import (
     format_categories,
     format_summary_as_rich,
     highlight_text,
+    truncate_at_word_boundary,
 )
 from arxiv_browser.semantic_scholar import SemanticScholarPaper
 from arxiv_browser.themes import THEME_COLORS, get_tag_color, parse_tag_namespace
@@ -20,6 +21,8 @@ from arxiv_browser.widgets.listing import _relevance_badge_parts
 
 # Maximum number of cached detail pane renderings (FIFO eviction)
 DETAIL_CACHE_MAX = 100
+DETAIL_SCAN_ABSTRACT_LEN = 420
+DETAIL_SCAN_AUTHORS_LEN = 120
 
 _DETAIL_GLYPH_SETS: dict[str, dict[str, str]] = {
     "unicode": {
@@ -76,6 +79,7 @@ def _detail_cache_key(
     tags: list[str] | None = None,
     relevance: tuple[int, str] | None = None,
     collapsed_sections: list[str] | None = None,
+    detail_mode: str = "full",
 ) -> tuple:
     """Build a stable cache key for rendered detail markup."""
     # Convert mutable/unhashable structures to tuples.
@@ -126,15 +130,22 @@ def _detail_cache_key(
         tuple(tags) if tags else (),
         relevance,
         tuple(collapsed_sections) if collapsed_sections else (),
+        detail_mode,
         tuple(sorted(THEME_COLORS.items())),
         _ACTIVE_DETAIL_GLYPH_MODE,
     )
+
+
+def _truncate_detail_text(text: str, max_len: int) -> str:
+    """Shorten plain text for scan mode at a word boundary."""
+    return truncate_at_word_boundary(text, max_len, ascii_mode=_ACTIVE_DETAIL_GLYPH_MODE == "ascii")
 
 
 class PaperDetails(Static):
     """Widget to display full paper details."""
 
     def __init__(self) -> None:
+        """Initialise the detail pane with an empty markup cache."""
         super().__init__()
         self._paper: Paper | None = None
         self._detail_cache: dict[tuple, str] = {}
@@ -155,6 +166,7 @@ class PaperDetails(Static):
         tags: list[str] | None = None,
         relevance: tuple[int, str] | None = None,
         collapsed_sections: list[str] | None = None,
+        detail_mode: str = "full",
     ) -> None:
         """Update the displayed paper details."""
         self._paper = paper
@@ -182,6 +194,7 @@ class PaperDetails(Static):
             tags=tags,
             relevance=relevance,
             collapsed_sections=collapsed_sections,
+            detail_mode=detail_mode,
         )
         cached = self._detail_cache.get(cache_key)
         if cached is not None:
@@ -193,8 +206,14 @@ class PaperDetails(Static):
         sections = [
             self._render_title(paper),
             self._render_metadata(paper),
-            self._render_abstract(abstract_text, loading, highlight_terms, "abstract" in collapsed),
-            self._render_authors(paper, "authors" in collapsed),
+            self._render_abstract(
+                abstract_text,
+                loading,
+                highlight_terms,
+                "abstract" in collapsed,
+                detail_mode,
+            ),
+            self._render_authors(paper, "authors" in collapsed, detail_mode),
             self._render_tags(tags, "tags" in collapsed),
             self._render_relevance(relevance, "relevance" in collapsed),
             self._render_summary(summary, summary_loading, summary_mode, "summary" in collapsed),
@@ -214,11 +233,19 @@ class PaperDetails(Static):
 
         self.update(markup)
 
+    # -- Section renderers ------------------------------------------------
+    # Each _render_* method returns a Rich markup string for one detail pane
+    # section, or "" when the section should be hidden.  The update_paper()
+    # orchestrator joins non-empty results with newlines.
+    # ----------------------------------------------------------------------
+
     def _render_title(self, paper: Paper) -> str:
+        """Return Rich markup for the paper title."""
         safe_title = escape_rich_text(paper.title)
         return f"[bold {THEME_COLORS['text']}]{safe_title}[/]"
 
     def _render_metadata(self, paper: Paper) -> str:
+        """Return Rich markup for arXiv ID, date, categories, and comments."""
         safe_date = escape_rich_text(paper.date)
         safe_comments = escape_rich_text(paper.comments or "")
         lines = [
@@ -236,15 +263,27 @@ class PaperDetails(Static):
         loading: bool,
         highlight_terms: list[str] | None,
         is_collapsed: bool,
+        detail_mode: str,
     ) -> str:
+        """Return Rich markup for the abstract section with optional highlighting."""
         collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
         expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
         if is_collapsed:
             return f"[dim]{collapsed_glyph} Abstract[/]"
         if highlight_terms:
-            safe_abstract = highlight_text(abstract_text, highlight_terms, THEME_COLORS["accent"])
+            abstract_body = (
+                _truncate_detail_text(abstract_text, DETAIL_SCAN_ABSTRACT_LEN)
+                if detail_mode == "scan"
+                else abstract_text
+            )
+            safe_abstract = highlight_text(abstract_body, highlight_terms, THEME_COLORS["accent"])
         else:
-            safe_abstract = escape_rich_text(abstract_text)
+            abstract_body = (
+                _truncate_detail_text(abstract_text, DETAIL_SCAN_ABSTRACT_LEN)
+                if detail_mode == "scan"
+                else abstract_text
+            )
+            safe_abstract = escape_rich_text(abstract_body)
         lines = [f"[bold {THEME_COLORS['orange']}]{expanded_glyph} Abstract[/]"]
         if loading:
             lines.append("  [dim italic]Loading abstract...[/]")
@@ -254,18 +293,25 @@ class PaperDetails(Static):
             lines.append("  [dim italic]No abstract available[/]")
         return "\n".join(lines)
 
-    def _render_authors(self, paper: Paper, is_collapsed: bool) -> str:
+    def _render_authors(self, paper: Paper, is_collapsed: bool, detail_mode: str) -> str:
+        """Return Rich markup for the authors section."""
         collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
         expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
         if is_collapsed:
             return f"[dim]{collapsed_glyph} Authors[/]"
-        safe_authors = escape_rich_text(paper.authors)
+        authors_text = (
+            _truncate_detail_text(paper.authors, DETAIL_SCAN_AUTHORS_LEN)
+            if detail_mode == "scan"
+            else paper.authors
+        )
+        safe_authors = escape_rich_text(authors_text)
         return (
             f"[bold {THEME_COLORS['green']}]{expanded_glyph} Authors[/]\n"
             f"  [{THEME_COLORS['text']}]{safe_authors}[/]"
         )
 
     def _render_tags(self, tags: list[str] | None, is_collapsed: bool) -> str:
+        """Return Rich markup for user-assigned tags grouped by namespace."""
         collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
         expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
         if not tags:
@@ -293,6 +339,7 @@ class PaperDetails(Static):
         return "\n".join(lines)
 
     def _render_relevance(self, relevance: tuple[int, str] | None, is_collapsed: bool) -> str:
+        """Return Rich markup for the relevance score and reason."""
         if relevance is None:
             return ""
         rel_score, rel_reason = relevance
@@ -318,6 +365,7 @@ class PaperDetails(Static):
         summary_mode: str,
         is_collapsed: bool,
     ) -> str:
+        """Return Rich markup for the AI-generated summary section."""
         summary_header = "AI Summary"
         if summary_mode:
             summary_header += f" ({summary_mode})"
@@ -349,6 +397,7 @@ class PaperDetails(Static):
         s2_loading: bool,
         is_collapsed: bool,
     ) -> str:
+        """Return Rich markup for the Semantic Scholar data section."""
         if not s2_loading and not s2_data:
             return ""
         collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
@@ -383,6 +432,7 @@ class PaperDetails(Static):
         return ""
 
     def _render_hf(self, hf_data: HuggingFacePaper | None, is_collapsed: bool) -> str:
+        """Return Rich markup for the HuggingFace metadata section."""
         if not hf_data:
             return ""
         collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
@@ -415,6 +465,7 @@ class PaperDetails(Static):
         version_update: tuple[int, int] | None,
         is_collapsed: bool,
     ) -> str:
+        """Return Rich markup for the version update section."""
         if version_update is None:
             return ""
         old_v, new_v = version_update
@@ -430,6 +481,7 @@ class PaperDetails(Static):
         )
 
     def _render_url(self, paper: Paper) -> str:
+        """Return Rich markup for the paper URL footer."""
         safe_url = escape_rich_text(paper.url)
         return f"[bold {THEME_COLORS['pink']}]URL[/]\n  [{THEME_COLORS['accent']}]{safe_url}[/]"
 
@@ -440,6 +492,7 @@ class PaperDetails(Static):
 
     @property
     def paper(self) -> Paper | None:
+        """Return the currently displayed paper, if any."""
         return self._paper
 
 

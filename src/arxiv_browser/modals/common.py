@@ -164,9 +164,7 @@ class HelpScreen(ModalScreen[None]):
         from arxiv_browser._ascii import is_ascii_mode
 
         if is_ascii_mode():
-            raw = [
-                (name.replace("\u00b7", "-"), entries) for name, entries in raw
-            ]
+            raw = [(name.replace("\u00b7", "-"), entries) for name, entries in raw]
         self._sections = raw
         self._footer_note = footer_note
 
@@ -177,9 +175,7 @@ class HelpScreen(ModalScreen[None]):
         lines = [f"  [{green}]{key}[/]  {description}" for key, description in entries]
         return "\n".join(lines)
 
-    def _filter_sections(
-        self, query: str
-    ) -> list[tuple[str, list[tuple[str, str]]]]:
+    def _filter_sections(self, query: str) -> list[tuple[str, list[tuple[str, str]]]]:
         """Return sections filtered to entries matching the query (case-insensitive)."""
         if not query:
             return self._sections
@@ -187,9 +183,7 @@ class HelpScreen(ModalScreen[None]):
         filtered: list[tuple[str, list[tuple[str, str]]]] = []
         for section_name, entries in self._sections:
             matching = [
-                (key, desc)
-                for key, desc in entries
-                if q in key.lower() or q in desc.lower()
+                (key, desc) for key, desc in entries if q in key.lower() or q in desc.lower()
             ]
             if matching:
                 filtered.append((section_name, matching))
@@ -241,9 +235,7 @@ class HelpScreen(ModalScreen[None]):
                     classes="help-section-title",
                 )
             )
-            widgets.append(
-                Static(self._render_section_lines(entries), classes="help-keys")
-            )
+            widgets.append(Static(self._render_section_lines(entries), classes="help-keys"))
         if widgets:
             await container.mount(*widgets)
 

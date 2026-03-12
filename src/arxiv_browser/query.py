@@ -51,17 +51,52 @@ def truncate_text(text: str, max_len: int, suffix: str = "...") -> str:
     return text[:max_len] + suffix
 
 
+def truncate_at_word_boundary(text: str, max_length: int, *, ascii_mode: bool = False) -> str:
+    """Truncate *text* at a word boundary, appending an ellipsis when shortened.
+
+    The returned string (including ellipsis) never exceeds *max_length* characters.
+
+    Args:
+        text: The text to truncate.
+        max_length: Maximum total length of the returned string.
+        ascii_mode: Use ``"..."`` instead of ``"…"`` when *True*.
+
+    Returns:
+        Original text unchanged when it fits, otherwise word-boundary-truncated
+        text with an appended ellipsis.
+    """
+    if len(text) <= max_length:
+        return text
+    ellipsis = "..." if ascii_mode else "\u2026"
+    cutoff = max_length - len(ellipsis)
+    if cutoff <= 0:
+        return ellipsis[:max_length]
+    last_space = text.rfind(" ", 0, cutoff)
+    # Only use word boundary if it preserves at least 60% of the budget
+    if last_space > cutoff * 0.6:
+        return text[:last_space] + ellipsis
+    return text[:cutoff] + ellipsis
+
+
 def escape_rich_text(text: str) -> str:
     """Escape text for safe Rich markup rendering."""
     return escape_markup(text) if text else ""
 
 
-def render_progress_bar(current: int, total: int, width: int = 10) -> str:
-    """Render a Unicode progress bar like ████░░░░░░."""
+def render_progress_bar(
+    current: int, total: int, width: int = 10, *, ascii_mode: bool | None = None
+) -> str:
+    """Render a progress bar like ████░░░░░░ (or ###------- in ASCII mode)."""
+    if ascii_mode is None:
+        from arxiv_browser._ascii import is_ascii_mode
+
+        ascii_mode = is_ascii_mode()
+    filled_ch = "#" if ascii_mode else "\u2588"
+    empty_ch = "-" if ascii_mode else "\u2591"
     if total <= 0:
-        return "░" * width
+        return empty_ch * width
     filled = max(0, min(width, round(current / total * width)))
-    return "█" * filled + "░" * (width - filled)
+    return filled_ch * filled + empty_ch * (width - filled)
 
 
 # Pre-compiled patterns for lightweight markdown → Rich markup conversion
@@ -97,8 +132,11 @@ def format_summary_as_rich(text: str) -> str:
     # Inline code: `code` → styled span
     code_color = THEME_COLORS.get("green", "#a6e22e")
     out = _MD_INLINE_CODE_RE.sub(rf"[{code_color}]\1[/]", out)
-    # Bullets: - item → • item
-    out = _MD_BULLET_RE.sub(r"\1  • ", out)
+    # Bullets: - item → • item (or - item in ASCII mode)
+    from arxiv_browser._ascii import is_ascii_mode
+
+    bullet = "- " if is_ascii_mode() else "\u2022 "
+    out = _MD_BULLET_RE.sub(rf"\1  {bullet}", out)
     # Indent all lines for consistent padding inside the details pane
     indented = "\n".join(f"  {line}" if line.strip() else "" for line in out.split("\n"))
     return indented
@@ -109,7 +147,12 @@ _HIGHLIGHT_PATTERN_CACHE: OrderedDict[tuple[str, ...], re.Pattern[str]] = Ordere
 
 
 def highlight_text(text: str, terms: list[str], color: str) -> str:
-    """Highlight terms inside text using Rich markup."""
+    """Highlight terms inside text using Rich markup.
+
+    Terms shorter than 2 characters are ignored. Duplicate terms (case-
+    insensitive) are deduplicated, and remaining terms are matched longest-first
+    to avoid partial overlaps. Compiled patterns are cached (LRU, max 256).
+    """
     if not text:
         return text
     escaped_text = escape_rich_text(text)
@@ -333,7 +376,12 @@ def is_advanced_query(tokens: list[QueryToken]) -> bool:
 
 
 def build_highlight_terms(tokens: list[QueryToken]) -> dict[str, list[str]]:
-    """Build highlight term lists from query tokens by field."""
+    """Build highlight term lists from query tokens by field.
+
+    Returns:
+        Dict keyed by ``"title"``, ``"author"``, ``"abstract"``. Unscoped
+        terms appear in both ``"title"`` and ``"author"`` lists.
+    """
     highlight: dict[str, list[str]] = {"title": [], "author": [], "abstract": []}
     for token in tokens:
         if token.kind != "term":
@@ -359,7 +407,21 @@ def execute_query_filter(
     fuzzy_search: Callable[[str, list[Paper]], list[Paper]],
     advanced_match: Callable[[Paper, list[QueryToken]], bool],
 ) -> tuple[list[Paper], dict[str, list[str]]]:
-    """Filter papers for a query and return (filtered_papers, highlight_terms)."""
+    """Filter papers by a query string, choosing fuzzy or advanced mode.
+
+    Args:
+        query: Raw user query string.
+        papers: Full paper list to filter.
+        fuzzy_search: Callback for simple (non-advanced) queries; receives the
+            normalized query and paper list, returns filtered papers.
+        advanced_match: Callback for advanced queries (boolean operators, field
+            scopes, phrases); receives a paper and RPN token list, returns
+            whether the paper matches.
+
+    Returns:
+        Tuple of (filtered_papers, highlight_terms) where highlight_terms is a
+        dict keyed by field name (see ``build_highlight_terms``).
+    """
     normalized_query = query.strip()
     if not normalized_query:
         return papers.copy(), {"title": [], "author": [], "abstract": []}
@@ -545,5 +607,6 @@ __all__ = [
     "sort_papers",
     "to_rpn",
     "tokenize_query",
+    "truncate_at_word_boundary",
     "truncate_text",
 ]

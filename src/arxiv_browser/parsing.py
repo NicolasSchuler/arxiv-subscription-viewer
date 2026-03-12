@@ -427,25 +427,30 @@ class _HTMLTextExtractor(HTMLParser):
     )
 
     def __init__(self) -> None:
+        """Initialize the extractor with empty output and zero skip depth."""
         super().__init__()
         self._pieces: list[str] = []
         self._skip_depth: int = 0
 
     def handle_starttag(self, tag: str, _attrs: list[tuple[str, str | None]]) -> None:
+        """Track entry into tags whose content should be skipped."""
         if tag in self._SKIP_TAGS:
             self._skip_depth += 1
 
     def handle_endtag(self, tag: str) -> None:
+        """Track exit from skipped tags and insert newlines after block tags."""
         if tag in self._SKIP_TAGS:
             self._skip_depth = max(0, self._skip_depth - 1)
         if tag in self._BLOCK_TAGS:
             self._pieces.append("\n")
 
     def handle_data(self, data: str) -> None:
+        """Accumulate text content when not inside a skipped tag."""
         if self._skip_depth == 0:
             self._pieces.append(data)
 
     def get_text(self) -> str:
+        """Return accumulated text with collapsed whitespace and preserved paragraphs."""
         raw = "".join(self._pieces)
         # Collapse whitespace within lines, preserve paragraph breaks
         lines = raw.split("\n")
@@ -520,10 +525,14 @@ def build_daily_digest(
     """Build a concise daily digest string summarizing the day's papers.
 
     Returns a single-line summary with category breakdown, watch matches, and read stats
-    separated by " · ".
+    separated by " · " (or " | " in ASCII mode).
     """
     if not papers:
         return "No papers loaded"
+
+    from arxiv_browser._ascii import is_ascii_mode
+
+    sep = " | " if is_ascii_mode() else " \u00b7 "
 
     # Category breakdown (top 5)
     cat_counts: dict[str, int] = {}
@@ -555,7 +564,7 @@ def build_daily_digest(
                 parts.append(f"{starred} starred")
             lines.append(", ".join(parts))
 
-    return " · ".join(lines)
+    return sep.join(lines)
 
 
 __all__ = [

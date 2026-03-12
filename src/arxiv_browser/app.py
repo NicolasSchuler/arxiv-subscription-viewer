@@ -6,37 +6,7 @@ Usage:
     python arxiv_browser.py -i papers.txt      # Use custom file
     python arxiv_browser.py --no-restore       # Start fresh session
 
-Key bindings:
-    /       - Toggle search (fuzzy matching)
-    A       - Search all arXiv (API mode)
-    o       - Open selected paper(s) in browser
-    P       - Open selected paper(s) as PDF
-    c       - Copy selected paper(s) to clipboard
-    d       - Download PDF(s) to local folder
-    E       - Export menu (BibTeX, Markdown, RIS, CSV + more)
-    space   - Toggle selection
-    a       - Select all visible
-    u       - Clear selection
-    s       - Cycle sort order (title/date/arxiv_id/citations/trending/relevance)
-    j/k     - Navigate down/up (vim-style)
-    r       - Toggle read status
-    x       - Toggle star
-    n       - Edit notes
-    t       - Edit tags
-    w       - Toggle watch list filter
-    W       - Manage watch list
-    p       - Toggle abstract preview
-    m       - Set mark (then press a-z)
-    '       - Jump to mark (then press a-z)
-    R       - Show similar papers
-    1-9     - Jump to bookmark
-    Ctrl+b  - Add current search as bookmark
-    V       - Check starred papers for version updates
-    Ctrl+e  - Toggle S2 (browse) / Exit API (API mode)
-    e       - Fetch Semantic Scholar data
-    [       - Previous date (history) / previous API page (API mode)
-    ]       - Next date (history) / next API page (API mode)
-    q       - Quit
+Press ``?`` in the TUI for the full keybinding reference.
 
 Search filters:
     cat:<category>  - Filter by category (e.g., cat:cs.AI)
@@ -81,6 +51,7 @@ from textual.widgets import (
     Input,
     Label,
     OptionList,
+    Static,
 )
 from textual.widgets.option_list import Option, OptionDoesNotExist
 
@@ -207,6 +178,7 @@ from arxiv_browser.modals import (
     HelpScreen,
     MetadataSnapshotPickerModal,
     NotesModal,
+    PaletteCommand,
     PaperChatScreen,
     RecommendationSourceModal,
     RecommendationsScreen,
@@ -221,6 +193,7 @@ from arxiv_browser.models import (
     ARXIV_API_DEFAULT_MAX_RESULTS,
     ARXIV_API_MAX_RESULTS_LIMIT,
     DEFAULT_COLLAPSED_SECTIONS,
+    DETAIL_MODES,
     DETAIL_SECTION_KEYS,
     DETAIL_SECTION_NAMES,
     MAX_COLLECTIONS,
@@ -536,6 +509,7 @@ FOOTER_CONTEXTS: dict[str, list[tuple[str, str]]] = {
 COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
     # Navigation
     ("Search Papers", "Filter papers by text, category, or tag", "/", "toggle_search"),
+    ("Search Syntax", "Open search examples and operators", "", "show_search_syntax"),
     ("Search arXiv API", "Search all of arXiv online", "A", "arxiv_search"),
     ("Previous Date", "Navigate to older date file", "[", "prev_date"),
     ("Next Date", "Navigate to newer date file", "]", "next_date"),
@@ -642,6 +616,12 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
     ("Collections", "Manage paper reading lists", "Ctrl+k", "collections"),
     ("Add to Collection", "Add papers to a reading list", "", "add_to_collection"),
     # UI
+    (
+        "Toggle Detail Density",
+        "Switch between scan and full detail views",
+        "v",
+        "toggle_detail_mode",
+    ),
     ("Cycle Theme", "Switch between Monokai/Catppuccin/Solarized", "Ctrl+t", "cycle_theme"),
     ("Toggle Sections", "Show/hide detail pane sections", "Ctrl+d", "toggle_sections"),
     ("Help", "Show all keyboard shortcuts", "?", "show_help"),
@@ -789,6 +769,7 @@ class ArxivBrowser(App):
         ascii_icons: bool = False,
         services: AppServices | None = None,
     ) -> None:
+        """Initialize the app with papers, config, and optional history/service overrides."""
         super().__init__()
         # Register all Textual themes so $th-* CSS variables resolve before compose()
         for textual_theme in TEXTUAL_THEMES.values():
@@ -834,6 +815,9 @@ class ArxivBrowser(App):
 
         # Abstract preview toggle
         self._show_abstract_preview: bool = self._config.show_abstract_preview
+        self._detail_mode: str = (
+            self._config.detail_mode if self._config.detail_mode in DETAIL_MODES else "scan"
+        )
 
         # Abstract cache for lazy loading
         self._abstract_cache: dict[str, str] = {}
@@ -890,6 +874,9 @@ class ArxivBrowser(App):
 
         # Accessibility: allow ASCII-only indicators for terminals/fonts
         # that do not render emoji or box symbols well.
+        from arxiv_browser._ascii import set_ascii_mode
+
+        set_ascii_mode(ascii_icons)
         _widget_chrome.set_ascii_glyphs(ascii_icons)
         _widget_listing.set_ascii_icons(ascii_icons)
         _widget_details.set_ascii_glyphs(ascii_icons)
@@ -899,12 +886,14 @@ class ArxivBrowser(App):
         self._s2_cache: dict[str, SemanticScholarPaper] = {}  # In-memory cache
         self._s2_loading: set[str] = set()  # In-flight dedup
         self._s2_db_path: Path = get_s2_db_path()
+        self._s2_api_error: bool = False  # Last S2 fetch failed
 
         # HuggingFace trending state
         self._hf_active: bool = False  # Runtime toggle (set from config in on_mount)
         self._hf_cache: dict[str, HuggingFacePaper] = {}  # In-memory cache
         self._hf_loading: bool = False  # Single bool (bulk fetch)
         self._hf_db_path: Path = get_hf_db_path()
+        self._hf_api_error: bool = False  # Last HF fetch failed
 
         # Version tracking state (ephemeral per-session)
         self._version_updates: dict[str, tuple[int, int]] = {}  # arxiv_id -> (old, new)
@@ -947,19 +936,26 @@ class ArxivBrowser(App):
         return services
 
     def compose(self) -> ComposeResult:
+        """Build the main UI layout: header, split panes for list/detail, and footer."""
         yield Header()
         with Horizontal(id="main-container"):
             with Vertical(id="left-pane"):
                 yield Label(f" Papers ({len(self.all_papers)} total)", id="list-header")
                 yield DateNavigator(self._history_files, self._current_date_index)
-                yield BookmarkTabBar(self._config.bookmarks, self._active_bookmark_index)
+                yield BookmarkTabBar(
+                    self._config.bookmarks,
+                    self._active_bookmark_index,
+                    active_search=bool(self._config.session.current_filter.strip()),
+                )
                 yield FilterPillBar()
                 with Vertical(id="search-container"):
                     yield Input(
-                        placeholder=(
-                            " Filter: text, author:, title:, cat:, tag:, unread, starred, AND/OR/NOT"
-                        ),
+                        placeholder=' Search papers (e.g., cat:cs.AI or "large language")',
                         id="search-input",
+                    )
+                    yield Static(
+                        'Examples: cat:cs.AI  author:hinton  unread  "large language"  ? help  Ctrl+p commands',
+                        id="search-hint",
                     )
                 yield OptionList(id="paper-list")
                 yield Label("", id="status-bar")
@@ -994,15 +990,6 @@ class ArxivBrowser(App):
         if self._is_history_mode() and len(self._history_files) > 1:
             self.call_after_refresh(self._refresh_date_navigator)
 
-        # Set subtitle with date info if in history mode
-        current_date = self._get_current_date()
-        if current_date:
-            self.sub_title = (
-                f"{len(self.all_papers)} papers · {current_date.strftime(HISTORY_DATE_FORMAT)}"
-            )
-        else:
-            self.sub_title = f"{len(self.all_papers)} papers loaded"
-
         # Restore session state if enabled
         if self._restore_session and self._config.session:
             session = self._config.session
@@ -1030,7 +1017,10 @@ class ArxivBrowser(App):
             option_list = self._get_paper_list_widget()
             if option_list.option_count > 0:
                 option_list.highlighted = 0
-        self._update_status_bar()
+        self._update_header()
+        self._update_subtitle()
+        self._update_details_header()
+        self._track_task(self._update_bookmark_bar())
 
         self._notify_watch_list_matches()
 
@@ -1117,39 +1107,55 @@ class ArxivBrowser(App):
         return widget
 
     def _get_search_input_widget(self) -> Input:
+        """Return the cached search input widget."""
         return self._get_cached_widget(
             "search_input", lambda: self.query_one("#search-input", Input)
         )
 
     def _get_search_container_widget(self) -> Any:
+        """Return the cached search container widget."""
         return self._get_cached_widget(
             "search_container", lambda: self.query_one("#search-container")
         )
 
     def _get_paper_list_widget(self) -> OptionList:
+        """Return the cached paper list OptionList widget."""
         return self._get_cached_widget(
             "paper_list", lambda: self.query_one("#paper-list", OptionList)
         )
 
     def _get_list_header_widget(self) -> Label:
+        """Return the cached left-pane header label."""
         return self._get_cached_widget("list_header", lambda: self.query_one("#list-header", Label))
 
+    def _get_details_header_widget(self) -> Label:
+        """Return the cached right-pane header label."""
+        return self._get_cached_widget(
+            "details_header", lambda: self.query_one("#details-header", Label)
+        )
+
     def _get_status_bar_widget(self) -> Label:
+        """Return the cached status bar label."""
         return self._get_cached_widget("status_bar", lambda: self.query_one("#status-bar", Label))
 
     def _get_footer_widget(self) -> ContextFooter:
+        """Return the cached context-sensitive footer widget."""
         return self._get_cached_widget("footer", lambda: self.query_one(ContextFooter))
 
     def _get_date_navigator_widget(self) -> DateNavigator:
+        """Return the cached date navigator widget."""
         return self._get_cached_widget("date_navigator", lambda: self.query_one(DateNavigator))
 
     def _get_filter_pill_bar_widget(self) -> FilterPillBar:
+        """Return the cached filter pill bar widget."""
         return self._get_cached_widget("filter_pill_bar", lambda: self.query_one(FilterPillBar))
 
     def _get_bookmark_bar_widget(self) -> BookmarkTabBar:
+        """Return the cached bookmark tab bar widget."""
         return self._get_cached_widget("bookmark_bar", lambda: self.query_one(BookmarkTabBar))
 
     def _get_paper_details_widget(self) -> PaperDetails:
+        """Return the cached paper details widget."""
         return self._get_cached_widget("paper_details", lambda: self.query_one(PaperDetails))
 
     def _prime_ui_refs(self) -> None:
@@ -1159,6 +1165,7 @@ class ArxivBrowser(App):
             ("search_container", self._get_search_container_widget),
             ("paper_list", self._get_paper_list_widget),
             ("list_header", self._get_list_header_widget),
+            ("details_header", self._get_details_header_widget),
             ("status_bar", self._get_status_bar_widget),
             ("footer", self._get_footer_widget),
             ("date_navigator", self._get_date_navigator_widget),
@@ -1306,6 +1313,7 @@ class ArxivBrowser(App):
         return None
 
     async def _load_abstract_async(self, paper: Paper) -> None:
+        """Clean a paper's LaTeX abstract off-thread and update the display."""
         try:
             cleaned = await asyncio.to_thread(clean_latex, paper.abstract_raw)
             self._abstract_cache[paper.arxiv_id] = cleaned
@@ -1339,9 +1347,47 @@ class ArxivBrowser(App):
             "tags": self._tags_for(arxiv_id),
             "relevance": self._relevance_scores.get(arxiv_id),
             "collapsed_sections": self._config.collapsed_sections,
+            "detail_mode": getattr(self, "_detail_mode", "scan"),
         }
 
+    def _format_details_header_text(self) -> str:
+        """Return the right-pane header text for the current detail density."""
+        from arxiv_browser._ascii import is_ascii_mode
+
+        sep = " - " if is_ascii_mode() else " \u00b7 "
+        return f" Paper Details{sep}{self._detail_mode}"
+
+    def _update_details_header(self) -> None:
+        """Refresh the detail pane header text."""
+        try:
+            self._get_details_header_widget().update(self._format_details_header_text())
+        except NoMatches:
+            pass
+
+    def _build_subtitle_text(self) -> str:
+        """Build the app subtitle for the current dataset and mode."""
+        from arxiv_browser._ascii import is_ascii_mode
+
+        sep = " - " if is_ascii_mode() else " \u00b7 "
+        if self._in_arxiv_api_mode and self._arxiv_search_state is not None:
+            state = self._arxiv_search_state
+            page = (state.start // state.max_results) + 1
+            query_label = truncate_text(self._format_arxiv_search_label(state.request), 60)
+            return f"Search{sep}{query_label}{sep}page {page}"
+        query = self._get_active_query()
+        if query:
+            return f"Filtered{sep}{len(self.filtered_papers)}/{len(self.all_papers)} papers"
+        current_date = self._get_current_date()
+        if current_date is not None:
+            return f"Browse{sep}{len(self.all_papers)} papers{sep}{current_date.strftime(HISTORY_DATE_FORMAT)}"
+        return f"Browse{sep}{len(self.all_papers)} papers"
+
+    def _update_subtitle(self) -> None:
+        """Refresh the app subtitle from current state."""
+        self.sub_title = self._build_subtitle_text()
+
     def _update_abstract_display(self, arxiv_id: str) -> None:
+        """Refresh the detail pane and list preview after an abstract finishes loading."""
         try:
             details = self._get_paper_details_widget()
             if details.paper and details.paper.arxiv_id == arxiv_id:
@@ -1386,7 +1432,7 @@ class ArxivBrowser(App):
             if not save_config(self._config):
                 logger.warning("Failed to save session state to config file")
                 self.notify(
-                    "Failed to save session — changes may be lost",
+                    "Failed to save session -- changes may be lost",
                     title="Save Error",
                     severity="error",
                     timeout=8,
@@ -1417,7 +1463,7 @@ class ArxivBrowser(App):
         if not save_config(self._config):
             logger.warning("Failed to save session state to config file")
             self.notify(
-                "Failed to save session — changes may be lost",
+                "Failed to save session -- changes may be lost",
                 title="Save Error",
                 severity="error",
                 timeout=8,
@@ -1489,11 +1535,13 @@ class ArxivBrowser(App):
         self._pending_detail_started_at = None
 
     def action_toggle_search(self) -> None:
+        """Toggle the search input bar visibility and focus."""
         from arxiv_browser.actions import search_api_actions as _actions
 
         return _actions.action_toggle_search(self)
 
     def action_cancel_search(self) -> None:
+        """Cancel the active search, clear the query, and refocus the paper list."""
         from arxiv_browser.actions import search_api_actions as _actions
 
         return _actions.action_cancel_search(self)
@@ -1563,21 +1611,25 @@ class ArxivBrowser(App):
             self._track_task(self._update_bookmark_bar())
 
     def action_ctrl_e_dispatch(self) -> None:
+        """Dispatch Ctrl+E: exit API mode if active, otherwise toggle S2 enrichment."""
         from arxiv_browser.actions import ui_actions as _actions
 
         return _actions.action_ctrl_e_dispatch(self)
 
     def action_toggle_s2(self) -> None:
+        """Toggle Semantic Scholar enrichment on or off."""
         from arxiv_browser.actions import ui_actions as _actions
 
         return _actions.action_toggle_s2(self)
 
     async def action_fetch_s2(self) -> None:
+        """Fetch Semantic Scholar data for the currently highlighted paper."""
         from arxiv_browser.actions import ui_actions as _actions
 
         return await _actions.action_fetch_s2(self)
 
     async def _fetch_s2_paper_async(self, arxiv_id: str) -> None:
+        """Fetch and cache Semantic Scholar metadata for a single paper."""
         from arxiv_browser.actions import ui_actions as _actions
 
         return await _actions._fetch_s2_paper_async(self, arxiv_id)
@@ -1593,16 +1645,19 @@ class ArxivBrowser(App):
     # ========================================================================
 
     async def action_toggle_hf(self) -> None:
+        """Toggle HuggingFace daily papers enrichment on or off."""
         from arxiv_browser.actions import ui_actions as _actions
 
         return await _actions.action_toggle_hf(self)
 
     async def _fetch_hf_daily(self) -> None:
+        """Fetch HuggingFace daily papers and update the in-memory cache."""
         from arxiv_browser.actions import ui_actions as _actions
 
         return await _actions._fetch_hf_daily(self)
 
     async def _fetch_hf_daily_async(self) -> None:
+        """Background task: query HF API, populate cache, and refresh badges."""
         from arxiv_browser.actions import ui_actions as _actions
 
         return await _actions._fetch_hf_daily_async(self)
@@ -1698,6 +1753,7 @@ class ArxivBrowser(App):
     VERSION_CHECK_BATCH_SIZE = 40  # IDs per API request (URL length safe)
 
     async def action_check_versions(self) -> None:
+        """Check starred papers for newer versions on arXiv."""
         from arxiv_browser.actions import ui_actions as _actions
 
         return await _actions.action_check_versions(self)
@@ -1824,21 +1880,25 @@ class ArxivBrowser(App):
             self._update_option_at_index(idx)
 
     def action_exit_arxiv_search_mode(self) -> None:
+        """Exit arXiv API search mode and restore the local browse snapshot."""
         from arxiv_browser.actions import search_api_actions as _actions
 
         return _actions.action_exit_arxiv_search_mode(self)
 
     def action_arxiv_search(self) -> None:
+        """Open the arXiv API search modal for remote paper queries."""
         from arxiv_browser.actions import search_api_actions as _actions
 
         return _actions.action_arxiv_search(self)
 
     def _format_arxiv_search_label(self, request: ArxivSearchRequest) -> str:
+        """Format a human-readable label for an arXiv API search request."""
         from arxiv_browser.actions import search_api_actions as _actions
 
         return _actions._format_arxiv_search_label(self, request)
 
     async def _apply_arxiv_rate_limit(self) -> None:
+        """Sleep if needed to respect arXiv API rate limits."""
         from arxiv_browser.actions import search_api_actions as _actions
 
         return await _actions._apply_arxiv_rate_limit(self)
@@ -1849,6 +1909,7 @@ class ArxivBrowser(App):
         start: int,
         max_results: int,
     ) -> list[Paper]:
+        """Fetch a single page of results from the arXiv API."""
         from arxiv_browser.actions import search_api_actions as _actions
 
         return await _actions._fetch_arxiv_api_page(self, request, start, max_results)
@@ -1860,11 +1921,13 @@ class ArxivBrowser(App):
         max_results: int,
         papers: list[Paper],
     ) -> None:
+        """Replace the paper list with arXiv API results and refresh the UI."""
         from arxiv_browser.actions import search_api_actions as _actions
 
         return _actions._apply_arxiv_search_results(self, request, start, max_results, papers)
 
     async def _run_arxiv_search(self, request: ArxivSearchRequest, start: int) -> None:
+        """Execute an arXiv API search and apply the results."""
         from arxiv_browser.actions import search_api_actions as _actions
 
         return await _actions._run_arxiv_search(self, request, start)
@@ -1886,11 +1949,13 @@ class ArxivBrowser(App):
         await self._run_arxiv_search(state.request, start=target_start)
 
     def action_cursor_down(self) -> None:
+        """Move the paper list cursor down, wrapping at the bottom."""
         from arxiv_browser.actions import library_actions as _actions
 
         return _actions.action_cursor_down(self)
 
     def action_cursor_up(self) -> None:
+        """Move the paper list cursor up, wrapping at the top."""
         from arxiv_browser.actions import library_actions as _actions
 
         return _actions.action_cursor_up(self)
@@ -1945,48 +2010,23 @@ class ArxivBrowser(App):
         """Get the active search query, preferring the current input value."""
         try:
             return self._get_search_input_widget().value.strip()
-        except NoMatches:
-            return self._pending_query.strip()
+        except (AttributeError, NoMatches):
+            return str(getattr(self, "_pending_query", "")).strip()
 
     def _format_header_text(self, query: str = "") -> str:
-        """Format the header text with paper count, date info, and filter indicator."""
-        # Paper count: filtered/total when searching, total otherwise
+        """Format the left-pane header text."""
         if query:
-            count = f"{len(self.filtered_papers)}/{len(self.all_papers)}"
-        else:
-            count = f"{len(self.all_papers)} total"
-
-        # Context suffix: API mode info or history date
-        suffix = ""
-        if self._in_arxiv_api_mode and self._arxiv_search_state is not None:
-            state = self._arxiv_search_state
-            page = (state.start // state.max_results) + 1
-            mode_query = self._format_arxiv_search_label(state.request)
-            mode_query = truncate_text(mode_query, 28)
-            suffix = (
-                f" · [{THEME_COLORS['orange']}]API[/]"
-                f" [dim]({escape_rich_text(mode_query)} · page {page})[/]"
-            )
-        elif self._is_history_mode():
-            current_date = self._get_current_date()
-            if current_date:
-                pos = self._current_date_index + 1
-                total = len(self._history_files)
-                suffix = f" · [{THEME_COLORS['accent']}]{current_date.strftime(HISTORY_DATE_FORMAT)}[/] [dim]({pos}/{total})[/]"
-
-        # Selection badge
-        if self.selected_ids:
-            n = len(self.selected_ids)
-            suffix += f" · [{THEME_COLORS['green']}]{n} selected[/]"
-
-        return f" [bold]Papers[/] ({count}){suffix}"
+            return f" [bold]Papers[/] ({len(self.filtered_papers)}/{len(self.all_papers)})"
+        return " [bold]Papers[/]"
 
     def _matches_advanced_query(self, paper: Paper, rpn: list[QueryToken]) -> bool:
+        """Test whether a paper matches an advanced RPN query with metadata context."""
         metadata = self._config.paper_metadata.get(paper.arxiv_id)
         abstract_text = self._get_abstract_text(paper, allow_async=False) or ""
         return matches_advanced_query(paper, rpn, metadata, abstract_text)
 
     def _match_query_term(self, paper: Paper, token: QueryToken) -> bool:
+        """Test whether a paper matches a single query token with metadata context."""
         metadata = self._config.paper_metadata.get(paper.arxiv_id)
         abstract_text = self._get_abstract_text(paper, allow_async=False) or ""
         return match_query_term(paper, token, metadata, abstract_text)
@@ -2050,6 +2090,8 @@ class ArxivBrowser(App):
         # Apply current sort order and refresh UI
         self._sort_papers()
         self._get_ui_refresh_coordinator().apply_filter_refresh(query)
+        self._update_subtitle()
+        self._track_task(self._update_bookmark_bar())
 
         logger.debug(
             "Filter applied: query=%r, matched=%d/%d papers",
@@ -2093,16 +2135,19 @@ class ArxivBrowser(App):
         self._apply_filter(self._pending_query)
 
     def action_toggle_select(self) -> None:
+        """Toggle multi-select on the currently highlighted paper."""
         from arxiv_browser.actions import library_actions as _actions
 
         return _actions.action_toggle_select(self)
 
     def action_select_all(self) -> None:
+        """Select all currently visible (filtered) papers."""
         from arxiv_browser.actions import library_actions as _actions
 
         return _actions.action_select_all(self)
 
     def action_clear_selection(self) -> None:
+        """Clear the current paper selection."""
         from arxiv_browser.actions import library_actions as _actions
 
         return _actions.action_clear_selection(self)
@@ -2222,12 +2267,13 @@ class ArxivBrowser(App):
             pass
 
     def action_cycle_sort(self) -> None:
+        """Cycle through available sort orders and re-sort the paper list."""
         from arxiv_browser.actions import library_actions as _actions
 
         return _actions.action_cycle_sort(self)
 
     # ========================================================================
-    # Phase 2: Read/Star Status and Notes/Tags
+    # Paper Management: Read/Star Status and Notes/Tags
     # ========================================================================
 
     def _get_or_create_metadata(self, arxiv_id: str) -> PaperMetadata:
@@ -2303,26 +2349,31 @@ class ArxivBrowser(App):
         self.notify(f"{len(self.selected_ids)} papers {status}", title=title)
 
     def action_toggle_read(self) -> None:
+        """Toggle read status on the current or selected papers."""
         from arxiv_browser.actions import library_actions as _actions
 
         return _actions.action_toggle_read(self)
 
     def action_toggle_star(self) -> None:
+        """Toggle star status on the current or selected papers."""
         from arxiv_browser.actions import library_actions as _actions
 
         return _actions.action_toggle_star(self)
 
     def action_edit_notes(self) -> None:
+        """Open the notes editor modal for the current paper."""
         from arxiv_browser.actions import library_actions as _actions
 
         return _actions.action_edit_notes(self)
 
     def action_edit_tags(self) -> None:
+        """Open the tags editor modal for the current or selected papers."""
         from arxiv_browser.actions import library_actions as _actions
 
         return _actions.action_edit_tags(self)
 
     def _collect_all_tags(self) -> list[str]:
+        """Return a sorted list of all unique tags across all papers."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return _actions._collect_all_tags(self)
@@ -2378,7 +2429,7 @@ class ArxivBrowser(App):
         meta.tags = sorted(tag_set)
 
     # ========================================================================
-    # Phase 3: Watch List
+    # Watch List
     # ========================================================================
 
     def _compute_watched_papers(self) -> None:
@@ -2424,41 +2475,50 @@ class ArxivBrowser(App):
         return arxiv_id in self._watched_paper_ids
 
     def action_toggle_watch_filter(self) -> None:
+        """Toggle filtering to show only watch-list-matched papers."""
         from arxiv_browser.actions import library_actions as _actions
 
         return _actions.action_toggle_watch_filter(self)
 
     def action_manage_watch_list(self) -> None:
+        """Open the watch list management modal."""
         from arxiv_browser.actions import library_actions as _actions
 
         return _actions.action_manage_watch_list(self)
 
     # ========================================================================
-    # Phase 4: Bookmarked Search Tabs
+    # Bookmarked Search Tabs
     # ========================================================================
 
     async def _update_bookmark_bar(self) -> None:
         """Update the bookmark tab bar display."""
         bookmark_bar = self._get_bookmark_bar_widget()
-        await bookmark_bar.update_bookmarks(self._config.bookmarks, self._active_bookmark_index)
+        await bookmark_bar.update_bookmarks(
+            self._config.bookmarks,
+            self._active_bookmark_index,
+            active_search=bool(self._get_active_query()),
+        )
 
     async def action_goto_bookmark(self, index: int) -> None:
+        """Activate a bookmarked search by its tab index."""
         from arxiv_browser.actions import search_api_actions as _actions
 
         return await _actions.action_goto_bookmark(self, index)
 
     async def action_add_bookmark(self) -> None:
+        """Save the current search query as a named bookmark tab."""
         from arxiv_browser.actions import search_api_actions as _actions
 
         return await _actions.action_add_bookmark(self)
 
     async def action_remove_bookmark(self) -> None:
+        """Remove the currently active bookmark tab."""
         from arxiv_browser.actions import search_api_actions as _actions
 
         return await _actions.action_remove_bookmark(self)
 
     # ========================================================================
-    # Phase 5: Abstract Preview
+    # Abstract Preview
     # ========================================================================
 
     def action_toggle_preview(self) -> None:
@@ -2473,8 +2533,17 @@ class ArxivBrowser(App):
         self._refresh_list_view()
         self._update_status_bar()
 
+    def action_toggle_detail_mode(self) -> None:
+        """Toggle the detail pane between scan and full reading modes."""
+        self._detail_mode = "full" if self._detail_mode == "scan" else "scan"
+        self._config.detail_mode = self._detail_mode
+        self._save_config_or_warn("detail density preference")
+        self._update_details_header()
+        self._refresh_detail_pane()
+        self.notify(f"Detail view: {self._detail_mode}", title="Details")
+
     # ========================================================================
-    # Phase 7: Vim-style Marks
+    # Vim-style Marks
     # ========================================================================
 
     def action_start_mark(self) -> None:
@@ -2543,15 +2612,17 @@ class ArxivBrowser(App):
         )
 
     # ========================================================================
-    # Phase 8: Export Features
+    # Export Features
     # ========================================================================
 
     def action_copy_bibtex(self) -> None:
+        """Copy BibTeX entries for the current or selected papers to the clipboard."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions.action_copy_bibtex(self)
 
     def action_export_bibtex_file(self) -> None:
+        """Export BibTeX entries for the current or selected papers to a file."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions.action_export_bibtex_file(self)
@@ -2562,61 +2633,73 @@ class ArxivBrowser(App):
         return format_paper_as_markdown(paper, abstract_text)
 
     def action_export_markdown(self) -> None:
+        """Copy a Markdown-formatted summary to the clipboard."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions.action_export_markdown(self)
 
     def action_export_menu(self) -> None:
+        """Open the export format picker modal."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions.action_export_menu(self)
 
     def _do_export(self, fmt: str, papers: list[Paper]) -> None:
+        """Dispatch an export to the correct format handler."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions._do_export(self, fmt, papers)
 
     def _get_export_dir(self) -> Path:
+        """Return the configured or default export directory."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions._get_export_dir(self)
 
     def _export_to_file(self, content: str, extension: str, format_name: str) -> None:
+        """Write export content to a timestamped file in the export directory."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions._export_to_file(self, content, extension, format_name)
 
     def _export_clipboard_ris(self, papers: list[Paper]) -> None:
+        """Copy RIS-formatted references to the clipboard."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions._export_clipboard_ris(self, papers)
 
     def _export_clipboard_csv(self, papers: list[Paper]) -> None:
+        """Copy CSV-formatted paper data to the clipboard."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions._export_clipboard_csv(self, papers)
 
     def _export_clipboard_mdtable(self, papers: list[Paper]) -> None:
+        """Copy a Markdown table of papers to the clipboard."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions._export_clipboard_mdtable(self, papers)
 
     def _export_file_ris(self, papers: list[Paper]) -> None:
+        """Export RIS-formatted references to a file."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions._export_file_ris(self, papers)
 
     def _export_file_csv(self, papers: list[Paper]) -> None:
+        """Export CSV-formatted paper data to a file."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions._export_file_csv(self, papers)
 
     def action_export_metadata(self) -> None:
+        """Export all paper metadata and config to a JSON file."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions.action_export_metadata(self)
 
     def action_import_metadata(self) -> None:
+        """Import paper metadata from a previously exported JSON file."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions.action_import_metadata(self)
@@ -2632,10 +2715,11 @@ class ArxivBrowser(App):
         )
 
     # ========================================================================
-    # Phase 9: Paper Similarity
+    # Paper Similarity
     # ========================================================================
 
     def action_show_similar(self) -> None:
+        """Show papers similar to the currently highlighted paper."""
         from arxiv_browser.actions import ui_actions as _actions
 
         return _actions.action_show_similar(self)
@@ -2840,6 +2924,7 @@ class ArxivBrowser(App):
         )
 
     async def _fetch_s2_recommendations_async(self, arxiv_id: str) -> list[SemanticScholarPaper]:
+        """Fetch Semantic Scholar paper recommendations via the API."""
         from arxiv_browser.actions import ui_actions as _actions
 
         return await _actions._fetch_s2_recommendations_async(self, arxiv_id)
@@ -2872,6 +2957,7 @@ class ArxivBrowser(App):
     # ========================================================================
 
     def action_citation_graph(self) -> None:
+        """Open the citation graph explorer for the currently highlighted paper."""
         from arxiv_browser.actions import ui_actions as _actions
 
         return _actions.action_citation_graph(self)
@@ -2940,6 +3026,7 @@ class ArxivBrowser(App):
     async def _fetch_citation_graph(
         self, paper_id: str
     ) -> tuple[list[CitationEntry], list[CitationEntry]]:
+        """Fetch references and citations for a paper from Semantic Scholar."""
         from arxiv_browser.actions import ui_actions as _actions
 
         return await _actions._fetch_citation_graph(self, paper_id)
@@ -2949,33 +3036,125 @@ class ArxivBrowser(App):
         self._on_recommendation_selected(arxiv_id)
 
     def action_cycle_theme(self) -> None:
+        """Cycle through available color themes."""
         from arxiv_browser.actions import ui_actions as _actions
 
         return _actions.action_cycle_theme(self)
 
     def action_toggle_sections(self) -> None:
+        """Open the section toggle modal to show/hide detail pane sections."""
         from arxiv_browser.actions import ui_actions as _actions
 
         return _actions.action_toggle_sections(self)
 
-    def _build_help_sections(self) -> list[tuple[str, list[tuple[str, str]]]]:
+    def _build_help_sections(
+        self,
+        *,
+        search_first: bool = False,
+    ) -> list[tuple[str, list[tuple[str, str]]]]:
         """Build help sections from the runtime key binding table."""
-        return build_help_sections(self.BINDINGS)
+        return build_help_sections(self.BINDINGS, search_first=search_first)
 
-    def _build_command_palette_commands(self) -> list[tuple[str, str, str, str]]:
+    @staticmethod
+    def _palette_group_for_action(action_name: str) -> str:
+        """Return a compact group label for a palette action."""
+        group_map = {
+            "toggle_search": "Core",
+            "show_search_syntax": "Core",
+            "arxiv_search": "Research",
+            "prev_date": "Advanced",
+            "next_date": "Advanced",
+            "open_url": "Core",
+            "open_pdf": "Core",
+            "download_pdf": "Core",
+            "copy_selected": "Core",
+            "toggle_read": "Organize",
+            "toggle_star": "Organize",
+            "edit_notes": "Organize",
+            "edit_tags": "Organize",
+            "select_all": "Core",
+            "clear_selection": "Core",
+            "toggle_select": "Core",
+            "cycle_sort": "Core",
+            "toggle_watch_filter": "Organize",
+            "manage_watch_list": "Organize",
+            "toggle_preview": "Advanced",
+            "export_menu": "Core",
+            "export_metadata": "Advanced",
+            "import_metadata": "Advanced",
+            "fetch_s2": "Research",
+            "ctrl_e_dispatch": "Research",
+            "toggle_hf": "Research",
+            "check_versions": "Research",
+            "citation_graph": "Research",
+            "generate_summary": "Research",
+            "chat_with_paper": "Research",
+            "score_relevance": "Research",
+            "edit_interests": "Research",
+            "auto_tag": "Research",
+            "show_similar": "Research",
+            "add_bookmark": "Organize",
+            "collections": "Organize",
+            "add_to_collection": "Organize",
+            "toggle_detail_mode": "Advanced",
+            "cycle_theme": "Advanced",
+            "toggle_sections": "Advanced",
+            "show_help": "Core",
+            "start_mark": "Advanced",
+            "start_goto_mark": "Advanced",
+        }
+        return group_map.get(action_name, "Commands")
+
+    def _build_command_palette_commands(self) -> list[PaletteCommand]:
         """Return command palette rows with labels adapted to current app state."""
-        in_arxiv_api_mode = getattr(self, "_in_arxiv_api_mode", False)
-        hf_active = getattr(self, "_hf_active", False)
-        watch_filter_active = getattr(self, "_watch_filter_active", False)
-        show_abstract_preview = getattr(
-            getattr(self, "_config", None), "show_abstract_preview", False
+        config = getattr(self, "_config", None)
+        in_arxiv_api_mode = bool(getattr(self, "_in_arxiv_api_mode", False))
+        hf_active = bool(getattr(self, "_hf_active", False))
+        watch_filter_active = bool(getattr(self, "_watch_filter_active", False))
+        show_abstract_preview = bool(getattr(config, "show_abstract_preview", False))
+        detail_mode = getattr(self, "_detail_mode", "scan")
+        active_query = self._get_active_query()
+        has_history_navigation = bool(
+            getattr(self, "_history_files", []) and len(self._history_files) > 1
         )
+        watch_list = list(getattr(config, "watch_list", []))
+        has_marks = bool(getattr(config, "marks", {}))
+        metadata_values = getattr(config, "paper_metadata", {}).values() if config else []
+        has_starred = any(getattr(meta, "starred", False) for meta in metadata_values)
+        llm_configured = bool(isinstance(config, UserConfig) and _resolve_llm_command(config))
+        filtered_papers = getattr(self, "filtered_papers", [])
+        has_visible_papers = bool(filtered_papers)
+        has_selection = bool(getattr(self, "selected_ids", set()))
+        try:
+            current_paper = self._get_current_paper()
+        except AttributeError:
+            current_paper = None
+        has_current_paper = current_paper is not None
+        has_target_papers = has_selection or has_current_paper
+        s2_cache = getattr(self, "_s2_cache", {})
+        s2_data_loaded = bool(current_paper and current_paper.arxiv_id in s2_cache)
 
-        commands: list[tuple[str, str, str, str]] = []
+        suggested_actions = {
+            "toggle_search",
+            "open_url",
+            "toggle_select",
+            "toggle_read",
+            "export_menu",
+        }
+        if in_arxiv_api_mode:
+            suggested_actions.update({"ctrl_e_dispatch", "arxiv_search"})
+        if active_query:
+            suggested_actions.update({"add_bookmark", "show_search_syntax"})
+        if has_selection:
+            suggested_actions.update({"edit_tags", "download_pdf"})
+
+        commands: list[PaletteCommand] = []
         for name, description, key_hint, action_name in COMMAND_PALETTE_COMMANDS:
+            enabled = True
+            blocked_reason = ""
             if action_name == "ctrl_e_dispatch":
                 if in_arxiv_api_mode:
-                    name = "Exit arXiv API Mode"
+                    name = "Exit Search Results"
                     description = "Return to your local or history papers"
                 else:
                     name = "Toggle Semantic Scholar"
@@ -2991,9 +3170,9 @@ class ArxivBrowser(App):
                 if watch_filter_active:
                     name = "Show All Papers"
                     description = "Return to the full paper list"
-                else:
-                    name = "Show Watched Papers"
-                    description = "Filter the list to papers matching your watch list"
+                if not watch_list:
+                    enabled = False
+                    blocked_reason = "watch list entries"
             elif action_name == "toggle_preview":
                 if show_abstract_preview:
                     name = "Hide Abstract Preview"
@@ -3001,15 +3180,105 @@ class ArxivBrowser(App):
                 else:
                     name = "Show Abstract Preview"
                     description = "Reveal abstract snippets in the paper list"
-            commands.append((name, description, key_hint, action_name))
+            elif action_name == "toggle_detail_mode":
+                if detail_mode == "scan":
+                    name = "Switch to Full Details"
+                    description = "Expand the detail pane for long-form reading"
+                else:
+                    name = "Switch to Scan Details"
+                    description = "Return to a faster triage-focused detail view"
+
+            if (
+                action_name
+                in {
+                    "open_url",
+                    "open_pdf",
+                    "download_pdf",
+                    "copy_selected",
+                    "export_menu",
+                    "toggle_read",
+                    "toggle_star",
+                    "edit_notes",
+                    "edit_tags",
+                    "show_similar",
+                    "add_to_collection",
+                    "start_mark",
+                }
+                and not has_target_papers
+            ):
+                enabled = False
+                blocked_reason = "selection"
+            elif action_name == "select_all" and not has_visible_papers:
+                enabled = False
+                blocked_reason = "visible papers"
+            elif action_name == "clear_selection" and not has_selection:
+                enabled = False
+                blocked_reason = "selection"
+            elif action_name == "add_bookmark" and not active_query:
+                enabled = False
+                blocked_reason = "an active search"
+            elif action_name in {"prev_date", "next_date"} and not has_history_navigation:
+                enabled = False
+                blocked_reason = "history mode"
+            elif action_name == "fetch_s2":
+                if not has_current_paper:
+                    enabled = False
+                    blocked_reason = "selection"
+                elif not getattr(self, "_s2_active", False):
+                    enabled = False
+                    blocked_reason = "Semantic Scholar enabled"
+            elif action_name == "citation_graph":
+                if not has_current_paper:
+                    enabled = False
+                    blocked_reason = "selection"
+                elif not s2_data_loaded:
+                    enabled = False
+                    blocked_reason = "S2 data"
+            elif action_name == "check_versions" and not has_starred:
+                enabled = False
+                blocked_reason = "starred papers"
+            elif action_name in {
+                "generate_summary",
+                "chat_with_paper",
+                "score_relevance",
+                "auto_tag",
+            }:
+                if not llm_configured:
+                    enabled = False
+                    blocked_reason = "LLM configuration"
+                elif action_name != "score_relevance" and not has_target_papers:
+                    enabled = False
+                    blocked_reason = "selection"
+            elif action_name == "start_goto_mark" and not has_marks:
+                enabled = False
+                blocked_reason = "saved marks"
+
+            commands.append(
+                PaletteCommand(
+                    name=name,
+                    description=description,
+                    key_hint=key_hint,
+                    action=action_name,
+                    group=self._palette_group_for_action(action_name),
+                    enabled=enabled,
+                    blocked_reason=blocked_reason,
+                    suggested=action_name in suggested_actions,
+                )
+            )
         return commands
 
     def action_show_help(self) -> None:
+        """Open the help overlay with keybinding reference."""
         from arxiv_browser.actions import ui_actions as _actions
 
         return _actions.action_show_help(self)
 
+    def action_show_search_syntax(self) -> None:
+        """Open the help overlay with search syntax prioritized."""
+        self.push_screen(HelpScreen(sections=self._build_help_sections(search_first=True)))
+
     def action_command_palette(self) -> None:
+        """Open the fuzzy command palette for quick action access."""
         from arxiv_browser.actions import ui_actions as _actions
 
         return _actions.action_command_palette(self)
@@ -3019,11 +3288,13 @@ class ArxivBrowser(App):
     # ========================================================================
 
     def action_collections(self) -> None:
+        """Open the collections manager modal."""
         from arxiv_browser.actions import ui_actions as _actions
 
         return _actions.action_collections(self)
 
     def action_add_to_collection(self) -> None:
+        """Add the current or selected papers to a collection."""
         from arxiv_browser.actions import ui_actions as _actions
 
         return _actions.action_add_to_collection(self)
@@ -3034,6 +3305,7 @@ class ArxivBrowser(App):
 
     @staticmethod
     def _trust_hash(command_template: str) -> str:
+        """Compute a SHA-256 hash for a command template used in trust checks."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return _actions._trust_hash(command_template)
@@ -3044,16 +3316,19 @@ class ArxivBrowser(App):
         trusted_hashes: list[str],
         title: str,
     ) -> bool:
+        """Add a command hash to the trusted list and persist config."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return _actions._remember_trusted_hash(self, command_template, trusted_hashes, title)
 
     def _is_llm_command_trusted(self, command_template: str) -> bool:
+        """Check if an LLM command template has been previously trusted."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return _actions._is_llm_command_trusted(self, command_template)
 
     def _is_pdf_viewer_trusted(self, viewer_cmd: str) -> bool:
+        """Check if a PDF viewer command has been previously trusted."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return _actions._is_pdf_viewer_trusted(self, viewer_cmd)
@@ -3069,6 +3344,11 @@ class ArxivBrowser(App):
         trusted_hashes: list[str],
         on_trusted: Callable[[], None],
     ) -> bool:
+        """Gate an action behind a trust prompt if the command is not yet trusted.
+
+        Returns True if the command is already trusted; otherwise shows a
+        confirmation modal and calls on_trusted when the user approves.
+        """
         from arxiv_browser.actions import llm_actions as _actions
 
         return _actions._ensure_command_trusted(
@@ -3087,6 +3367,7 @@ class ArxivBrowser(App):
         command_template: str,
         on_trusted: Callable[[], None],
     ) -> bool:
+        """Gate an LLM action behind a trust prompt for the configured command."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return _actions._ensure_llm_command_trusted(self, command_template, on_trusted)
@@ -3096,21 +3377,25 @@ class ArxivBrowser(App):
         viewer_cmd: str,
         on_trusted: Callable[[], None],
     ) -> bool:
+        """Gate a PDF viewer action behind a trust prompt for the configured command."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return _actions._ensure_pdf_viewer_trusted(self, viewer_cmd, on_trusted)
 
     def _require_llm_command(self) -> str | None:
+        """Return the resolved LLM command template, or None with a user notification."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return _actions._require_llm_command(self)
 
     def action_generate_summary(self) -> None:
+        """Generate an LLM summary for the current paper."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return _actions.action_generate_summary(self)
 
     def _start_summary_flow(self, command_template: str) -> None:
+        """Begin the summary generation flow after trust verification."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return _actions._start_summary_flow(self, command_template)
@@ -3118,6 +3403,7 @@ class ArxivBrowser(App):
     def _on_summary_mode_selected(
         self, mode: str | None, paper: Paper, command_template: str
     ) -> None:
+        """Handle summary mode selection and start async generation."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return _actions._on_summary_mode_selected(self, mode, paper, command_template)
@@ -3130,6 +3416,7 @@ class ArxivBrowser(App):
         mode_label: str = "",
         use_full_paper_content: bool = True,
     ) -> None:
+        """Run the LLM summary subprocess and cache the result."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return await _actions._generate_summary_async(
@@ -3141,16 +3428,19 @@ class ArxivBrowser(App):
     # ========================================================================
 
     def action_chat_with_paper(self) -> None:
+        """Start an interactive LLM chat session about the current paper."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return _actions.action_chat_with_paper(self)
 
     def _start_chat_with_paper(self) -> None:
+        """Begin the chat flow after LLM trust verification."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return _actions._start_chat_with_paper(self)
 
     async def _open_chat_screen(self, paper: Paper, provider: CLIProvider) -> None:
+        """Fetch paper content and push the PaperChatScreen."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return await _actions._open_chat_screen(self, paper, provider)
@@ -3160,31 +3450,37 @@ class ArxivBrowser(App):
     # ========================================================================
 
     def action_score_relevance(self) -> None:
+        """Score all visible papers for relevance to research interests via LLM."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return _actions.action_score_relevance(self)
 
     def _start_score_relevance_flow(self, command_template: str) -> None:
+        """Begin relevance scoring: prompt for interests if not yet configured."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return _actions._start_score_relevance_flow(self, command_template)
 
     def _on_interests_saved_then_score(self, interests: str | None, command_template: str) -> None:
+        """Callback after research interests are saved; starts batch scoring."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return _actions._on_interests_saved_then_score(self, interests, command_template)
 
     def _start_relevance_scoring(self, command_template: str, interests: str) -> None:
+        """Launch the async batch relevance scoring task."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return _actions._start_relevance_scoring(self, command_template, interests)
 
     def action_edit_interests(self) -> None:
+        """Open the research interests editor modal."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return _actions.action_edit_interests(self)
 
     def _on_interests_edited(self, interests: str | None) -> None:
+        """Persist updated research interests to config."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return _actions._on_interests_edited(self, interests)
@@ -3195,6 +3491,7 @@ class ArxivBrowser(App):
         command_template: str,
         interests: str,
     ) -> None:
+        """Score a batch of papers for relevance via LLM and update badges."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return await _actions._score_relevance_batch_async(
@@ -3208,6 +3505,7 @@ class ArxivBrowser(App):
             self._update_option_at_index(visible_index)
 
     def _update_relevance_badge(self, arxiv_id: str) -> None:
+        """Refresh the list option and detail pane after a relevance score update."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return _actions._update_relevance_badge(self, arxiv_id)
@@ -3217,11 +3515,13 @@ class ArxivBrowser(App):
     # ========================================================================
 
     def action_auto_tag(self) -> None:
+        """Auto-tag the current or selected papers using LLM suggestions."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return _actions.action_auto_tag(self)
 
     def _start_auto_tag_flow(self) -> None:
+        """Begin the auto-tag flow after LLM trust verification."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return _actions._start_auto_tag_flow(self)
@@ -3232,6 +3532,7 @@ class ArxivBrowser(App):
         taxonomy: list[str],
         current_tags: list[str],
     ) -> None:
+        """Auto-tag a single paper and show the suggestion modal."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return await _actions._auto_tag_single_async(self, paper, taxonomy, current_tags)
@@ -3241,6 +3542,7 @@ class ArxivBrowser(App):
         papers: list[Paper],
         taxonomy: list[str],
     ) -> None:
+        """Auto-tag a batch of papers, applying suggestions without confirmation."""
         from arxiv_browser.actions import llm_actions as _actions
 
         return await _actions._auto_tag_batch_async(self, papers, taxonomy)
@@ -3310,7 +3612,7 @@ class ArxivBrowser(App):
         if not self._is_history_mode():
             return False
 
-        current_date, path = self._history_files[self._current_date_index]
+        _current_date, path = self._history_files[self._current_date_index]
         try:
             self.all_papers = parse_arxiv_file(path)
         except OSError as e:
@@ -3367,9 +3669,7 @@ class ArxivBrowser(App):
             self._track_task(self._fetch_hf_daily())
 
         # Update subtitle
-        self.sub_title = (
-            f"{len(self.all_papers)} papers · {current_date.strftime(HISTORY_DATE_FORMAT)}"
-        )
+        self._update_subtitle()
 
         # Update date navigator
         self.call_after_refresh(self._refresh_date_navigator)
@@ -3389,11 +3689,13 @@ class ArxivBrowser(App):
         return False
 
     def action_prev_date(self) -> None:
+        """Navigate to the previous date in history mode."""
         from arxiv_browser.actions import search_api_actions as _actions
 
         return _actions.action_prev_date(self)
 
     def action_next_date(self) -> None:
+        """Navigate to the next date in history mode."""
         from arxiv_browser.actions import search_api_actions as _actions
 
         return _actions.action_next_date(self)
@@ -3406,9 +3708,10 @@ class ArxivBrowser(App):
             pass
 
     def _update_header(self) -> None:
-        """Update header with selection count and sort info."""
+        """Update pane headers and status text."""
         query = self._get_active_query()
         self._update_list_header(query)
+        self._update_details_header()
         self._update_status_bar()
 
     def _update_status_bar(self) -> None:
@@ -3442,9 +3745,11 @@ class ArxivBrowser(App):
                 s2_active=self._s2_active,
                 s2_loading=bool(self._s2_loading),
                 s2_count=len(self._s2_cache),
+                s2_api_error=self._s2_api_error,
                 hf_active=self._hf_active,
                 hf_loading=self._hf_loading,
                 hf_match_count=hf_match_count,
+                hf_api_error=self._hf_api_error,
                 version_checking=self._version_checking,
                 version_update_count=len(self._version_updates),
                 max_width=getattr(size, "width", None),
@@ -3454,19 +3759,22 @@ class ArxivBrowser(App):
 
     def _get_footer_bindings(self) -> list[tuple[str, str]]:
         """Return context-sensitive binding hints for the footer."""
+        from arxiv_browser._ascii import is_ascii_mode
+
+        ellipsis = "..." if is_ascii_mode() else "\u2026"
         # Progress operations take highest priority (visual progress bar)
         if self._scoring_progress is not None:
             current, total = self._scoring_progress
             bar = render_progress_bar(current, total)
             return [("", f"Scoring {bar} {current}/{total}"), ("?", "help")]
         if self._relevance_scoring_active:
-            return [("", "Scoring papers…"), ("?", "help")]
+            return [("", f"Scoring papers{ellipsis}"), ("?", "help")]
         if self._version_progress is not None:
             batch, total = self._version_progress
             bar = render_progress_bar(batch, total)
             return [("", f"Versions {bar} {batch}/{total}"), ("?", "help")]
         if self._version_checking:
-            return [("", "Checking versions…"), ("?", "help")]
+            return [("", f"Checking versions{ellipsis}"), ("?", "help")]
         if self._is_download_batch_active():
             completed = len(self._download_results)
             total = self._download_total
@@ -3477,7 +3785,7 @@ class ArxivBrowser(App):
             bar = render_progress_bar(current, total)
             return [("", f"Auto-tagging {bar} {current}/{total}"), ("?", "help")]
         if self._auto_tag_active:
-            return [("", "Auto-tagging…"), ("?", "help")]
+            return [("", f"Auto-tagging{ellipsis}"), ("?", "help")]
 
         # Search mode — search container visible
         try:
@@ -3560,6 +3868,7 @@ class ArxivBrowser(App):
         return success
 
     def _start_downloads(self) -> None:
+        """Drain the download queue, processing papers up to the concurrency limit."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions._start_downloads(self)
@@ -3569,6 +3878,7 @@ class ArxivBrowser(App):
         return bool(self._download_queue or self._downloading or self._download_total)
 
     async def _process_single_download(self, paper: Paper) -> None:
+        """Download a single PDF and update progress when complete."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return await _actions._process_single_download(self, paper)
@@ -3583,6 +3893,7 @@ class ArxivBrowser(App):
         self._update_footer()
 
     def _finish_download_batch(self) -> None:
+        """Summarize download results and reset batch state."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions._finish_download_batch(self)
@@ -3607,51 +3918,61 @@ class ArxivBrowser(App):
             return False
 
     def action_open_url(self) -> None:
+        """Open the arXiv abstract page for the current or selected papers."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions.action_open_url(self)
 
     def _do_open_urls(self, papers: list[Paper]) -> None:
+        """Open arXiv abstract URLs in the system browser for a list of papers."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions._do_open_urls(self, papers)
 
     def action_open_pdf(self) -> None:
+        """Open the PDF for the current or selected papers in the configured viewer."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions.action_open_pdf(self)
 
     def _do_open_pdfs(self, papers: list[Paper]) -> None:
+        """Open PDF URLs or local files for a list of papers."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions._do_open_pdfs(self, papers)
 
     def _open_with_viewer(self, viewer_cmd: str, url_or_path: str) -> bool:
+        """Open a URL or file path with the configured external viewer command."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions._open_with_viewer(self, viewer_cmd, url_or_path)
 
     def action_download_pdf(self) -> None:
+        """Download PDFs for the current or selected papers to the local folder."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions.action_download_pdf(self)
 
     def _do_start_downloads(self, to_download: list[Paper]) -> None:
+        """Queue papers for download and start the batch processing."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions._do_start_downloads(self, to_download)
 
     def _format_paper_for_clipboard(self, paper: Paper) -> str:
+        """Format a paper's title, authors, and URL as plain text for the clipboard."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions._format_paper_for_clipboard(self, paper)
 
     def _copy_to_clipboard(self, text: str) -> bool:
+        """Copy text to the system clipboard. Returns True on success."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions._copy_to_clipboard(self, text)
 
     def action_copy_selected(self) -> None:
+        """Copy paper info for the current or selected papers to the clipboard."""
         from arxiv_browser.actions import external_io_actions as _actions
 
         return _actions.action_copy_selected(self)

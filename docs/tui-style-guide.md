@@ -31,6 +31,24 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 
 ## 4. Layout Hierarchy Rules
 
+### Modal Sizes
+
+All modals use one of three standard widths. Pick the smallest size that fits the content.
+
+| Size | Width | Height | Use for |
+|------|-------|--------|---------|
+| **Small** | `52` (fixed cols) | `auto` | Quick pickers, confirmations, single-choice dialogs |
+| **Medium** | `70` (fixed cols) | keep existing | Form dialogs, editors, search, list management |
+| **Large** | `80%` | `85%` | Full content views, help, recommendations, citations |
+
+Large modals also keep `min-width: 60; min-height: 20;` for small-terminal safety.
+
+**Current assignments:**
+
+- **Small**: ConfirmModal, ExportMenuModal, SummaryModeModal, RecommendationSourceModal, SectionToggleModal, AddToCollectionModal, MetadataSnapshotPickerModal
+- **Medium**: NotesModal, TagsModal, AutoTagSuggestModal, ArxivSearchModal, CommandPaletteModal, WatchListModal, CollectionsModal, CollectionViewModal, ResearchInterestsModal
+- **Large**: HelpScreen, RecommendationsScreen, CitationGraphScreen, PaperChatScreen
+
 - Preserve the three-zone structure:
   - Header: context and active dataset/date.
   - Content: list + details with selection/focus state.
@@ -61,6 +79,39 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 - Keep color use semantic:
 - Accent for interactive controls and key hints.
 - Green/yellow/orange/pink for status meaning, not decoration.
+
+### ASCII Glyph Pattern
+
+When adding any non-ASCII character to the UI, follow the established glyph-set pattern:
+
+1. **Centralized flag**: `src/arxiv_browser/_ascii.py` exposes `is_ascii_mode()` and `set_ascii_mode()`. Any module can import it (zero internal dependencies).
+2. **Widget glyph sets**: `widgets/listing.py`, `widgets/details.py`, and `widgets/chrome.py` each maintain `_*_GLYPH_SETS` dicts with `"unicode"` and `"ascii"` variants, toggled via `set_ascii_*()` functions called from `App.__init__`.
+3. **Other modules**: Import `is_ascii_mode()` and choose the appropriate character inline:
+   ```python
+   from arxiv_browser._ascii import is_ascii_mode
+   sep = " - " if is_ascii_mode() else " \u00b7 "
+   ```
+4. **Common substitutions**:
+   | Unicode | Codepoint | ASCII fallback |
+   |---------|-----------|----------------|
+   | `●`     | U+25CF    | `[x]`          |
+   | `⭐`    | U+2B50    | `*`            |
+   | `✓`     | U+2713    | `v`            |
+   | `👁`    | U+1F441   | `[w]`          |
+   | `▸` / `▾` | U+25B8/U+25BE | `>` / `v` |
+   | `·`     | U+00B7    | `-` or `\|`    |
+   | `→`     | U+2192    | `->`           |
+   | `↑` / `↓` | U+2191/U+2193 | `^` / `v` |
+   | `…`     | U+2026    | `...`          |
+   | `—`     | U+2014    | `--`           |
+   | `×`     | U+00D7    | `x`            |
+   | `│`     | U+2502    | `\|`           |
+   | `█` / `░` | U+2588/U+2591 | `#` / `-` |
+   | `•`     | U+2022    | `-`            |
+   | `🤖` / `⏳` | Emoji  | (omitted)      |
+
+5. **Test**: The `TestAsciiModeNoUnicodeLeaks` class in `tests/test_widgets_listing.py` verifies no Unicode leaks across key widgets using `re.search(r'[^\x00-\x7f]', text)`.
+6. **Rule**: Never add a non-ASCII character to UI-visible output without a corresponding ASCII fallback.
 
 ## 7. Message Templates
 

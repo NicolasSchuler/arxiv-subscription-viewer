@@ -65,39 +65,50 @@ class SummaryModeModal(ModalScreen[str]):
     """
 
     def compose(self) -> ComposeResult:
+        """Yield the summary mode selection dialog with labeled keyboard shortcuts."""
+        from arxiv_browser._ascii import is_ascii_mode
+
+        dash = "--" if is_ascii_mode() else "\u2014"
         with Vertical(id="summary-mode-dialog"):
             yield Label("AI Summary Mode", id="summary-mode-title")
             g = THEME_COLORS["green"]
             yield Static(
-                f"  [{g}]d[/]  Default  [dim]— Full summary (Problem / Approach / Results)[/]\n"
-                f"  [{g}]q[/]  Quick    [dim]— Fast abstract-only summary[/]\n"
-                f"  [{g}]t[/]  TLDR     [dim]— 1-2 sentence summary[/]\n"
-                f"  [{g}]m[/]  Methods  [dim]— Technical methodology deep-dive[/]\n"
-                f"  [{g}]r[/]  Results  [dim]— Key experimental results with numbers[/]\n"
-                f"  [{g}]c[/]  Compare  [dim]— Comparison with related work[/]",
+                f"  [{g}]d[/]  Default  [dim]{dash} Full summary (Problem / Approach / Results)[/]\n"
+                f"  [{g}]q[/]  Quick    [dim]{dash} Fast abstract-only summary[/]\n"
+                f"  [{g}]t[/]  TLDR     [dim]{dash} 1-2 sentence summary[/]\n"
+                f"  [{g}]m[/]  Methods  [dim]{dash} Technical methodology deep-dive[/]\n"
+                f"  [{g}]r[/]  Results  [dim]{dash} Key experimental results with numbers[/]\n"
+                f"  [{g}]c[/]  Compare  [dim]{dash} Comparison with related work[/]",
                 classes="summary-mode-keys",
             )
             yield Static("[dim]Cancel: Esc[/dim]", id="summary-mode-footer")
 
     def action_cancel(self) -> None:
+        """Dismiss the modal without selecting a summary mode."""
         self.dismiss("")
 
     def action_mode_default(self) -> None:
+        """Dismiss with 'default' for a full structured summary."""
         self.dismiss("default")
 
     def action_mode_quick(self) -> None:
+        """Dismiss with 'quick' for a fast abstract-only summary."""
         self.dismiss("quick")
 
     def action_mode_tldr(self) -> None:
+        """Dismiss with 'tldr' for a 1-2 sentence summary."""
         self.dismiss("tldr")
 
     def action_mode_methods(self) -> None:
+        """Dismiss with 'methods' for a technical methodology deep-dive."""
         self.dismiss("methods")
 
     def action_mode_results(self) -> None:
+        """Dismiss with 'results' for key experimental results."""
         self.dismiss("results")
 
     def action_mode_comparison(self) -> None:
+        """Dismiss with 'comparison' for a related-work comparison."""
         self.dismiss("comparison")
 
 
@@ -115,9 +126,8 @@ class ResearchInterestsModal(ModalScreen[str]):
     }
 
     #interests-dialog {
-        width: 60%;
+        width: 70;
         height: 60%;
-        min-width: 50;
         min-height: 15;
         background: $th-background;
         border: tall $th-accent-alt;
@@ -157,10 +167,12 @@ class ResearchInterestsModal(ModalScreen[str]):
     """
 
     def __init__(self, current_interests: str = "") -> None:
+        """Initialize with the user's current research interests text."""
         super().__init__()
         self._current_interests = current_interests
 
     def compose(self) -> ComposeResult:
+        """Yield the dialog with a text area for interests and Save/Cancel buttons."""
         with Vertical(id="interests-dialog"):
             yield Label("Research Interests", id="interests-title")
             yield Static(
@@ -173,21 +185,26 @@ class ResearchInterestsModal(ModalScreen[str]):
                 yield Button("Save (Ctrl+S)", variant="primary", id="save-btn")
 
     def on_mount(self) -> None:
+        """Focus the research interests text area on mount."""
         self.query_one("#interests-textarea", TextArea).focus()
 
     def action_save(self) -> None:
+        """Save the trimmed text area content and dismiss the modal."""
         text = self.query_one("#interests-textarea", TextArea).text.strip()
         self.dismiss(text)
 
     def action_cancel(self) -> None:
+        """Dismiss the modal without saving changes."""
         self.dismiss("")
 
     @on(Button.Pressed, "#save-btn")
     def on_save_pressed(self) -> None:
+        """Handle the Save button press by delegating to action_save."""
         self.action_save()
 
     @on(Button.Pressed, "#cancel-btn")
     def on_cancel_pressed(self) -> None:
+        """Handle the Cancel button press by delegating to action_cancel."""
         self.action_cancel()
 
 
@@ -268,6 +285,7 @@ class PaperChatScreen(ModalScreen[None]):
         provider: CLIProvider,
         paper_content: str = "",
     ) -> None:
+        """Initialize with a paper, LLM provider, and optional full paper content."""
         super().__init__()
         self._paper = paper
         self._provider = provider
@@ -276,6 +294,7 @@ class PaperChatScreen(ModalScreen[None]):
         self._waiting = False
 
     def compose(self) -> ComposeResult:
+        """Yield the chat dialog with a message scroll area, status bar, and input field."""
         title = self._paper.title[:70]
         with Vertical(id="chat-dialog"):
             yield Static(f"Chat: {title}", id="chat-title")
@@ -288,6 +307,7 @@ class PaperChatScreen(ModalScreen[None]):
                 )
 
     def on_mount(self) -> None:
+        """Focus the chat input and display a hint about available paper content."""
         self.query_one("#chat-input", Input).focus()
         hint = (
             "Paper content loaded. Ask anything!"
@@ -299,6 +319,7 @@ class PaperChatScreen(ModalScreen[None]):
 
     @on(Input.Submitted, "#chat-input")
     def on_question_submitted(self, event: Input.Submitted) -> None:
+        """Handle user question submission by displaying it and dispatching to the LLM."""
         question = event.value.strip()
         if not question or self._waiting:
             return
@@ -309,6 +330,7 @@ class PaperChatScreen(ModalScreen[None]):
         self.app._track_task(self._ask_llm(question))  # type: ignore[attr-defined]
 
     def _add_message(self, role: str, text: str, *, markup: bool = False) -> None:
+        """Append a message to the conversation history and render it in the chat scroll area."""
         self._history.append((role, text))
         display = text if markup else escape_rich_text(text)
         messages = self.query_one("#chat-messages", VerticalScroll)
@@ -319,6 +341,7 @@ class PaperChatScreen(ModalScreen[None]):
         messages.scroll_end(animate=False)
 
     async def _ask_llm(self, question: str) -> None:
+        """Build conversation context, send the question to the LLM, and display the response."""
         try:
             # Build context with conversation history
             context = CHAT_SYSTEM_PROMPT.format(
@@ -355,4 +378,5 @@ class PaperChatScreen(ModalScreen[None]):
                 pass
 
     def action_close(self) -> None:
+        """Close the chat screen and return to the previous screen."""
         self.dismiss(None)
