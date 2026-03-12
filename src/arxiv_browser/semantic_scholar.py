@@ -185,6 +185,7 @@ def parse_citation_entry(data: dict) -> CitationEntry | None:
 # ============================================================================
 
 
+@overload
 async def _s2_get_with_retry(
     client: httpx.AsyncClient,
     url: str,
@@ -192,7 +193,31 @@ async def _s2_get_with_retry(
     api_key: str,
     timeout: int,
     label: str,
-) -> httpx.Response | None:
+    include_status: Literal[False] = ...,
+) -> httpx.Response | None: ...
+
+
+@overload
+async def _s2_get_with_retry(
+    client: httpx.AsyncClient,
+    url: str,
+    params: dict[str, str],
+    api_key: str,
+    timeout: int,
+    label: str,
+    include_status: Literal[True],
+) -> tuple[httpx.Response | None, bool]: ...
+
+
+async def _s2_get_with_retry(
+    client: httpx.AsyncClient,
+    url: str,
+    params: dict[str, str],
+    api_key: str,
+    timeout: int,
+    label: str,
+    include_status: bool = False,
+) -> httpx.Response | None | tuple[httpx.Response | None, bool]:
     """Send a GET request with exponential backoff retry on 429/5xx.
 
     Returns the response on 200, or None on terminal failure (404, other 4xx,
@@ -208,24 +233,26 @@ async def _s2_get_with_retry(
         return response
 
     try:
-        return await retry_with_backoff(
+        response = await retry_with_backoff(
             _do_request,
             max_retries=S2_MAX_RETRIES - 1,
             backoff_base=S2_INITIAL_BACKOFF,
             operation=label,
         )
+        return (response, True) if include_status else response
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 404:
             logger.info("%s not found", label)
+            return (None, True) if include_status else None
         else:
             logger.warning("%s returned %d", label, exc.response.status_code)
-        return None
+        return (None, False) if include_status else None
     except (httpx.ConnectError, httpx.TimeoutException, httpx.ReadError):
         logger.warning("%s timeout/connection error after retries", label)
-        return None
+        return (None, False) if include_status else None
     except httpx.HTTPError:
         logger.warning("%s HTTP error", label, exc_info=True)
-        return None
+        return (None, False) if include_status else None
 
 
 def _parse_json_object(response: httpx.Response, label: str) -> dict[str, Any] | None:
@@ -241,27 +268,57 @@ def _parse_json_object(response: httpx.Response, label: str) -> dict[str, Any] |
     return payload
 
 
+@overload
+async def fetch_s2_paper(
+    arxiv_id: str,
+    client: httpx.AsyncClient,
+    api_key: str = ...,
+    timeout: int = ...,
+    include_status: Literal[False] = ...,
+) -> SemanticScholarPaper | None: ...
+
+
+@overload
+async def fetch_s2_paper(
+    arxiv_id: str,
+    client: httpx.AsyncClient,
+    api_key: str = ...,
+    timeout: int = ...,
+    include_status: Literal[True] = ...,
+) -> tuple[SemanticScholarPaper | None, bool]: ...
+
+
 async def fetch_s2_paper(
     arxiv_id: str,
     client: httpx.AsyncClient,
     api_key: str = "",
     timeout: int = S2_REQUEST_TIMEOUT,
-) -> SemanticScholarPaper | None:
-    """Fetch paper metadata from S2 Graph API. Returns None on failure."""
-    response = await _s2_get_with_retry(
+    include_status: bool = False,
+) -> SemanticScholarPaper | None | tuple[SemanticScholarPaper | None, bool]:
+    """Fetch paper metadata from S2 Graph API.
+
+    When include_status=True, returns (paper, complete) where complete=False
+    means the request or parse path failed. A 404 counts as complete and yields
+    (None, True).
+    """
+    response, complete = await _s2_get_with_retry(
         client,
         url=f"{S2_API_BASE}/paper/ARXIV:{arxiv_id}",
         params={"fields": S2_PAPER_FIELDS},
         api_key=api_key,
         timeout=timeout,
         label=f"S2 paper arXiv:{arxiv_id}",
+        include_status=True,
     )
     if response is None:
-        return None
+        return (None, complete) if include_status else None
     payload = _parse_json_object(response, f"S2 paper arXiv:{arxiv_id}")
     if payload is None:
-        return None
-    return parse_s2_paper_response(payload, arxiv_id=arxiv_id)
+        return (None, False) if include_status else None
+    paper = parse_s2_paper_response(payload, arxiv_id=arxiv_id)
+    if include_status:
+        return paper, paper is not None
+    return paper
 
 
 async def fetch_s2_recommendations(

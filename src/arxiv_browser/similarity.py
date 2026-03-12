@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 else:
     # Deferred import to avoid circular deps at runtime
     def parse_arxiv_date(date_str: str) -> datetime:  # type: ignore[assignment]
+        """Parse an arXiv date string via deferred import to avoid circular deps."""
         from arxiv_browser.parsing import parse_arxiv_date as _parse
 
         return _parse(date_str)
@@ -63,6 +64,7 @@ class TfidfIndex:
     __slots__ = ("_idf", "_norms", "_tfidf_vectors")
 
     def __init__(self) -> None:
+        """Initialize an empty TF-IDF index."""
         self._idf: dict[str, float] = {}
         self._tfidf_vectors: dict[str, dict[str, float]] = {}
         self._norms: dict[str, float] = {}
@@ -114,9 +116,11 @@ class TfidfIndex:
         return dot / (norm_a * norm_b)
 
     def __contains__(self, arxiv_id: str) -> bool:
+        """Return True if the given arxiv_id is indexed."""
         return arxiv_id in self._tfidf_vectors
 
     def __len__(self) -> int:
+        """Return the number of indexed papers."""
         return len(self._tfidf_vectors)
 
 
@@ -255,6 +259,12 @@ def find_similar_papers(
         target: The paper to find similarities for
         all_papers: List of all papers to search
         top_n: Number of similar papers to return
+        metadata: Per-paper metadata used for interest-based scoring boosts
+            (starred/noted/tagged papers score higher)
+        abstract_lookup: Callable returning abstract text for a paper; defaults
+            to ``paper.abstract or ""``
+        tfidf_index: Pre-built TF-IDF index for cosine similarity; when provided,
+            switches from pairwise Jaccard to indexed TF-IDF scoring
 
     Returns:
         List of (paper, score) tuples, sorted by score descending
@@ -263,6 +273,7 @@ def find_similar_papers(
     if abstract_lookup is None:
 
         def _default_abstract_lookup(paper: Paper) -> str:
+            """Return the paper's abstract, defaulting to empty string."""
             return paper.abstract or ""
 
         abstract_lookup = _default_abstract_lookup
@@ -277,6 +288,7 @@ def find_similar_papers(
             newest_date = paper_date
 
     def metadata_boost(arxiv_id: str) -> float:
+        """Compute a score boost from starred/read metadata signals."""
         if not metadata:
             return 0.0
         entry = metadata.get(arxiv_id)
@@ -292,6 +304,7 @@ def find_similar_papers(
         return boost
 
     def recency_score(paper: Paper) -> float:
+        """Compute a 0-1 recency score based on paper age relative to newest."""
         if newest_date == datetime.min:
             return 0.0
         paper_date = parse_arxiv_date(paper.date)

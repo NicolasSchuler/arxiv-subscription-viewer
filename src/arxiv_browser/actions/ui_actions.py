@@ -107,6 +107,7 @@ async def action_fetch_s2(app: "ArxivBrowser") -> None:
         app.notify("S2 data already loaded", title="S2")
         return
     app._s2_loading.add(aid)
+    app._update_status_bar()
     app._get_ui_refresh_coordinator().refresh_detail_pane()  # Show loading indicator immediately
     # Try SQLite cache first (off main thread)
     try:
@@ -115,6 +116,8 @@ async def action_fetch_s2(app: "ArxivBrowser") -> None:
         )
     except _RECOVERABLE_ACTION_ERRORS as exc:
         app._s2_loading.discard(aid)
+        app._s2_api_error = True
+        app._update_status_bar()
         _log_action_failure(f"S2 cache lookup for {aid}", exc)
         app.notify(
             build_actionable_error(
@@ -128,6 +131,8 @@ async def action_fetch_s2(app: "ArxivBrowser") -> None:
         return
     except Exception as exc:
         app._s2_loading.discard(aid)
+        app._s2_api_error = True
+        app._update_status_bar()
         _log_action_failure(f"S2 cache lookup for {aid}", exc, unexpected=True)
         app.notify(
             build_actionable_error(
@@ -141,7 +146,9 @@ async def action_fetch_s2(app: "ArxivBrowser") -> None:
         return
     if cached:
         app._s2_cache[aid] = cached
+        app._s2_api_error = False
         app._s2_loading.discard(aid)
+        app._update_status_bar()
         app._get_ui_refresh_coordinator().refresh_detail_and_list_item()
         return
     # Fetch from API
@@ -161,14 +168,28 @@ async def _fetch_s2_paper_async(app: "ArxivBrowser", arxiv_id: str) -> None:
     """Fetch S2 paper data and update UI on completion."""
     _sync_app_globals()
     try:
-        result = await _load_or_fetch_s2_paper_cached(
+        result, complete = await _load_or_fetch_s2_paper_cached(
             arxiv_id=arxiv_id,
             db_path=app._s2_db_path,
             cache_ttl_days=app._config.s2_cache_ttl_days,
             client=app._http_client,
             api_key=app._config.s2_api_key,
+            include_status=True,
         )
+        if not complete:
+            app._s2_api_error = True
+            app.notify(
+                build_actionable_error(
+                    "fetch Semantic Scholar data",
+                    why="an API or network error occurred",
+                    next_step="press e to retry after a moment",
+                ),
+                title="S2",
+                severity="error",
+            )
+            return
         if result is None:
+            app._s2_api_error = False
             app.notify(
                 build_actionable_warning(
                     "No Semantic Scholar data was found for this paper",
@@ -180,10 +201,12 @@ async def _fetch_s2_paper_async(app: "ArxivBrowser", arxiv_id: str) -> None:
             return
         # Cache in memory + SQLite
         app._s2_cache[arxiv_id] = result
+        app._s2_api_error = False
         # Update UI if still relevant
         app._get_ui_refresh_coordinator().refresh_detail_and_list_item()
     except (httpx.HTTPError, OSError, RuntimeError, ValueError, TypeError) as exc:
         _log_action_failure(f"S2 fetch for {arxiv_id}", exc)
+        app._s2_api_error = True
         app.notify(
             build_actionable_error(
                 "fetch Semantic Scholar data",
@@ -195,6 +218,7 @@ async def _fetch_s2_paper_async(app: "ArxivBrowser", arxiv_id: str) -> None:
         )
     except Exception as exc:
         _log_action_failure(f"S2 fetch for {arxiv_id}", exc, unexpected=True)
+        app._s2_api_error = True
         app.notify(
             build_actionable_error(
                 "fetch Semantic Scholar data",
@@ -206,6 +230,7 @@ async def _fetch_s2_paper_async(app: "ArxivBrowser", arxiv_id: str) -> None:
         )
     finally:
         app._s2_loading.discard(arxiv_id)
+        app._update_status_bar()
 
 
 async def action_toggle_hf(app: "ArxivBrowser") -> None:
@@ -254,6 +279,7 @@ async def _fetch_hf_daily(app: "ArxivBrowser") -> None:
         )
     except _RECOVERABLE_ACTION_ERRORS as exc:
         app._hf_loading = False
+        app._hf_api_error = True
         app._update_status_bar()
         _log_action_failure("HF cache lookup", exc)
         app.notify(
@@ -268,6 +294,7 @@ async def _fetch_hf_daily(app: "ArxivBrowser") -> None:
         return
     except Exception as exc:
         app._hf_loading = False
+        app._hf_api_error = True
         app._update_status_bar()
         _log_action_failure("HF cache lookup", exc, unexpected=True)
         app.notify(
@@ -283,6 +310,7 @@ async def _fetch_hf_daily(app: "ArxivBrowser") -> None:
     if cached is not None:
         app._hf_cache = cached
         app._hf_loading = False
+        app._hf_api_error = False
         app._get_ui_refresh_coordinator().refresh_detail_pane()
         app._mark_badges_dirty("hf")
         matched = count_hf_matches(app._hf_cache, app._papers_by_id)
@@ -308,12 +336,26 @@ async def _fetch_hf_daily_async(app: "ArxivBrowser") -> None:
     """Background task: fetch HF daily papers and update UI."""
     _sync_app_globals()
     try:
-        papers = await _load_or_fetch_hf_daily_cached(
+        papers, complete = await _load_or_fetch_hf_daily_cached(
             db_path=app._hf_db_path,
             cache_ttl_hours=app._config.hf_cache_ttl_hours,
             client=app._http_client,
+            include_status=True,
         )
+        if not complete:
+            app._hf_api_error = True
+            app.notify(
+                build_actionable_error(
+                    "fetch HuggingFace trending data",
+                    why="an API or network error occurred",
+                    next_step="retry later or press Ctrl+h to disable HF",
+                ),
+                title="HF",
+                severity="error",
+            )
+            return
         if not papers:
+            app._hf_api_error = False
             app.notify(
                 build_actionable_warning(
                     "No HuggingFace trending data was returned",
@@ -324,12 +366,14 @@ async def _fetch_hf_daily_async(app: "ArxivBrowser") -> None:
             )
             return
         app._hf_cache = {p.arxiv_id: p for p in papers}
+        app._hf_api_error = False
         app._get_ui_refresh_coordinator().refresh_detail_pane()
         app._mark_badges_dirty("hf")
         matched = count_hf_matches(app._hf_cache, app._papers_by_id)
         _notify_hf_matches(app, matched)
     except (httpx.HTTPError, OSError, RuntimeError, ValueError, TypeError) as exc:
         _log_action_failure("HF daily fetch", exc)
+        app._hf_api_error = True
         app.notify(
             build_actionable_error(
                 "fetch HuggingFace trending data",
@@ -341,6 +385,7 @@ async def _fetch_hf_daily_async(app: "ArxivBrowser") -> None:
         )
     except Exception as exc:
         _log_action_failure("HF daily fetch", exc, unexpected=True)
+        app._hf_api_error = True
         app.notify(
             build_actionable_error(
                 "fetch HuggingFace trending data",
@@ -584,10 +629,13 @@ def action_show_help(app: "ArxivBrowser") -> None:
 def action_command_palette(app: "ArxivBrowser") -> None:
     """Open the fuzzy-searchable command palette."""
     _sync_app_globals()
+    commands = app._build_command_palette_commands()
+    command_labels = {command.action: command.name for command in commands}
 
     def _on_command_selected(action_name: str | None) -> None:
         if not action_name:
             return
+        command_label = command_labels.get(action_name, action_name)
         method = getattr(app, f"action_{action_name}", None)
         if method is not None:
             try:
@@ -602,7 +650,11 @@ def action_command_palette(app: "ArxivBrowser") -> None:
                     exc,
                     exc_info=True,
                 )
-                app.notify(f"Command failed: {action_name}", title="Error", severity="error")
+                app.notify(
+                    f"{command_label} failed. Try: retry from Ctrl+p or press ? for help.",
+                    title="Commands",
+                    severity="error",
+                )
             except Exception as exc:
                 logger.warning(
                     "Unexpected command palette action failure %s (%s): %s",
@@ -611,13 +663,15 @@ def action_command_palette(app: "ArxivBrowser") -> None:
                     exc,
                     exc_info=True,
                 )
-                app.notify(f"Command failed: {action_name}", title="Error", severity="error")
+                app.notify(
+                    f"{command_label} failed. Try: retry from Ctrl+p or press ? for help.",
+                    title="Commands",
+                    severity="error",
+                )
         else:
             logger.warning("Unknown command palette action: %s", action_name)
 
-    app.push_screen(
-        CommandPaletteModal(app._build_command_palette_commands()), _on_command_selected
-    )
+    app.push_screen(CommandPaletteModal(commands), _on_command_selected)
 
 
 def action_collections(app: "ArxivBrowser") -> None:

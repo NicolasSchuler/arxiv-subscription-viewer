@@ -31,9 +31,8 @@ class CollectionsModal(ModalScreen[str | None]):
     }
 
     #col-dialog {
-        width: 80%;
+        width: 70;
         height: 70%;
-        min-width: 60;
         min-height: 20;
         background: $th-background;
         border: tall $th-accent;
@@ -106,6 +105,7 @@ class CollectionsModal(ModalScreen[str | None]):
         collections: list[PaperCollection],
         papers_by_id: dict[str, Paper] | None = None,
     ) -> None:
+        """Initialize with deep-copied collections and an optional paper lookup."""
         super().__init__()
         self._collections = [
             PaperCollection(
@@ -119,6 +119,7 @@ class CollectionsModal(ModalScreen[str | None]):
         self._papers_by_id = papers_by_id or {}
 
     def compose(self) -> ComposeResult:
+        """Yield the collections dialog with a list view, name/description form, and action buttons."""
         with Vertical(id="col-dialog"):
             yield Label("Collections Manager", id="col-title")
             with Horizontal(id="col-body"):
@@ -138,10 +139,12 @@ class CollectionsModal(ModalScreen[str | None]):
                 yield Button("Save", variant="primary", id="col-save")
 
     def on_mount(self) -> None:
+        """Populate the collections list and focus the name input on mount."""
         self._refresh_list()
         self.query_one("#col-name", Input).focus()
 
     def _refresh_list(self) -> None:
+        """Clear and repopulate the collections list view with current collection data."""
         list_view = self.query_one("#col-list", ListView)
         list_view.clear()
         for col in self._collections:
@@ -153,6 +156,7 @@ class CollectionsModal(ModalScreen[str | None]):
             self._populate_form(0)
 
     def _populate_form(self, index: int) -> None:
+        """Fill the name and description inputs from the collection at the given index."""
         if index < 0 or index >= len(self._collections):
             return
         col = self._collections[index]
@@ -160,6 +164,7 @@ class CollectionsModal(ModalScreen[str | None]):
         self.query_one("#col-desc", Input).value = col.description
 
     def _get_selected_index(self) -> int | None:
+        """Return the currently highlighted list index, or None if nothing is selected."""
         list_view = self.query_one("#col-list", ListView)
         idx = list_view.index
         if idx is None or idx < 0 or idx >= len(self._collections):
@@ -175,10 +180,12 @@ class CollectionsModal(ModalScreen[str | None]):
         )
 
     def action_cancel(self) -> None:
+        """Dismiss the modal without saving changes."""
         self.dismiss(None)
 
     @on(ListView.Highlighted, "#col-list")
     def on_list_highlighted(self, event: ListView.Highlighted) -> None:
+        """Handle list highlight changes by populating the form with the selected collection."""
         list_view = self.query_one("#col-list", ListView)
         idx = list_view.index
         if idx is not None:
@@ -186,6 +193,7 @@ class CollectionsModal(ModalScreen[str | None]):
 
     @on(Button.Pressed, "#col-create")
     def on_create_pressed(self) -> None:
+        """Create a new collection from the form inputs after validating name and limits."""
         name = self.query_one("#col-name", Input).value.strip()
         if not name:
             self._notify_warning(
@@ -217,6 +225,7 @@ class CollectionsModal(ModalScreen[str | None]):
 
     @on(Button.Pressed, "#col-rename")
     def on_rename_pressed(self) -> None:
+        """Rename the selected collection and update its description from the form inputs."""
         idx = self._get_selected_index()
         if idx is None:
             self._notify_warning(
@@ -238,6 +247,7 @@ class CollectionsModal(ModalScreen[str | None]):
 
     @on(Button.Pressed, "#col-delete")
     def on_delete_pressed(self) -> None:
+        """Delete the currently selected collection from the list."""
         idx = self._get_selected_index()
         if idx is None:
             self._notify_warning(
@@ -250,6 +260,7 @@ class CollectionsModal(ModalScreen[str | None]):
 
     @on(Button.Pressed, "#col-view")
     def on_view_pressed(self) -> None:
+        """Open the CollectionViewModal for the selected collection's papers."""
         idx = self._get_selected_index()
         if idx is None:
             self._notify_warning(
@@ -264,6 +275,7 @@ class CollectionsModal(ModalScreen[str | None]):
         )
 
     def _on_view_result(self, result: PaperCollection | None) -> None:
+        """Handle the result from CollectionViewModal by updating the modified collection."""
         if result is not None:
             # Find and update the collection
             for i, c in enumerate(self._collections):
@@ -274,14 +286,17 @@ class CollectionsModal(ModalScreen[str | None]):
 
     @on(Button.Pressed, "#col-save")
     def on_save_pressed(self) -> None:
+        """Dismiss the modal with a save signal to persist collection changes."""
         self.dismiss("save")
 
     @on(Button.Pressed, "#col-close")
     def on_close_pressed(self) -> None:
+        """Dismiss the modal without saving changes."""
         self.dismiss(None)
 
     @property
     def collections(self) -> list[PaperCollection]:
+        """Return the current list of collections, including any unsaved edits."""
         return self._collections
 
 
@@ -298,9 +313,8 @@ class CollectionViewModal(ModalScreen[PaperCollection | None]):
     }
 
     #colview-dialog {
-        width: 75%;
+        width: 70;
         height: 65%;
-        min-width: 50;
         min-height: 15;
         background: $th-background;
         border: tall $th-accent;
@@ -335,6 +349,7 @@ class CollectionViewModal(ModalScreen[PaperCollection | None]):
         collection: PaperCollection,
         papers_by_id: dict[str, Paper] | None = None,
     ) -> None:
+        """Initialize with a deep-copied collection and an optional paper lookup."""
         super().__init__()
         self._collection = PaperCollection(
             name=collection.name,
@@ -345,6 +360,7 @@ class CollectionViewModal(ModalScreen[PaperCollection | None]):
         self._papers_by_id = papers_by_id or {}
 
     def compose(self) -> ComposeResult:
+        """Yield the collection view dialog with a paper list and remove/done buttons."""
         count = len(self._collection.paper_ids)
         title = f"{self._collection.name} ({count} paper{'s' if count != 1 else ''})"
         with Vertical(id="colview-dialog"):
@@ -355,9 +371,11 @@ class CollectionViewModal(ModalScreen[PaperCollection | None]):
                 yield Button("Done", variant="primary", id="colview-done")
 
     def on_mount(self) -> None:
+        """Populate the paper list on mount."""
         self._refresh_list()
 
     def _refresh_list(self) -> None:
+        """Clear and repopulate the paper list view from the collection's paper IDs."""
         list_view = self.query_one("#colview-list", ListView)
         list_view.clear()
         for pid in self._collection.paper_ids:
@@ -368,6 +386,7 @@ class CollectionViewModal(ModalScreen[PaperCollection | None]):
             list_view.index = 0
 
     def action_cancel(self) -> None:
+        """Dismiss the modal without applying paper removals."""
         self.dismiss(None)
 
     def _notify_warning(self, message: str, *, next_step: str) -> None:
@@ -380,6 +399,7 @@ class CollectionViewModal(ModalScreen[PaperCollection | None]):
 
     @on(Button.Pressed, "#colview-remove")
     def on_remove_pressed(self) -> None:
+        """Remove the highlighted paper from the collection and refresh the list."""
         list_view = self.query_one("#colview-list", ListView)
         idx = list_view.index
         if idx is None or idx < 0 or idx >= len(self._collection.paper_ids):
@@ -398,6 +418,7 @@ class CollectionViewModal(ModalScreen[PaperCollection | None]):
 
     @on(Button.Pressed, "#colview-done")
     def on_done_pressed(self) -> None:
+        """Dismiss the modal and return the updated collection."""
         self.dismiss(self._collection)
 
 
@@ -415,9 +436,8 @@ class AddToCollectionModal(ModalScreen[str | None]):
     }
 
     #addcol-dialog {
-        width: 50%;
+        width: 52;
         height: 50%;
-        min-width: 40;
         min-height: 12;
         background: $th-background;
         border: tall $th-accent;
@@ -448,10 +468,12 @@ class AddToCollectionModal(ModalScreen[str | None]):
     """
 
     def __init__(self, collections: list[PaperCollection]) -> None:
+        """Initialize with the list of available collections to choose from."""
         super().__init__()
         self._collections = collections
 
     def compose(self) -> ComposeResult:
+        """Yield the collection picker dialog with a selectable list and cancel button."""
         with Vertical(id="addcol-dialog"):
             yield Label("Add to Collection", id="addcol-title")
             yield ListView(id="addcol-list")
@@ -459,6 +481,7 @@ class AddToCollectionModal(ModalScreen[str | None]):
                 yield Button("Cancel (Esc/q)", variant="default", id="addcol-cancel")
 
     def on_mount(self) -> None:
+        """Populate the list view with available collections on mount."""
         list_view = self.query_one("#addcol-list", ListView)
         for col in self._collections:
             count = len(col.paper_ids)
@@ -468,10 +491,12 @@ class AddToCollectionModal(ModalScreen[str | None]):
             list_view.index = 0
 
     def action_cancel(self) -> None:
+        """Dismiss the picker without selecting a collection."""
         self.dismiss(None)
 
     @on(ListView.Selected, "#addcol-list")
     def on_list_selected(self, event: ListView.Selected) -> None:
+        """Handle list item selection by dismissing with the chosen collection name."""
         list_view = self.query_one("#addcol-list", ListView)
         idx = list_view.index
         if idx is not None and 0 <= idx < len(self._collections):
@@ -479,4 +504,5 @@ class AddToCollectionModal(ModalScreen[str | None]):
 
     @on(Button.Pressed, "#addcol-cancel")
     def on_cancel_pressed(self) -> None:
+        """Handle the cancel button press by dismissing without a selection."""
         self.dismiss(None)

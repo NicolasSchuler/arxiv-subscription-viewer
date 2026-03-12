@@ -108,6 +108,7 @@ class DefaultArxivApiService:
     """Default adapter that delegates to function-based arXiv API services."""
 
     def format_query_label(self, request: ArxivSearchRequest) -> str:
+        """Build a user-facing arXiv API query label."""
         return _arxiv_api.format_query_label(request)
 
     async def enforce_rate_limit(
@@ -118,6 +119,7 @@ class DefaultArxivApiService:
         now: Callable[[], float],
         sleep: Callable[[float], Awaitable[None]],
     ) -> tuple[float, float]:
+        """Enforce API rate limiting and return (new_timestamp, wait_seconds)."""
         return await _arxiv_api.enforce_rate_limit(
             last_request_at=last_request_at,
             min_interval_seconds=min_interval_seconds,
@@ -135,6 +137,7 @@ class DefaultArxivApiService:
         timeout_seconds: int,
         user_agent: str,
     ) -> list[Paper]:
+        """Fetch a page of arXiv API results."""
         return await _arxiv_api.fetch_page(
             client=client,
             request=request,
@@ -158,6 +161,7 @@ class DefaultLlmService:
         summary_timeout_seconds: int,
         fetch_paper_content: Callable[[Paper], Awaitable[str]],
     ) -> tuple[str | None, str | None]:
+        """Generate a summary and return (summary, error)."""
         return await _llm.generate_summary(
             paper=paper,
             prompt_template=prompt_template,
@@ -175,6 +179,7 @@ class DefaultLlmService:
         provider: LLMProvider,
         timeout_seconds: int,
     ) -> tuple[int, str] | None:
+        """Score one paper for relevance."""
         return await _llm.score_relevance_once(
             paper=paper,
             interests=interests,
@@ -190,6 +195,7 @@ class DefaultLlmService:
         provider: LLMProvider,
         timeout_seconds: int,
     ) -> list[str] | None:
+        """Suggest tags for one paper."""
         return await _llm.suggest_tags_once(
             paper=paper,
             taxonomy=taxonomy,
@@ -209,6 +215,7 @@ class DefaultDownloadService:
         client: httpx.AsyncClient | None,
         timeout_seconds: int,
     ) -> bool:
+        """Download a paper PDF and return success."""
         return await _download.download_pdf(
             paper=paper,
             config=config,

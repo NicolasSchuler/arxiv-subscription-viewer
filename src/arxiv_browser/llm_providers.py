@@ -90,7 +90,9 @@ class LLMResult:
 class LLMProvider(Protocol):
     """Protocol for LLM providers — any class with this signature is compatible."""
 
-    async def execute(self, prompt: str, timeout: int) -> LLMResult: ...
+    async def execute(self, prompt: str, timeout: int) -> LLMResult:
+        """Execute a prompt and return the LLM result."""
+        ...
 
 
 class CLIProvider:
@@ -104,6 +106,7 @@ class CLIProvider:
     __slots__ = ("_allow_shell", "_command_template")
 
     def __init__(self, command_template: str, *, allow_shell: bool = True) -> None:
+        """Initialize the CLI provider with a command template and shell policy."""
         self._command_template = command_template
         self._allow_shell = allow_shell
 

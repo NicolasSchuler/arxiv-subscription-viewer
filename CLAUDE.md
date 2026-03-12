@@ -84,10 +84,10 @@ huggingface.py         ← models
 enrichment.py          ← models
 io_actions.py          ← models
 cli.py                 ← action_messages, config, models, parsing
-services/arxiv_api.py  ← models, parsing
-services/download.py   ← export, models
-services/enrichment.py ← huggingface, semantic_scholar
-services/llm.py        ← llm, llm_providers, models
+services/arxiv_api_service.py  ← models, parsing
+services/download_service.py   ← export, models
+services/enrichment_service.py ← huggingface, semantic_scholar
+services/llm_service.py        ← llm, llm_providers, models
 services/interfaces.py ← llm_providers, models, services.*
 modals/common.py       ← models, themes
 modals/editing.py      ← themes
@@ -112,6 +112,7 @@ No module imports from `app.py` — this prevents circular dependencies. Modal, 
 - `WatchListEntry` - Author/keyword/title patterns to highlight
 - `SearchBookmark` - Saved search queries (max 9)
 - `SessionState` - Scroll position, filters, sort order, current date
+- `PaperCollection` - Named collection of papers (reading list) with description
 - `UserConfig` - Complete user configuration container
 
 ### Core Functions (by module)
@@ -363,6 +364,7 @@ Detailed setup and usage for each feature is in `docs/`:
 
 GitHub Actions workflow (`.github/workflows/ci-cd.yml`):
 - **CI job**: Runs on push to `main` and PRs — lint, format check, type check, tests with coverage
+- **Quality job**: Runs after CI passes — xenon complexity (C/C/B), bandit security, vulture dead-code (80% confidence), deptry deps, app.py line count (≤5000)
 - **Publish job**: Runs on `v*` tags after CI passes — builds and publishes to PyPI via Trusted Publishers (OIDC)
 
 ### Release process

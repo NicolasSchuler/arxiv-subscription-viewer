@@ -42,6 +42,7 @@ DETAIL_SECTION_NAMES: dict[str, str] = {
     "hf": "HuggingFace",
     "version": "Version Update",
 }
+DETAIL_MODES = ("scan", "full")
 DEFAULT_COLLAPSED_SECTIONS: list[str] = ["tags", "relevance", "summary", "s2", "hf", "version"]
 
 STOPWORDS = frozenset(
@@ -251,6 +252,7 @@ class UserConfig:
     marks: dict[str, str] = field(default_factory=dict)  # letter -> arxiv_id
     session: SessionState = field(default_factory=SessionState)
     show_abstract_preview: bool = False
+    detail_mode: str = "scan"
     bibtex_export_dir: str = ""  # Empty = use ~/arxiv-exports/
     pdf_download_dir: str = ""  # Empty = use ~/arxiv-pdfs/
     prefer_pdf_url: bool = False
@@ -275,6 +277,7 @@ class UserConfig:
     trusted_llm_command_hashes: list[str] = field(default_factory=list)
     trusted_pdf_viewer_hashes: list[str] = field(default_factory=list)
     version: int = 1
+    onboarding_seen: bool = False  # True after user has dismissed the first-run help overlay
     config_defaulted: bool = False  # True when config was corrupt and defaults were used
 
 
@@ -319,6 +322,7 @@ __all__ = [
     "ARXIV_API_MAX_RESULTS_LIMIT",
     "CONFIG_APP_NAME",
     "DEFAULT_COLLAPSED_SECTIONS",
+    "DETAIL_MODES",
     "DETAIL_SECTION_KEYS",
     "DETAIL_SECTION_NAMES",
     "MAX_COLLECTIONS",

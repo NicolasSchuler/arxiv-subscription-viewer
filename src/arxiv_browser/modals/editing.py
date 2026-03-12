@@ -30,9 +30,8 @@ class NotesModal(ModalScreen[str | None]):
     }
 
     #notes-dialog {
-        width: 60%;
+        width: 70;
         height: 60%;
-        min-width: 50;
         min-height: 15;
         background: $th-background;
         border: tall $th-accent;
@@ -67,11 +66,13 @@ class NotesModal(ModalScreen[str | None]):
     """
 
     def __init__(self, arxiv_id: str, current_notes: str = "") -> None:
+        """Initialize the notes modal with the paper ID and existing notes."""
         super().__init__()
         self._arxiv_id = arxiv_id
         self._current_notes = current_notes
 
     def compose(self) -> ComposeResult:
+        """Yield the notes dialog with a text area and save/cancel buttons."""
         with Vertical(id="notes-dialog"):
             yield Label(f"Notes for {self._arxiv_id}", id="notes-title")
             yield TextArea(self._current_notes, id="notes-textarea")
@@ -80,21 +81,26 @@ class NotesModal(ModalScreen[str | None]):
                 yield Button("Save (Ctrl+S)", variant="primary", id="save-btn")
 
     def on_mount(self) -> None:
+        """Focus the text area when the modal is mounted."""
         self.query_one("#notes-textarea", TextArea).focus()
 
     def action_save(self) -> None:
+        """Dismiss the modal with the current text area content."""
         text = self.query_one("#notes-textarea", TextArea).text
         self.dismiss(text)
 
     def action_cancel(self) -> None:
+        """Dismiss the modal without saving."""
         self.dismiss(None)
 
     @on(Button.Pressed, "#save-btn")
     def on_save_pressed(self) -> None:
+        """Handle the save button press by triggering the save action."""
         self.action_save()
 
     @on(Button.Pressed, "#cancel-btn")
     def on_cancel_pressed(self) -> None:
+        """Handle the cancel button press by dismissing without saving."""
         self.action_cancel()
 
 
@@ -112,9 +118,8 @@ class TagsModal(ModalScreen[list[str] | None]):
     }
 
     #tags-dialog {
-        width: 50%;
+        width: 70;
         height: auto;
-        min-width: 40;
         background: $th-background;
         border: tall $th-green;
         padding: 0 2;
@@ -163,6 +168,7 @@ class TagsModal(ModalScreen[list[str] | None]):
         current_tags: list[str] | None = None,
         all_tags: list[str] | None = None,
     ) -> None:
+        """Initialize the tags modal with the paper ID, its tags, and all known tags."""
         super().__init__()
         self._arxiv_id = arxiv_id
         self._current_tags = current_tags or []
@@ -191,6 +197,7 @@ class TagsModal(ModalScreen[list[str] | None]):
         return " | ".join(parts)
 
     def compose(self) -> ComposeResult:
+        """Yield the tags dialog with help text, suggestions, input, and buttons."""
         with Vertical(id="tags-dialog"):
             yield Label(f"Tags for {self._arxiv_id}", id="tags-title")
             yield Label(
@@ -210,6 +217,7 @@ class TagsModal(ModalScreen[list[str] | None]):
                 yield Button("Save (Ctrl+S)", variant="primary", id="save-btn")
 
     def on_mount(self) -> None:
+        """Focus the tags input field when the modal is mounted."""
         self.query_one("#tags-input", Input).focus()
 
     def _parse_tags(self, text: str) -> list[str]:
@@ -217,22 +225,27 @@ class TagsModal(ModalScreen[list[str] | None]):
         return [tag.strip() for tag in text.split(",") if tag.strip()]
 
     def action_save(self) -> None:
+        """Parse the input tags and dismiss the modal with the result."""
         text = self.query_one("#tags-input", Input).value
         self.dismiss(self._parse_tags(text))
 
     def action_cancel(self) -> None:
+        """Dismiss the modal without saving."""
         self.dismiss(None)
 
     @on(Button.Pressed, "#save-btn")
     def on_save_pressed(self) -> None:
+        """Handle the save button press by triggering the save action."""
         self.action_save()
 
     @on(Button.Pressed, "#cancel-btn")
     def on_cancel_pressed(self) -> None:
+        """Handle the cancel button press by dismissing without saving."""
         self.action_cancel()
 
     @on(Input.Submitted, "#tags-input")
     def on_input_submitted(self) -> None:
+        """Handle Enter key in the tags input by triggering the save action."""
         self.action_save()
 
 
@@ -250,9 +263,8 @@ class AutoTagSuggestModal(ModalScreen[list[str] | None]):
     }
 
     #autotag-dialog {
-        width: 55%;
+        width: 70;
         height: auto;
-        min-width: 45;
         max-height: 80%;
         background: $th-background;
         border: tall $th-green;
@@ -297,12 +309,14 @@ class AutoTagSuggestModal(ModalScreen[list[str] | None]):
         suggested_tags: list[str],
         current_tags: list[str] | None = None,
     ) -> None:
+        """Initialize with the paper title, LLM-suggested tags, and current tags."""
         super().__init__()
         self._paper_title = paper_title
         self._suggested = suggested_tags
         self._current = current_tags or []
 
     def compose(self) -> ComposeResult:
+        """Yield the auto-tag dialog with current tags, merged input, and buttons."""
         with Vertical(id="autotag-dialog"):
             yield Static(f"Auto-Tag: {self._paper_title[:60]}", id="autotag-title")
             if self._current:
@@ -322,18 +336,22 @@ class AutoTagSuggestModal(ModalScreen[list[str] | None]):
                 yield Button("Cancel (Esc)", id="cancel-btn")
 
     def action_accept(self) -> None:
+        """Parse the edited tags and dismiss the modal with the result."""
         text_input = self.query_one("#autotag-input", Input)
         raw = text_input.value
         tags = [t.strip().lower() for t in raw.split(",") if t.strip()]
         self.dismiss(tags)
 
     def action_cancel(self) -> None:
+        """Dismiss the modal without applying suggested tags."""
         self.dismiss(None)
 
     @on(Button.Pressed, "#accept-btn")
     def on_accept_pressed(self) -> None:
+        """Handle the accept button press by triggering the accept action."""
         self.action_accept()
 
     @on(Button.Pressed, "#cancel-btn")
     def on_cancel_pressed(self) -> None:
+        """Handle the cancel button press by dismissing without saving."""
         self.action_cancel()

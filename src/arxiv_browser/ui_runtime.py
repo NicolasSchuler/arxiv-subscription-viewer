@@ -23,6 +23,7 @@ class UiRefs:
     search_container: Widget | None = None
     paper_list: OptionList | None = None
     list_header: Label | None = None
+    details_header: Label | None = None
     status_bar: Label | None = None
     footer: ContextFooter | None = None
     date_navigator: DateNavigator | None = None
@@ -36,6 +37,7 @@ class UiRefs:
         self.search_container = None
         self.paper_list = None
         self.list_header = None
+        self.details_header = None
         self.status_bar = None
         self.footer = None
         self.date_navigator = None

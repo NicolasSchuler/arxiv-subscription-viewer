@@ -60,3 +60,7 @@ Organize papers into reading lists:
 - Create, rename, delete collections and edit descriptions
 - Add papers from command palette (`Ctrl+p`)
 - Export individual collections as Markdown
+
+---
+
+**See also:** [Config Reference](config-reference.md) · [Search & Filters](search-filters.md) · [Troubleshooting](troubleshooting.md) · [All Docs](README.md)

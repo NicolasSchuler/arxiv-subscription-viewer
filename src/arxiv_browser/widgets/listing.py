@@ -10,7 +10,12 @@ from textual.widgets import ListItem, Static
 
 from arxiv_browser.huggingface import HuggingFacePaper
 from arxiv_browser.models import Paper, PaperMetadata
-from arxiv_browser.query import escape_rich_text, format_categories, highlight_text
+from arxiv_browser.query import (
+    escape_rich_text,
+    format_categories,
+    highlight_text,
+    truncate_at_word_boundary,
+)
 from arxiv_browser.semantic_scholar import SemanticScholarPaper
 from arxiv_browser.themes import THEME_COLORS, get_tag_color
 
@@ -33,6 +38,7 @@ _ICON_SETS: dict[str, dict[str, str]] = {
     },
 }
 _ACTIVE_ICON_SET = _ICON_SETS["unicode"]
+_ACTIVE_LISTING_ASCII_MODE = False
 _META_GLYPH_SETS: dict[str, dict[str, str]] = {
     "unicode": {
         "hf_upvotes": "\u2191",  # ↑
@@ -54,7 +60,8 @@ _ACTIVE_META_GLYPHS = _META_GLYPH_SETS["unicode"]
 
 def set_ascii_icons(enabled: bool) -> None:
     """Switch list indicators between Unicode and ASCII modes."""
-    global _ACTIVE_ICON_SET, _ACTIVE_META_GLYPHS
+    global _ACTIVE_ICON_SET, _ACTIVE_META_GLYPHS, _ACTIVE_LISTING_ASCII_MODE
+    _ACTIVE_LISTING_ASCII_MODE = enabled
     _ACTIVE_ICON_SET = _ICON_SETS["ascii"] if enabled else _ICON_SETS["unicode"]
     _ACTIVE_META_GLYPHS = _META_GLYPH_SETS["ascii"] if enabled else _META_GLYPH_SETS["unicode"]
 
@@ -210,9 +217,11 @@ def _render_abstract_preview(abstract_text: str | None, ht: dict[str, list[str]]
     if len(abstract_text) <= PREVIEW_ABSTRACT_MAX_LEN:
         highlighted = highlight_text(abstract_text, ht.get("abstract", []), THEME_COLORS["accent"])
         return f"[dim italic]{highlighted}[/]"
-    truncated = abstract_text[:PREVIEW_ABSTRACT_MAX_LEN].rsplit(" ", 1)[0]
+    truncated = truncate_at_word_boundary(
+        abstract_text, PREVIEW_ABSTRACT_MAX_LEN, ascii_mode=_ACTIVE_LISTING_ASCII_MODE
+    )
     highlighted = highlight_text(truncated, ht.get("abstract", []), THEME_COLORS["accent"])
-    return f"[dim italic]{highlighted}...[/]"
+    return f"[dim italic]{highlighted}[/]"
 
 
 def render_paper_option(
@@ -390,13 +399,15 @@ class PaperListItem(ListItem):
             )
             return f"[dim italic]{highlighted}[/]"
         # Truncate at word boundary for cleaner display
-        truncated = abstract[:PREVIEW_ABSTRACT_MAX_LEN].rsplit(" ", 1)[0]
+        truncated = truncate_at_word_boundary(
+            abstract, PREVIEW_ABSTRACT_MAX_LEN, ascii_mode=_ACTIVE_LISTING_ASCII_MODE
+        )
         highlighted = highlight_text(
             truncated,
             self._highlight_terms.get("abstract", []),
             THEME_COLORS["accent"],
         )
-        return f"[dim italic]{highlighted}...[/]"
+        return f"[dim italic]{highlighted}[/]"
 
     def _update_selection_class(self) -> None:
         """Update the CSS class based on selection state."""

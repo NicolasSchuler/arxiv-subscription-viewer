@@ -68,7 +68,7 @@ def action_clear_selection(app: "ArxivBrowser") -> None:
 
 
 def action_cycle_sort(app: "ArxivBrowser") -> None:
-    """Cycle through sort options: title, date, arxiv_id."""
+    """Cycle through sort options (title → date → arxiv_id → citations → trending → relevance)."""
     _sync_app_globals()
     app._sort_index = (app._sort_index + 1) % len(SORT_OPTIONS)
     sort_key = SORT_OPTIONS[app._sort_index]

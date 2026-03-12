@@ -272,9 +272,7 @@ async def test_custom_max_retries_and_backoff() -> None:
         return "ok"
 
     with patch("arxiv_browser.http_retry.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-        result = await retry_with_backoff(
-            _fn, max_retries=1, backoff_base=0.5, operation="custom"
-        )
+        result = await retry_with_backoff(_fn, max_retries=1, backoff_base=0.5, operation="custom")
 
     assert result == "ok"
     assert call_count == 2

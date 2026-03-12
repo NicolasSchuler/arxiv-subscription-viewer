@@ -1,6 +1,6 @@
 # 🔍 Search Filters & Advanced Queries
 
-Press `/` to open the search box, `Escape` to cancel search or exit API mode. Combine any of these filters:
+Press `/` to open the search box. Use the hint row for quick examples like `cat:cs.AI`, `author:hinton`, `unread`, or `"large language"`. Press `Escape` to close search or exit API/search-results mode.
 
 ## Filter Prefixes
 
@@ -48,10 +48,10 @@ Press `A` to search all of arXiv via the API:
 
 ```bash
 # CLI startup equivalents
-arxiv-viewer --api-category cs.AI
-arxiv-viewer --api-query "diffusion transformer" --api-field title
-arxiv-viewer --api-query "agent benchmark" --api-category cs.LG
-arxiv-viewer --api-query "transformer" --api-page-mode
+arxiv-viewer search --category cs.AI
+arxiv-viewer search --query "diffusion transformer" --field title
+arxiv-viewer search --query "agent benchmark" --category cs.LG
+arxiv-viewer search --query "transformer" --mode page
 ```
 
 API field options: `all`, `title`, `author`, `abstract`. Default page size is configurable:
@@ -63,3 +63,7 @@ API field options: `all`, `title`, `author`, `abstract`. Default page size is co
 ```
 
 Values are clamped to the range `1..200`.
+
+---
+
+**See also:** [LLM Setup](llm-setup.md) · [Config Reference](config-reference.md) · [Troubleshooting](troubleshooting.md) · [All Docs](README.md)

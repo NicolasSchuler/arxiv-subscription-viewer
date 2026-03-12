@@ -17,6 +17,7 @@ from arxiv_browser.models import (
     ARXIV_API_MAX_RESULTS_LIMIT,
     CONFIG_APP_NAME,
     DEFAULT_COLLAPSED_SECTIONS,
+    DETAIL_MODES,
     DETAIL_SECTION_KEYS,
     MAX_COLLECTIONS,
     MAX_PAPERS_PER_COLLECTION,
@@ -72,6 +73,7 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
     return {
         "version": config.version,
         "show_abstract_preview": config.show_abstract_preview,
+        "detail_mode": config.detail_mode,
         "bibtex_export_dir": config.bibtex_export_dir,
         "pdf_download_dir": config.pdf_download_dir,
         "prefer_pdf_url": config.prefer_pdf_url,
@@ -129,6 +131,7 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
             for c in config.collections
         ],
         "marks": config.marks,
+        "onboarding_seen": config.onboarding_seen,
     }
 
 
@@ -160,6 +163,13 @@ def _parse_collapsed_sections(raw: Any) -> list[str]:
         return list(DEFAULT_COLLAPSED_SECTIONS)
     valid = [s for s in raw if isinstance(s, str) and s in DETAIL_SECTION_KEYS]
     return valid
+
+
+def _coerce_detail_mode(value: Any) -> str:
+    """Validate the persisted detail density mode."""
+    if isinstance(value, str) and value in DETAIL_MODES:
+        return value
+    return "scan"
 
 
 def _parse_session_state(data: dict[str, Any]) -> SessionState:
@@ -304,6 +314,7 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         marks=marks,
         session=_parse_session_state(data),
         show_abstract_preview=_safe_get(data, "show_abstract_preview", False, bool),
+        detail_mode=_coerce_detail_mode(data.get("detail_mode")),
         bibtex_export_dir=_safe_get(data, "bibtex_export_dir", "", str),
         pdf_download_dir=_safe_get(data, "pdf_download_dir", "", str),
         prefer_pdf_url=_safe_get(data, "prefer_pdf_url", False, bool),
@@ -328,6 +339,7 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         trusted_llm_command_hashes=_parse_str_list(data, "trusted_llm_command_hashes"),
         trusted_pdf_viewer_hashes=_parse_str_list(data, "trusted_pdf_viewer_hashes"),
         version=_safe_get(data, "version", 1, int),
+        onboarding_seen=_safe_get(data, "onboarding_seen", False, bool),
     )
 
 

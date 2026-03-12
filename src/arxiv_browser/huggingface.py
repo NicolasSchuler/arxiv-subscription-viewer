@@ -32,7 +32,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, overload
 
 import httpx
 from platformdirs import user_config_dir
@@ -136,13 +136,33 @@ def parse_hf_paper_response(item: dict) -> HuggingFacePaper | None:
 # ============================================================================
 
 
+@overload
+async def fetch_hf_daily_papers(
+    client: httpx.AsyncClient,
+    timeout: int = ...,
+    include_status: Literal[False] = ...,
+) -> list[HuggingFacePaper]: ...
+
+
+@overload
+async def fetch_hf_daily_papers(
+    client: httpx.AsyncClient,
+    timeout: int = ...,
+    include_status: Literal[True] = ...,
+) -> tuple[list[HuggingFacePaper], bool]: ...
+
+
 async def fetch_hf_daily_papers(
     client: httpx.AsyncClient,
     timeout: int = HF_REQUEST_TIMEOUT,
-) -> list[HuggingFacePaper]:
+    include_status: bool = False,
+) -> list[HuggingFacePaper] | tuple[list[HuggingFacePaper], bool]:
     """Fetch today's trending papers from HuggingFace Daily Papers.
 
     Returns empty list on failure. Never raises.
+
+    When include_status=True, returns (papers, complete) where complete=False
+    means the request or parse path failed.
     """
 
     async def _do_request() -> httpx.Response:
@@ -162,22 +182,22 @@ async def fetch_hf_daily_papers(
             logger.info("HF daily papers endpoint not found")
         else:
             logger.warning("HF API returned %d", exc.response.status_code)
-        return []
+        return ([], False) if include_status else []
     except (httpx.ConnectError, httpx.TimeoutException, httpx.ReadError):
         logger.warning("HF API timeout/connection error after retries")
-        return []
+        return ([], False) if include_status else []
     except httpx.HTTPError:
         logger.warning("HF API HTTP error", exc_info=True)
-        return []
+        return ([], False) if include_status else []
 
     try:
         data = response.json()
     except ValueError:
         logger.warning("HF API returned invalid JSON", exc_info=True)
-        return []
+        return ([], False) if include_status else []
     if not isinstance(data, list):
         logger.warning("HF API returned non-list response")
-        return []
+        return ([], False) if include_status else []
     papers: list[HuggingFacePaper] = []
     for item in data:
         if not isinstance(item, dict):
@@ -185,6 +205,8 @@ async def fetch_hf_daily_papers(
         parsed = parse_hf_paper_response(item)
         if parsed is not None:
             papers.append(parsed)
+    if include_status:
+        return papers, True
     return papers
 
 

@@ -1643,39 +1643,55 @@ class TestStatusFilterRegressions:
         assert ("Ctrl+e", "Toggle S2 (browse) / Exit API (API mode)") in entries
         assert ("[", "Older") in entries
         assert ("]", "Newer") in entries
-        assert ("Ctrl+p", "Command palette") in entries
+        assert ("Ctrl+p", "Commands") in entries
         assert ("Ctrl+k", "Collections") in entries
         assert ("C", "Chat") in entries
         assert ("Ctrl+g", "Auto-Tag") in entries
 
     def test_command_palette_entries_adapt_to_app_state(self):
         """Command palette labels should reflect the current UI state."""
+        from types import SimpleNamespace
+
         from arxiv_browser.app import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._in_arxiv_api_mode = True
         app._hf_active = True
         app._watch_filter_active = True
-        app._config = type("Config", (), {"show_abstract_preview": True})()
+        app._s2_active = True
+        app._s2_cache = {}
+        app._detail_mode = "scan"
+        app._pending_query = "cat:cs.AI"
+        app.filtered_papers = [SimpleNamespace(arxiv_id="2401.00001")]
+        app.selected_ids = set()
+        app._history_files = []
+        app._config = type(
+            "Config",
+            (),
+            {
+                "show_abstract_preview": True,
+                "watch_list": ["watch"],
+                "marks": {},
+                "paper_metadata": {},
+            },
+        )()
+        app._get_current_paper = lambda: SimpleNamespace(arxiv_id="2401.00001")
 
-        entries = {
-            action_name: (name, description, key_hint)
-            for name, description, key_hint, action_name in app._build_command_palette_commands()
-        }
+        entries = {command.action: command for command in app._build_command_palette_commands()}
 
-        assert entries["ctrl_e_dispatch"] == (
-            "Exit arXiv API Mode",
-            "Return to your local or history papers",
-            "Ctrl+e",
-        )
-        assert entries["toggle_hf"][0] == "Disable HuggingFace Trending"
-        assert entries["toggle_watch_filter"][0] == "Show All Papers"
-        assert entries["toggle_preview"][0] == "Hide Abstract Preview"
-        assert "requires S2 enabled" in entries["fetch_s2"][1]
-        assert "requires S2 data" in entries["citation_graph"][1]
-        assert "requires LLM configuration" in entries["generate_summary"][1]
-        assert "requires LLM configuration" in entries["chat_with_paper"][1]
-        assert "requires LLM configuration" in entries["score_relevance"][1]
+        assert entries["ctrl_e_dispatch"].name == "Exit Search Results"
+        assert entries["ctrl_e_dispatch"].description == "Return to your local or history papers"
+        assert entries["toggle_hf"].name == "Disable HuggingFace Trending"
+        assert entries["toggle_watch_filter"].name == "Show All Papers"
+        assert entries["toggle_preview"].name == "Hide Abstract Preview"
+        assert entries["toggle_detail_mode"].name == "Switch to Full Details"
+        assert entries["fetch_s2"].enabled is True
+        assert entries["citation_graph"].enabled is False
+        assert entries["citation_graph"].blocked_reason == "S2 data"
+        assert entries["generate_summary"].enabled is False
+        assert entries["generate_summary"].blocked_reason == "LLM configuration"
+        assert entries["chat_with_paper"].blocked_reason == "LLM configuration"
+        assert entries["score_relevance"].blocked_reason == "LLM configuration"
 
     def test_help_sections_include_getting_started_shortcuts(self):
         """Help content should lead with a concise getting-started flow."""
@@ -1690,7 +1706,7 @@ class TestStatusFilterRegressions:
         assert ("Space", "Select current paper") in getting_started_entries
         assert ("A", "Search all arXiv") in getting_started_entries
         assert ("E", "Export current or selected papers") in getting_started_entries
-        assert ("Ctrl+p", "Open command palette") in getting_started_entries
+        assert ("Ctrl+p", "Open commands") in getting_started_entries
         assert ("[ / ]", "Change dates (history mode)") in getting_started_entries
         assert ("?", "Show full shortcuts") in getting_started_entries
 
@@ -2629,7 +2645,7 @@ class TestMainCLI:
     """Tests for the main() CLI entry point."""
 
     def test_list_dates_with_files(self, tmp_path, monkeypatch, capsys):
-        """--list-dates should print dates and return 0."""
+        """`dates` should print dates and return 0."""
         from datetime import date as datemod
 
         from arxiv_browser.app import main
@@ -2638,7 +2654,7 @@ class TestMainCLI:
         history_dir.mkdir()
         (history_dir / "2024-01-15.txt").write_text("test content")
 
-        monkeypatch.setattr("sys.argv", ["arxiv_browser", "--list-dates"])
+        monkeypatch.setattr("sys.argv", ["arxiv_browser", "dates"])
         monkeypatch.setattr(
             "arxiv_browser.app.discover_history_files",
             lambda base_dir: [(datemod(2024, 1, 15), history_dir / "2024-01-15.txt")],
@@ -2651,10 +2667,10 @@ class TestMainCLI:
         assert "2024-01-15" in captured.out
 
     def test_list_dates_empty_history(self, monkeypatch, capsys):
-        """--list-dates with no files should return 1."""
+        """`dates` with no files should return 1."""
         from arxiv_browser.app import main
 
-        monkeypatch.setattr("sys.argv", ["arxiv_browser", "--list-dates"])
+        monkeypatch.setattr("sys.argv", ["arxiv_browser", "dates"])
         monkeypatch.setattr("arxiv_browser.app.discover_history_files", lambda base_dir: [])
         monkeypatch.setattr("arxiv_browser.app.load_config", lambda: UserConfig())
 
@@ -2789,7 +2805,7 @@ class TestMainCLI:
         captured = capsys.readouterr()
         assert result == 2
         assert "requires an interactive TTY" in captured.err
-        assert "--list-dates" in captured.err
+        assert "arxiv-viewer dates" in captured.err
 
     def test_main_applies_ascii_and_color_flags(self, monkeypatch, make_paper):
         """CLI flags should configure ASCII icon mode and color environment hints."""
@@ -2824,8 +2840,8 @@ class TestMainCLI:
         assert captured_kwargs.get("ascii_icons") is True
         assert os.environ.get("NO_COLOR") == "1"
 
-    def test_api_category_fetches_latest_day_and_runs_app(self, monkeypatch, make_paper):
-        """--api-category should load startup papers in latest-day digest mode."""
+    def test_search_category_fetches_latest_day_and_runs_app(self, monkeypatch, make_paper):
+        """`search --category` should load startup papers in latest-day digest mode."""
         from arxiv_browser.app import main
 
         paper = make_paper(arxiv_id="2602.00001")
@@ -2845,7 +2861,7 @@ class TestMainCLI:
             api_calls.append(kwargs)
             return [paper]
 
-        monkeypatch.setattr("sys.argv", ["arxiv_browser", "--api-category", "cs.AI"])
+        monkeypatch.setattr("sys.argv", ["arxiv_browser", "search", "--category", "cs.AI"])
         monkeypatch.setattr("arxiv_browser.app.load_config", lambda: UserConfig())
         monkeypatch.setattr("arxiv_browser.cli._fetch_latest_arxiv_digest", fake_fetch)
         monkeypatch.setattr("sys.stdin.isatty", lambda: True)
@@ -2856,10 +2872,11 @@ class TestMainCLI:
         assert result == 0
         assert captured_papers == [paper]
         assert captured_kwargs.get("history_files") == []
+        assert captured_kwargs.get("restore_session") is False
         assert api_calls[0]["category"] == "cs.AI"
 
-    def test_api_page_mode_fetches_single_page(self, monkeypatch, make_paper):
-        """--api-page-mode should use a single API page instead of latest-day mode."""
+    def test_search_page_mode_fetches_single_page(self, monkeypatch, make_paper):
+        """`search --mode page` should use a single API page instead of latest-day mode."""
         from arxiv_browser.app import main
 
         paper = make_paper(arxiv_id="2602.00002")
@@ -2881,8 +2898,7 @@ class TestMainCLI:
             return [paper]
 
         monkeypatch.setattr(
-            "sys.argv",
-            ["arxiv_browser", "--api-query", "transformer", "--api-page-mode"],
+            "sys.argv", ["arxiv_browser", "search", "--query", "transformer", "--mode", "page"]
         )
         monkeypatch.setattr("arxiv_browser.app.load_config", lambda: UserConfig())
         monkeypatch.setattr("arxiv_browser.cli._fetch_latest_arxiv_digest", fail_digest_fetch)
@@ -2896,11 +2912,11 @@ class TestMainCLI:
         assert captured_papers == [paper]
         assert page_calls[0]["query"] == "transformer"
 
-    def test_api_query_requires_query_or_category(self, monkeypatch, capsys):
-        """Empty API query/category should fail with actionable error text."""
+    def test_search_requires_query_or_category(self, monkeypatch, capsys):
+        """`search` should require either a query or a category."""
         from arxiv_browser.app import main
 
-        monkeypatch.setattr("sys.argv", ["arxiv_browser", "--api-query", ""])
+        monkeypatch.setattr("sys.argv", ["arxiv_browser", "search"])
         monkeypatch.setattr("arxiv_browser.app.load_config", lambda: UserConfig())
 
         result = main()
@@ -2908,19 +2924,47 @@ class TestMainCLI:
         assert result == 1
         assert "Search query or category must be provided" in captured.err
 
-    def test_api_mode_rejects_date_flag(self, monkeypatch, capsys):
-        """--date should not be combined with API startup mode flags."""
+    def test_legacy_api_flags_are_rejected(self, monkeypatch, capsys):
+        """Legacy flat API flags should fail fast under the subcommand CLI."""
         from arxiv_browser.app import main
 
-        monkeypatch.setattr(
-            "sys.argv",
-            ["arxiv_browser", "--api-category", "cs.AI", "--date", "2026-02-01"],
-        )
+        monkeypatch.setattr("sys.argv", ["arxiv_browser", "--api-category", "cs.AI"])
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        captured = capsys.readouterr()
+        assert exc_info.value.code == 2
+        assert "unrecognized arguments" in captured.err
+
+    def test_browse_alias_inserts_subcommand_for_browse_flags(self, monkeypatch, make_paper):
+        """Bare invocations with browse flags should still resolve as `browse`."""
+        from arxiv_browser.app import main
+
+        paper = make_paper(arxiv_id="2401.42424")
+        captured_args: dict[str, object] = {}
+
+        class FakeApp:
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            def run(self):
+                return None
+
+        def fake_resolve(args, _base_dir, _config, _history_files):
+            captured_args["command"] = args.command
+            captured_args["date"] = args.date
+            return ([paper], [], 0)
+
+        monkeypatch.setattr("sys.argv", ["arxiv_browser", "--date", "2024-01-15"])
+        monkeypatch.setattr("arxiv_browser.app.load_config", lambda: UserConfig())
+        monkeypatch.setattr("arxiv_browser.app._resolve_papers", fake_resolve)
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+        monkeypatch.setattr("arxiv_browser.app.ArxivBrowser", FakeApp)
 
         result = main()
-        captured = capsys.readouterr()
-        assert result == 1
-        assert "cannot be combined" in captured.err
+        assert result == 0
+        assert captured_args == {"command": "browse", "date": "2024-01-15"}
 
 
 class TestResolvePapersHistoryRestore:
@@ -3157,7 +3201,7 @@ class TestResolvePapersHistoryRestore:
 
 
 # ============================================================================
-# Phase 6: Textual Integration Tests
+# Textual Integration Tests
 # ============================================================================
 
 
@@ -3712,7 +3756,7 @@ class TestArxivApiErrorHandling:
 
 
 # ============================================================================
-# Phase 7: Migrate Fragile Regressions to Integration Tests
+# Regression Integration Tests
 # ============================================================================
 
 
@@ -4792,6 +4836,7 @@ class TestDetailKwargs:
             "hf",
             "version",
         ]
+        assert kwargs["detail_mode"] == "scan"
 
 
 class TestDetailPaneHighlighting:
@@ -9324,7 +9369,7 @@ class TestRenderPaperOptionBadges:
         paper = make_paper()
         long_abstract = "word " * 100  # well over 150 chars
         result = render_paper_option(paper, show_preview=True, abstract_text=long_abstract)
-        assert "..." in result
+        assert "..." in result or "\u2026" in result
 
     def test_preview_exact_length_not_truncated(self, make_paper):
         """Abstract at exactly max length should not be truncated."""
@@ -12126,14 +12171,13 @@ class TestFooterDiscoverability:
         bindings = app._get_footer_bindings()
         assert bindings == [
             ("/", "search"),
-            ("A", "arxiv"),
+            ("Space", "select"),
             ("o", "open"),
             ("s", "sort"),
             ("r", "read"),
             ("x", "star"),
-            ("n", "notes"),
             ("E", "export"),
-            ("Ctrl+p", "palette"),
+            ("Ctrl+p", "commands"),
             ("?", "help"),
         ]
 
@@ -12145,7 +12189,7 @@ class TestFooterDiscoverability:
         bindings = app._get_footer_bindings()
         keys = [k for k, _ in bindings]
         assert "E" in keys
-        assert "A" in keys
+        assert "Space" in keys
 
     def test_footer_is_capped_and_keeps_help_palette(self):
         from arxiv_browser.app import UserConfig
@@ -12167,14 +12211,13 @@ class TestFooterDiscoverability:
         bindings = app._get_footer_bindings()
         assert bindings == [
             ("/", "search"),
-            ("A", "arxiv"),
+            ("Space", "select"),
             ("o", "open"),
             ("s", "sort"),
             ("r", "read"),
             ("x", "star"),
-            ("n", "notes"),
             ("E", "export"),
-            ("Ctrl+p", "palette"),
+            ("Ctrl+p", "commands"),
             ("?", "help"),
         ]
 
@@ -12191,17 +12234,17 @@ class TestFooterDiscoverability:
             (dt_date(2026, 1, 1), Path("history/2026-01-01.txt")),
         ]
         bindings = app._get_footer_bindings()
-        assert len(bindings) == 10
-        assert ("Ctrl+p", "palette") in bindings
-        assert ("[/]", "history") in bindings
-        assert ("n", "notes") not in bindings
+        assert len(bindings) == 9
+        assert ("Ctrl+p", "commands") in bindings
+        assert ("[/]", "dates") in bindings
+        assert ("x", "star") not in bindings
 
     def test_search_and_api_footer_copy(self):
         from arxiv_browser.app import FOOTER_CONTEXTS
 
         assert ("type to search", "") in FOOTER_CONTEXTS["search"]
         assert ("Enter", "apply") in FOOTER_CONTEXTS["search"]
-        assert ("Esc", "clear") in FOOTER_CONTEXTS["search"]
+        assert ("Esc", "close") in FOOTER_CONTEXTS["search"]
         assert ("↑↓", "move") in FOOTER_CONTEXTS["search"]
         assert ("[/]", "page") in FOOTER_CONTEXTS["api"]
         assert ("Esc/Ctrl+e", "exit") in FOOTER_CONTEXTS["api"]
@@ -12704,39 +12747,54 @@ class TestPaperDetailsRenderHelpers:
 
     def test_render_abstract_collapsed(self, make_paper):
         details = self._make_details()
-        result = details._render_abstract("Some text", False, None, True)
+        result = details._render_abstract("Some text", False, None, True, "full")
         assert "▸ Abstract" in result
         assert "Some text" not in result
 
     def test_render_abstract_expanded(self, make_paper):
         details = self._make_details()
-        result = details._render_abstract("Deep learning is great", False, None, False)
+        result = details._render_abstract("Deep learning is great", False, None, False, "full")
         assert "▾ Abstract" in result
         assert "Deep learning is great" in result
 
     def test_render_abstract_loading(self, make_paper):
         details = self._make_details()
-        result = details._render_abstract("", True, None, False)
+        result = details._render_abstract("", True, None, False, "full")
         assert "Loading abstract" in result
 
     def test_render_abstract_empty(self, make_paper):
         details = self._make_details()
-        result = details._render_abstract("", False, None, False)
+        result = details._render_abstract("", False, None, False, "full")
         assert "No abstract available" in result
+
+    def test_render_abstract_scan_truncates(self):
+        details = self._make_details()
+        abstract = " ".join(["token"] * 120)
+        result = details._render_abstract(abstract, False, None, False, "scan")
+        assert "▾ Abstract" in result
+        assert "..." in result or "\u2026" in result
+        assert abstract not in result
 
     def test_render_authors_collapsed(self, make_paper):
         details = self._make_details()
         paper = make_paper(authors="John Doe")
-        result = details._render_authors(paper, True)
+        result = details._render_authors(paper, True, "full")
         assert "▸ Authors" in result
         assert "John Doe" not in result
 
     def test_render_authors_expanded(self, make_paper):
         details = self._make_details()
         paper = make_paper(authors="John Doe")
-        result = details._render_authors(paper, False)
+        result = details._render_authors(paper, False, "full")
         assert "▾ Authors" in result
         assert "John Doe" in result
+
+    def test_render_authors_scan_truncates(self, make_paper):
+        details = self._make_details()
+        paper = make_paper(authors=", ".join([f"Author {i}" for i in range(20)]))
+        result = details._render_authors(paper, False, "scan")
+        assert "▾ Authors" in result
+        assert "..." in result or "\u2026" in result
 
     def test_render_tags_empty(self):
         details = self._make_details()
@@ -12913,8 +12971,8 @@ class TestPaperDetailsRenderHelpers:
             details = self._make_details()
             paper = make_paper(authors="Jane Doe")
 
-            assert "> Abstract" in details._render_abstract("Some text", False, None, True)
-            assert "v Authors" in details._render_authors(paper, False)
+            assert "> Abstract" in details._render_abstract("Some text", False, None, True, "full")
+            assert "v Authors" in details._render_authors(paper, False, "full")
             assert "> Relevance (*8/10)" in details._render_relevance((8, "fit"), True)
             assert "v AI Summary" in details._render_summary("Summary text", False, "", False)
             assert "^12" in details._render_hf(
@@ -12978,6 +13036,20 @@ class TestUpdatePaperParity:
         assert "▸ Abstract" in output
         assert "▸ Authors" in output
         assert "Test abstract" not in output
+
+    def test_scan_mode_truncates_long_sections(self, make_paper):
+        from arxiv_browser.app import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(
+            authors=", ".join([f"Author {i}" for i in range(20)]),
+            abstract=" ".join(["transformer"] * 140),
+        )
+        details.update_paper(paper, detail_mode="scan")
+        output = str(details.content)
+        assert "▾ Abstract" in output
+        assert "▾ Authors" in output
+        assert "..." in output or "\u2026" in output
 
 
 # ============================================================================

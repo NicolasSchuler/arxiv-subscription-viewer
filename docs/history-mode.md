@@ -28,11 +28,11 @@ Session state (including current date) persists across runs. Falls back to `arxi
 ## CLI Options
 
 ```bash
-arxiv-viewer                    # Auto-load newest from history/
-arxiv-viewer --list-dates       # List available dates
-arxiv-viewer --date 2026-01-23  # Open specific date
-arxiv-viewer -i papers.txt      # Custom file (disables history mode)
-arxiv-viewer --no-restore       # Ignore saved session state
+arxiv-viewer                          # Alias for browse; auto-load newest from history/
+arxiv-viewer dates                    # List available dates
+arxiv-viewer browse --date 2026-01-23 # Open specific date
+arxiv-viewer browse -i papers.txt     # Custom file (disables history mode)
+arxiv-viewer browse --no-restore      # Ignore saved session state
 ```
 
 ## Automating Email Ingestion
@@ -71,3 +71,7 @@ Comments: 10 pages, 5 figures
 ( https://arxiv.org/abs/2501.12345 , 15kb)
 ------------------------------------------------------------------------------
 ```
+
+---
+
+**See also:** [Search & Filters](search-filters.md) · [Config Reference](config-reference.md) · [Troubleshooting](troubleshooting.md) · [All Docs](README.md)

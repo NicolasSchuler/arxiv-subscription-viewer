@@ -911,6 +911,7 @@ class TestS2AndHfCoverage:
         app._config.s2_cache_ttl_days = 7
         app._config.s2_api_key = ""
         app.notify = MagicMock()
+        app._update_status_bar = MagicMock()
         app._refresh_detail_pane = MagicMock()
         app._refresh_current_list_item = MagicMock()
         app._track_task = MagicMock()
@@ -943,6 +944,7 @@ class TestS2AndHfCoverage:
         app._config.s2_cache_ttl_days = 7
         app._config.s2_api_key = ""
         app.notify = MagicMock()
+        app._update_status_bar = MagicMock()
         app._refresh_detail_pane = MagicMock()
         app._refresh_current_list_item = MagicMock()
         app._s2_db_path = tmp_path / "s2.db"
@@ -956,6 +958,7 @@ class TestS2AndHfCoverage:
             await app.action_fetch_s2()
         assert "Could not fetch Semantic Scholar data." in app.notify.call_args[0][0]
         assert paper.arxiv_id not in app._s2_loading
+        assert app._update_status_bar.call_count == 2
 
         tracked = []
 
@@ -964,10 +967,25 @@ class TestS2AndHfCoverage:
             coro.close()
 
         app._track_task = MagicMock(side_effect=track_task)
+        app._update_status_bar.reset_mock()
         with patch("arxiv_browser.app.load_s2_paper", return_value=None):
             await app.action_fetch_s2()
         app._track_task.assert_called_once()
         assert paper.arxiv_id in app._s2_loading
+        app._update_status_bar.assert_called_once()
+
+        app._track_task.reset_mock()
+        app._update_status_bar.reset_mock()
+        app._s2_loading.clear()
+        app._s2_api_error = True
+        cached = _make_s2_paper(paper.arxiv_id)
+        with patch("arxiv_browser.app.load_s2_paper", return_value=cached):
+            await app.action_fetch_s2()
+        assert app._s2_cache[paper.arxiv_id] is cached
+        assert app._s2_api_error is False
+        app._track_task.assert_not_called()
+        assert paper.arxiv_id not in app._s2_loading
+        assert app._update_status_bar.call_count == 2
 
     @pytest.mark.asyncio
     async def test_fetch_s2_paper_async_success_and_no_data(self, tmp_path):
@@ -978,26 +996,49 @@ class TestS2AndHfCoverage:
         app._s2_db_path = tmp_path / "s2.db"
         app._s2_cache = {}
         app._s2_loading = {"2401.30003"}
+        app._s2_api_error = False
         app.notify = MagicMock()
+        app._update_status_bar = MagicMock()
         app._refresh_detail_pane = MagicMock()
         app._refresh_current_list_item = MagicMock()
 
         with (
             patch(
                 "arxiv_browser.app._load_or_fetch_s2_paper_cached",
-                return_value=_make_s2_paper("2401.30003"),
+                return_value=(_make_s2_paper("2401.30003"), True),
             ),
         ):
             await app._fetch_s2_paper_async("2401.30003")
 
         assert "2401.30003" in app._s2_cache
         assert "2401.30003" not in app._s2_loading
+        assert app._s2_api_error is False
+        app._update_status_bar.assert_called_once()
 
         app._s2_loading.add("2401.30004")
-        with patch("arxiv_browser.app._load_or_fetch_s2_paper_cached", return_value=None):
+        app._s2_api_error = True
+        app._update_status_bar.reset_mock()
+        with patch(
+            "arxiv_browser.app._load_or_fetch_s2_paper_cached",
+            return_value=(None, True),
+        ):
             await app._fetch_s2_paper_async("2401.30004")
         assert "No Semantic Scholar data was found for this paper." in app.notify.call_args[0][0]
         assert "2401.30004" not in app._s2_loading
+        assert app._s2_api_error is False
+        app._update_status_bar.assert_called_once()
+
+        app._s2_loading.add("2401.30005")
+        app._update_status_bar.reset_mock()
+        with patch(
+            "arxiv_browser.app._load_or_fetch_s2_paper_cached",
+            return_value=(None, False),
+        ):
+            await app._fetch_s2_paper_async("2401.30005")
+        assert "Could not fetch Semantic Scholar data." in app.notify.call_args[0][0]
+        assert "2401.30005" not in app._s2_loading
+        assert app._s2_api_error is True
+        app._update_status_bar.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_fetch_hf_daily_cache_hit_error_and_schedule(self, tmp_path):
@@ -1045,6 +1086,7 @@ class TestS2AndHfCoverage:
         app._hf_db_path = tmp_path / "hf.db"
         app._hf_cache = {}
         app._hf_loading = True
+        app._hf_api_error = False
         app._papers_by_id = {"2401.40002": object()}
         app.notify = MagicMock()
         app._update_status_bar = MagicMock()
@@ -1052,16 +1094,35 @@ class TestS2AndHfCoverage:
         app._mark_badges_dirty = MagicMock()
 
         hf = _make_hf_paper("2401.40002")
-        with patch("arxiv_browser.app._load_or_fetch_hf_daily_cached", return_value=[hf]):
+        with patch(
+            "arxiv_browser.app._load_or_fetch_hf_daily_cached",
+            return_value=([hf], True),
+        ):
             await app._fetch_hf_daily_async()
         assert app._hf_cache["2401.40002"] is hf
         assert app._hf_loading is False
+        assert app._hf_api_error is False
 
         app._hf_loading = True
-        with patch("arxiv_browser.app._load_or_fetch_hf_daily_cached", return_value=[]):
+        app._hf_api_error = True
+        with patch(
+            "arxiv_browser.app._load_or_fetch_hf_daily_cached",
+            return_value=([], True),
+        ):
             await app._fetch_hf_daily_async()
         assert "No HuggingFace trending data was returned." in app.notify.call_args[0][0]
         assert app._hf_loading is False
+        assert app._hf_api_error is False
+
+        app._hf_loading = True
+        with patch(
+            "arxiv_browser.app._load_or_fetch_hf_daily_cached",
+            return_value=([], False),
+        ):
+            await app._fetch_hf_daily_async()
+        assert "Could not fetch HuggingFace trending data." in app.notify.call_args[0][0]
+        assert app._hf_loading is False
+        assert app._hf_api_error is True
 
 
 class TestDownloadClipboardAndOpenCoverage:
@@ -1340,9 +1401,11 @@ class TestStatusCommandPaletteAndChatCoverage:
         app._s2_active = True
         app._s2_loading = {"a"}
         app._s2_cache = {"a": object()}
+        app._s2_api_error = False
         app._hf_active = True
         app._hf_loading = False
         app._hf_cache = {"a": _make_hf_paper("a")}
+        app._hf_api_error = False
         app._papers_by_id = {"a": object()}
         app._version_checking = True
         app._version_updates = {"a": (1, 2)}
@@ -1356,7 +1419,91 @@ class TestStatusCommandPaletteAndChatCoverage:
         assert "Preview" in content
         app._update_footer.assert_called_once()
 
-    def test_action_command_palette_dispatches_coroutines_and_errors(self):
+    def test_api_error_flags_default_false(self):
+        from arxiv_browser.app import ArxivBrowser
+        from arxiv_browser.models import Paper
+
+        fresh = ArxivBrowser(papers=[])
+        assert fresh._s2_api_error is False
+        assert fresh._hf_api_error is False
+
+    def test_status_bar_shows_s2_err_on_api_error(self):
+        class DummyLabel:
+            def __init__(self):
+                self.content = ""
+
+            def update(self, text):
+                self.content = text
+
+        label = DummyLabel()
+        app = _new_app()
+        app.query_one = MagicMock(return_value=label)
+        app._update_footer = MagicMock()
+        app._get_active_query = MagicMock(return_value="")
+        app.all_papers = []
+        app.filtered_papers = []
+        app.selected_ids = set()
+        app._sort_index = 0
+        app._watch_filter_active = False
+        app._in_arxiv_api_mode = False
+        app._arxiv_search_state = None
+        app._arxiv_api_loading = False
+        app._show_abstract_preview = False
+        app._s2_active = True
+        app._s2_loading = set()
+        app._s2_cache = {}
+        app._s2_api_error = True
+        app._hf_active = False
+        app._hf_loading = False
+        app._hf_cache = {}
+        app._hf_api_error = False
+        app._papers_by_id = {}
+        app._version_checking = False
+        app._version_updates = {}
+
+        app._update_status_bar()
+
+        content = str(label.content)
+        assert "S2:err" in content
+
+    def test_status_bar_shows_hf_err_on_api_error(self):
+        class DummyLabel:
+            def __init__(self):
+                self.content = ""
+
+            def update(self, text):
+                self.content = text
+
+        label = DummyLabel()
+        app = _new_app()
+        app.query_one = MagicMock(return_value=label)
+        app._update_footer = MagicMock()
+        app._get_active_query = MagicMock(return_value="")
+        app.all_papers = []
+        app.filtered_papers = []
+        app.selected_ids = set()
+        app._sort_index = 0
+        app._watch_filter_active = False
+        app._in_arxiv_api_mode = False
+        app._arxiv_search_state = None
+        app._arxiv_api_loading = False
+        app._show_abstract_preview = False
+        app._s2_active = False
+        app._s2_loading = set()
+        app._s2_cache = {}
+        app._s2_api_error = False
+        app._hf_active = True
+        app._hf_loading = False
+        app._hf_cache = {}
+        app._hf_api_error = True
+        app._papers_by_id = {}
+        app._version_checking = False
+        app._version_updates = {}
+
+        app._update_status_bar()
+
+        content = str(label.content)
+        assert "HF:err" in content
         app = _new_app()
         app.notify = MagicMock()
         captured = {}
@@ -1391,7 +1538,9 @@ class TestStatusCommandPaletteAndChatCoverage:
             callback(None)
 
         app._track_task.assert_called_once()
-        assert "Command failed: boom" in app.notify.call_args[0][0]
+        assert (
+            app.notify.call_args[0][0] == "boom failed. Try: retry from Ctrl+p or press ? for help."
+        )
         boom_warnings = [
             call
             for call in logger_mock.warning.call_args_list
@@ -1634,21 +1783,71 @@ class TestBookmarkRelevanceAndCopyCoverage:
         assert "Bookmark requires an active search query." in app.notify.call_args[0][0]
 
         search_input.value = "graph transformers"
-        await app.action_add_bookmark()
-        assert len(app._config.bookmarks) == 1
-        assert app._active_bookmark_index == 0
+        with patch("arxiv_browser.app.save_config", return_value=True) as save_mock:
+            await app.action_add_bookmark()
+            assert len(app._config.bookmarks) == 1
+            assert app._active_bookmark_index == 0
 
-        await app.action_goto_bookmark(99)
-        await app.action_goto_bookmark(0)
-        app._apply_filter.assert_called_with("graph transformers")
+            await app.action_goto_bookmark(99)
+            await app.action_goto_bookmark(0)
+            app._apply_filter.assert_called_with("graph transformers")
 
+            app._active_bookmark_index = -1
+            await app.action_remove_bookmark()
+            assert "No active bookmark is selected." in app.notify.call_args[0][0]
+
+            app._active_bookmark_index = 0
+            await app.action_remove_bookmark()
+            assert len(app._config.bookmarks) == 0
+            assert save_mock.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_bookmark_add_rolls_back_on_save_failure(self):
+        app = _new_app()
+        app._config = UserConfig()
+        app._config.bookmarks = []
+        original_bookmarks = app._config.bookmarks
         app._active_bookmark_index = -1
-        await app.action_remove_bookmark()
-        assert "No active bookmark is selected." in app.notify.call_args[0][0]
+        app._update_bookmark_bar = AsyncMock()
+        app.notify = MagicMock()
+        app.query_one = MagicMock(return_value=SimpleNamespace(value="graph transformers"))
 
+        with patch("arxiv_browser.app.save_config", return_value=False):
+            await app.action_add_bookmark()
+
+        assert app._config.bookmarks == []
+        assert app._config.bookmarks is original_bookmarks
+        assert app._active_bookmark_index == -1
+        app._update_bookmark_bar.assert_not_called()
+        app.notify.assert_called_once_with(
+            "Failed to save bookmarks",
+            title="Bookmark",
+            severity="error",
+        )
+
+    @pytest.mark.asyncio
+    async def test_bookmark_remove_rolls_back_on_save_failure(self):
+        app = _new_app()
+        app._config = UserConfig()
+        bookmark = SearchBookmark(name="graph transforme", query="graph transformers")
+        app._config.bookmarks = [bookmark]
+        original_bookmarks = app._config.bookmarks
         app._active_bookmark_index = 0
-        await app.action_remove_bookmark()
-        assert len(app._config.bookmarks) == 0
+        app._update_bookmark_bar = AsyncMock()
+        app.notify = MagicMock()
+
+        with patch("arxiv_browser.app.save_config", return_value=False):
+            await app.action_remove_bookmark()
+
+        assert app._config.bookmarks == [bookmark]
+        assert app._config.bookmarks is original_bookmarks
+        assert app._active_bookmark_index == 0
+        app._update_bookmark_bar.assert_not_called()
+        app.notify.assert_called_once_with(
+            "Failed to save bookmarks",
+            title="Bookmark",
+            severity="error",
+        )
 
     @pytest.mark.asyncio
     async def test_bookmark_limit_guard(self):

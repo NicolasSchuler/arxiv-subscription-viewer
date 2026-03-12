@@ -49,6 +49,7 @@ from arxiv_browser.modals.llm import (
 from arxiv_browser.modals.search import (
     ArxivSearchModal,
     CommandPaletteModal,
+    PaletteCommand,
 )
 
 __all__ = [
@@ -65,6 +66,7 @@ __all__ = [
     "HelpScreen",
     "MetadataSnapshotPickerModal",
     "NotesModal",
+    "PaletteCommand",
     "PaperChatScreen",
     "RecommendationListItem",
     "RecommendationSourceModal",

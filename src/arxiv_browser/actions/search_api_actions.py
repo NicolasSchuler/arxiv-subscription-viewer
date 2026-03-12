@@ -27,6 +27,10 @@ def action_toggle_search(app: "ArxivBrowser") -> None:
     else:
         container.add_class("visible")
         app._get_search_input_widget().focus()
+        app.notify(
+            'Search mode: try cat:cs.AI, author:hinton, unread, or "large language".',
+            title="Search",
+        )
     app._update_footer()
 
 
@@ -59,6 +63,7 @@ def action_exit_arxiv_search_mode(app: "ArxivBrowser") -> None:
     app._restore_local_browse_snapshot()
     app._local_browse_snapshot = None
     app._update_header()
+    app._update_subtitle()
     app.notify("Exited arXiv API mode", title="arXiv Search")
 
 
@@ -175,9 +180,7 @@ def _apply_arxiv_search_results(
     app._sort_papers()
     app._refresh_list_view()
     app._update_header()
-
-    query_label = app._format_arxiv_search_label(request)
-    app.sub_title = f"API search · {truncate_text(query_label, 60)}"
+    app._update_subtitle()
 
     try:
         app._get_paper_list_widget().focus()
@@ -260,7 +263,7 @@ async def _run_arxiv_search(app: "ArxivBrowser", request: ArxivSearchRequest, st
     page_number = (start // max_results) + 1
     if papers:
         app.notify(
-            f"Loaded {len(papers)} results (page {page_number})",
+            f"Loaded {len(papers)} results (page {page_number}). Next: Ctrl+e exits search results.",
             title="arXiv Search",
         )
     else:
@@ -316,9 +319,21 @@ async def action_add_bookmark(app: "ArxivBrowser") -> None:
     # Generate a short name from the query
     name = truncate_text(query, BOOKMARK_NAME_MAX_LEN)
 
+    bookmarks = app._config.bookmarks
+    old_bookmarks = list(bookmarks)
+    old_active_index = app._active_bookmark_index
     bookmark = SearchBookmark(name=name, query=query)
-    app._config.bookmarks.append(bookmark)
-    app._active_bookmark_index = len(app._config.bookmarks) - 1
+    bookmarks.append(bookmark)
+    app._active_bookmark_index = len(bookmarks) - 1
+    if not save_config(app._config):
+        bookmarks[:] = old_bookmarks
+        app._active_bookmark_index = old_active_index
+        app.notify(
+            "Failed to save bookmarks",
+            title="Bookmark",
+            severity="error",
+        )
+        return
 
     await app._update_bookmark_bar()
     app.notify(f"Added bookmark: {name}", title="Bookmark")
@@ -338,8 +353,20 @@ async def action_remove_bookmark(app: "ArxivBrowser") -> None:
         )
         return
 
-    removed = app._config.bookmarks.pop(app._active_bookmark_index)
+    bookmarks = app._config.bookmarks
+    old_bookmarks = list(bookmarks)
+    old_active_index = app._active_bookmark_index
+    removed = bookmarks.pop(app._active_bookmark_index)
     app._active_bookmark_index = -1
+    if not save_config(app._config):
+        bookmarks[:] = old_bookmarks
+        app._active_bookmark_index = old_active_index
+        app.notify(
+            "Failed to save bookmarks",
+            title="Bookmark",
+            severity="error",
+        )
+        return
 
     await app._update_bookmark_bar()
     app.notify(f"Removed bookmark: {removed.name}", title="Bookmark")

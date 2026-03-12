@@ -85,3 +85,7 @@ Press `Ctrl+g` to have the LLM suggest tags for the current or selected papers b
 | `L` | Score all papers by relevance |
 | `Ctrl+l` | Edit research interests |
 | `Ctrl+g` | Auto-tag current/selected papers |
+
+---
+
+**See also:** [Config Reference](config-reference.md) · [Search & Filters](search-filters.md) · [Troubleshooting](troubleshooting.md) · [All Docs](README.md)

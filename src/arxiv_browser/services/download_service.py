@@ -35,6 +35,7 @@ async def download_pdf(
         )
 
         async def _stream_to_tmp(active_client: httpx.AsyncClient) -> None:
+            """Stream the PDF response body into the temporary file."""
             with os.fdopen(fd, "wb") as tmp_file:
                 async with active_client.stream(
                     "GET",

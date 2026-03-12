@@ -76,6 +76,29 @@ async def test_load_or_fetch_s2_fetch_and_save_on_cache_miss(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_load_or_fetch_s2_include_status_reports_incomplete_fetch(tmp_path) -> None:
+    with (
+        patch("arxiv_browser.services.enrichment_service.load_s2_paper", return_value=None),
+        patch(
+            "arxiv_browser.services.enrichment_service.fetch_s2_paper",
+            new=AsyncMock(return_value=(None, False)),
+        ),
+        patch("arxiv_browser.services.enrichment_service.save_s2_paper") as save_mock,
+    ):
+        result = await load_or_fetch_s2_paper_cached(
+            arxiv_id="2401.10003",
+            db_path=tmp_path / "s2.db",
+            cache_ttl_days=7,
+            client=object(),
+            api_key="k",
+            include_status=True,
+        )
+
+    assert result == (None, False)
+    save_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_load_or_fetch_hf_cache_hit(tmp_path) -> None:
     cached_paper = HuggingFacePaper(
         arxiv_id="2401.20001",
@@ -132,3 +155,24 @@ async def test_load_or_fetch_hf_fetch_and_save_on_cache_miss(tmp_path) -> None:
 
     assert result == fetched
     save_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_load_or_fetch_hf_include_status_reports_incomplete_fetch(tmp_path) -> None:
+    with (
+        patch("arxiv_browser.services.enrichment_service.load_hf_daily_cache", return_value=None),
+        patch(
+            "arxiv_browser.services.enrichment_service.fetch_hf_daily_papers",
+            new=AsyncMock(return_value=([], False)),
+        ),
+        patch("arxiv_browser.services.enrichment_service.save_hf_daily_cache") as save_mock,
+    ):
+        result = await load_or_fetch_hf_daily_cached(
+            db_path=tmp_path / "hf.db",
+            cache_ttl_hours=6,
+            client=object(),
+            include_status=True,
+        )
+
+    assert result == ([], False)
+    save_mock.assert_not_called()

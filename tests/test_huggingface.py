@@ -415,6 +415,19 @@ class TestFetchHfDailyPapers:
         assert result == []
 
     @pytest.mark.asyncio
+    async def test_include_status_empty_response_is_complete(self) -> None:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = []
+
+        client = AsyncMock(spec=httpx.AsyncClient)
+        client.get.return_value = mock_response
+
+        result, complete = await fetch_hf_daily_papers(client, include_status=True)
+        assert result == []
+        assert complete is True
+
+    @pytest.mark.asyncio
     async def test_404_returns_empty(self) -> None:
         mock_response = MagicMock()
         mock_response.status_code = 404
@@ -465,6 +478,16 @@ class TestFetchHfDailyPapers:
 
         result = await fetch_hf_daily_papers(client)
         assert result == []
+
+    @pytest.mark.asyncio
+    @patch("arxiv_browser.http_retry.asyncio.sleep", new_callable=AsyncMock)
+    async def test_include_status_http_error_is_incomplete(self, mock_sleep) -> None:
+        client = AsyncMock(spec=httpx.AsyncClient)
+        client.get.side_effect = httpx.ConnectError("connection failed")
+
+        result, complete = await fetch_hf_daily_papers(client, include_status=True)
+        assert result == []
+        assert complete is False
 
     @pytest.mark.asyncio
     @patch("arxiv_browser.http_retry.asyncio.sleep", new_callable=AsyncMock)

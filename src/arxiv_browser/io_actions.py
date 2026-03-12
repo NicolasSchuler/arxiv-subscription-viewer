@@ -19,7 +19,12 @@ def resolve_target_papers(
     papers_by_id: Mapping[str, Paper],
     current_paper: Paper | None,
 ) -> list[Paper]:
-    """Resolve action target papers from selected IDs or current paper fallback."""
+    """Resolve action target papers from selected IDs or current paper fallback.
+
+    Resolution priority: multi-selected papers (preserving filtered list order,
+    then remaining selected IDs sorted alphabetically), falling back to the
+    single current paper, or an empty list if nothing is available.
+    """
     if selected_ids:
         ordered: list[Paper] = []
         seen: set[str] = set()
@@ -63,7 +68,12 @@ def build_markdown_export_document(formatted_papers: Sequence[str]) -> str:
 
 
 def build_viewer_args(viewer_cmd: str, url_or_path: str) -> list[str]:
-    """Build subprocess argument list for a configured external viewer command."""
+    """Build subprocess argument list for a configured external viewer command.
+
+    If the command contains ``{url}`` or ``{path}`` placeholders, they are
+    replaced with ``url_or_path``. Otherwise ``url_or_path`` is appended as
+    the final argument.
+    """
     args = shlex.split(viewer_cmd, posix=os.name != "nt")
     if os.name == "nt":
         # Windows split keeps wrapping quotes when posix=False.
