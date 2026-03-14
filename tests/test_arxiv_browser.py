@@ -7985,10 +7985,13 @@ class TestDateNavigator:
             current_date_index=0,
         )
         with patch("arxiv_browser.app.save_config", return_value=True):
-            async with app.run_test():
+            async with app.run_test() as pilot:
+                await pilot.pause()
                 nav = app.query_one(DateNavigator)
                 await nav.update_dates(first, 0)
+                await pilot.pause()
                 await nav.update_dates(second, 1)
+                await pilot.pause()
                 date_item_ids = [
                     child.id
                     for child in nav.children
@@ -8023,18 +8026,22 @@ class TestDateNavigator:
         )
 
         with patch("arxiv_browser.app.save_config", return_value=True):
-            async with app.run_test():
+            async with app.run_test() as pilot:
+                await pilot.pause()
                 nav = app.query_one(DateNavigator)
 
                 await nav.update_dates(history, 0)
+                await pilot.pause()
                 assert "visible" in nav.classes
                 assert any("date-nav-item" in child.classes for child in nav.children)
 
                 await nav.update_dates([history[0]], 0)
+                await pilot.pause()
                 assert "visible" not in nav.classes
                 assert not any("date-nav-item" in child.classes for child in nav.children)
 
                 await nav.update_dates([], 0)
+                await pilot.pause()
                 assert "visible" not in nav.classes
                 assert not any("date-nav-item" in child.classes for child in nav.children)
 
