@@ -12,6 +12,7 @@ HELP_SECTION_ACTIONS: list[tuple[str, list[str]]] = [
         "Core Actions",
         [
             "toggle_search",
+            "show_search_syntax",
             "cursor_down",
             "cursor_up",
             "toggle_select",
@@ -102,9 +103,16 @@ HELP_DESCRIPTION_OVERRIDES: dict[str, str] = {
     "ctrl_e_dispatch": "Toggle S2 (browse) / Exit API (API mode)",
     "command_palette": "Commands",
     "show_help": "Help overlay",
+    "show_search_syntax": "Search examples & operators",
     "open_url": "Open in Browser",
     "open_pdf": "Open PDF",
     "toggle_detail_mode": "Toggle detail density (scan/full)",
+}
+
+
+# Actions accessible only via command palette (Ctrl+p) — no direct keybinding.
+HELP_PALETTE_ONLY_KEYS: dict[str, str] = {
+    "show_search_syntax": "Ctrl+p",
 }
 
 
@@ -178,6 +186,10 @@ def build_help_sections(
                 continue
             binding = _binding_for_help_action(bindings, action_name)
             if binding is None:
+                if action_name in HELP_PALETTE_ONLY_KEYS:
+                    key = _format_help_key(HELP_PALETTE_ONLY_KEYS[action_name])
+                    description = HELP_DESCRIPTION_OVERRIDES.get(action_name, action_name)
+                    entries.append((key, description))
                 continue
             key = _format_help_key(binding.key)
             description = HELP_DESCRIPTION_OVERRIDES.get(action_name, binding.description)

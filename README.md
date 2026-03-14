@@ -26,6 +26,9 @@ arxiv-viewer search --category cs.AI
 # Search by topic
 arxiv-viewer search --query "diffusion transformer" --field title
 
+# Paginate through results (instead of collecting the newest day)
+arxiv-viewer search --query "attention" --mode page --max-results 100
+
 # Browse from email digest files (see docs/history-mode.md)
 arxiv-viewer browse
 
@@ -34,6 +37,8 @@ arxiv-viewer dates
 ```
 
 > **Requires Python 3.13+** · Press `?` in-app for help · `Ctrl+p` opens commands
+>
+> Global options: `--debug` (log to file) · `--ascii` (ASCII-only icons) · `--color auto|always|never` · `--no-color`
 
 ## ✨ Highlights
 
@@ -70,7 +75,8 @@ arxiv-viewer dates
 | `m` / `'` | Set / jump to mark | | `w` / `W` | Watch list |
 | `Ctrl+k` | Collections | | `Ctrl+g` | Auto-tag (LLM) |
 | `Ctrl+d` | Detail pane sections | | `Ctrl+h` | HuggingFace trending |
-| `Ctrl+e` | Toggle S2 / Exit search results | | `?` | Help / shortcuts |
+| `v` | Detail mode | | `Ctrl+Shift+b` | Remove bookmark |
+| `Ctrl+e` | Toggle S2 / Exit API mode | | `?` | Help / shortcuts |
 
 ## ⚙️ Configuration
 
