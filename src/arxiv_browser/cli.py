@@ -528,7 +528,7 @@ def _normalize_cli_argv(argv: list[str] | None) -> list[str]:
         if token in _ROOT_FLAG_OPTIONS:
             index += 1
             continue
-        if token == "--color":
+        if token == "--color":  # nosec B105 - CLI color flag, not a credential
             if index + 1 >= len(args):
                 return args
             index += 2

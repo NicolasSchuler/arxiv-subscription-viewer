@@ -190,9 +190,7 @@ def _require_llm_command(app: "ArxivBrowser") -> str | None:
             timeout=10,
         )
         return None
-    app._llm_provider = CLIProvider(
-        command_template, allow_shell=app._config.allow_llm_shell_fallback
-    )
+    app._llm_provider = resolve_provider(app._config)
     return command_template
 
 
@@ -530,7 +528,7 @@ async def _score_relevance_batch_async(
                         paper=paper,
                         interests=interests,
                         provider=app._llm_provider,
-                        timeout_seconds=RELEVANCE_SCORE_TIMEOUT,
+                        timeout_seconds=app._config.llm_timeout,
                     )
                     if parsed is None:
                         failed += 1
@@ -645,6 +643,7 @@ def _start_auto_tag_flow(app: "ArxivBrowser") -> None:
             app._auto_tag_active = False
             app.notify("No selected papers found", title="Auto-Tag", severity="warning")
             return
+        app._auto_tag_progress = (0, len(papers))
         app._update_footer()
         app._track_task(app._auto_tag_batch_async(papers, taxonomy))
     else:
@@ -699,19 +698,20 @@ async def _auto_tag_batch_async(
         tagged = 0
         failed = 0
 
-        for i, paper in enumerate(papers):
-            app._auto_tag_progress = (i + 1, total)
-            app._update_footer()
-
+        app._auto_tag_progress = (0, total)
+        app._update_footer()
+        for i, paper in enumerate(papers, start=1):
             if getattr(app, "_cancel_batch_requested", False):
                 if tagged > 0:
                     app._save_config_or_warn("partial auto-tag results")
                 app.notify(
-                    f"Auto-tagging cancelled after {i}/{total} papers ({tagged} tagged)",
+                    f"Auto-tagging cancelled after {i - 1}/{total} papers ({tagged} tagged)",
                     title="Auto-Tag",
                 )
                 break
 
+            app._auto_tag_progress = (i, total)
+            app._update_footer()
             suggested = await app._call_auto_tag_llm(paper, taxonomy)
             if suggested is None:
                 failed += 1

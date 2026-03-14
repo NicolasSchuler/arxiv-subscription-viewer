@@ -391,6 +391,7 @@ class TestRelevanceBatchCoverage:
     async def test_score_relevance_batch_mixed_results(self, make_paper, tmp_path):
         papers = [make_paper(arxiv_id=f"2401.{i:05d}") for i in range(1, 6)]
         app = _new_app()
+        app._config = UserConfig(llm_timeout=45)
         app._relevance_db_path = tmp_path / "relevance.db"
         app._relevance_scores = {}
         app._mark_badges_dirty = MagicMock()
@@ -427,6 +428,10 @@ class TestRelevanceBatchCoverage:
         assert app._relevance_scoring_active is False
         assert app._scoring_progress is None
         assert app._update_relevance_badge.call_count == 2
+        assert {
+            call.kwargs["timeout_seconds"]
+            for call in app._services.llm.score_relevance_once.await_args_list
+        } == {45}
         messages = [str(call.args[0]) for call in app.notify.call_args_list if call.args]
         assert any("5/5" in message for message in messages)
         assert any("Relevance scoring complete" in message for message in messages)
@@ -657,19 +662,52 @@ class TestAutoTagCoverage:
         app.action_auto_tag()
         assert app._track_task.call_count == 1
         assert app._auto_tag_active is True
+        assert app._auto_tag_progress == (0, 1)
 
         app._auto_tag_active = False
+        app._auto_tag_progress = None
         app.selected_ids = set()
         app._get_current_paper = MagicMock(return_value=paper)
         app._tags_for = MagicMock(return_value=["old"])
         app.action_auto_tag()
         assert app._track_task.call_count == 2
+        assert app._auto_tag_progress is None
 
         app._auto_tag_active = False
         app._get_current_paper = MagicMock(return_value=None)
         app.action_auto_tag()
         assert app._auto_tag_active is False
         assert "No paper selected" in app.notify.call_args[0][0]
+
+    def test_cancel_search_ignores_single_auto_tag_and_cancels_batch_auto_tag(self):
+        app = _new_app()
+        app.notify = MagicMock()
+        app.action_exit_arxiv_search_mode = MagicMock()
+        app._apply_filter = MagicMock()
+        app._in_arxiv_api_mode = False
+        app._relevance_scoring_active = False
+        app._auto_tag_active = True
+        app._auto_tag_progress = None
+        app._cancel_batch_requested = False
+        app._get_search_container_widget = MagicMock(
+            return_value=SimpleNamespace(classes=set(), remove_class=MagicMock())
+        )
+
+        app.action_cancel_search()
+
+        assert app._cancel_batch_requested is False
+        cancel_messages = [str(call.args[0]) for call in app.notify.call_args_list if call.args]
+        assert "Cancelling batch operation..." not in cancel_messages
+
+        app._auto_tag_progress = (0, 2)
+        app.action_cancel_search()
+
+        assert app._cancel_batch_requested is True
+        assert any(
+            "Cancelling batch operation..." in msg
+            for msg in cancel_messages
+            + [str(call.args[0]) for call in app.notify.call_args_list if call.args]
+        )
 
 
 class TestImportCollectionAndTagsCoverage:

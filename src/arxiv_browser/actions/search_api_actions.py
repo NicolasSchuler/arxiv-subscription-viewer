@@ -46,8 +46,8 @@ def action_cancel_search(app: "ArxivBrowser") -> None:
     if app._in_arxiv_api_mode:
         app.action_exit_arxiv_search_mode()
 
-    # Cancel any active batch LLM operation (relevance scoring / auto-tagging)
-    if app._relevance_scoring_active or app._auto_tag_active:
+    # Cancel only true batch LLM operations (relevance scoring / batch auto-tagging).
+    if app._relevance_scoring_active or app._auto_tag_progress is not None:
         app._cancel_batch_requested = True
         app.notify("Cancelling batch operation...", title="Cancel")
 

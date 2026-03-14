@@ -27,6 +27,20 @@ class TestRequireLlmCommand:
         assert result == "my-tool {prompt}"
         app.notify.assert_not_called()
 
+    def test_refreshes_provider_with_configured_retry_policy(self):
+        app = self._make_mock_app(
+            llm_command="my-tool {prompt}",
+            allow_llm_shell_fallback=False,
+            llm_max_retries=3,
+        )
+
+        result = app._require_llm_command()
+
+        assert result == "my-tool {prompt}"
+        assert app._llm_provider is not None
+        assert app._llm_provider._allow_shell is False
+        assert app._llm_provider._max_retries == 3
+
     def test_returns_none_and_notifies_when_not_configured(self):
         app = self._make_mock_app()
         result = app._require_llm_command()
