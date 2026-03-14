@@ -42,6 +42,11 @@ Save up to 9 frequent searches for quick access:
 | `1`-`9` | Jump to saved bookmark |
 | `Ctrl+Shift+b` | Remove active bookmark |
 
+### Watch Lists vs Bookmarks
+
+- **Watch lists** (`w`/`W`): Highlight papers matching author/keyword/title patterns across all views. Use these to track topics or researchers you always want to notice.
+- **Bookmarks** (`1-9`, `Ctrl+b`): Save specific search queries for quick recall. Use these for complex filters you run frequently.
+
 ## arXiv API Search
 
 Press `A` to search all of arXiv via the API:

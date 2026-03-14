@@ -261,8 +261,9 @@ This writes detailed logs to a rotating log file:
 
 | Platform | Log path |
 |----------|----------|
-| macOS | `~/Library/Application Support/arxiv-browser/debug.log` |
 | Linux | `~/.config/arxiv-browser/debug.log` |
+| macOS | `~/Library/Application Support/arxiv-browser/debug.log` |
+| Windows | `%APPDATA%/arxiv-browser/debug.log` |
 
 Logs rotate at 5 MB with 3 backup files (`debug.log.1`, `.2`, `.3`).
 

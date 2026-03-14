@@ -241,7 +241,7 @@ class PaperChatScreen(ModalScreen[None]):
     #chat-messages {
         height: 1fr;
         background: $th-panel;
-        padding: 1 1;
+        padding: 1;
     }
 
     .chat-user {

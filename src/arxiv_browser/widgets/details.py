@@ -222,7 +222,7 @@ class PaperDetails(Static):
             self._render_version(paper, version_update, "version" in collapsed),
             self._render_url(paper),
         ]
-        markup = "\n".join(s for s in sections if s)
+        markup = "\n\n".join(s for s in sections if s)
 
         # Store in cache with FIFO eviction
         if len(self._detail_cache) >= DETAIL_CACHE_MAX:
@@ -415,10 +415,8 @@ class PaperDetails(Static):
         if s2_data:
             lines = [
                 f"[bold {THEME_COLORS['green']}]{expanded_glyph} Semantic Scholar[/]",
-                (
-                    f"  [bold {THEME_COLORS['accent']}]Citations:[/] {s2_data.citation_count}"
-                    f"  [bold {THEME_COLORS['accent']}]Influential:[/] {s2_data.influential_citation_count}"
-                ),
+                f"  [bold {THEME_COLORS['accent']}]Citations:[/] {s2_data.citation_count}",
+                f"  [bold {THEME_COLORS['accent']}]Influential:[/] {s2_data.influential_citation_count}",
             ]
             if s2_data.fields_of_study:
                 fos = ", ".join(escape_rich_text(field) for field in s2_data.fields_of_study)
@@ -444,7 +442,7 @@ class PaperDetails(Static):
         hf_parts = [f"  [bold {THEME_COLORS['accent']}]Upvotes:[/] {hf_data.upvotes}"]
         if hf_data.num_comments > 0:
             hf_parts.append(f"  [bold {THEME_COLORS['accent']}]Comments:[/] {hf_data.num_comments}")
-        lines.append("".join(hf_parts))
+        lines.extend(hf_parts)
         if hf_data.github_repo:
             stars_str = f" ({hf_data.github_stars} stars)" if hf_data.github_stars else ""
             safe_repo = escape_rich_text(hf_data.github_repo)

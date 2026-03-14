@@ -457,13 +457,46 @@ def _render_compact_status(parts: list[str], max_width: int) -> str:
 
 
 def _truncate_rich_text(text: str, max_width: int | None) -> str:
-    """Truncate rendered Rich markup by visible width when constrained."""
+    """Truncate rendered Rich markup by visible width when constrained.
+
+    Walks the string preserving Rich ``[tag]`` sequences (which contribute
+    zero visible width) so that formatting is retained in the truncated
+    output.  Escaped brackets (``\\[``) are correctly counted as visible
+    characters.
+    """
     if max_width is None or max_width <= 0:
         return text
-    visible = re.sub(r"\[[^\]]*]", "", text)
-    if len(visible) <= max_width:
+    # Count visible chars: strip Rich tags but treat escaped brackets as
+    # literal text.  ``\\[`` renders as ``[`` (1 visible char).
+    stripped = re.sub(r"\\\[", "X", text)  # escaped bracket → 1 char placeholder
+    stripped = re.sub(r"\[[^\]]*]", "", stripped)
+    if len(stripped) <= max_width:
         return text
-    return visible[: max(0, max_width - 3)] + "..."
+    # Walk the original text, copying Rich tags verbatim while counting
+    # only visible characters.  Stop once we've consumed enough visible
+    # chars to leave room for the trailing "...".
+    target = max(0, max_width - 3)
+    result: list[str] = []
+    visible_count = 0
+    i = 0
+    n = len(text)
+    while i < n and visible_count < target:
+        if text[i] == "\\" and i + 1 < n and text[i + 1] == "[":
+            # Escaped bracket: ``\[`` is 1 visible char rendered as ``[``
+            result.append(text[i : i + 2])
+            visible_count += 1
+            i += 2
+            continue
+        if text[i] == "[":
+            end = text.find("]", i)
+            if end != -1:
+                result.append(text[i : end + 1])
+                i = end + 1
+                continue
+        result.append(text[i])
+        visible_count += 1
+        i += 1
+    return "".join(result) + "..."
 
 
 class ContextFooter(Static):

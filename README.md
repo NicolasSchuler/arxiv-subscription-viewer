@@ -20,7 +20,7 @@
 pip install arxiv-subscription-viewer
 # or: uv tool install arxiv-subscription-viewer
 
-# Browse latest cs.AI papers from the API
+# Search arXiv API directly
 arxiv-viewer search --category cs.AI
 
 # Search by topic
@@ -39,6 +39,8 @@ arxiv-viewer dates
 > **Requires Python 3.13+** · Press `?` in-app for help · `Ctrl+p` opens commands
 >
 > Global options: `--debug` (log to file) · `--ascii` (ASCII-only icons) · `--color auto|always|never` · `--no-color`
+>
+> Debug log paths: `~/.config/arxiv-browser/debug.log` (Linux) · `~/Library/Application Support/arxiv-browser/debug.log` (macOS) · `%APPDATA%/arxiv-browser/debug.log` (Windows)
 
 ## ✨ Highlights
 
@@ -77,6 +79,12 @@ arxiv-viewer dates
 | `Ctrl+d` | Detail pane sections | | `Ctrl+h` | HuggingFace trending |
 | `v` | Detail mode | | `Ctrl+Shift+b` | Remove bookmark |
 | `Ctrl+e` | Toggle S2 / Exit API mode | | `?` | Help / shortcuts |
+
+### Marks
+
+Press `m` followed by a letter (`a`–`z`) to set a named mark at the current paper.
+Press `'` followed by that letter to jump back to it. Marks persist within a session,
+making it easy to navigate between papers you're comparing or revisiting.
 
 ## ⚙️ Configuration
 

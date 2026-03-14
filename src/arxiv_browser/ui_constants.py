@@ -35,6 +35,7 @@ Header {
 
 #right-pane {
     width: 3fr;
+    max-width: 100;
     height: 100%;
     border: tall $th-highlight;
     background: $th-panel;
@@ -45,14 +46,14 @@ Header {
 }
 
 #list-header {
-    padding: 0 1;
+    padding: 1 1;
     background: $th-panel;
     color: $th-accent;
     text-style: bold;
 }
 
 #details-header {
-    padding: 0 1;
+    padding: 1 1;
     background: $th-panel;
     color: $th-accent-alt;
     text-style: bold;
@@ -100,6 +101,7 @@ Header {
 
 #paper-list:focus > .option-list--option-highlighted {
     background: $th-highlight-focus;
+    text-style: bold;
 }
 
 #paper-list > .option-list--option-hover {

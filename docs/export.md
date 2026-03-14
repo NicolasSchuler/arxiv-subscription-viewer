@@ -15,7 +15,7 @@ File exports default to `~/arxiv-exports/`. Configure a custom directory:
 
 ```json
 {
-  "export_dir": "/path/to/exports"
+  "bibtex_export_dir": "/path/to/exports"
 }
 ```
 

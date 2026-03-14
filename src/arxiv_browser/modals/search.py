@@ -221,7 +221,11 @@ class CommandPaletteModal(ModalScreen[str]):
         max-height: 28;
         background: $th-panel;
         border: thick $th-accent;
-        padding: 1 2;
+        padding: 0 2;
+    }
+
+    CommandPaletteModal #palette-title {
+        margin-bottom: 1;
     }
 
     CommandPaletteModal #palette-search {
@@ -250,7 +254,7 @@ class CommandPaletteModal(ModalScreen[str]):
 
         arrows = "^v" if is_ascii_mode() else "\u2191\u2193"
         with Vertical():
-            yield Label(f"[bold {THEME_COLORS['accent']}]Command palette[/]")
+            yield Label(f"[bold {THEME_COLORS['accent']}]Command palette[/]", id="palette-title")
             yield Input(
                 placeholder="Type to search command palette actions...",
                 id="palette-search",

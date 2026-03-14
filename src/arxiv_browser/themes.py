@@ -40,7 +40,7 @@ DEFAULT_THEME = {
     "pink": "#fd4d8e",  # lightened for WCAG AA (4.5:1)
     "purple": "#ae81ff",
     "highlight": "#49483e",
-    "highlight_focus": "#5a5950",
+    "highlight_focus": "#6e6d5e",
     "selection": "#3d4a32",
     "selection_highlight": "#4d5a42",
     "scrollbar_background": "#3e3d32",
@@ -121,7 +121,7 @@ HIGH_CONTRAST_THEME: dict[str, str] = {
     "pink": "#ff7ab2",  # 7.5:1 — WCAG AAA
     "purple": "#b4a7ff",  # 8.2:1 — WCAG AAA
     "highlight": "#1a1a1a",
-    "highlight_focus": "#2a2a2a",
+    "highlight_focus": "#3d3d3d",
     "selection": "#1a3a1a",
     "selection_highlight": "#2a4a2a",
     "scrollbar_background": "#1a1a1a",

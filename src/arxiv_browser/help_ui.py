@@ -12,6 +12,7 @@ HELP_SECTION_ACTIONS: list[tuple[str, list[str]]] = [
         "Core Actions",
         [
             "toggle_search",
+            "cancel_search",
             "show_search_syntax",
             "cursor_down",
             "cursor_up",
