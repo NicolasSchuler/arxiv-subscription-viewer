@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 
 from arxiv_browser.llm import (
@@ -13,6 +14,8 @@ from arxiv_browser.llm import (
 )
 from arxiv_browser.llm_providers import LLMProvider
 from arxiv_browser.models import Paper
+
+logger = logging.getLogger(__name__)
 
 
 class LLMExecutionError(RuntimeError):
@@ -53,8 +56,14 @@ async def score_relevance_once(
     prompt = build_relevance_prompt(paper, interests)
     llm_result = await provider.execute(prompt, timeout_seconds)
     if not llm_result.success:
+        logger.debug("Relevance LLM failed for %s: %s", paper.arxiv_id, llm_result.error)
         return None
-    return _parse_relevance_response(llm_result.output)
+    parsed = _parse_relevance_response(llm_result.output)
+    if parsed is None:
+        logger.debug(
+            "Relevance parse failed for %s (output: %.200s)", paper.arxiv_id, llm_result.output
+        )
+    return parsed
 
 
 async def suggest_tags_once(
@@ -70,7 +79,12 @@ async def suggest_tags_once(
     if not llm_result.success:
         error = llm_result.error or "LLM command failed"
         raise LLMExecutionError(error)
-    return _parse_auto_tag_response(llm_result.output)
+    tags = _parse_auto_tag_response(llm_result.output)
+    if tags is None:
+        logger.debug(
+            "Auto-tag parse failed for %s (output: %.200s)", paper.arxiv_id, llm_result.output
+        )
+    return tags
 
 
 __all__ = [

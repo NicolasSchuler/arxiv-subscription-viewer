@@ -84,6 +84,8 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
         "llm_prompt_template": config.llm_prompt_template,
         "llm_preset": config.llm_preset,
         "allow_llm_shell_fallback": config.allow_llm_shell_fallback,
+        "llm_max_retries": config.llm_max_retries,
+        "llm_timeout": config.llm_timeout,
         "arxiv_api_max_results": max_results,
         "s2_enabled": config.s2_enabled,
         "s2_api_key": config.s2_api_key,
@@ -300,6 +302,25 @@ def _parse_str_list(data: dict[str, Any], key: str) -> list[str]:
     return [item for item in raw if isinstance(item, str)]
 
 
+def _validate_llm_prompt_template(template: str) -> str:
+    """Validate an LLM prompt template, rejecting unapproved placeholders.
+
+    Returns the template if valid, or empty string (use default) if invalid.
+    """
+    if not template:
+        return ""
+    from arxiv_browser.llm import validate_prompt_template
+
+    invalid = validate_prompt_template(template)
+    if invalid:
+        logger.warning(
+            "LLM prompt template contains invalid placeholders: %s — using default",
+            ", ".join(f"{{{p}}}" for p in invalid),
+        )
+        return ""
+    return template
+
+
 def _dict_to_config(data: dict[str, Any]) -> UserConfig:
     """Deserialize a dictionary to UserConfig with type validation."""
     marks = data.get("marks", {})
@@ -322,9 +343,13 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         theme=_parse_str_dict(data, "theme"),
         theme_name=_safe_get(data, "theme_name", "monokai", str),
         llm_command=_safe_get(data, "llm_command", "", str),
-        llm_prompt_template=_safe_get(data, "llm_prompt_template", "", str),
+        llm_prompt_template=_validate_llm_prompt_template(
+            _safe_get(data, "llm_prompt_template", "", str)
+        ),
         llm_preset=_safe_get(data, "llm_preset", "", str),
         allow_llm_shell_fallback=_safe_get(data, "allow_llm_shell_fallback", True, bool),
+        llm_max_retries=max(0, min(5, _safe_get(data, "llm_max_retries", 1, int))),
+        llm_timeout=max(10, min(600, _safe_get(data, "llm_timeout", 120, int))),
         arxiv_api_max_results=_coerce_arxiv_api_max_results(
             data.get("arxiv_api_max_results", ARXIV_API_DEFAULT_MAX_RESULTS)
         ),

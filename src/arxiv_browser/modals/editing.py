@@ -79,6 +79,7 @@ class NotesModal(ModalScreen[str | None]):
             with Horizontal(id="notes-buttons"):
                 yield Button("Cancel", variant="default", id="cancel-btn")
                 yield Button("Save (Ctrl+S)", variant="primary", id="save-btn")
+            yield Static("[dim]Ctrl+S save · Esc cancel[/dim]", id="notes-help")
 
     def on_mount(self) -> None:
         """Focus the text area when the modal is mounted."""
@@ -215,6 +216,10 @@ class TagsModal(ModalScreen[list[str] | None]):
             with Horizontal(id="tags-buttons"):
                 yield Button("Cancel", variant="default", id="cancel-btn")
                 yield Button("Save (Ctrl+S)", variant="primary", id="save-btn")
+            yield Static(
+                "[dim]namespace:value format · Ctrl+S save · Enter save · Esc cancel[/dim]",
+                id="tags-keys-help",
+            )
 
     def on_mount(self) -> None:
         """Focus the tags input field when the modal is mounted."""

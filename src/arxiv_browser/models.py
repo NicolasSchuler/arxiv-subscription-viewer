@@ -263,6 +263,8 @@ class UserConfig:
     llm_prompt_template: str = ""  # Empty = use DEFAULT_LLM_PROMPT
     llm_preset: str = ""  # "claude" | "codex" | "llm" | "" (custom)
     allow_llm_shell_fallback: bool = True  # False = reject shell-only command templates
+    llm_max_retries: int = 1  # Retries for transient LLM failures (timeout, non-zero exit)
+    llm_timeout: int = 120  # Seconds to wait for LLM CLI response
     arxiv_api_max_results: int = ARXIV_API_DEFAULT_MAX_RESULTS
     s2_enabled: bool = False  # Semantic Scholar enrichment (opt-in)
     s2_api_key: str = ""  # Optional S2 API key for higher rate limits

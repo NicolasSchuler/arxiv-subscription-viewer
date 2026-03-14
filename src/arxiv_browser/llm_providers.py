@@ -101,14 +101,24 @@ class CLIProvider:
     Wraps the existing subprocess pattern: build shell command from template,
     run with asyncio.create_subprocess_shell, capture stdout/stderr.
     Never raises — returns LLMResult with success=False on any error.
+    Supports configurable retry with exponential backoff for transient failures.
     """
 
-    __slots__ = ("_allow_shell", "_command_template")
+    __slots__ = ("_allow_shell", "_command_template", "_max_retries")
 
-    def __init__(self, command_template: str, *, allow_shell: bool = True) -> None:
+    _RETRYABLE_PREFIXES = ("Timed out", "Exit ")
+
+    def __init__(
+        self,
+        command_template: str,
+        *,
+        allow_shell: bool = True,
+        max_retries: int = 0,
+    ) -> None:
         """Initialize the CLI provider with a command template and shell policy."""
         self._command_template = command_template
         self._allow_shell = allow_shell
+        self._max_retries = max(0, max_retries)
 
     @property
     def command_template(self) -> str:
@@ -116,7 +126,23 @@ class CLIProvider:
         return self._command_template
 
     async def execute(self, prompt: str, timeout: int) -> LLMResult:
-        """Execute the LLM command and return the result."""
+        """Execute the LLM command with optional retry for transient failures."""
+        last_result: LLMResult | None = None
+        for attempt in range(1 + self._max_retries):
+            if attempt > 0:
+                delay = min(2**attempt, 8)
+                logger.info("LLM retry %d/%d after %ds", attempt, self._max_retries, delay)
+                await asyncio.sleep(delay)
+            result = await self._execute_once(prompt, timeout)
+            if result.success:
+                return result
+            last_result = result
+            if not any(result.error.startswith(p) for p in self._RETRYABLE_PREFIXES):
+                return result  # Not a transient error, don't retry
+        return last_result or LLMResult(output="", success=False, error="No attempts made")
+
+    async def _execute_once(self, prompt: str, timeout: int) -> LLMResult:
+        """Execute a single LLM command attempt."""
         try:
             plan = _build_invocation_plan(
                 self._command_template,
@@ -171,7 +197,11 @@ def resolve_provider(config: UserConfig) -> CLIProvider | None:
     template = _resolve_llm_command(config)
     if not template:
         return None
-    return CLIProvider(template, allow_shell=config.allow_llm_shell_fallback)
+    return CLIProvider(
+        template,
+        allow_shell=config.allow_llm_shell_fallback,
+        max_retries=config.llm_max_retries,
+    )
 
 
 __all__ = [

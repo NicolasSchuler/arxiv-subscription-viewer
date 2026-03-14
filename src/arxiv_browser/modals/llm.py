@@ -183,6 +183,7 @@ class ResearchInterestsModal(ModalScreen[str]):
             with Horizontal(id="interests-buttons"):
                 yield Button("Cancel", variant="default", id="cancel-btn")
                 yield Button("Save (Ctrl+S)", variant="primary", id="save-btn")
+            yield Static("[dim]Ctrl+S save · Esc cancel[/dim]", id="interests-keys-help")
 
     def on_mount(self) -> None:
         """Focus the research interests text area on mount."""
@@ -284,6 +285,8 @@ class PaperChatScreen(ModalScreen[None]):
         paper: Paper,
         provider: CLIProvider,
         paper_content: str = "",
+        *,
+        timeout: int = 0,
     ) -> None:
         """Initialize with a paper, LLM provider, and optional full paper content."""
         super().__init__()
@@ -292,6 +295,7 @@ class PaperChatScreen(ModalScreen[None]):
         self._paper_content = paper_content
         self._history: list[tuple[str, str]] = []  # (role, text)
         self._waiting = False
+        self._timeout = timeout or LLM_COMMAND_TIMEOUT
 
     def compose(self) -> ComposeResult:
         """Yield the chat dialog with a message scroll area, status bar, and input field."""
@@ -305,6 +309,7 @@ class PaperChatScreen(ModalScreen[None]):
                     placeholder="Ask a question about this paper... (Enter to send, Esc to close)",
                     id="chat-input",
                 )
+            yield Static("[dim]Enter send · Esc close[/dim]", id="chat-help")
 
     def on_mount(self) -> None:
         """Focus the chat input and display a hint about available paper content."""
@@ -359,7 +364,7 @@ class PaperChatScreen(ModalScreen[None]):
                 context += "\n\nConversation so far:\n" + "\n".join(history_lines)
             context += f"\n\nUser: {question}\nAssistant:"
 
-            result = await self._provider.execute(context, LLM_COMMAND_TIMEOUT)
+            result = await self._provider.execute(context, self._timeout)
             if not result.success:
                 err = escape_rich_text(result.error[:200])
                 self._add_message("assistant", f"[red]Error: {err}[/]", markup=True)

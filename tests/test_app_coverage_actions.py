@@ -29,6 +29,7 @@ def _new_app() -> ArxivBrowser:
     app = ArxivBrowser.__new__(ArxivBrowser)
     app._http_client = None
     app._visible_index_by_id = {}
+    app._config = UserConfig()
     return app
 
 
@@ -2191,6 +2192,7 @@ class TestLlmProviderGuards:
         app._update_abstract_display = MagicMock()
         app.notify = MagicMock()
         app._http_client = None
+        app._config = UserConfig()
         generate_summary = AsyncMock(return_value=("service summary", None))
         app._services = SimpleNamespace(llm=SimpleNamespace(generate_summary=generate_summary))
 

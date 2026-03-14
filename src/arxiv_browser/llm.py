@@ -378,6 +378,7 @@ def _parse_relevance_response(text: str) -> tuple[int, str] | None:
         reason = reason_match.group(1) if reason_match else ""
         return (score, reason)
 
+    logger.debug("Relevance parse failed for response: %.300s", stripped)
     return None
 
 
@@ -455,6 +456,7 @@ def _parse_auto_tag_response(text: str) -> list[str] | None:
         if items:
             return [t.strip().lower() for t in items if t.strip()]
 
+    logger.debug("Auto-tag parse failed for response: %.300s", stripped)
     return None
 
 
@@ -472,6 +474,19 @@ _LLM_PROMPT_FIELDS = frozenset(
         "paper_content",
     }
 )
+
+# Match {name} but not {{ (escaped braces)
+_TEMPLATE_FIELD_RE = re.compile(r"\{(?!\{)([^{}]+)\}(?!\})")
+
+
+def validate_prompt_template(template: str) -> list[str]:
+    """Validate that a prompt template only uses approved placeholders.
+
+    Returns a list of invalid placeholder names found (empty if all valid).
+    """
+    found = set(_TEMPLATE_FIELD_RE.findall(template))
+    invalid = sorted(found - _LLM_PROMPT_FIELDS)
+    return invalid
 
 
 def build_llm_prompt(paper: Paper, prompt_template: str = "", paper_content: str = "") -> str:
@@ -548,4 +563,5 @@ __all__ = [
     "build_relevance_prompt",
     "get_relevance_db_path",
     "get_summary_db_path",
+    "validate_prompt_template",
 ]

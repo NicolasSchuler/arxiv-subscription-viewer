@@ -306,7 +306,7 @@ async def _generate_summary_async(
             prompt_template=prompt_template,
             provider=app._llm_provider,
             use_full_paper_content=use_full_paper_content,
-            summary_timeout_seconds=LLM_COMMAND_TIMEOUT,
+            summary_timeout_seconds=app._config.llm_timeout,
             fetch_paper_content=lambda selected_paper: _fetch_paper_content_async(
                 selected_paper,
                 app._http_client,
@@ -380,7 +380,9 @@ async def _open_chat_screen(app: "ArxivBrowser", paper: Paper, provider: CLIProv
     """Fetch paper content and open the chat modal."""
     _sync_app_globals()
     paper_content = await _fetch_paper_content_async(paper, app._http_client)
-    app.push_screen(PaperChatScreen(paper, provider, paper_content))
+    app.push_screen(
+        PaperChatScreen(paper, provider, paper_content, timeout=app._config.llm_timeout)
+    )
 
 
 def action_score_relevance(app: "ArxivBrowser") -> None:
@@ -506,65 +508,88 @@ async def _score_relevance_batch_async(
         total = len(uncached)
         scored = 0
         failed = 0
+        done = 0
+        cancelled = False
 
         if app._llm_provider is None:
             logger.warning("LLM provider unexpectedly None in _score_relevance_batch")
             return
-        for i, paper in enumerate(uncached):
-            app._scoring_progress = (i + 1, total)
-            app._update_footer()
 
-            try:
-                parsed = await app._get_services().llm.score_relevance_once(
-                    paper=paper,
-                    interests=interests,
-                    provider=app._llm_provider,
-                    timeout_seconds=RELEVANCE_SCORE_TIMEOUT,
-                )
-                if parsed is None:
+        sem = asyncio.Semaphore(3)
+
+        async def score_one(paper: Paper) -> None:
+            nonlocal scored, failed, done, cancelled
+
+            async with sem:
+                if getattr(app, "_cancel_batch_requested", False):
+                    cancelled = True
+                    return
+
+                try:
+                    parsed = await app._get_services().llm.score_relevance_once(
+                        paper=paper,
+                        interests=interests,
+                        provider=app._llm_provider,
+                        timeout_seconds=RELEVANCE_SCORE_TIMEOUT,
+                    )
+                    if parsed is None:
+                        failed += 1
+                        return
+
+                    score, reason = parsed
+                    app._relevance_scores[paper.arxiv_id] = (score, reason)
+
+                    # Persist to SQLite
+                    await asyncio.to_thread(
+                        _save_relevance_score,
+                        app._relevance_db_path,
+                        paper.arxiv_id,
+                        interests_hash,
+                        score,
+                        reason,
+                    )
+
+                    # Update list item badge
+                    app._update_relevance_badge(paper.arxiv_id)
+                    scored += 1
+
+                except _RECOVERABLE_ACTION_ERRORS as exc:
+                    _log_action_failure(f"relevance scoring for {paper.arxiv_id}", exc)
                     failed += 1
-                    continue
+                except Exception as exc:
+                    _log_action_failure(
+                        f"relevance scoring for {paper.arxiv_id}", exc, unexpected=True
+                    )
+                    failed += 1
+                finally:
+                    done += 1
+                    app._scoring_progress = (done, total)
+                    app._update_footer()
 
-                score, reason = parsed
-                app._relevance_scores[paper.arxiv_id] = (score, reason)
+                    # Progress notification every 5 papers
+                    if done % 5 == 0:
+                        app.notify(
+                            f"Scoring relevance {done}/{total}...",
+                            title="Relevance",
+                        )
 
-                # Persist to SQLite
-                await asyncio.to_thread(
-                    _save_relevance_score,
-                    app._relevance_db_path,
-                    paper.arxiv_id,
-                    interests_hash,
-                    score,
-                    reason,
-                )
+        tasks = [score_one(p) for p in uncached]
+        await asyncio.gather(*tasks)
 
-                # Update list item badge
-                app._update_relevance_badge(paper.arxiv_id)
-                scored += 1
-
-            except _RECOVERABLE_ACTION_ERRORS as exc:
-                _log_action_failure(f"relevance scoring for {paper.arxiv_id}", exc)
-                failed += 1
-            except Exception as exc:
-                _log_action_failure(f"relevance scoring for {paper.arxiv_id}", exc, unexpected=True)
-                failed += 1
-
-            # Progress notification every 5 papers
-            done = i + 1
-            if done % 5 == 0:
-                app.notify(
-                    f"Scoring relevance {done}/{total}...",
-                    title="Relevance",
-                )
-
-        # Final notification
-        msg = f"Relevance scoring complete: {scored} scored"
-        if failed:
-            msg += f", {failed} failed"
-        cached_count = len(papers) - total
-        if cached_count:
-            msg += f", {cached_count} cached"
-        app.notify(msg, title="Relevance")
+        if cancelled:
+            app.notify(
+                f"Scoring cancelled after {done}/{total} papers",
+                title="Relevance",
+            )
+        else:
+            # Final notification
+            msg = f"Relevance scoring complete: {scored} scored"
+            if failed:
+                msg += f", {failed} failed"
+            cached_count = len(papers) - total
+            if cached_count:
+                msg += f", {cached_count} cached"
+            app.notify(msg, title="Relevance")
 
         # Refresh display
         app._mark_badges_dirty("relevance")
@@ -579,6 +604,7 @@ async def _score_relevance_batch_async(
     finally:
         app._relevance_scoring_active = False
         app._scoring_progress = None
+        app._cancel_batch_requested = False
         app._update_footer()
 
 
@@ -677,6 +703,15 @@ async def _auto_tag_batch_async(
             app._auto_tag_progress = (i + 1, total)
             app._update_footer()
 
+            if getattr(app, "_cancel_batch_requested", False):
+                if tagged > 0:
+                    app._save_config_or_warn("partial auto-tag results")
+                app.notify(
+                    f"Auto-tagging cancelled after {i}/{total} papers ({tagged} tagged)",
+                    title="Auto-Tag",
+                )
+                break
+
             suggested = await app._call_auto_tag_llm(paper, taxonomy)
             if suggested is None:
                 failed += 1
@@ -727,4 +762,5 @@ async def _auto_tag_batch_async(
     finally:
         app._auto_tag_active = False
         app._auto_tag_progress = None
+        app._cancel_batch_requested = False
         app._update_footer()

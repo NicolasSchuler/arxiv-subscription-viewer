@@ -910,6 +910,9 @@ class ArxivBrowser(App):
         self._auto_tag_active: bool = False
         self._auto_tag_progress: tuple[int, int] | None = None  # (current, total)
 
+        # Batch cancellation flag (shared by relevance scoring & auto-tagging)
+        self._cancel_batch_requested: bool = False
+
         # TF-IDF similarity index state
         self._tfidf_index: TfidfIndex | None = None
         self._tfidf_corpus_key: str | None = None
@@ -1210,14 +1213,17 @@ class ArxivBrowser(App):
         task.add_done_callback(self._on_task_done)
         return task
 
-    @staticmethod
-    def _on_task_done(task: asyncio.Task[None]) -> None:
-        """Log unhandled exceptions from background tasks."""
+    def _on_task_done(self, task: asyncio.Task[None]) -> None:
+        """Log unhandled exceptions from background tasks and notify user."""
         if task.cancelled():
             return
         exc = task.exception()
         if exc is not None:
             logger.error("Unhandled exception in background task: %s", exc, exc_info=exc)
+            try:
+                self.notify(str(exc)[:200], severity="error", title="Background task error")
+            except Exception:
+                pass  # App may be shutting down  # nosec B110
 
     def _apply_category_overrides(self) -> None:
         """Apply category color overrides from config.
@@ -3558,7 +3564,7 @@ class ArxivBrowser(App):
                 paper=paper,
                 taxonomy=taxonomy,
                 provider=self._llm_provider,
-                timeout_seconds=AUTO_TAG_TIMEOUT,
+                timeout_seconds=max(15, self._config.llm_timeout // 4),
             )
         except _LLMExecutionError as exc:
             logger.warning("Auto-tag failed for %s: %s", paper.arxiv_id, str(exc)[:200])
