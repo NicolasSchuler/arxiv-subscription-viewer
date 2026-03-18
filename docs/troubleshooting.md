@@ -2,6 +2,9 @@
 
 Common issues and how to fix them.
 
+> **Quick diagnostic:** Run `arxiv-viewer doctor` to check your environment,
+> config file, LLM setup, history directory, and more in one command.
+
 ## No Papers Loaded
 
 **Symptom:** The viewer opens but the paper list is empty.

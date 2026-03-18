@@ -1,6 +1,11 @@
 # ruff: noqa: F403, F405, UP037
 # pyright: reportUndefinedVariable=false, reportAttributeAccessIssue=false
-"""Extracted ArxivBrowser action handlers."""
+"""Library and organisation action handlers for ArxivBrowser.
+
+Covers: list navigation (cursor up/down), multi-paper selection (select,
+select-all, clear), sort-order cycling, read/star toggles, notes and tags
+editing, and watch-list management.
+"""
 
 from __future__ import annotations
 

@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import logging
 import logging.handlers
 import os
+import re
+import shlex
+import shutil
 import sys
 import time
 from collections.abc import Callable
@@ -37,7 +41,7 @@ ARXIV_API_URL = "https://export.arxiv.org/api/query"
 ARXIV_API_TIMEOUT = 30
 ARXIV_API_USER_AGENT = "arxiv-subscription-viewer/1.0"
 ARXIV_API_MIN_INTERVAL_SECONDS = 3.0
-CLI_COMMANDS = ("browse", "search", "dates", "completions")
+CLI_COMMANDS = ("browse", "search", "dates", "completions", "config-path", "doctor")
 CLI_ROOT_DESCRIPTION = "Browse and search arXiv papers from your terminal."
 CLI_ROOT_EPILOG = """Examples:
   arxiv-viewer
@@ -46,10 +50,29 @@ CLI_ROOT_EPILOG = """Examples:
   arxiv-viewer search --category cs.AI
   arxiv-viewer search --query "diffusion transformer" --field title
   arxiv-viewer dates
+  arxiv-viewer config-path
+  arxiv-viewer doctor
   eval "$(arxiv-viewer completions bash)"
+
+Exit codes:
+  0   Success
+  1   Application error (missing files, API failures, bad input)
+  2   Usage error (bad arguments, non-interactive terminal)
 """
 
-_ROOT_FLAG_OPTIONS = frozenset({"--debug", "--ascii", "--no-color"})
+_PACKAGE_NAME = "arxiv-subscription-viewer"
+_POSIX_ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
+
+
+def _get_version() -> str:
+    """Return the installed package version, or 'dev' if not installed."""
+    try:
+        return importlib.metadata.version(_PACKAGE_NAME)
+    except importlib.metadata.PackageNotFoundError:
+        return "dev"
+
+
+_ROOT_FLAG_OPTIONS = frozenset({"--debug", "--ascii", "--no-color", "-V", "--version"})
 
 
 def _fetch_arxiv_api_papers(
@@ -135,16 +158,7 @@ def _fetch_latest_arxiv_digest(
 
 def _api_mode_requested(args: argparse.Namespace) -> bool:
     """Return True when CLI args request startup via arXiv API."""
-    if getattr(args, "command", None) == "search":
-        return True
-    return bool(getattr(args, "api_query", None) is not None or getattr(args, "api_category", None))
-
-
-def _get_api_arg(args: argparse.Namespace, name: str, legacy_name: str, default: Any = None) -> Any:
-    """Return the active CLI value for API startup/search settings."""
-    if getattr(args, "command", None) == "search":
-        return getattr(args, name, default)
-    return getattr(args, legacy_name, default)
+    return getattr(args, "command", None) == "search"
 
 
 def _resolve_arxiv_api_mode(
@@ -159,14 +173,12 @@ def _resolve_arxiv_api_mode(
     if not _api_mode_requested(args):
         return None
 
-    api_query = str(_get_api_arg(args, "query", "api_query", "") or "").strip()
-    api_category = str(_get_api_arg(args, "category", "api_category", "") or "").strip()
-    api_field = str(_get_api_arg(args, "field", "api_field", "all"))
-    search_mode = str(_get_api_arg(args, "mode", "api_mode", "latest"))
-    api_page_mode = search_mode == "page" or bool(
-        _get_api_arg(args, "page_mode", "api_page_mode", False)
-    )
-    max_results_arg = _get_api_arg(args, "max_results", "api_max_results", None)
+    api_query = str(getattr(args, "query", "") or "").strip()
+    api_category = str(getattr(args, "category", "") or "").strip()
+    api_field = str(getattr(args, "field", "all"))
+    search_mode = str(getattr(args, "mode", "latest"))
+    api_page_mode = search_mode == "page"
+    max_results_arg = getattr(args, "max_results", None)
     max_results = _coerce_arxiv_api_max_results(
         max_results_arg if max_results_arg is not None else config.arxiv_api_max_results
     )
@@ -392,11 +404,170 @@ def _configure_color_mode(color_mode: str) -> None:
         return
     # auto
     os.environ.pop("FORCE_COLOR", None)
+    os.environ.pop("NO_COLOR", None)
 
 
 def _validate_interactive_tty() -> bool:
     """Return True when stdin/stdout are interactive terminals."""
     return bool(sys.stdin.isatty() and sys.stdout.isatty())
+
+
+def _print_config_path() -> int:
+    """Print the platform-specific config file path and return exit code."""
+    from arxiv_browser.config import get_config_path
+
+    print(get_config_path())
+    return 0
+
+
+def _extract_command_binary(command_template: str) -> str | None:
+    """Extract the executable token from a command template for diagnostics."""
+    try:
+        argv = shlex.split(command_template, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not argv:
+        return None
+    if os.name != "nt":
+        while len(argv) > 1 and _POSIX_ENV_ASSIGNMENT_RE.match(argv[0]):
+            argv.pop(0)
+        if not argv:
+            return None
+    if os.name == "nt" and len(argv[0]) >= 2 and argv[0].startswith('"') and argv[0].endswith('"'):
+        return argv[0][1:-1]
+    return argv[0]
+
+
+def _run_doctor(config: UserConfig, history_files: list[tuple[date, Path]]) -> int:
+    """Run diagnostic checks and print a summary report."""
+    from arxiv_browser.config import get_config_path
+    from arxiv_browser.llm import LLM_PRESETS, _resolve_llm_command
+    from arxiv_browser.llm_providers import llm_command_requires_shell
+
+    ok_marker = "  ok   "
+    warn_marker = "  WARN "
+    info_marker = "  info "
+    issues = 0
+
+    print(f"arxiv-viewer {_get_version()}")
+    print(f"Python {sys.version.split()[0]}")
+    print()
+
+    # Config file
+    config_path = get_config_path()
+    if config_path.exists():
+        print(f"{ok_marker} Config file: {config_path}")
+    else:
+        print(f"{info_marker} Config file: {config_path} (not created yet; using defaults)")
+
+    # History directory
+    base_dir = Path.cwd()
+    history_dir = base_dir / "history"
+    if history_files:
+        print(f"{ok_marker} History: {len(history_files)} date(s) in {history_dir}")
+    elif history_dir.is_dir():
+        print(f"{warn_marker} History: {history_dir} exists but contains no YYYY-MM-DD.txt files")
+        issues += 1
+    else:
+        print(
+            f"{info_marker} History: no history/ directory in {base_dir} (use search mode instead)"
+        )
+
+    # LLM configuration
+    resolved_llm_command = _resolve_llm_command(config)
+    if config.llm_command and resolved_llm_command:
+        if "{prompt}" not in resolved_llm_command:
+            print(f"{warn_marker} LLM command: missing required {{prompt}} placeholder")
+            issues += 1
+        elif not config.allow_llm_shell_fallback and llm_command_requires_shell(
+            resolved_llm_command
+        ):
+            print(
+                f"{warn_marker} LLM command: requires shell execution, "
+                "but allow_llm_shell_fallback is disabled"
+            )
+            issues += 1
+        else:
+            cmd_binary = _extract_command_binary(resolved_llm_command)
+            if cmd_binary and shutil.which(cmd_binary):
+                print(f"{ok_marker} LLM command: {cmd_binary} found on PATH")
+            else:
+                print(
+                    f"{warn_marker} LLM command: "
+                    f"{cmd_binary or 'unable to parse command'} NOT found on PATH"
+                )
+                issues += 1
+    elif config.llm_preset:
+        preset_cmd_name = config.llm_preset
+        if preset_cmd_name not in LLM_PRESETS:
+            print(f"{warn_marker} LLM preset: unknown preset '{preset_cmd_name}'")
+            issues += 1
+        elif "{prompt}" not in resolved_llm_command:
+            print(f"{warn_marker} LLM preset: missing required {{prompt}} placeholder")
+            issues += 1
+        elif not config.allow_llm_shell_fallback and llm_command_requires_shell(
+            resolved_llm_command
+        ):
+            print(
+                f"{warn_marker} LLM preset: {preset_cmd_name} requires shell execution, "
+                "but allow_llm_shell_fallback is disabled"
+            )
+            issues += 1
+        else:
+            cmd_binary = _extract_command_binary(resolved_llm_command)
+            if cmd_binary and shutil.which(cmd_binary):
+                print(f"{ok_marker} LLM preset: {preset_cmd_name} ({cmd_binary} found on PATH)")
+            else:
+                print(
+                    f"{warn_marker} LLM preset: {preset_cmd_name} "
+                    f"({cmd_binary or 'unable to parse command'} NOT found on PATH)"
+                )
+                issues += 1
+    else:
+        print(f"{info_marker} LLM: not configured (set llm_preset or llm_command in config)")
+
+    # Semantic Scholar
+    if config.s2_enabled:
+        s2_status = "enabled"
+        if config.s2_api_key:
+            s2_status += " (API key set)"
+        print(f"{ok_marker} Semantic Scholar: {s2_status}")
+    else:
+        print(f"{info_marker} Semantic Scholar: disabled (enable with s2_enabled in config)")
+
+    # HuggingFace
+    if config.hf_enabled:
+        print(f"{ok_marker} HuggingFace trending: enabled")
+    else:
+        print(f"{info_marker} HuggingFace trending: disabled (enable with hf_enabled in config)")
+
+    # Export directories
+    export_dir = Path(config.bibtex_export_dir).expanduser() if config.bibtex_export_dir else None
+    pdf_dir = Path(config.pdf_download_dir).expanduser() if config.pdf_download_dir else None
+    for label, d, default in [
+        ("Export dir", export_dir, "~/arxiv-exports/"),
+        ("PDF dir", pdf_dir, "~/arxiv-pdfs/"),
+    ]:
+        if d is not None:
+            if d.is_dir():
+                print(f"{ok_marker} {label}: {d}")
+            else:
+                print(f"{info_marker} {label}: {d} (will be created on first export)")
+        else:
+            print(f"{info_marker} {label}: {default} (default; will be created on first use)")
+
+    # Terminal
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        print(f"{ok_marker} Terminal: interactive TTY")
+    else:
+        print(f"{info_marker} Terminal: not an interactive TTY (TUI will not start)")
+
+    print()
+    if issues:
+        print(f"{issues} issue(s) found. See warnings above.")
+    else:
+        print("No issues found.")
+    return 1 if issues else 0
 
 
 def _build_cli_parser() -> argparse.ArgumentParser:
@@ -406,6 +577,12 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         description=CLI_ROOT_DESCRIPTION,
         epilog=CLI_ROOT_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "-V",
+        "--version",
+        action="version",
+        version=f"%(prog)s {_get_version()}",
     )
     parser.add_argument(
         "--debug",
@@ -421,7 +598,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-color",
         action="store_true",
-        help="Disable terminal colors (equivalent to --color never)",
+        help="Disable terminal colors (equivalent to --color never; honors NO_COLOR standard)",
     )
     parser.add_argument(
         "--ascii",
@@ -435,6 +612,14 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         "browse",
         help="Open local history or a local paper file",
         description="Browse local digest history or a specific input file.",
+        epilog=(
+            "Examples:\n"
+            "  arxiv-viewer browse                     # auto-load newest history\n"
+            "  arxiv-viewer browse --date 2026-01-23   # open specific date\n"
+            "  arxiv-viewer browse -i papers.txt       # custom file\n"
+            "  arxiv-viewer browse --no-restore         # ignore saved session"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     browse_parser.add_argument(
         "-i",
@@ -459,6 +644,14 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         "search",
         help="Fetch startup papers from the arXiv API",
         description="Search arXiv online and open the results directly in the TUI.",
+        epilog=(
+            "Examples:\n"
+            "  arxiv-viewer search --category cs.AI\n"
+            '  arxiv-viewer search --query "diffusion transformer" --field title\n'
+            '  arxiv-viewer search --query "attention" --mode page --max-results 100\n'
+            '  arxiv-viewer search --query "LLM" --category cs.CL'
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     search_parser.add_argument(
         "--query",
@@ -511,6 +704,18 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         help="Target shell (bash, zsh, or fish)",
     )
 
+    subparsers.add_parser(
+        "config-path",
+        help="Print the configuration file path and exit",
+        description="Print the platform-specific config.json path to stdout.",
+    )
+
+    subparsers.add_parser(
+        "doctor",
+        help="Check environment and configuration health",
+        description="Run diagnostic checks and report potential issues.",
+    )
+
     return parser
 
 
@@ -557,7 +762,8 @@ def main(
 ) -> int:
     """Main entry point. Returns exit code."""
     parser = _build_cli_parser()
-    args = parser.parse_args(_normalize_cli_argv(argv))
+    normalized_argv = _normalize_cli_argv(argv)
+    args = parser.parse_args(normalized_argv)
 
     # Handle `completions` early (no config/history/TTY needed)
     if getattr(args, "command", None) == "completions":
@@ -566,7 +772,21 @@ def main(
         print(get_completion_script(args.shell))
         return 0
 
-    color_mode = "never" if args.no_color else args.color
+    # Handle `config-path` early (no config/history/TTY needed)
+    if getattr(args, "command", None) == "config-path":
+        return _print_config_path()
+
+    color_flag_explicit = any(
+        token == "--color" or token.startswith("--color=") for token in normalized_argv
+    )
+    if args.no_color:
+        color_mode = "never"
+    elif color_flag_explicit:
+        color_mode = args.color
+    elif os.environ.get("NO_COLOR"):
+        color_mode = "never"
+    else:
+        color_mode = args.color
     configure_color_mode_fn(color_mode)
     configure_logging_fn(args.debug)
     logger.debug("arxiv-viewer starting, cwd=%s", Path.cwd())
@@ -578,6 +798,10 @@ def main(
 
     # Discover history files
     history_files = discover_history_files_fn(base_dir)
+
+    # Handle `doctor`
+    if getattr(args, "command", None) == "doctor":
+        return _run_doctor(config, history_files)
 
     # Handle `dates`
     if getattr(args, "command", None) == "dates":
@@ -661,13 +885,15 @@ __all__ = [
     "_fetch_arxiv_api_papers",
     "_fetch_latest_arxiv_digest",
     "_find_history_index",
-    "_get_api_arg",
+    "_get_version",
     "_normalize_cli_argv",
+    "_print_config_path",
     "_resolve_arxiv_api_mode",
     "_resolve_history_date",
     "_resolve_input_file",
     "_resolve_legacy_fallback",
     "_resolve_papers",
+    "_run_doctor",
     "_validate_interactive_tty",
     "main",
 ]

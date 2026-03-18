@@ -1,6 +1,11 @@
 # ruff: noqa: F403, F405, UP037
 # pyright: reportUndefinedVariable=false, reportAttributeAccessIssue=false
-"""Extracted ArxivBrowser action handlers."""
+"""UI, enrichment, and navigation action handlers for ArxivBrowser.
+
+Covers: theme cycling, S2/HF enrichment toggles, HuggingFace daily-paper
+fetching, version-update checks, similar-paper recommendations, citation graph,
+help overlay, command palette, and paper-collections management.
+"""
 
 from __future__ import annotations
 
@@ -333,7 +338,17 @@ async def _fetch_hf_daily(app: "ArxivBrowser") -> None:
 
 
 async def _fetch_hf_daily_async(app: "ArxivBrowser") -> None:
-    """Background task: fetch HF daily papers and update UI."""
+    """Background task: fetch HF daily papers from the API and update the UI.
+
+    Only reached when the SQLite cache is cold (``_fetch_hf_daily`` handles
+    the cache-hit fast path).  On success, ``app._hf_cache`` is populated
+    with a ``{arxiv_id: HuggingFacePaper}`` mapping and badges are marked
+    dirty.  On partial failure (``complete=False`` from the service layer),
+    ``app._hf_api_error`` is set so the status bar can display an indicator.
+
+    Args:
+        app: The running ``ArxivBrowser`` application instance.
+    """
     _sync_app_globals()
     try:
         papers, complete = await _load_or_fetch_hf_daily_cached(
@@ -401,7 +416,16 @@ async def _fetch_hf_daily_async(app: "ArxivBrowser") -> None:
 
 
 async def action_check_versions(app: "ArxivBrowser") -> None:
-    """Check starred papers for newer arXiv versions."""
+    """Check starred papers for newer arXiv versions and notify the user.
+
+    Requires at least one starred paper (``starred_ids`` from
+    ``get_starred_paper_ids_for_version_check``).  A "newer version"
+    means arXiv has published a higher version suffix (e.g. v2 while the
+    locally loaded entry is v1).
+
+    Args:
+        app: The running ``ArxivBrowser`` application instance.
+    """
     _sync_app_globals()
     if app._version_checking:
         app.notify(
@@ -436,7 +460,16 @@ async def action_check_versions(app: "ArxivBrowser") -> None:
 
 
 def action_show_similar(app: "ArxivBrowser") -> None:
-    """Show papers similar to the currently highlighted paper."""
+    """Show papers similar to the currently highlighted paper.
+
+    When Semantic Scholar is active (``app._s2_active``), a source-selection
+    modal is pushed first so the user can choose between local TF-IDF and
+    S2 recommendations.  When S2 is disabled, the local-only path is taken
+    directly without prompting.
+
+    Args:
+        app: The running ``ArxivBrowser`` application instance.
+    """
     _sync_app_globals()
     paper = app._get_current_paper()
     if not paper:
@@ -510,7 +543,23 @@ def action_citation_graph(app: "ArxivBrowser") -> None:
 async def _fetch_citation_graph(
     app, paper_id: str
 ) -> tuple[list[CitationEntry], list[CitationEntry]]:
-    """Fetch references + citations with SQLite cache."""
+    """Fetch references and citations for a paper, with SQLite caching.
+
+    Cache coherence uses a single ``has_s2_citation_graph_cache`` probe
+    rather than loading both directions separately, to avoid partial cache
+    reads.  Both directions are written to the cache **only when both API
+    fetches complete successfully** (``refs_ok and cites_ok``); a partial
+    write is suppressed to prevent stale one-sided data from poisoning
+    future loads.
+
+    Args:
+        app: The running ``ArxivBrowser`` application instance.
+        paper_id: Semantic Scholar paper ID (or ``"ARXIV:<id>"`` fallback).
+
+    Returns:
+        A ``(references, citations)`` tuple.  Either list may be empty on
+        API error or when the paper has no connections.
+    """
     _sync_app_globals()
     cache_hit = await asyncio.to_thread(
         has_s2_citation_graph_cache,

@@ -165,7 +165,14 @@ def _init_summary_db(db_path: Path) -> None:
     Migrates from old single-PK schema (arxiv_id only) to composite PK
     (arxiv_id, command_hash) to support multiple summary modes per paper.
 
-    Raises sqlite3.OperationalError if the parent directory cannot be created.
+    Args:
+        db_path: Filesystem path to the SQLite database file.  The parent
+            directory is created with ``mkdir(parents=True, exist_ok=True)``
+            if it does not already exist.
+
+    Raises:
+        sqlite3.OperationalError: If the parent directory cannot be created
+            (e.g. permission denied).
     """
     try:
         db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -190,7 +197,18 @@ def _init_summary_db(db_path: Path) -> None:
 
 
 def _load_summary(db_path: Path, arxiv_id: str, command_hash: str) -> str | None:
-    """Load a cached summary if it exists and the command hash matches."""
+    """Load a cached summary if it exists and the command hash matches.
+
+    Args:
+        db_path: Path to the summaries SQLite database.
+        arxiv_id: Bare arXiv identifier (e.g. ``"2401.12345"``).
+        command_hash: 16-character hex hash of the command+prompt templates,
+            used to invalidate cached summaries when config changes.
+
+    Returns:
+        The cached summary string, or ``None`` if no matching row exists or
+        the database cannot be read.
+    """
     if not db_path.exists():
         return None
     try:
@@ -206,7 +224,15 @@ def _load_summary(db_path: Path, arxiv_id: str, command_hash: str) -> str | None
 
 
 def _save_summary(db_path: Path, arxiv_id: str, summary: str, command_hash: str) -> None:
-    """Persist a summary to the SQLite database."""
+    """Persist a summary to the SQLite database.
+
+    Args:
+        db_path: Path to the summaries SQLite database.
+        arxiv_id: Bare arXiv identifier (e.g. ``"2401.12345"``).
+        summary: Full summary text to store.
+        command_hash: 16-character hex hash of the command+prompt templates
+            (see ``_compute_command_hash``).
+    """
     try:
         _init_summary_db(db_path)
         with closing(sqlite3.connect(str(db_path))) as conn, conn:
@@ -220,7 +246,22 @@ def _save_summary(db_path: Path, arxiv_id: str, summary: str, command_hash: str)
 
 
 def _compute_command_hash(command_template: str, prompt_template: str) -> str:
-    """Hash the command + prompt templates to detect config changes."""
+    """Hash the command + prompt templates to detect config changes.
+
+    The hash is used as a secondary key in the summary and relevance databases
+    so that cached results are automatically invalidated when either the LLM
+    command or the prompt template changes.
+
+    Args:
+        command_template: The raw LLM CLI command string (may contain
+            ``{prompt}`` placeholder).
+        prompt_template: The prompt template string used to build the LLM
+            input.
+
+    Returns:
+        A 16-character hexadecimal string (truncated SHA-256 digest of
+        ``"{command_template}|{prompt_template}"``).
+    """
     key = f"{command_template}|{prompt_template}"
     return hashlib.sha256(key.encode()).hexdigest()[:16]
 
@@ -239,7 +280,14 @@ def get_relevance_db_path() -> Path:
 def _init_relevance_db(db_path: Path) -> None:
     """Create the relevance_scores table if it doesn't exist.
 
-    Raises sqlite3.OperationalError if the parent directory cannot be created.
+    Args:
+        db_path: Filesystem path to the SQLite database file.  The parent
+            directory is created with ``mkdir(parents=True, exist_ok=True)``
+            if it does not already exist.
+
+    Raises:
+        sqlite3.OperationalError: If the parent directory cannot be created
+            (e.g. permission denied).
     """
     try:
         db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -261,7 +309,19 @@ def _init_relevance_db(db_path: Path) -> None:
 def _load_relevance_score(
     db_path: Path, arxiv_id: str, interests_hash: str
 ) -> tuple[int, str] | None:
-    """Load a cached relevance score if it exists."""
+    """Load a cached relevance score if it exists.
+
+    Args:
+        db_path: Path to the relevance SQLite database.
+        arxiv_id: Bare arXiv identifier (e.g. ``"2401.12345"``).
+        interests_hash: 16-character hex hash of the user's research interests
+            string, used to invalidate scores when interests change.
+
+    Returns:
+        A ``(score, reason)`` tuple where ``score`` is 1-10 and ``reason`` is
+        the LLM's one-sentence explanation, or ``None`` if no matching row
+        exists or the database cannot be read.
+    """
     if not db_path.exists():
         return None
     try:
@@ -280,7 +340,15 @@ def _load_relevance_score(
 def _save_relevance_score(
     db_path: Path, arxiv_id: str, interests_hash: str, score: int, reason: str
 ) -> None:
-    """Persist a relevance score to the SQLite database."""
+    """Persist a relevance score to the SQLite database.
+
+    Args:
+        db_path: Path to the relevance SQLite database.
+        arxiv_id: Bare arXiv identifier (e.g. ``"2401.12345"``).
+        interests_hash: 16-character hex hash of the user's research interests.
+        score: Integer relevance score in the range 1-10.
+        reason: One-sentence explanation from the LLM.
+    """
     try:
         _init_relevance_db(db_path)
         with closing(sqlite3.connect(str(db_path))) as conn, conn:
@@ -295,7 +363,17 @@ def _save_relevance_score(
 
 
 def _load_all_relevance_scores(db_path: Path, interests_hash: str) -> dict[str, tuple[int, str]]:
-    """Bulk-load all relevance scores for a given interests hash."""
+    """Bulk-load all relevance scores for a given interests hash.
+
+    Args:
+        db_path: Path to the relevance SQLite database.
+        interests_hash: 16-character hex hash of the user's research interests,
+            used to select only scores computed under the current interests.
+
+    Returns:
+        Mapping from bare arXiv ID to ``(score, reason)`` tuples.  Returns an
+        empty dict if the database does not exist or cannot be read.
+    """
     if not db_path.exists():
         return {}
     try:
@@ -343,8 +421,13 @@ def _parse_relevance_response(text: str) -> tuple[int, str] | None:
     2. Strip markdown fences then JSON parse
     3. Regex fallback for score and reason fields
 
-    Returns (score, reason) tuple or None if parsing fails.
-    Score is clamped to 1-10 range.
+    Args:
+        text: Raw LLM output string, expected to contain JSON like
+            ``{"score": 7, "reason": "..."}``.
+
+    Returns:
+        ``(score, reason)`` tuple where ``score`` is clamped to 1-10, or
+        ``None`` if all parsing strategies fail.
     """
     stripped = text.strip()
 
@@ -414,6 +497,11 @@ def _extract_tags_from_json(data: Any) -> list[str] | None:
     if isinstance(data, dict) and "tags" in data:
         tags = data["tags"]
         if isinstance(tags, list):
+            # str(t) is called twice: once for the filter predicate and once for
+            # the output value.  This is intentional — it normalises non-string
+            # elements (e.g. integers) in both the guard and the result.
+            # A bare list (not wrapped in {"tags": …}) is rejected here to avoid
+            # accidentally treating any JSON array as a tag list.
             return [str(t).strip().lower() for t in tags if str(t).strip()]
     return None
 
@@ -426,7 +514,13 @@ def _parse_auto_tag_response(text: str) -> list[str] | None:
     2. Strip markdown fences then JSON parse
     3. Regex fallback for tags array
 
-    Returns list of tag strings or None if parsing fails.
+    Args:
+        text: Raw LLM output string, expected to contain JSON like
+            ``{"tags": ["topic:llm", "method:quantization"]}``.
+
+    Returns:
+        List of lowercased, stripped tag strings, or ``None`` if all parsing
+        strategies fail.
     """
     stripped = text.strip()
 
@@ -499,6 +593,8 @@ def build_llm_prompt(paper: Paper, prompt_template: str = "", paper_content: str
     """
     template = prompt_template or DEFAULT_LLM_PROMPT
     abstract = paper.abstract or paper.abstract_raw or "(no abstract)"
+    # When no full paper content is available, fall back to a labelled abstract
+    # block so the LLM still receives meaningful context.
     content = paper_content or f"Abstract:\n{abstract}"
     values = {
         "title": paper.title,
@@ -515,7 +611,9 @@ def build_llm_prompt(paper: Paper, prompt_template: str = "", paper_content: str
             f"Invalid prompt template: {e}. "
             f"Valid placeholders: {', '.join(f'{{{k}}}' for k in sorted(_LLM_PROMPT_FIELDS))}"
         ) from e
-    # Auto-append paper content if the template didn't include {paper_content}
+    # Auto-append paper content if the template didn't include {paper_content}.
+    # This ensures every prompt benefits from full-paper context even when the
+    # user's custom template omits the placeholder.
     if "{paper_content}" not in template and content:
         result = result + "\n\n" + content
     return result
@@ -524,8 +622,14 @@ def build_llm_prompt(paper: Paper, prompt_template: str = "", paper_content: str
 def _resolve_llm_command(config: UserConfig) -> str:
     """Resolve the LLM command template from config (custom or preset).
 
-    Returns the command template string, or "" if not configured.
-    Logs a warning if the preset name is unrecognized.
+    Args:
+        config: The application's ``UserConfig`` instance.  Reads
+            ``llm_command`` (checked first) and ``llm_preset`` (used as
+            fallback via ``LLM_PRESETS`` lookup).
+
+    Returns:
+        The command template string (e.g. ``"llm {prompt}"``), or ``""`` if
+        neither ``llm_command`` nor a recognised ``llm_preset`` is set.
     """
     if config.llm_command:
         return config.llm_command
@@ -540,13 +644,29 @@ def _resolve_llm_command(config: UserConfig) -> str:
 def _build_llm_shell_command(command_template: str, prompt: str) -> str:
     """Build the final shell command by substituting the prompt.
 
-    Raises ValueError if the template does not contain {prompt}.
+    Uses platform-native shell quoting (``shlex.quote`` on POSIX,
+    ``subprocess.list2cmdline`` on Windows) to safely embed the prompt.
+
+    Args:
+        command_template: Raw command string containing a ``{prompt}``
+            placeholder (e.g. ``"llm {prompt}"``).
+        prompt: The resolved prompt text to embed in the command.
+
+    Returns:
+        A shell-safe command string ready for
+        ``asyncio.create_subprocess_shell``.
+
+    Raises:
+        ValueError: If ``command_template`` does not contain ``{prompt}``.
     """
     if "{prompt}" not in command_template:
         raise ValueError(
             f"LLM command template must contain {{prompt}} placeholder, got: {command_template!r}"
         )
     # Use platform-native shell quoting semantics.
+    # On Windows (os.name == "nt") use list2cmdline for cmd.exe; on POSIX use shlex.quote.
+    # Use str.replace instead of str.format to avoid brace-collision with prompts that
+    # themselves contain literal {…} characters.
     escaped_prompt = subprocess.list2cmdline([prompt]) if os.name == "nt" else shlex.quote(prompt)
     return command_template.replace("{prompt}", escaped_prompt)
 

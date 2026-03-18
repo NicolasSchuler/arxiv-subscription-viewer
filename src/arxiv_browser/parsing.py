@@ -138,7 +138,10 @@ def clean_latex(text: str) -> str:
     if "\\" not in text and "$" not in text:
         return " ".join(text.split())
 
-    # Iteratively apply patterns to handle nested structures
+    # Iteratively apply patterns to handle nested structures.
+    # Fixed-point iteration: repeat until a full pass produces no changes,
+    # which guarantees that nested constructs (e.g. \textbf{\it …}) are
+    # fully resolved regardless of nesting depth.
     prev_text = None
     while prev_text != text:
         prev_text = text
@@ -154,12 +157,26 @@ def parse_arxiv_file(filepath: Path) -> list[Paper]:
 
     Duplicate arXiv IDs are deduplicated by bare ID (version suffix stripped).
     When multiple versions of the same ID are present, the highest version wins.
+
+    Args:
+        filepath: Path to the arXiv email digest file (typically
+            ``arxiv.txt``).  Read with ``errors="replace"`` to handle any
+            non-UTF-8 bytes gracefully.
+
+    Returns:
+        List of ``Paper`` objects parsed from the file.  Each paper has its
+        title, authors, and comments cleaned via ``clean_latex``.  The order
+        reflects the order in the file (after deduplication).
+
+    Raises:
+        OSError: If the file cannot be opened or read.
     """
     import time
 
     t0 = time.monotonic()
     # Use errors="replace" to handle any non-UTF-8 characters gracefully
     content = filepath.read_text(encoding="utf-8", errors="replace")
+    # Dict value is (version, paper) so we can keep the highest-version entry
     papers_by_id: dict[str, tuple[int, Paper]] = {}
 
     # Split by paper separator using pre-compiled pattern
@@ -179,6 +196,7 @@ def parse_arxiv_file(filepath: Path) -> list[Paper]:
         if not bare_arxiv_id:
             continue
         version_match = _ARXIV_VERSION_SUFFIX.search(arxiv_id_raw)
+        # Default to version 1 when no suffix is present (e.g. "2401.12345")
         version = int(version_match.group(0)[1:]) if version_match else 1
 
         # Extract date
@@ -255,7 +273,17 @@ def normalize_arxiv_id(raw: str) -> str:
 
 
 def _format_arxiv_api_date(raw_date: str) -> str:
-    """Convert Atom timestamp to the app's date format."""
+    """Convert Atom timestamp to the app's date format.
+
+    Args:
+        raw_date: ISO 8601 datetime string from the Atom feed (e.g.
+            ``"2024-01-15T00:00:00Z"`` or ``"2024-01-15T00:00:00+00:00"``).
+
+    Returns:
+        Date string formatted as ``ARXIV_DATE_FORMAT`` (e.g.
+        ``"Mon, 15 Jan 2024"``), or the original ``raw_date`` if parsing
+        fails.  Returns ``""`` for blank input.
+    """
     cleaned = raw_date.strip()
     if not cleaned:
         return ""
@@ -272,7 +300,16 @@ def _format_arxiv_api_date(raw_date: str) -> str:
 
 
 def _atom_text(node: Any, path: str) -> str:
-    """Extract normalized text from an Atom XML node path."""
+    """Extract normalized text from an Atom XML node path.
+
+    Args:
+        node: An ``ElementTree`` element to search within.
+        path: XPath-style path string (using the ``ATOM_NS`` namespace map).
+
+    Returns:
+        Whitespace-normalized text of the first matching descendant, or ``""``
+        if the path matches nothing or the element has no text.
+    """
     found = node.find(path, ATOM_NS)
     if found is None or found.text is None:
         return ""
@@ -283,9 +320,19 @@ def build_arxiv_search_query(query: str, field: str = "all", category: str = "")
     """Build an arXiv API search query string.
 
     Args:
-        query: User search text (can be empty if category is provided).
-        field: One of: all, title, author, abstract.
-        category: Optional category filter like "cs.AI".
+        query: User search text (can be empty if ``category`` is provided).
+            Double-quotes are stripped to avoid breaking the query syntax.
+        field: One of: ``all``, ``title``, ``author``, ``abstract``.
+        category: Optional category filter such as ``"cs.AI"``.
+
+    Returns:
+        A query string ready for the arXiv API ``search_query`` parameter,
+        e.g. ``"ti:transformers AND cat:cs.LG"``.
+
+    Raises:
+        ValueError: If ``field`` is not a recognised key in
+            ``ARXIV_QUERY_FIELDS``, or if both ``query`` and ``category`` are
+            empty after stripping.
     """
     field_key = field.strip().lower()
     if field_key not in ARXIV_QUERY_FIELDS:
@@ -309,7 +356,21 @@ def build_arxiv_search_query(query: str, field: str = "all", category: str = "")
 
 
 def parse_arxiv_api_feed(xml_text: str) -> list[Paper]:
-    """Parse an arXiv Atom feed into Paper objects."""
+    """Parse an arXiv Atom feed into Paper objects.
+
+    Args:
+        xml_text: Raw XML string returned by the arXiv API.
+
+    Returns:
+        List of ``Paper`` objects, one per ``<entry>`` element.  Duplicate
+        arXiv IDs within the feed are deduplicated (first occurrence wins).
+        Title, authors, and comments are LaTeX-cleaned.  Papers carry
+        ``source="api"`` to distinguish them from email-digest papers.
+
+    Raises:
+        ValueError: If ``xml_text`` is not valid XML (wraps
+            ``ET.ParseError`` or ``DefusedXmlException``).
+    """
     if not xml_text.strip():
         return []
 
@@ -498,13 +559,13 @@ def discover_history_files(
             d = datetime.strptime(path.stem, HISTORY_DATE_FORMAT).date()
             files.append((d, path))
         except ValueError:
-            continue  # Skip files that don't match YYYY-MM-DD pattern
+            continue  # Silently skip files whose names don't match YYYY-MM-DD
 
     # Sort newest first and optionally limit.
     sorted_files = sorted(files, key=lambda x: x[0], reverse=True)
     if limit is None:
         return sorted_files
-    return sorted_files[: max(limit, 0)]
+    return sorted_files[: max(limit, 0)]  # max(..., 0) guards against negative limit
 
 
 def count_papers_in_file(path: Path) -> int:
@@ -524,8 +585,19 @@ def build_daily_digest(
 ) -> str:
     """Build a concise daily digest string summarizing the day's papers.
 
-    Returns a single-line summary with category breakdown, watch matches, and read stats
-    separated by " · " (or " | " in ASCII mode).
+    Args:
+        papers: The full list of papers loaded for the current day.
+        watched_ids: Optional set of arXiv IDs that matched the user's watch
+            list.  When provided, a ``"N matches your watch list"`` segment is
+            included in the output.
+        metadata: Optional mapping from arXiv ID to ``PaperMetadata``.  When
+            provided, read/starred counts are appended.
+
+    Returns:
+        A single-line summary string with segments separated by ``" · "``
+        (or ``" | "`` in ASCII mode), e.g.
+        ``"42 papers · Top: cs.AI (18) · 3 matches your watch list"``.
+        Returns ``"No papers loaded"`` when ``papers`` is empty.
     """
     if not papers:
         return "No papers loaded"

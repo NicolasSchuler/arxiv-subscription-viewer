@@ -68,7 +68,16 @@ def get_config_path() -> Path:
 
 
 def _config_to_dict(config: UserConfig) -> dict[str, Any]:
-    """Serialize UserConfig to a JSON-compatible dictionary."""
+    """Serialize UserConfig to a JSON-compatible dictionary.
+
+    Args:
+        config: The ``UserConfig`` instance to serialize.
+
+    Returns:
+        A nested ``dict`` containing only JSON-compatible types (str, int,
+        bool, list, dict).  The ``arxiv_api_max_results`` value is clamped
+        to the valid range before serialization.
+    """
     max_results = max(1, min(config.arxiv_api_max_results, ARXIV_API_MAX_RESULTS_LIMIT))
     return {
         "version": config.version,
@@ -140,7 +149,18 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
 def _safe_get(data: dict, key: str, default: Any, expected_type: type) -> Any:
     """Safely get a value from dict with type validation.
 
-    Returns the default if key is missing or value has wrong type.
+    Args:
+        data: Source dictionary (typically parsed from JSON).
+        key: Key to look up.
+        default: Value to return when the key is absent or the value has the
+            wrong type.
+        expected_type: The Python type the value must be an instance of.
+            Integers are checked with an extra ``not isinstance(value, bool)``
+            guard to prevent JSON booleans from being accepted as ints.
+
+    Returns:
+        The value from ``data[key]`` if it exists and has the correct type,
+        otherwise ``default``.
     """
     value = data.get(key, default)
     if expected_type is int:
@@ -153,14 +173,33 @@ def _safe_get(data: dict, key: str, default: Any, expected_type: type) -> Any:
 
 
 def _coerce_arxiv_api_max_results(value: Any) -> int:
-    """Validate and clamp the configured max_results for arXiv API queries."""
+    """Validate and clamp the configured max_results for arXiv API queries.
+
+    Args:
+        value: Raw value from the config dict (may be any type).
+
+    Returns:
+        An integer in the range ``[1, ARXIV_API_MAX_RESULTS_LIMIT]``.
+        Returns ``ARXIV_API_DEFAULT_MAX_RESULTS`` if ``value`` is not a valid
+        non-bool integer.
+    """
     if not isinstance(value, int) or isinstance(value, bool):
         return ARXIV_API_DEFAULT_MAX_RESULTS
     return max(1, min(value, ARXIV_API_MAX_RESULTS_LIMIT))
 
 
 def _parse_collapsed_sections(raw: Any) -> list[str]:
-    """Parse and validate collapsed_sections from config data."""
+    """Parse and validate collapsed_sections from config data.
+
+    Args:
+        raw: Raw value from the config dict under the ``"collapsed_sections"``
+            key (expected to be a list of strings).
+
+    Returns:
+        A list containing only string values that are valid
+        ``DETAIL_SECTION_KEYS`` entries.  Returns ``DEFAULT_COLLAPSED_SECTIONS``
+        if ``raw`` is not a list.
+    """
     if not isinstance(raw, list):
         return list(DEFAULT_COLLAPSED_SECTIONS)
     valid = [s for s in raw if isinstance(s, str) and s in DETAIL_SECTION_KEYS]
@@ -168,14 +207,32 @@ def _parse_collapsed_sections(raw: Any) -> list[str]:
 
 
 def _coerce_detail_mode(value: Any) -> str:
-    """Validate the persisted detail density mode."""
+    """Validate the persisted detail density mode.
+
+    Args:
+        value: Raw value from the config dict (expected to be a string in
+            ``DETAIL_MODES``).
+
+    Returns:
+        The validated mode string if ``value`` is a recognized ``DETAIL_MODES``
+        entry, otherwise ``"scan"`` (the safe default).
+    """
     if isinstance(value, str) and value in DETAIL_MODES:
         return value
     return "scan"
 
 
 def _parse_session_state(data: dict[str, Any]) -> SessionState:
-    """Parse the session state section from config data."""
+    """Parse the session state section from config data.
+
+    Args:
+        data: Top-level config dictionary.  Reads the ``"session"`` sub-dict.
+
+    Returns:
+        A ``SessionState`` instance.  Invalid or out-of-range values are
+        replaced with safe defaults (``sort_index`` is clamped to
+        ``[0, len(SORT_OPTIONS))``, ``selected_ids`` keeps only strings).
+    """
     session_data = data.get("session", {})
     if not isinstance(session_data, dict):
         session_data = {}
@@ -199,7 +256,16 @@ def _parse_session_state(data: dict[str, Any]) -> SessionState:
 
 
 def _parse_paper_metadata_dict(data: dict[str, Any]) -> dict[str, PaperMetadata]:
-    """Parse the paper_metadata section from config data."""
+    """Parse the paper_metadata section from config data.
+
+    Args:
+        data: Top-level config dictionary.  Reads the ``"paper_metadata"``
+            sub-dict mapping arXiv IDs to metadata objects.
+
+    Returns:
+        Mapping from bare arXiv ID to ``PaperMetadata`` instances.  Malformed
+        entries are silently skipped.  Tag lists are filtered to strings only.
+    """
     result: dict[str, PaperMetadata] = {}
     raw_metadata = data.get("paper_metadata", {})
     if not isinstance(raw_metadata, dict):
@@ -222,7 +288,16 @@ def _parse_paper_metadata_dict(data: dict[str, Any]) -> dict[str, PaperMetadata]
 
 
 def _parse_watch_list(data: dict[str, Any]) -> list[WatchListEntry]:
-    """Parse the watch_list section from config data."""
+    """Parse the watch_list section from config data.
+
+    Args:
+        data: Top-level config dictionary.  Reads the ``"watch_list"`` list.
+
+    Returns:
+        A list of ``WatchListEntry`` instances.  Entries with an unrecognised
+        ``match_type`` are logged and default to ``"author"``.  Non-dict
+        entries are skipped.
+    """
     result: list[WatchListEntry] = []
     raw_watch_list = data.get("watch_list", [])
     if not isinstance(raw_watch_list, list):
@@ -248,7 +323,14 @@ def _parse_watch_list(data: dict[str, Any]) -> list[WatchListEntry]:
 
 
 def _parse_bookmarks(data: dict[str, Any]) -> list[SearchBookmark]:
-    """Parse the bookmarks section from config data."""
+    """Parse the bookmarks section from config data.
+
+    Args:
+        data: Top-level config dictionary.  Reads the ``"bookmarks"`` list.
+
+    Returns:
+        A list of ``SearchBookmark`` instances.  Non-dict entries are skipped.
+    """
     result: list[SearchBookmark] = []
     raw_bookmarks = data.get("bookmarks", [])
     if not isinstance(raw_bookmarks, list):
@@ -266,7 +348,16 @@ def _parse_bookmarks(data: dict[str, Any]) -> list[SearchBookmark]:
 
 
 def _parse_collections(data: dict[str, Any]) -> list[PaperCollection]:
-    """Parse the collections section from config data."""
+    """Parse the collections section from config data.
+
+    Args:
+        data: Top-level config dictionary.  Reads the ``"collections"`` list.
+
+    Returns:
+        A list of up to ``MAX_COLLECTIONS`` ``PaperCollection`` instances.
+        Collections without a name are skipped.  ``paper_ids`` are truncated
+        to ``MAX_PAPERS_PER_COLLECTION`` and filtered to strings only.
+    """
     result: list[PaperCollection] = []
     raw_collections = data.get("collections", [])
     if not isinstance(raw_collections, list):
@@ -291,13 +382,32 @@ def _parse_collections(data: dict[str, Any]) -> list[PaperCollection]:
 
 
 def _parse_str_dict(data: dict[str, Any], key: str) -> dict[str, str]:
-    """Parse a dict[str, str] field from config data with type validation."""
+    """Parse a dict[str, str] field from config data with type validation.
+
+    Args:
+        data: Top-level config dictionary.
+        key: The config key whose value is expected to be a ``dict[str, str]``.
+
+    Returns:
+        A ``dict[str, str]`` containing only entries where both key and value
+        are strings.  Returns an empty dict if the value is absent or has the
+        wrong type.
+    """
     raw = _safe_get(data, key, {}, dict)
     return {str(k): str(v) for k, v in raw.items() if isinstance(k, str) and isinstance(v, str)}
 
 
 def _parse_str_list(data: dict[str, Any], key: str) -> list[str]:
-    """Parse a list[str] field from config data with type validation."""
+    """Parse a list[str] field from config data with type validation.
+
+    Args:
+        data: Top-level config dictionary.
+        key: The config key whose value is expected to be a ``list[str]``.
+
+    Returns:
+        A ``list[str]`` containing only string elements.  Returns an empty
+        list if the value is absent or has the wrong type.
+    """
     raw = _safe_get(data, key, [], list)
     return [item for item in raw if isinstance(item, str)]
 
@@ -305,7 +415,14 @@ def _parse_str_list(data: dict[str, Any], key: str) -> list[str]:
 def _validate_llm_prompt_template(template: str) -> str:
     """Validate an LLM prompt template, rejecting unapproved placeholders.
 
-    Returns the template if valid, or empty string (use default) if invalid.
+    Args:
+        template: Raw prompt template string from the config file.  May be
+            empty (treated as "use default").
+
+    Returns:
+        The template unchanged if all placeholders are in ``_LLM_PROMPT_FIELDS``,
+        or ``""`` (signalling "use default") if any invalid placeholders are
+        found.  Logs a warning listing the offending placeholder names.
     """
     if not template:
         return ""
@@ -322,7 +439,18 @@ def _validate_llm_prompt_template(template: str) -> str:
 
 
 def _dict_to_config(data: dict[str, Any]) -> UserConfig:
-    """Deserialize a dictionary to UserConfig with type validation."""
+    """Deserialize a dictionary to UserConfig with type validation.
+
+    All values are validated and coerced via the ``_parse_*`` / ``_safe_get``
+    helpers so that the returned ``UserConfig`` is always in a consistent,
+    within-bounds state regardless of what the raw JSON contains.
+
+    Args:
+        data: Top-level config dictionary parsed from JSON.
+
+    Returns:
+        A fully-populated ``UserConfig`` instance with validated fields.
+    """
     marks = data.get("marks", {})
     if not isinstance(marks, dict):
         marks = {}
@@ -369,7 +497,13 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
 
 
 def _backup_corrupt_config(config_path: Path) -> None:
-    """Rename a corrupt config file to .corrupt so the next save doesn't overwrite it."""
+    """Rename a corrupt config file to .corrupt so the next save doesn't overwrite it.
+
+    Args:
+        config_path: Path to the current (corrupt) config file.  The backup
+            will be written to the same directory with a ``.json.corrupt``
+            suffix.
+    """
     backup_path = config_path.with_suffix(".json.corrupt")
     try:
         config_path.rename(backup_path)
@@ -491,7 +625,18 @@ def export_metadata(config: UserConfig) -> dict[str, Any]:
 
 
 def _merge_paper_metadata(existing: PaperMetadata, meta_dict: dict[str, Any]) -> None:
-    """Merge imported metadata into an existing PaperMetadata entry."""
+    """Merge imported metadata into an existing PaperMetadata entry in-place.
+
+    Merge rules:
+    - Tags are union-merged (deduplication via ``dict.fromkeys``).
+    - Notes: imported value wins only when the existing entry has no notes.
+    - ``is_read`` and ``starred``: set to ``True`` if the imported value is
+      truthy; existing ``True`` is never cleared.
+
+    Args:
+        existing: The ``PaperMetadata`` instance to mutate.
+        meta_dict: Raw import dict for one paper (from the export format).
+    """
     import_tags = meta_dict.get("tags")
     if import_tags and isinstance(import_tags, list):
         valid_tags = [t for t in import_tags if isinstance(t, str)]
@@ -505,7 +650,18 @@ def _merge_paper_metadata(existing: PaperMetadata, meta_dict: dict[str, Any]) ->
 
 
 def _create_paper_metadata(arxiv_id: str, meta_dict: dict[str, Any]) -> PaperMetadata:
-    """Create a new PaperMetadata from an import dict."""
+    """Create a new PaperMetadata from an import dict.
+
+    Args:
+        arxiv_id: Bare arXiv identifier for the new entry.
+        meta_dict: Raw import dict for one paper (from the export format).
+            Expected keys: ``"notes"``, ``"tags"``, ``"is_read"``,
+            ``"starred"``, ``"last_checked_version"``.
+
+    Returns:
+        A new ``PaperMetadata`` instance populated from the import dict.
+        Missing or wrongly-typed values fall back to safe defaults.
+    """
     lcv_raw = meta_dict.get("last_checked_version")
     return PaperMetadata(
         arxiv_id=arxiv_id,
@@ -520,7 +676,19 @@ def _create_paper_metadata(arxiv_id: str, meta_dict: dict[str, Any]) -> PaperMet
 
 
 def _import_paper_metadata(pm_data: Any, config: UserConfig, merge: bool) -> int:
-    """Import paper metadata entries into config. Returns count imported."""
+    """Import paper metadata entries into config.
+
+    Args:
+        pm_data: Raw ``"paper_metadata"`` value from the export dict (expected
+            to be a ``dict[str, dict]``).
+        config: The ``UserConfig`` to modify in-place.
+        merge: When ``True``, existing entries are updated via
+            ``_merge_paper_metadata``; when ``False``, they are replaced.
+
+    Returns:
+        The number of arXiv IDs processed (including those merged into
+        existing entries).
+    """
     if not isinstance(pm_data, dict):
         return 0
     count = 0
@@ -537,7 +705,20 @@ def _import_paper_metadata(pm_data: Any, config: UserConfig, merge: bool) -> int
 
 
 def _import_watch_entries(wl_data: Any, config: UserConfig) -> int:
-    """Import watch list entries into config with dedup. Returns count imported."""
+    """Import watch list entries into config with dedup.
+
+    Entries with a ``(pattern, match_type)`` pair that already exists in the
+    config are silently skipped.
+
+    Args:
+        wl_data: Raw ``"watch_list"`` value from the export dict (expected to
+            be a list of dicts with ``"pattern"``, ``"match_type"``, and
+            ``"case_sensitive"`` keys).
+        config: The ``UserConfig`` to modify in-place.
+
+    Returns:
+        The number of new entries added to ``config.watch_list``.
+    """
     if not isinstance(wl_data, list):
         return 0
     existing_patterns = {(e.pattern, e.match_type) for e in config.watch_list}
@@ -568,7 +749,21 @@ def _import_watch_entries(wl_data: Any, config: UserConfig) -> int:
 
 
 def _import_bookmarks(bk_data: Any, config: UserConfig, merge: bool) -> int:
-    """Import bookmarks into config with dedup and capacity check. Returns count imported."""
+    """Import bookmarks into config with dedup and capacity check.
+
+    Bookmarks with a ``query`` that already exists are skipped.  Import stops
+    when ``config.bookmarks`` reaches 9 entries.
+
+    Args:
+        bk_data: Raw ``"bookmarks"`` value from the export dict.
+        config: The ``UserConfig`` to modify in-place.
+        merge: When ``False`` this function is a no-op (returns 0), letting
+            ``import_metadata`` handle clearing in replace mode before calling
+            the individual import helpers.
+
+    Returns:
+        The number of new bookmarks added to ``config.bookmarks``.
+    """
     if not isinstance(bk_data, list) or not merge:
         return 0
     existing_queries = {b.query for b in config.bookmarks}
@@ -589,7 +784,20 @@ def _import_bookmarks(bk_data: Any, config: UserConfig, merge: bool) -> int:
 
 
 def _import_collections(col_data: Any, config: UserConfig, merge: bool) -> int:
-    """Import collections into config with dedup and capacity check. Returns count imported."""
+    """Import collections into config with dedup and capacity check.
+
+    Collections with a ``name`` that already exists are skipped.  Import
+    stops when ``config.collections`` reaches ``MAX_COLLECTIONS``.  Each
+    collection's ``paper_ids`` is capped at ``MAX_PAPERS_PER_COLLECTION``.
+
+    Args:
+        col_data: Raw ``"collections"`` value from the export dict.
+        config: The ``UserConfig`` to modify in-place.
+        merge: When ``False`` this function is a no-op (returns 0).
+
+    Returns:
+        The number of new collections added to ``config.collections``.
+    """
     if not isinstance(col_data, list) or not merge:
         return 0
     existing_names = {c.name for c in config.collections}

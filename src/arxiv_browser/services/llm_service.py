@@ -52,7 +52,22 @@ async def score_relevance_once(
     provider: LLMProvider,
     timeout_seconds: int,
 ) -> tuple[int, str] | None:
-    """Score one paper for relevance, returning parsed score tuple or None."""
+    """Score one paper for relevance against the user's research interests.
+
+    Args:
+        paper: The paper to score.
+        interests: Free-text description of the user's research interests.
+        provider: An ``LLMProvider`` instance used to execute the prompt.
+        timeout_seconds: Maximum seconds to wait for the LLM response.
+
+    Returns:
+        A ``(score, reason)`` tuple where ``score`` is an integer 1-10 and
+        ``reason`` is the LLM's one-sentence explanation, or ``None`` when the
+        LLM call fails *or* the response cannot be parsed.  Callers should
+        treat ``None`` as "score unavailable" rather than an error — the
+        failure is logged at DEBUG level and the caller can decide whether to
+        retry or skip.
+    """
     prompt = build_relevance_prompt(paper, interests)
     llm_result = await provider.execute(prompt, timeout_seconds)
     if not llm_result.success:
@@ -73,7 +88,29 @@ async def suggest_tags_once(
     provider: LLMProvider,
     timeout_seconds: int,
 ) -> list[str] | None:
-    """Suggest tags for one paper, returning parsed tags or None."""
+    """Suggest tags for one paper using the LLM.
+
+    Unlike ``score_relevance_once``, this function **raises** on LLM execution
+    failure rather than returning ``None``, because callers (batch auto-tag
+    actions) need to distinguish between "LLM unavailable" (abort the batch)
+    and "response unparseable" (skip this paper).
+
+    Args:
+        paper: The paper to tag.
+        taxonomy: Existing tag strings from the user's library, provided as
+            context so the LLM can reuse consistent tag vocabulary.
+        provider: An ``LLMProvider`` instance used to execute the prompt.
+        timeout_seconds: Maximum seconds to wait for the LLM response.
+
+    Returns:
+        A list of suggested tag strings (lowercased, stripped) if the LLM
+        responds successfully and the response can be parsed, or ``None`` if
+        the response is unparseable (the paper is skipped, not the batch).
+
+    Raises:
+        LLMExecutionError: If the underlying LLM command fails (non-zero exit,
+            timeout, empty output, etc.).  The caller should abort the batch.
+    """
     prompt = build_auto_tag_prompt(paper, taxonomy)
     llm_result = await provider.execute(prompt, timeout_seconds)
     if not llm_result.success:

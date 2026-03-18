@@ -2840,6 +2840,70 @@ class TestMainCLI:
         assert captured_kwargs.get("ascii_icons") is True
         assert os.environ.get("NO_COLOR") == "1"
 
+    def test_main_honors_no_color_env_var(self, monkeypatch, make_paper):
+        """NO_COLOR should disable terminal colors even without --no-color."""
+        import os
+
+        from arxiv_browser.app import main
+
+        paper = make_paper(arxiv_id="2401.99997")
+
+        class FakeApp:
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            def run(self):
+                return None
+
+        monkeypatch.setattr("sys.argv", ["arxiv_browser"])
+        monkeypatch.setattr("arxiv_browser.app.load_config", lambda: UserConfig())
+        monkeypatch.setattr(
+            "arxiv_browser.app._resolve_papers",
+            lambda args, base_dir, config, history_files: ([paper], [], 0),
+        )
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+        monkeypatch.setattr("arxiv_browser.app.ArxivBrowser", FakeApp)
+        monkeypatch.setenv("NO_COLOR", "1")
+        monkeypatch.setenv("FORCE_COLOR", "1")
+
+        result = main()
+        assert result == 0
+        assert os.environ.get("NO_COLOR") == "1"
+        assert os.environ.get("FORCE_COLOR") is None
+
+    def test_main_explicit_color_flag_overrides_no_color_env_var(self, monkeypatch, make_paper):
+        """``--color always`` should override a globally exported ``NO_COLOR``."""
+        import os
+
+        from arxiv_browser.app import main
+
+        paper = make_paper(arxiv_id="2401.99996")
+
+        class FakeApp:
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            def run(self):
+                return None
+
+        monkeypatch.setattr("sys.argv", ["arxiv_browser", "--color", "always"])
+        monkeypatch.setattr("arxiv_browser.app.load_config", lambda: UserConfig())
+        monkeypatch.setattr(
+            "arxiv_browser.app._resolve_papers",
+            lambda args, base_dir, config, history_files: ([paper], [], 0),
+        )
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+        monkeypatch.setattr("arxiv_browser.app.ArxivBrowser", FakeApp)
+        monkeypatch.setenv("NO_COLOR", "1")
+        monkeypatch.delenv("FORCE_COLOR", raising=False)
+
+        result = main()
+        assert result == 0
+        assert os.environ.get("FORCE_COLOR") == "1"
+        assert os.environ.get("NO_COLOR") is None
+
     def test_search_category_fetches_latest_day_and_runs_app(self, monkeypatch, make_paper):
         """`search --category` should load startup papers in latest-day digest mode."""
         from arxiv_browser.app import main
@@ -3112,14 +3176,15 @@ class TestResolvePapersHistoryRestore:
         monkeypatch.setattr("arxiv_browser.cli._fetch_latest_arxiv_digest", fake_fetch)
 
         args = argparse.Namespace(
+            command="search",
             input=None,
             date=None,
             no_restore=False,
-            api_query=None,
-            api_field="all",
-            api_category="cs.LG",
-            api_max_results=None,
-            api_page_mode=False,
+            query=None,
+            field="all",
+            category="cs.LG",
+            max_results=None,
+            mode="latest",
         )
 
         result = _resolve_papers(args, tmp_path, config, history_files)
@@ -13613,6 +13678,263 @@ class TestCorruptConfigBackup:
         """config_defaulted should default to False."""
         config = UserConfig()
         assert config.config_defaulted is False
+
+
+# ============================================================================
+# CLI subcommand and helper tests
+# ============================================================================
+
+
+class TestCLIVersionAndSubcommands:
+    """Tests for --version, config-path, and doctor CLI subcommands."""
+
+    def test_version_flag_exits_zero(self, monkeypatch, capsys):
+        """``--version`` should print version info and exit 0."""
+        from arxiv_browser.app import main
+
+        monkeypatch.setattr("sys.argv", ["arxiv_browser", "--version"])
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert "arxiv-viewer" in captured.out
+
+    def test_short_version_flag_exits_zero(self, monkeypatch, capsys):
+        """``-V`` should behave the same as ``--version``."""
+        from arxiv_browser.app import main
+
+        monkeypatch.setattr("sys.argv", ["arxiv_browser", "-V"])
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert "arxiv-viewer" in captured.out
+
+    def test_get_version_returns_string(self):
+        """``_get_version`` should return a non-empty string."""
+        from arxiv_browser.cli import _get_version
+
+        version = _get_version()
+        assert isinstance(version, str)
+        assert len(version) > 0
+
+    def test_get_version_fallback(self, monkeypatch):
+        """``_get_version`` should return 'dev' when package is not installed."""
+        import importlib.metadata
+
+        from arxiv_browser.cli import _get_version
+
+        monkeypatch.setattr(
+            importlib.metadata,
+            "version",
+            lambda _name: (_ for _ in ()).throw(importlib.metadata.PackageNotFoundError()),
+        )
+        assert _get_version() == "dev"
+
+    def test_config_path_subcommand(self, monkeypatch, capsys):
+        """``config-path`` should print the config path and exit 0."""
+        from arxiv_browser.app import main
+
+        monkeypatch.setattr("sys.argv", ["arxiv_browser", "config-path"])
+
+        result = main()
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "config.json" in captured.out
+
+    def test_print_config_path_function(self, capsys):
+        """``_print_config_path`` should print a path containing config.json."""
+        from arxiv_browser.cli import _print_config_path
+
+        result = _print_config_path()
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "config.json" in captured.out
+
+    def test_doctor_subcommand_no_history(self, monkeypatch, capsys):
+        """``doctor`` should run diagnostics and return 0."""
+        from arxiv_browser.app import main
+
+        monkeypatch.setattr("sys.argv", ["arxiv_browser", "doctor"])
+        monkeypatch.setattr("arxiv_browser.app.load_config", lambda: UserConfig())
+        monkeypatch.setattr("arxiv_browser.cli.discover_history_files", lambda _d: [])
+
+        result = main()
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "arxiv-viewer" in captured.out
+        assert "Python" in captured.out
+
+    def test_run_doctor_reports_config_exists(self, tmp_path, monkeypatch, capsys):
+        """``_run_doctor`` should report when config exists."""
+        from arxiv_browser.cli import _run_doctor
+
+        config = UserConfig()
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text("{}")
+
+        from unittest.mock import patch
+
+        monkeypatch.chdir(tmp_path)
+
+        with patch("arxiv_browser.config.get_config_path", return_value=config_file):
+            result = _run_doctor(config, [])
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "ok" in captured.out.lower() or "Config file" in captured.out
+
+    def test_run_doctor_warns_empty_history_dir(self, tmp_path, monkeypatch, capsys):
+        """``_run_doctor`` should warn when history dir exists but has no files."""
+        from arxiv_browser.cli import _run_doctor
+
+        config = UserConfig()
+        history_dir = tmp_path / "history"
+        history_dir.mkdir()
+        monkeypatch.chdir(tmp_path)
+
+        from unittest.mock import patch
+
+        config_file = tmp_path / "config.json"
+        with patch("arxiv_browser.config.get_config_path", return_value=config_file):
+            result = _run_doctor(config, [])
+
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "WARN" in captured.out
+
+    def test_run_doctor_reports_llm_preset(self, tmp_path, capsys, monkeypatch):
+        """``_run_doctor`` should check LLM preset binary on PATH."""
+        from arxiv_browser.cli import _run_doctor
+
+        config = UserConfig()
+        config.llm_preset = "nonexistent_preset_xyz"
+
+        config_file = tmp_path / "config.json"
+        monkeypatch.chdir(tmp_path)
+
+        from unittest.mock import patch
+
+        with patch("arxiv_browser.config.get_config_path", return_value=config_file):
+            result = _run_doctor(config, [])
+
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "WARN" in captured.out or "LLM" in captured.out
+
+    def test_run_doctor_reports_tty_status(self, tmp_path, capsys, monkeypatch):
+        """``_run_doctor`` should report TTY status."""
+        from arxiv_browser.cli import _run_doctor
+
+        config = UserConfig()
+        monkeypatch.chdir(tmp_path)
+
+        config_file = tmp_path / "config.json"
+
+        from unittest.mock import patch
+
+        with patch("arxiv_browser.config.get_config_path", return_value=config_file):
+            result = _run_doctor(config, [])
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "TTY" in captured.out or "tty" in captured.out.lower()
+
+    def test_run_doctor_parses_quoted_llm_command_path(self, tmp_path, capsys, monkeypatch):
+        """``_run_doctor`` should parse quoted LLM command paths correctly."""
+        from arxiv_browser.cli import _run_doctor
+
+        config = UserConfig(llm_command='"/Applications/My LLM.app/llm" {prompt}')
+        monkeypatch.chdir(tmp_path)
+
+        config_file = tmp_path / "config.json"
+
+        from unittest.mock import patch
+
+        with (
+            patch("arxiv_browser.config.get_config_path", return_value=config_file),
+            patch("arxiv_browser.cli.shutil.which", return_value="/Applications/My LLM.app/llm"),
+        ):
+            result = _run_doctor(config, [])
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "/Applications/My LLM.app/llm found on PATH" in captured.out
+
+    def test_run_doctor_prefers_custom_llm_command_over_preset(self, tmp_path, capsys, monkeypatch):
+        """``_run_doctor`` should diagnose the runtime-effective custom LLM command."""
+        from arxiv_browser.cli import _run_doctor
+
+        config = UserConfig(llm_command="custom-tool {prompt}", llm_preset="claude")
+        monkeypatch.chdir(tmp_path)
+
+        config_file = tmp_path / "config.json"
+
+        from unittest.mock import patch
+
+        def _which(binary: str) -> str | None:
+            if binary == "custom-tool":
+                return "/usr/local/bin/custom-tool"
+            return None
+
+        with (
+            patch("arxiv_browser.config.get_config_path", return_value=config_file),
+            patch("arxiv_browser.cli.shutil.which", side_effect=_which),
+        ):
+            result = _run_doctor(config, [])
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "LLM command: custom-tool found on PATH" in captured.out
+
+    def test_run_doctor_warns_when_llm_command_missing_prompt_placeholder(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        """``_run_doctor`` should reject LLM commands without ``{prompt}``."""
+        from arxiv_browser.cli import _run_doctor
+
+        config = UserConfig(llm_command="custom-tool")
+        monkeypatch.chdir(tmp_path)
+
+        config_file = tmp_path / "config.json"
+
+        from unittest.mock import patch
+
+        with (
+            patch("arxiv_browser.config.get_config_path", return_value=config_file),
+            patch("arxiv_browser.cli.shutil.which", return_value="/usr/local/bin/custom-tool"),
+        ):
+            result = _run_doctor(config, [])
+
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "missing required {prompt} placeholder" in captured.out
+
+    def test_run_doctor_warns_when_shell_fallback_disabled_for_shell_only_command(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        """``_run_doctor`` should flag shell-only LLM commands blocked by policy."""
+        from arxiv_browser.cli import _run_doctor
+
+        config = UserConfig(
+            llm_command="echo {prompt} | cat",
+            allow_llm_shell_fallback=False,
+        )
+        monkeypatch.chdir(tmp_path)
+
+        config_file = tmp_path / "config.json"
+
+        from unittest.mock import patch
+
+        with patch("arxiv_browser.config.get_config_path", return_value=config_file):
+            result = _run_doctor(config, [])
+
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "allow_llm_shell_fallback is disabled" in captured.out
 
 
 # ============================================================================

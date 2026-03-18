@@ -760,7 +760,16 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
         self.query_one("#watch-case", Checkbox).value = item.entry.case_sensitive
 
     def _build_entry_from_form(self) -> WatchListEntry | None:
-        """Read form fields and return a new WatchListEntry, or None if invalid."""
+        """Read the form fields and return a new ``WatchListEntry``, or ``None`` if invalid.
+
+        A form entry is considered invalid only when the pattern field is
+        empty after stripping whitespace — all other validation (unknown
+        ``match_type``) silently falls back to ``"author"``.
+
+        Returns:
+            A ``WatchListEntry`` populated from the current form state, or
+            ``None`` (with a warning notification) when the pattern is empty.
+        """
         pattern = self.query_one("#watch-pattern", Input).value.strip()
         match_value = self.query_one("#watch-type", Select).value
         match_type = match_value if isinstance(match_value, str) else "author"
@@ -852,7 +861,13 @@ _SECTION_TOGGLE_KEYS: dict[str, str] = {
 
 
 class SectionToggleModal(ModalScreen[list[str] | None]):
-    """Modal for toggling collapsible detail pane sections."""
+    """Modal for toggling collapsible detail pane sections.
+
+    Dismisses with a **sorted list of the section keys that should remain
+    collapsed** (e.g. ``["abstract", "summary"]``), or ``None`` when the
+    user cancels.  The caller is responsible for writing this list to
+    ``config.collapsed_sections``.
+    """
 
     BINDINGS = [
         Binding("escape", "cancel", "Cancel"),

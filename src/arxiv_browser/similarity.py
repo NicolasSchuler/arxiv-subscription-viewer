@@ -44,7 +44,18 @@ _TFIDF_TOKEN_RE = re.compile(r"[a-z][a-z0-9]{2,}")
 
 
 def _tokenize_for_tfidf(text: str | None) -> list[str]:
-    """Tokenize text for TF-IDF, preserving term frequency."""
+    """Tokenize text for TF-IDF, preserving term frequency.
+
+    Tokens must be at least 3 characters, start with a letter, and not be
+    in the stopword list.
+
+    Args:
+        text: Raw text to tokenize, or ``None``/empty string.
+
+    Returns:
+        List of lowercase alphanumeric tokens (may contain duplicates —
+        duplicates are intentional to preserve raw term frequency).
+    """
     if not text:
         return []
     return [tok for tok in _TFIDF_TOKEN_RE.findall(text.lower()) if tok not in STOPWORDS]
@@ -71,7 +82,23 @@ class TfidfIndex:
 
     @staticmethod
     def build(papers: list[Paper], text_fn: Callable[[Paper], str]) -> TfidfIndex:
-        """Build index from papers. text_fn extracts text per paper."""
+        """Build a TF-IDF index from a paper corpus.
+
+        Uses sublinear TF (``1 + log(count)``) and a smoothed IDF formula
+        (``log(1 + n / (1 + df))``).  L2 norms are pre-computed at build time
+        so ``cosine_similarity`` only needs a dot-product and a lookup.
+
+        Args:
+            papers: Corpus of papers to index.
+            text_fn: Callable that extracts the text to index from a paper
+                (e.g. ``lambda p: f"{p.title} {p.abstract_raw}"``).
+
+        Returns:
+            A populated ``TfidfIndex``.  Returns an *empty* index (usable but
+            all similarities will be ``0.0``) when fewer than 2 papers produce
+            non-empty token lists — IDF requires at least 2 documents to be
+            meaningful.
+        """
         index = TfidfIndex()
         doc_tfs: dict[str, dict[str, float]] = {}
         df: dict[str, int] = {}
@@ -85,7 +112,10 @@ class TfidfIndex:
                 df[term] = df.get(term, 0) + 1
         n = len(doc_tfs)
         if n < 2:
+            # IDF requires at least 2 documents to be meaningful; return empty index
             return index
+        # Smoothed IDF: log(1 + n / (1 + df)) prevents division by zero and
+        # dampens the effect of very rare terms (the "+1" in the denominator).
         index._idf = {term: math.log(1 + n / (1 + freq)) for term, freq in df.items()}
         for arxiv_id, tf in doc_tfs.items():
             vec: dict[str, float] = {}
@@ -96,11 +126,24 @@ class TfidfIndex:
                     vec[term] = tfidf
                     norm_sq += tfidf * tfidf
             index._tfidf_vectors[arxiv_id] = vec
+            # Pre-compute L2 norms so cosine_similarity only needs a dot product
             index._norms[arxiv_id] = math.sqrt(norm_sq) if norm_sq > 0.0 else 0.0
         return index
 
     def cosine_similarity(self, id_a: str, id_b: str) -> float:
-        """Cosine similarity between two papers by arxiv_id."""
+        """Compute cosine similarity between two indexed papers.
+
+        Iterates over the smaller of the two TF-IDF vectors for efficiency,
+        using pre-computed L2 norms stored at build time.
+
+        Args:
+            id_a: arXiv ID of the first paper.
+            id_b: arXiv ID of the second paper.
+
+        Returns:
+            Cosine similarity in ``[0.0, 1.0]``.  Returns ``0.0`` if either
+            paper is not in the index or has a zero-norm vector.
+        """
         vec_a = self._tfidf_vectors.get(id_a)
         vec_b = self._tfidf_vectors.get(id_b)
         if not vec_a or not vec_b:
@@ -184,14 +227,30 @@ def compute_paper_similarity(
 ) -> float:
     """Compute weighted similarity score between two papers.
 
-    When tfidf_index is provided, uses TF-IDF cosine similarity for text (50%)
-    with category Jaccard (30%) and author Jaccard (20%).
+    Two scoring modes are available depending on whether a TF-IDF index is
+    provided:
 
-    Without tfidf_index, falls back to legacy Jaccard weights:
-    categories 40%, authors 30%, title keywords 20%, abstract keywords 10%.
+    **TF-IDF mode** (when *tfidf_index* is given):
+    ``SIMILARITY_WEIGHT_CATEGORY (0.30) * cat_sim``
+    + ``SIMILARITY_WEIGHT_AUTHOR (0.20) * author_sim``
+    + ``SIMILARITY_WEIGHT_TEXT (0.50) * cosine_sim``
+
+    **Legacy Jaccard mode** (no index):
+    ``0.40 * cat_sim + 0.30 * author_sim + 0.20 * title_kw_sim + 0.10 * abstract_kw_sim``
+
+    Args:
+        paper_a: First paper.
+        paper_b: Second paper.
+        abstract_a: Pre-cleaned abstract for *paper_a*.  Only used in legacy
+            Jaccard mode; defaults to ``paper_a.abstract`` when ``None``.
+        abstract_b: Pre-cleaned abstract for *paper_b*.  Only used in legacy
+            Jaccard mode; defaults to ``paper_b.abstract`` when ``None``.
+        tfidf_index: Pre-built TF-IDF index.  When provided, switches from
+            pairwise Jaccard to TF-IDF cosine for the text component.
 
     Returns:
-        Similarity score between 0.0 and 1.0
+        Similarity score in ``[0.0, 1.0]``.  Returns ``1.0`` when both
+        papers share the same arXiv ID.
     """
     if paper_a.arxiv_id == paper_b.arxiv_id:
         return 1.0
@@ -209,13 +268,15 @@ def compute_paper_similarity(
     if tfidf_index is not None:
         # TF-IDF branch: text similarity from pre-built index
         text_sim = tfidf_index.cosine_similarity(paper_a.arxiv_id, paper_b.arxiv_id)
+        # Weights: category 0.30, author 0.20, text 0.50
         return (
             SIMILARITY_WEIGHT_CATEGORY * cat_sim
             + SIMILARITY_WEIGHT_AUTHOR * author_sim
             + SIMILARITY_WEIGHT_TEXT * text_sim
         )
 
-    # Legacy Jaccard branch
+    # Legacy Jaccard branch: keyword overlap for title and abstract
+    # Weights: category 0.40, author 0.30, title keywords 0.20, abstract keywords 0.10
     title_kw_a = _extract_keywords(paper_a.title)
     title_kw_b = _extract_keywords(paper_b.title)
     title_sim = _jaccard_similarity(title_kw_a, title_kw_b)
@@ -232,7 +293,20 @@ def compute_paper_similarity(
 
 
 def build_similarity_corpus_key(papers: list[Paper]) -> str:
-    """Build a deterministic fingerprint for the similarity corpus."""
+    """Build a deterministic fingerprint for a paper corpus.
+
+    The fingerprint is used to detect when the corpus has changed (e.g. new
+    papers loaded) so that a cached TF-IDF index can be invalidated.
+
+    Args:
+        papers: The corpus to fingerprint.
+
+    Returns:
+        First 16 hex characters of the SHA-256 digest over each paper's
+        arXiv ID, title, and abstract (NUL-delimited).  The 16-character
+        truncation is sufficient for cache-key purposes while keeping the
+        string compact.
+    """
     h = sha256()
     for paper in papers:
         abstract_text = paper.abstract if paper.abstract is not None else paper.abstract_raw

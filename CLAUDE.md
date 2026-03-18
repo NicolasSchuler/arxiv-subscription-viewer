@@ -334,6 +334,9 @@ uv run mutmut run --paths-to-mutate=src/arxiv_browser/huggingface.py
 uv run arxiv-viewer              # History mode: auto-loads newest from history/
 uv run arxiv-viewer -i <file>    # Custom input file
 uv run arxiv-viewer --debug      # Debug logging to ~/.config/arxiv-browser/debug.log
+uv run arxiv-viewer --version    # Print version and exit
+uv run arxiv-viewer doctor       # Check environment & configuration health
+uv run arxiv-viewer config-path  # Print config file path
 uv run python -m arxiv_browser   # Alternative: run as module
 ```
 

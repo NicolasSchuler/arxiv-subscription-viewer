@@ -12,8 +12,8 @@ _arxiv_viewer() {
     local cur prev words cword
     _init_completion || return
 
-    local commands="browse search dates completions"
-    local global_opts="--debug --color --no-color --ascii --help -h"
+    local commands="browse search dates completions config-path doctor"
+    local global_opts="--debug --color --no-color --ascii --version -V --help -h"
 
     # Find the subcommand (skip global flags)
     local cmd=""
@@ -21,7 +21,7 @@ _arxiv_viewer() {
     for ((i=1; i < cword; i++)); do
         case "${words[i]}" in
             --color) ((i++)) ;;  # skip --color's argument
-            --debug|--no-color|--ascii) ;;
+            --debug|--no-color|--ascii|--version|-V) ;;
             -*) ;;
             *) cmd="${words[i]}"; break ;;
         esac
@@ -47,7 +47,7 @@ _arxiv_viewer() {
             esac
             COMPREPLY=($(compgen -W "--query --field --category --mode --max-results --help -h" -- "$cur"))
             ;;
-        dates)
+        dates|config-path|doctor)
             COMPREPLY=($(compgen -W "--help -h" -- "$cur"))
             ;;
         completions)
@@ -70,6 +70,8 @@ _arxiv_viewer() {
         'search:Fetch startup papers from the arXiv API'
         'dates:List available local history dates and exit'
         'completions:Generate shell completion scripts'
+        'config-path:Print the configuration file path'
+        'doctor:Check environment and configuration health'
     )
 
     local -a global_opts
@@ -78,6 +80,7 @@ _arxiv_viewer() {
         '--color[Color output mode]:mode:(auto always never)'
         '--no-color[Disable terminal colors]'
         '--ascii[Use ASCII-only status icons]'
+        '(-V --version)'{-V,--version}'[Show version]'
         '(-h --help)'{-h,--help}'[Show help]'
     )
 
@@ -108,7 +111,7 @@ _arxiv_viewer() {
                         '--max-results[API page size]:number:' \
                         '(-h --help)'{-h,--help}'[Show help]'
                     ;;
-                dates)
+                dates|config-path|doctor)
                     _arguments '(-h --help)'{-h,--help}'[Show help]'
                     ;;
                 completions)
@@ -133,12 +136,15 @@ complete -c arxiv-viewer -n '__fish_use_subcommand' -l debug -d 'Enable debug lo
 complete -c arxiv-viewer -n '__fish_use_subcommand' -l color -x -a 'auto always never' -d 'Color output mode'
 complete -c arxiv-viewer -n '__fish_use_subcommand' -l no-color -d 'Disable terminal colors'
 complete -c arxiv-viewer -n '__fish_use_subcommand' -l ascii -d 'Use ASCII-only status icons'
+complete -c arxiv-viewer -n '__fish_use_subcommand' -s V -l version -d 'Show version'
 
 # Subcommands
 complete -c arxiv-viewer -n '__fish_use_subcommand' -a browse -d 'Open local history or a local paper file'
 complete -c arxiv-viewer -n '__fish_use_subcommand' -a search -d 'Fetch startup papers from the arXiv API'
 complete -c arxiv-viewer -n '__fish_use_subcommand' -a dates -d 'List available local history dates and exit'
 complete -c arxiv-viewer -n '__fish_use_subcommand' -a completions -d 'Generate shell completion scripts'
+complete -c arxiv-viewer -n '__fish_use_subcommand' -a config-path -d 'Print the configuration file path'
+complete -c arxiv-viewer -n '__fish_use_subcommand' -a doctor -d 'Check environment and configuration health'
 
 # browse options
 complete -c arxiv-viewer -n '__fish_seen_subcommand_from browse' -s i -l input -r -d 'Input file'

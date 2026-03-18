@@ -194,7 +194,21 @@ def _apply_arxiv_search_results(
 
 
 async def _run_arxiv_search(app: "ArxivBrowser", request: ArxivSearchRequest, start: int) -> None:
-    """Execute an arXiv API search and display one results page."""
+    """Execute an arXiv API search and display one results page.
+
+    Uses an incrementing ``_arxiv_api_request_token`` to discard stale
+    responses: the token is captured before the network call and compared
+    after it returns.  If the token changed while the request was in flight
+    (because the user exited API mode or started a newer search), the
+    response is silently dropped.  The ``finally`` block only clears the
+    inflight/loading flags when the token still matches, so that a newer
+    in-flight request is not prematurely un-flagged.
+
+    Args:
+        app: The running ``ArxivBrowser`` application instance.
+        request: Encapsulates the query, field, and category to search.
+        start: Zero-based result offset for pagination (0 for the first page).
+    """
     _sync_app_globals()
     if app._arxiv_api_fetch_inflight:
         app.notify("Search already in progress", title="arXiv Search")
@@ -204,6 +218,9 @@ async def _run_arxiv_search(app: "ArxivBrowser", request: ArxivSearchRequest, st
     app._config.arxiv_api_max_results = max_results
     start = max(0, start)
 
+    # Increment the token before launching the fetch so any concurrent or
+    # previous in-flight response that checks the token will see a mismatch
+    # and self-discard.
     app._arxiv_api_request_token += 1
     request_token = app._arxiv_api_request_token
     app._arxiv_api_fetch_inflight = True
@@ -251,12 +268,17 @@ async def _run_arxiv_search(app: "ArxivBrowser", request: ArxivSearchRequest, st
         logger.warning("arXiv search failed: %s", exc, exc_info=True)
         return
     finally:
+        # Only clear inflight/loading flags when our token is still current.
+        # If a newer request has already incremented the token, leave the flags
+        # set so the newer request can clear them itself when it finishes.
         if request_token == app._arxiv_api_request_token:
             app._arxiv_api_fetch_inflight = False
             app._arxiv_api_loading = False
             app._update_status_bar()
 
-    # Ignore stale responses after mode exits or newer requests.
+    # Discard the response if the user exited API mode or started a newer
+    # search while this one was in flight.  _arxiv_api_request_token is
+    # incremented both here (at search start) and in action_exit_arxiv_search_mode.
     if request_token != app._arxiv_api_request_token:
         return
 

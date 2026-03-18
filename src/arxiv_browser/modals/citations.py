@@ -114,7 +114,12 @@ class RecommendationListItem(ListItem):
 
 
 class RecommendationsScreen(ModalScreen[str | None]):
-    """Modal screen displaying similar papers."""
+    """Modal screen displaying similar papers and allowing the user to jump to one.
+
+    Accepts a target paper and a ranked list of ``(paper, score)`` pairs.
+    Dismisses with the arXiv ID of the selected paper, or ``None`` if the
+    user cancels without making a selection.
+    """
 
     BINDINGS = [
         Binding("escape", "cancel", "Close"),
@@ -266,16 +271,36 @@ class CitationGraphListItem(ListItem):
         is_local: bool = False,
         **kwargs,
     ) -> None:
-        """Initialize with a citation entry and whether it exists locally."""
+        """Initialize with a citation entry and a flag for local availability.
+
+        Args:
+            entry: The ``CitationEntry`` (paper metadata from Semantic Scholar)
+                to associate with this list item.
+            *children: Child widgets to pass to the ``ListItem`` base class.
+            is_local: ``True`` when *entry* has an arXiv ID that is present in
+                the currently loaded paper list, enabling the "go to local
+                paper" (``g``) action.
+            **kwargs: Additional keyword arguments forwarded to ``ListItem``.
+        """
         super().__init__(*children, **kwargs)
         self.entry = entry
         self.is_local = is_local
 
 
 class CitationGraphScreen(ModalScreen[str | None]):
-    """Modal screen for exploring citation graphs with drill-down navigation.
+    """Modal screen for exploring citation graphs with depth-limited drill-down.
 
-    Returns the arxiv_id of a local paper to jump to, or None.
+    Displays a two-panel layout: **References** (papers this paper cites) on
+    the left and **Cited By** (papers that cite this paper) on the right.
+    The user can drill into any entry to explore its own citation graph; each
+    drill-down level is pushed onto ``_stack`` so that ``Esc``/``q`` steps
+    back one level at a time.
+
+    ``_active_panel`` tracks which panel (``"refs"`` or ``"cites"``) currently
+    has keyboard focus; ``Tab`` switches between them.
+
+    Dismisses with the arXiv ID of a local paper to jump to (via ``g``), or
+    ``None`` when the user closes without navigating.
     """
 
     BINDINGS = [
@@ -373,7 +398,19 @@ class CitationGraphScreen(ModalScreen[str | None]):
         fetch_callback: Callable,
         local_arxiv_ids: frozenset[str],
     ) -> None:
-        """Initialize with root paper data, fetch callback, and local arxiv IDs."""
+        """Initialize with root paper data, a fetch callback, and the local paper set.
+
+        Args:
+            root_title: Display title of the root paper shown in the breadcrumb.
+            root_paper_id: Semantic Scholar paper ID (or ``"ARXIV:<id>"`` fallback)
+                used as the starting node.
+            references: Papers that the root paper cites.
+            citations: Papers that cite the root paper.
+            fetch_callback: Async callable ``(s2_paper_id: str) ->
+                (refs, cites)`` invoked when the user drills into an entry.
+            local_arxiv_ids: Frozenset of arXiv IDs currently loaded in the
+                app, used to mark entries that can be jumped to with ``g``.
+        """
         super().__init__()
         self._root_title = root_title
         self._root_paper_id = root_paper_id
@@ -434,7 +471,13 @@ class CitationGraphScreen(ModalScreen[str | None]):
         )
 
     def _populate_lists(self) -> None:
-        """Fill both list views with current references and citations."""
+        """Fill both list views with the current references and citations.
+
+        Side effects (beyond clearing and mounting list items):
+        - Updates the panel title labels (``#refs-title``, ``#cites-title``)
+          to show the current entry counts.
+        - Calls ``_update_status`` to refresh the status bar.
+        """
         refs_list = self.query_one("#refs-list", ListView)
         cites_list = self.query_one("#cites-list", ListView)
         refs_list.clear()

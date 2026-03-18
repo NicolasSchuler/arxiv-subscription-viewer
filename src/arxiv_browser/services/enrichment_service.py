@@ -57,8 +57,29 @@ async def load_or_fetch_s2_paper_cached(
 ) -> SemanticScholarPaper | None | tuple[SemanticScholarPaper | None, bool]:
     """Load S2 paper data from cache, or fetch and persist on cache miss.
 
-    When include_status=True, returns (paper, complete) where complete=False
-    means the remote fetch/parse path failed.
+    Args:
+        arxiv_id: Bare arXiv identifier (e.g. ``"2401.12345"``).
+        db_path: Path to the Semantic Scholar SQLite cache database.
+        cache_ttl_days: Maximum age in days for a cached result to be
+            considered fresh.
+        client: An active ``httpx.AsyncClient`` for remote fetching.  When
+            ``None``, the remote fetch step is skipped and the function
+            returns ``(None, True)`` (or ``None`` without status) — treating
+            "no client" as a normal no-result, not an error.
+        api_key: Semantic Scholar API key (may be empty string for
+            unauthenticated access).
+        include_status: When ``True``, return a ``(paper, complete)`` tuple
+            instead of just the paper.
+
+    Returns:
+        When ``include_status=False``: the ``SemanticScholarPaper`` if found
+        (cache or remote), or ``None`` otherwise.
+
+        When ``include_status=True``: a ``(paper, complete)`` tuple where
+        ``complete=False`` means the remote fetch path was tried but failed
+        (e.g. network error, parse error).  ``complete=True`` means either a
+        cache hit was returned, no client was provided, or a successful fetch
+        was completed.
     """
     cached = await asyncio.to_thread(load_s2_paper, db_path, arxiv_id, cache_ttl_days)
     if cached is not None:
@@ -112,8 +133,25 @@ async def load_or_fetch_hf_daily_cached(
 ) -> list[HuggingFacePaper] | tuple[list[HuggingFacePaper], bool]:
     """Load HF daily papers from cache, or fetch and persist on cache miss.
 
-    When include_status=True, returns (papers, complete) where complete=False
-    means the remote fetch/parse path failed.
+    Args:
+        db_path: Path to the HuggingFace daily-papers SQLite cache database.
+        cache_ttl_hours: Maximum age in hours for a cached result to be
+            considered fresh.
+        client: An active ``httpx.AsyncClient`` for remote fetching.  When
+            ``None``, the remote fetch step is skipped and the function
+            returns ``([], True)`` (or ``[]`` without status) — treating
+            "no client" as a normal empty result, not an error.
+        include_status: When ``True``, return a ``(papers, complete)`` tuple
+            instead of just the paper list.
+
+    Returns:
+        When ``include_status=False``: a list of ``HuggingFacePaper`` objects
+        (may be empty if the cache is cold and no client was provided).
+
+        When ``include_status=True``: a ``(papers, complete)`` tuple where
+        ``complete=False`` means the remote fetch path was tried but failed.
+        ``complete=True`` means either a cache hit was returned, no client was
+        provided, or a successful fetch was completed.
     """
     cached = await asyncio.to_thread(load_hf_daily_cache, db_path, cache_ttl_hours)
     if cached is not None:

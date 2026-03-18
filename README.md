@@ -34,11 +34,20 @@ arxiv-viewer browse
 
 # List local history dates
 arxiv-viewer dates
+
+# Show version
+arxiv-viewer --version
+
+# Check environment & config health
+arxiv-viewer doctor
+
+# Print config file path
+arxiv-viewer config-path
 ```
 
 > **Requires Python 3.13+** · Press `?` in-app for help · `Ctrl+p` opens commands
 >
-> Global options: `--debug` (log to file) · `--ascii` (ASCII-only icons) · `--color auto|always|never` · `--no-color`
+> Global options: `--version` · `--debug` (log to file) · `--ascii` (ASCII-only icons) · `--color auto|always|never` · `--no-color`
 >
 > Debug log paths: `~/.config/arxiv-browser/debug.log` (Linux) · `~/Library/Application Support/arxiv-browser/debug.log` (macOS) · `%APPDATA%/arxiv-browser/debug.log` (Windows)
 

@@ -254,7 +254,22 @@ def render_paper_option(
 
 
 class PaperListItem(ListItem):
-    """A list item displaying a paper title and URL."""
+    """A list item rendering a single paper in the main paper list.
+
+    Each item renders up to four lines depending on the current display state:
+
+    1. **Title line** — paper title with optional search highlight, prefixed
+       by selection (✓), watch-list (👁), star (★), and read (·) indicators.
+    2. **Authors line** — author string, optionally highlighted.
+    3. **Metadata badge line** — arXiv ID, category badges, S2 citation count,
+       HF upvote count, version-update badge, and relevance score badge.
+    4. **Abstract preview** (optional) — truncated abstract when
+       ``show_preview`` is enabled.
+
+    Enrichment data (S2/HF) and the relevance score can be pushed in after
+    initial construction via ``set_s2_data``, ``set_hf_data``,
+    ``set_version_update``, and ``set_relevance_score``.
+    """
 
     def __init__(
         self,

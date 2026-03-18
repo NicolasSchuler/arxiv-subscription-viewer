@@ -1,6 +1,11 @@
 # ruff: noqa: F403, F405, UP037
 # pyright: reportUndefinedVariable=false, reportAttributeAccessIssue=false
-"""Extracted ArxivBrowser action handlers."""
+"""LLM, Semantic Scholar, and command-trust action handlers for ArxivBrowser.
+
+Covers: AI summary generation, paper chat, relevance scoring, auto-tagging,
+research-interests editing, Semantic Scholar paper/recommendation/citation-graph
+fetching, and the security trust-gate for LLM and PDF-viewer commands.
+"""
 
 from __future__ import annotations
 
@@ -48,7 +53,25 @@ def _remember_trusted_hash(
     trusted_hashes: list[str],
     title: str,
 ) -> bool:
-    """Persist command trust hash. Returns True when trusted in-memory."""
+    """Add a command hash to the trusted list and persist it to disk.
+
+    The command is always trusted for the current session regardless of
+    whether the disk write succeeds.  When ``save_config`` fails, the user
+    is notified that the trust is session-only; the function still returns
+    ``True`` so the calling action can proceed.
+
+    Args:
+        app: The running ``ArxivBrowser`` application instance (used for
+            ``notify`` and ``_trust_hash``).
+        command_template: The raw LLM or PDF-viewer command string to trust.
+        trusted_hashes: The mutable list (from ``config``) to append the hash
+            to — mutated in-place.
+        title: Notification title shown if the config save fails.
+
+    Returns:
+        Always ``True``.  The command is trusted in-memory even when the
+        ``save_config`` call fails (e.g. read-only filesystem).
+    """
     _sync_app_globals()
     cmd_hash = app._trust_hash(command_template)
     if cmd_hash in trusted_hashes:
@@ -93,7 +116,28 @@ def _ensure_command_trusted(
     trusted_hashes: list[str],
     on_trusted: Callable[[], None],
 ) -> bool:
-    """Show trust prompt for a custom command and persist approval on confirm."""
+    """Show a trust confirmation prompt for a custom shell command.
+
+    Pushes a ``ConfirmModal`` asking the user to approve execution.  If the
+    user confirms, ``_remember_trusted_hash`` is called to persist the
+    approval and then *on_trusted* is invoked to continue the action.
+
+    Args:
+        app: The running ``ArxivBrowser`` application instance.
+        command_template: The raw command string being evaluated for trust.
+        title: Short label used in notification titles (e.g. ``"LLM"``).
+        prompt_heading: First line of the confirmation dialog body.
+        trust_button_label: Short verb shown in the confirmation text
+            (e.g. ``"Run"`` or ``"Open"``).
+        cancel_message: Notification body shown when the user cancels.
+        trusted_hashes: Mutable list (from config) to persist the hash into.
+        on_trusted: Zero-argument callable invoked after the user approves
+            and the hash is persisted.
+
+    Returns:
+        Always ``False`` — the action is deferred to the modal callback.
+        The caller should not continue inline after this returns.
+    """
     _sync_app_globals()
     command_preview = truncate_text(command_template, 120)
 
@@ -130,7 +174,22 @@ def _ensure_llm_command_trusted(
     command_template: str,
     on_trusted: Callable[[], None],
 ) -> bool:
-    """Ensure a custom LLM command is trusted before execution."""
+    """Ensure a custom LLM command is trusted before execution.
+
+    Short-circuits to ``True`` (proceed inline) when the command is already
+    trusted (preset match or hash on record).  Otherwise delegates to
+    ``_ensure_command_trusted``, which pushes a confirmation modal and returns
+    ``False`` — the caller must not continue inline.
+
+    Args:
+        app: The running ``ArxivBrowser`` application instance.
+        command_template: LLM command template to check.
+        on_trusted: Callback invoked after the user confirms trust.
+
+    Returns:
+        ``True`` if the command is already trusted (caller may proceed).
+        ``False`` if a trust prompt was pushed (caller must stop inline).
+    """
     _sync_app_globals()
     if app._is_llm_command_trusted(command_template):
         return True
@@ -150,7 +209,20 @@ def _ensure_pdf_viewer_trusted(
     viewer_cmd: str,
     on_trusted: Callable[[], None],
 ) -> bool:
-    """Ensure a custom PDF viewer command is trusted before execution."""
+    """Ensure a custom PDF viewer command is trusted before execution.
+
+    Mirrors ``_ensure_llm_command_trusted`` but for PDF viewer commands.
+    Short-circuits to ``True`` when the command hash is already on record.
+
+    Args:
+        app: The running ``ArxivBrowser`` application instance.
+        viewer_cmd: PDF viewer command string to check.
+        on_trusted: Callback invoked after the user confirms trust.
+
+    Returns:
+        ``True`` if the command is already trusted (caller may proceed).
+        ``False`` if a trust prompt was pushed (caller must stop inline).
+    """
     _sync_app_globals()
     if app._is_pdf_viewer_trusted(viewer_cmd):
         return True
@@ -166,10 +238,18 @@ def _ensure_pdf_viewer_trusted(
 
 
 def _require_llm_command(app: "ArxivBrowser") -> str | None:
-    """Resolve LLM command, showing a notification if not configured.
+    """Resolve the LLM command template, notifying the user if not configured.
 
-    Also refreshes app._llm_provider so it stays in sync with config.
-    Returns the command template string (needed for cache hashing).
+    Also refreshes ``app._llm_provider`` to stay in sync with config changes
+    since the app was started.
+
+    Args:
+        app: The running ``ArxivBrowser`` application instance.
+
+    Returns:
+        The command template string (needed for cache hashing and trust
+        checks), or ``None`` if no LLM command is configured or the command
+        is blocked by the ``allow_llm_shell_fallback`` setting.
     """
     _sync_app_globals()
     command_template = _resolve_llm_command(app._config)
@@ -475,7 +555,23 @@ async def _score_relevance_batch_async(
     command_template: str,
     interests: str,
 ) -> None:
-    """Background task: batch-score papers for relevance."""
+    """Background task: batch-score papers for relevance with concurrency control.
+
+    Bulk-loads existing scores from SQLite first, then fires LLM calls for the
+    uncached subset.  A ``asyncio.Semaphore(3)`` limits concurrency to three
+    simultaneous LLM processes.  Each coroutine checks
+    ``app._cancel_batch_requested`` after acquiring the semaphore so a
+    user-initiated cancel stops new work without waiting for in-flight calls.
+
+    Args:
+        app: The running ``ArxivBrowser`` application instance.
+        papers: Full list of loaded papers to score (already-cached papers are
+            skipped after the bulk SQLite load).
+        command_template: LLM command template; combined with *interests* to
+            produce the ``interests_hash`` that namespaces the SQLite cache.
+        interests: The user's research-interests text used as the scoring
+            prompt context.
+    """
     _sync_app_globals()
     try:
         interests_hash = _compute_command_hash(command_template, interests)

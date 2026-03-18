@@ -243,6 +243,7 @@ def tokenize_query(query: str) -> list[QueryToken]:
             tokens.append(token)
             continue
         start = i
+        # Phase 1: advance until whitespace or ':' to check for a field prefix
         while i < query_len and not query[i].isspace() and query[i] != ":":
             i += 1
         if i < query_len and query[i] == ":":
@@ -251,6 +252,8 @@ def tokenize_query(query: str) -> list[QueryToken]:
                 token, i = _parse_field_value(query, i + 1, query_len, field)
                 tokens.append(token)
                 continue
+        # Phase 2: no valid field prefix found; re-use 'start' to parse from
+        # the beginning of this chunk as a plain term or boolean operator
         token, i = _parse_plain_term(query, start, i, query_len)
         tokens.append(token)
     return tokens
@@ -327,10 +330,13 @@ def insert_implicit_and(tokens: list[QueryToken]) -> list[QueryToken]:
     result: list[QueryToken] = []
     prev_was_term = False
     for token in tokens:
+        # NOT begins a new term group but is itself an operator, so it triggers
+        # an implicit AND insertion without setting prev_was_term afterward.
         token_is_term_start = token.kind == "term" or token.value == "NOT"
         if prev_was_term and token_is_term_start:
             result.append(QueryToken(kind="op", value="AND"))
         result.append(token)
+        # Only a resolved term (not an operator) advances the "prev_was_term" flag
         prev_was_term = token.kind == "term"
     return result
 
@@ -339,14 +345,17 @@ def to_rpn(tokens: list[QueryToken]) -> list[QueryToken]:
     """Convert tokens to reverse polish notation using operator precedence."""
     output: list[QueryToken] = []
     ops: list[QueryToken] = []
+    # Precedence: OR < AND < NOT (higher value = binds tighter)
     precedence = {"OR": 1, "AND": 2, "NOT": 3}
     for token in tokens:
         if token.kind == "term":
             output.append(token)
             continue
+        # Pop operators with >= precedence (left-associative: equal priority flushes first)
         while ops and precedence[ops[-1].value] >= precedence[token.value]:
             output.append(ops.pop())
         ops.append(token)
+    # Drain any remaining operators onto the output queue
     while ops:
         output.append(ops.pop())
     return output
@@ -377,6 +386,14 @@ def is_advanced_query(tokens: list[QueryToken]) -> bool:
 
 def build_highlight_terms(tokens: list[QueryToken]) -> dict[str, list[str]]:
     """Build highlight term lists from query tokens by field.
+
+    Operator tokens (``AND``, ``OR``, ``NOT``) and virtual terms
+    (``unread``, ``starred``) are excluded — only literal match terms are
+    collected.  Unscoped terms appear in both ``"title"`` and ``"author"``
+    lists so they are highlighted in both columns.
+
+    Args:
+        tokens: Parsed query tokens from ``tokenize_query``.
 
     Returns:
         Dict keyed by ``"title"``, ``"author"``, ``"abstract"``. Unscoped
@@ -455,11 +472,21 @@ def match_query_term(
 ) -> bool:
     """Check if a paper matches a single query term.
 
+    Handles field-scoped tokens (``cat:``, ``tag:``, ``title:``, ``author:``,
+    ``abstract:``) as well as the virtual terms ``unread`` and ``starred``.
+    Unscoped tokens match against ``title + authors``.
+
     Args:
         paper: The paper to match against.
         token: The query token to match.
         paper_metadata: The paper's user metadata (for tag/read/star lookups).
-        abstract_text: Pre-cleaned abstract text.
+            Pass ``None`` when metadata is unavailable; tag/starred terms will
+            return ``False`` in that case.
+        abstract_text: Pre-cleaned abstract text used for ``abstract:`` scoped
+            queries.
+
+    Returns:
+        ``True`` if the paper satisfies the token, ``False`` otherwise.
     """
     value = token.value.strip()
     if not value:
@@ -493,11 +520,22 @@ def matches_advanced_query(
 ) -> bool:
     """Evaluate an RPN query expression against a paper.
 
+    Implements a stack-based evaluator for Boolean RPN produced by
+    ``to_rpn(insert_implicit_and(tokenize_query(...)))``.  Operands are pushed
+    as ``bool`` values; ``NOT``, ``AND``, and ``OR`` pop and push results.
+    Defensive pops default to ``False`` for malformed RPN; an empty stack
+    after evaluation returns ``True`` (fail-open — match everything).
+
     Args:
         paper: The paper to match against.
-        rpn: Query in Reverse Polish Notation.
+        rpn: Query in Reverse Polish Notation, as returned by ``to_rpn``.
         paper_metadata: The paper's user metadata.
-        abstract_text: Pre-cleaned abstract text.
+        abstract_text: Pre-cleaned abstract text passed through to
+            ``match_query_term``.
+
+    Returns:
+        ``True`` if the paper satisfies the expression, ``False`` otherwise.
+        Returns ``True`` for an empty *rpn* list (no filter applied).
     """
     if not rpn:
         return True
@@ -507,16 +545,16 @@ def matches_advanced_query(
             stack.append(match_query_term(paper, token, paper_metadata, abstract_text))
             continue
         if token.value == "NOT":
-            value = stack.pop() if stack else False
+            value = stack.pop() if stack else False  # Defensive: malformed RPN → False
             stack.append(not value)
         else:
-            right = stack.pop() if stack else False
-            left = stack.pop() if stack else False
+            right = stack.pop() if stack else False  # Defensive: malformed RPN → False
+            left = stack.pop() if stack else False  # Defensive: malformed RPN → False
             if token.value == "AND":
                 stack.append(left and right)
             else:
                 stack.append(left or right)
-    return stack[-1] if stack else True
+    return stack[-1] if stack else True  # Empty stack = no filter: fail-open (match all)
 
 
 def paper_matches_watch_entry(paper: Paper, entry: WatchListEntry) -> bool:
@@ -546,12 +584,25 @@ def sort_papers(
 ) -> list[Paper]:
     """Sort papers by the given key, returning a new sorted list.
 
+    For cache-backed sort modes (``citations``, ``trending``, ``relevance``),
+    papers with a cache entry sort before papers without one using a two-tuple
+    key ``(0, -value)`` < ``(1, 0)``.  Within the first group the value is
+    negated to produce a descending order.
+
     Args:
         papers: List of papers to sort.
-        sort_key: One of "title", "date", "arxiv_id", "citations", "trending", "relevance".
-        s2_cache: Optional S2 cache dict, required for "citations" sort.
-        hf_cache: Optional HF cache dict, required for "trending" sort.
-        relevance_cache: Optional relevance cache dict, required for "relevance" sort.
+        sort_key: One of ``"title"``, ``"date"``, ``"arxiv_id"``,
+            ``"citations"``, ``"trending"``, ``"relevance"``.
+        s2_cache: Optional Semantic Scholar cache; required for
+            ``"citations"`` sort.  Papers absent from the cache sort last.
+        hf_cache: Optional HuggingFace cache; required for ``"trending"``
+            sort.  Papers absent from the cache sort last.
+        relevance_cache: Optional relevance-score cache; required for
+            ``"relevance"`` sort.  Papers absent from the cache sort last.
+
+    Returns:
+        A new sorted list.  Unknown *sort_key* values return a shallow copy
+        of the input list in its original order.
     """
     if sort_key == "title":
         return sorted(papers, key=lambda p: p.title.lower())
@@ -564,8 +615,9 @@ def sort_papers(
         def _citation_key(p: Paper) -> tuple[int, int]:
             s2 = s2_cache.get(p.arxiv_id) if s2_cache else None
             if s2 is not None:
+                # (0, -count) sorts before (1, 0); negated count gives descending order
                 return (0, -s2.citation_count)
-            return (1, 0)
+            return (1, 0)  # Papers without S2 data sort last
 
         return sorted(papers, key=_citation_key)
     elif sort_key == "trending":
@@ -574,7 +626,7 @@ def sort_papers(
             hf = hf_cache.get(p.arxiv_id) if hf_cache else None
             if hf is not None:
                 return (0, -hf.upvotes)
-            return (1, 0)
+            return (1, 0)  # Papers without HF data sort last
 
         return sorted(papers, key=_trending_key)
     elif sort_key == "relevance":
@@ -583,7 +635,7 @@ def sort_papers(
             rel = relevance_cache.get(p.arxiv_id) if relevance_cache else None
             if rel is not None:
                 return (0, -rel[0])
-            return (1, 0)
+            return (1, 0)  # Papers without a relevance score sort last
 
         return sorted(papers, key=_relevance_key)
     return list(papers)

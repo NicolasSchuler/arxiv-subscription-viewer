@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lightweight docs drift checks for CLI flags, presets, and keybindings."""
+"""Lightweight docs drift checks for CLI flags, presets, keybindings, and completions."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CLI_PATH = ROOT / "src/arxiv_browser/cli.py"
 APP_PATH = ROOT / "src/arxiv_browser/app.py"
 LLM_PATH = ROOT / "src/arxiv_browser/llm.py"
+COMPLETIONS_PATH = ROOT / "src/arxiv_browser/completions.py"
 README_PATH = ROOT / "README.md"
 CLAUDE_PATH = ROOT / "CLAUDE.md"
 DOCS_DIR = ROOT / "docs"
@@ -224,9 +225,86 @@ def _check_keybindings(readme_text: str, claude_text: str) -> list[str]:
     return errors
 
 
+def _extract_cli_commands(cli_text: str) -> set[str]:
+    """Extract the subcommand names from the ``CLI_COMMANDS`` tuple in cli.py."""
+    match = re.search(r"CLI_COMMANDS\s*=\s*\((.*?)\)", cli_text, re.DOTALL)
+    if not match:
+        return set()
+    return set(re.findall(r'"([a-z][-a-z]*)"', match.group(1)))
+
+
+def _extract_completion_script(completions_text: str, variable_name: str) -> str | None:
+    """Extract a raw completion script block from completions.py."""
+    match = re.search(
+        rf"{re.escape(variable_name)}\s*=\s*r?\"\"\"(.*?)\"\"\"",
+        completions_text,
+        re.DOTALL,
+    )
+    if not match:
+        return None
+    return match.group(1)
+
+
+def _extract_bash_commands(script: str) -> set[str]:
+    """Extract subcommands from the bash completion script."""
+    match = re.search(r'local commands="([^"]+)"', script)
+    if not match:
+        return set()
+    return set(match.group(1).split())
+
+
+def _extract_zsh_commands(script: str) -> set[str]:
+    """Extract subcommands from the zsh completion script."""
+    return set(re.findall(r"'([a-z][-a-z]*):", script))
+
+
+def _extract_fish_commands(script: str) -> set[str]:
+    """Extract subcommands from the fish completion script."""
+    return set(
+        re.findall(
+            r"^complete -c arxiv-viewer -n '__fish_use_subcommand' -a ([a-z][-a-z]*)\b",
+            script,
+            re.MULTILINE,
+        )
+    )
+
+
+def _check_completions(cli_text: str, completions_text: str) -> list[str]:
+    """Verify that every CLI subcommand appears in all three completion scripts."""
+    commands = _extract_cli_commands(cli_text)
+    if not commands:
+        return ["Could not parse CLI_COMMANDS from cli.py"]
+
+    shell_commands = {
+        "bash": _extract_bash_commands(
+            _extract_completion_script(completions_text, "_BASH_SCRIPT") or ""
+        ),
+        "zsh": _extract_zsh_commands(
+            _extract_completion_script(completions_text, "_ZSH_SCRIPT") or ""
+        ),
+        "fish": _extract_fish_commands(
+            _extract_completion_script(completions_text, "_FISH_SCRIPT") or ""
+        ),
+    }
+
+    errors: list[str] = []
+    for shell, extracted_commands in shell_commands.items():
+        if not extracted_commands:
+            errors.append(
+                f"Could not parse {shell} completion commands from src/arxiv_browser/completions.py"
+            )
+            continue
+        errors.extend(
+            f"{shell} completions missing subcommand: {cmd}"
+            for cmd in sorted(commands - extracted_commands)
+        )
+    return errors
+
+
 def main() -> int:
     cli_text = _read(CLI_PATH)
     llm_text = _read(LLM_PATH)
+    completions_text = _read(COMPLETIONS_PATH)
     _ = _read(APP_PATH)  # Keep app.py as an explicit source-of-truth dependency.
     readme_text = _read(README_PATH)
     claude_text = _read(CLAUDE_PATH)
@@ -235,6 +313,7 @@ def main() -> int:
     errors.extend(_check_cli_flags(readme_text, cli_text))
     errors.extend(_check_llm_presets(readme_text, claude_text, llm_text))
     errors.extend(_check_keybindings(readme_text, claude_text))
+    errors.extend(_check_completions(cli_text, completions_text))
 
     if errors:
         print("Documentation sync check failed:")

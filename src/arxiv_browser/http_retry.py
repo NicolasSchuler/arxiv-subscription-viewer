@@ -40,14 +40,14 @@ async def retry_with_backoff[T](
     After *max_retries* failed attempts the last exception is re-raised.
     """
     last_exc: Exception | None = None
-    for attempt in range(max_retries + 1):
+    for attempt in range(max_retries + 1):  # attempt 0 … max_retries (inclusive)
         try:
             return await fn()
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code not in RETRYABLE_STATUS_CODES:
-                raise
+                raise  # Non-retryable status (e.g. 404, 400) — re-raise immediately
             last_exc = exc
-            if attempt < max_retries:
+            if attempt < max_retries:  # No sleep after the last attempt
                 delay = backoff_base * (2**attempt)
                 logger.warning(
                     "%s: HTTP %d, retrying in %.1fs (attempt %d/%d)",
@@ -58,9 +58,10 @@ async def retry_with_backoff[T](
                     max_retries,
                 )
                 await asyncio.sleep(delay)
+        # Separate except block: status_code is only available on HTTPStatusError
         except (httpx.ConnectError, httpx.TimeoutException, httpx.ReadError) as exc:
             last_exc = exc
-            if attempt < max_retries:
+            if attempt < max_retries:  # No sleep after the last attempt
                 delay = backoff_base * (2**attempt)
                 logger.warning(
                     "%s: %s, retrying in %.1fs (attempt %d/%d)",
@@ -71,4 +72,4 @@ async def retry_with_backoff[T](
                     max_retries,
                 )
                 await asyncio.sleep(delay)
-    raise last_exc  # type: ignore[misc]
+    raise last_exc  # type: ignore[misc]  # last_exc is non-None: loop ran at least once

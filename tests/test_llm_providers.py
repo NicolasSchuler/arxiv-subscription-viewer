@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from arxiv_browser.llm_providers import CLIProvider, LLMProvider, LLMResult, resolve_provider
+from arxiv_browser.llm_providers import (
+    CLIProvider,
+    LLMProvider,
+    LLMResult,
+    llm_command_requires_shell,
+    resolve_provider,
+)
 
 # ============================================================================
 # LLMResult
@@ -121,6 +127,27 @@ class TestCLIProvider:
         result = await provider.execute("hello", timeout=5)
         assert result.success is False
         assert "allow_llm_shell_fallback" in result.error
+
+    async def test_shell_fallback_for_env_prefixed_command(self):
+        from unittest.mock import AsyncMock, patch
+
+        provider = CLIProvider("OPENAI_API_KEY=test-key llm {prompt}")
+        proc = AsyncMock()
+        proc.communicate.return_value = (b"ok\n", b"")
+        proc.returncode = 0
+
+        with patch(
+            "arxiv_browser.llm_providers.asyncio.create_subprocess_shell",
+            new_callable=AsyncMock,
+            return_value=proc,
+        ) as shell_mock:
+            result = await provider.execute("hello", timeout=5)
+
+        assert result.success is True
+        shell_mock.assert_called_once()
+
+    def test_env_prefixed_command_requires_shell(self):
+        assert llm_command_requires_shell("OPENAI_API_KEY=test-key llm {prompt}") is True
 
     async def test_shell_fallback_uses_windows_prompt_quoting(self):
         from unittest.mock import AsyncMock, patch
