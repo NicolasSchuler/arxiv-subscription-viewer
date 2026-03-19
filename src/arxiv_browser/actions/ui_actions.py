@@ -114,51 +114,8 @@ async def action_fetch_s2(app: "ArxivBrowser") -> None:
     app._s2_loading.add(aid)
     app._update_status_bar()
     app._get_ui_refresh_coordinator().refresh_detail_pane()  # Show loading indicator immediately
-    # Try SQLite cache first (off main thread)
     try:
-        cached = await asyncio.to_thread(
-            load_s2_paper, app._s2_db_path, aid, app._config.s2_cache_ttl_days
-        )
-    except _RECOVERABLE_ACTION_ERRORS as exc:
-        app._s2_loading.discard(aid)
-        app._s2_api_error = True
-        app._update_status_bar()
-        _log_action_failure(f"S2 cache lookup for {aid}", exc)
-        app.notify(
-            build_actionable_error(
-                "fetch Semantic Scholar data",
-                why="local cache lookup failed",
-                next_step="press e to retry, or press Ctrl+e to temporarily disable S2",
-            ),
-            title="S2",
-            severity="error",
-        )
-        return
-    except Exception as exc:
-        app._s2_loading.discard(aid)
-        app._s2_api_error = True
-        app._update_status_bar()
-        _log_action_failure(f"S2 cache lookup for {aid}", exc, unexpected=True)
-        app.notify(
-            build_actionable_error(
-                "fetch Semantic Scholar data",
-                why="local cache lookup failed",
-                next_step="press e to retry, or press Ctrl+e to temporarily disable S2",
-            ),
-            title="S2",
-            severity="error",
-        )
-        return
-    if cached:
-        app._s2_cache[aid] = cached
-        app._s2_api_error = False
-        app._s2_loading.discard(aid)
-        app._update_status_bar()
-        app._get_ui_refresh_coordinator().refresh_detail_and_list_item()
-        return
-    # Fetch from API
-    try:
-        app._track_task(app._fetch_s2_paper_async(aid))
+        app._track_dataset_task(app._fetch_s2_paper_async(aid))
     except _RECOVERABLE_ACTION_ERRORS as exc:
         app._s2_loading.discard(aid)
         _log_action_failure(f"S2 fetch scheduling for {aid}", exc)
@@ -172,16 +129,23 @@ async def action_fetch_s2(app: "ArxivBrowser") -> None:
 async def _fetch_s2_paper_async(app: "ArxivBrowser", arxiv_id: str) -> None:
     """Fetch S2 paper data and update UI on completion."""
     _sync_app_globals()
+    task_epoch = app._capture_dataset_epoch()
     try:
-        result, complete = await _load_or_fetch_s2_paper_cached(
+        client = app._http_client
+        if client is None:
+            app._s2_api_error = True
+            return
+
+        result = await app._get_services().enrichment.load_or_fetch_s2_paper(
             arxiv_id=arxiv_id,
             db_path=app._s2_db_path,
             cache_ttl_days=app._config.s2_cache_ttl_days,
-            client=app._http_client,
+            client=client,
             api_key=app._config.s2_api_key,
-            include_status=True,
         )
-        if not complete:
+        if not app._is_current_dataset_epoch(task_epoch):
+            return
+        if not result.complete or result.state == "unavailable":
             app._s2_api_error = True
             app.notify(
                 build_actionable_error(
@@ -193,23 +157,27 @@ async def _fetch_s2_paper_async(app: "ArxivBrowser", arxiv_id: str) -> None:
                 severity="error",
             )
             return
-        if result is None:
+        if result.state == "not_found" or result.paper is None:
             app._s2_api_error = False
-            app.notify(
-                build_actionable_warning(
-                    "No Semantic Scholar data was found for this paper",
-                    next_step="press e to retry later or continue with local metadata",
-                ),
-                title="S2",
-                severity="warning",
-            )
+            if not result.from_cache:
+                app.notify(
+                    build_actionable_warning(
+                        "No Semantic Scholar data was found for this paper",
+                        next_step="press e to retry later or continue with local metadata",
+                    ),
+                    title="S2",
+                    severity="warning",
+                )
             return
-        # Cache in memory + SQLite
-        app._s2_cache[arxiv_id] = result
+        app._s2_cache[arxiv_id] = result.paper
         app._s2_api_error = False
-        # Update UI if still relevant
-        app._get_ui_refresh_coordinator().refresh_detail_and_list_item()
+        app._get_ui_refresh_coordinator().refresh_detail_pane()
+        app._mark_badges_dirty("s2")
+    except asyncio.CancelledError:
+        raise
     except (httpx.HTTPError, OSError, RuntimeError, ValueError, TypeError) as exc:
+        if not app._is_current_dataset_epoch(task_epoch):
+            return
         _log_action_failure(f"S2 fetch for {arxiv_id}", exc)
         app._s2_api_error = True
         app.notify(
@@ -222,6 +190,8 @@ async def _fetch_s2_paper_async(app: "ArxivBrowser", arxiv_id: str) -> None:
             severity="error",
         )
     except Exception as exc:
+        if not app._is_current_dataset_epoch(task_epoch):
+            return
         _log_action_failure(f"S2 fetch for {arxiv_id}", exc, unexpected=True)
         app._s2_api_error = True
         app.notify(
@@ -234,8 +204,9 @@ async def _fetch_s2_paper_async(app: "ArxivBrowser", arxiv_id: str) -> None:
             severity="error",
         )
     finally:
-        app._s2_loading.discard(arxiv_id)
-        app._update_status_bar()
+        if app._is_current_dataset_epoch(task_epoch):
+            app._s2_loading.discard(arxiv_id)
+            app._update_status_bar()
 
 
 async def action_toggle_hf(app: "ArxivBrowser") -> None:
@@ -277,11 +248,8 @@ async def _fetch_hf_daily(app: "ArxivBrowser") -> None:
         return
     app._hf_loading = True
     app._update_status_bar()
-    # Try SQLite cache first
     try:
-        cached = await asyncio.to_thread(
-            load_hf_daily_cache, app._hf_db_path, app._config.hf_cache_ttl_hours
-        )
+        app._track_dataset_task(app._fetch_hf_daily_async())
     except _RECOVERABLE_ACTION_ERRORS as exc:
         app._hf_loading = False
         app._hf_api_error = True
@@ -296,40 +264,6 @@ async def _fetch_hf_daily(app: "ArxivBrowser") -> None:
             title="HF",
             severity="error",
         )
-        return
-    except Exception as exc:
-        app._hf_loading = False
-        app._hf_api_error = True
-        app._update_status_bar()
-        _log_action_failure("HF cache lookup", exc, unexpected=True)
-        app.notify(
-            build_actionable_error(
-                "fetch HuggingFace trending data",
-                why="local cache lookup failed",
-                next_step="retry in a moment or press Ctrl+h to disable HF",
-            ),
-            title="HF",
-            severity="error",
-        )
-        return
-    if cached is not None:
-        app._hf_cache = cached
-        app._hf_loading = False
-        app._hf_api_error = False
-        app._get_ui_refresh_coordinator().refresh_detail_pane()
-        app._mark_badges_dirty("hf")
-        matched = count_hf_matches(app._hf_cache, app._papers_by_id)
-        _notify_hf_matches(app, matched)
-        app._update_status_bar()
-        return
-    # Fetch from API
-    try:
-        app._track_task(app._fetch_hf_daily_async())
-    except _RECOVERABLE_ACTION_ERRORS as exc:
-        app._hf_loading = False
-        app._update_status_bar()
-        _log_action_failure("HF fetch scheduling", exc)
-        raise
     except Exception as exc:
         app._hf_loading = False
         app._update_status_bar()
@@ -350,14 +284,21 @@ async def _fetch_hf_daily_async(app: "ArxivBrowser") -> None:
         app: The running ``ArxivBrowser`` application instance.
     """
     _sync_app_globals()
+    task_epoch = app._capture_dataset_epoch()
     try:
-        papers, complete = await _load_or_fetch_hf_daily_cached(
+        client = app._http_client
+        if client is None:
+            app._hf_api_error = True
+            return
+
+        result = await app._get_services().enrichment.load_or_fetch_hf_daily(
             db_path=app._hf_db_path,
             cache_ttl_hours=app._config.hf_cache_ttl_hours,
-            client=app._http_client,
-            include_status=True,
+            client=client,
         )
-        if not complete:
+        if not app._is_current_dataset_epoch(task_epoch):
+            return
+        if not result.complete or result.state == "unavailable":
             app._hf_api_error = True
             app.notify(
                 build_actionable_error(
@@ -369,24 +310,29 @@ async def _fetch_hf_daily_async(app: "ArxivBrowser") -> None:
                 severity="error",
             )
             return
-        if not papers:
+        if result.state == "empty":
             app._hf_api_error = False
-            app.notify(
-                build_actionable_warning(
-                    "No HuggingFace trending data was returned",
-                    next_step="retry later or press Ctrl+h to disable HF",
-                ),
-                title="HF",
-                severity="warning",
-            )
+            if not result.from_cache:
+                app.notify(
+                    build_actionable_warning(
+                        "No HuggingFace trending data was returned",
+                        next_step="retry later or press Ctrl+h to disable HF",
+                    ),
+                    title="HF",
+                    severity="warning",
+                )
             return
-        app._hf_cache = {p.arxiv_id: p for p in papers}
+        app._hf_cache = {p.arxiv_id: p for p in result.papers}
         app._hf_api_error = False
         app._get_ui_refresh_coordinator().refresh_detail_pane()
         app._mark_badges_dirty("hf")
         matched = count_hf_matches(app._hf_cache, app._papers_by_id)
         _notify_hf_matches(app, matched)
+    except asyncio.CancelledError:
+        raise
     except (httpx.HTTPError, OSError, RuntimeError, ValueError, TypeError) as exc:
+        if not app._is_current_dataset_epoch(task_epoch):
+            return
         _log_action_failure("HF daily fetch", exc)
         app._hf_api_error = True
         app.notify(
@@ -399,6 +345,8 @@ async def _fetch_hf_daily_async(app: "ArxivBrowser") -> None:
             severity="error",
         )
     except Exception as exc:
+        if not app._is_current_dataset_epoch(task_epoch):
+            return
         _log_action_failure("HF daily fetch", exc, unexpected=True)
         app._hf_api_error = True
         app.notify(
@@ -411,8 +359,9 @@ async def _fetch_hf_daily_async(app: "ArxivBrowser") -> None:
             severity="error",
         )
     finally:
-        app._hf_loading = False
-        app._update_status_bar()
+        if app._is_current_dataset_epoch(task_epoch):
+            app._hf_loading = False
+            app._update_status_bar()
 
 
 async def action_check_versions(app: "ArxivBrowser") -> None:
@@ -456,7 +405,7 @@ async def action_check_versions(app: "ArxivBrowser") -> None:
         f"Checking {len(starred_ids)} starred papers...",
         title="Versions",
     )
-    app._track_task(app._check_versions_async(starred_ids))
+    app._track_dataset_task(app._check_versions_async(starred_ids))
 
 
 def action_show_similar(app: "ArxivBrowser") -> None:
@@ -497,24 +446,17 @@ async def _fetch_s2_recommendations_async(
 ) -> list[SemanticScholarPaper]:
     """Fetch S2 recommendations with SQLite cache."""
     _sync_app_globals()
-    cached = await asyncio.to_thread(
-        load_s2_recommendations,
-        app._s2_db_path,
-        arxiv_id,
-        S2_REC_CACHE_TTL_DAYS,
-    )
-    if cached:
-        return cached
     client = app._http_client
     if client is None:
         return []
-    recs = await fetch_s2_recommendations(arxiv_id, client, api_key=app._config.s2_api_key)
-    if recs:
-        try:
-            await asyncio.to_thread(save_s2_recommendations, app._s2_db_path, arxiv_id, recs)
-        except (OSError, sqlite3.Error):
-            logger.warning("Failed to cache S2 recommendations for %s", arxiv_id, exc_info=True)
-    return recs
+    result = await app._get_services().enrichment.load_or_fetch_s2_recommendations(
+        arxiv_id=arxiv_id,
+        db_path=app._s2_db_path,
+        cache_ttl_days=S2_REC_CACHE_TTL_DAYS,
+        client=client,
+        api_key=app._config.s2_api_key,
+    )
+    return result.papers
 
 
 def action_citation_graph(app: "ArxivBrowser") -> None:
@@ -537,7 +479,7 @@ def action_citation_graph(app: "ArxivBrowser") -> None:
     s2_data = app._s2_cache.get(paper.arxiv_id)
     paper_id = s2_data.s2_paper_id if s2_data else f"ARXIV:{paper.arxiv_id}"
     app.notify("Fetching citation graph...", title="Citations")
-    app._track_task(app._show_citation_graph(paper_id, paper.title))
+    app._track_dataset_task(app._show_citation_graph(paper_id, paper.title))
 
 
 async def _fetch_citation_graph(

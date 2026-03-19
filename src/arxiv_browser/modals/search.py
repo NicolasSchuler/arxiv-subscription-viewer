@@ -17,7 +17,7 @@ from textual.widgets.option_list import Option
 from arxiv_browser.models import ArxivSearchRequest
 from arxiv_browser.parsing import ARXIV_QUERY_FIELDS, build_arxiv_search_query
 from arxiv_browser.query import escape_rich_text
-from arxiv_browser.themes import THEME_COLORS
+from arxiv_browser.themes import theme_colors_for
 
 logger = logging.getLogger(__name__)
 
@@ -253,8 +253,9 @@ class CommandPaletteModal(ModalScreen[str]):
         from arxiv_browser._ascii import is_ascii_mode
 
         arrows = "^v" if is_ascii_mode() else "\u2191\u2193"
+        accent = theme_colors_for(self)["accent"]
         with Vertical():
-            yield Label(f"[bold {THEME_COLORS['accent']}]Command palette[/]", id="palette-title")
+            yield Label(f"[bold {accent}]Command palette[/]", id="palette-title")
             yield Input(
                 placeholder="Type to search command palette actions...",
                 id="palette-search",
@@ -340,8 +341,9 @@ class CommandPaletteModal(ModalScreen[str]):
 
     def _build_command_option(self, command: PaletteCommand) -> Option:
         """Render one command palette row."""
-        accent = THEME_COLORS["accent"]
-        muted = THEME_COLORS["muted"]
+        colors = theme_colors_for(self)
+        accent = colors["accent"]
+        muted = colors["muted"]
         safe_name = escape_rich_text(_truncate_palette_text(command.name, PALETTE_NAME_MAX_LEN))
         safe_desc = escape_rich_text(
             _truncate_palette_text(command.description, PALETTE_DESC_MAX_LEN)

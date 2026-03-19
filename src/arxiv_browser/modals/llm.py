@@ -16,7 +16,7 @@ from arxiv_browser.llm import CHAT_SYSTEM_PROMPT, LLM_COMMAND_TIMEOUT
 from arxiv_browser.llm_providers import CLIProvider
 from arxiv_browser.models import Paper
 from arxiv_browser.query import escape_rich_text
-from arxiv_browser.themes import THEME_COLORS
+from arxiv_browser.themes import theme_colors_for
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +69,9 @@ class SummaryModeModal(ModalScreen[str]):
         from arxiv_browser._ascii import is_ascii_mode
 
         dash = "--" if is_ascii_mode() else "\u2014"
+        g = theme_colors_for(self)["green"]
         with Vertical(id="summary-mode-dialog"):
             yield Label("AI Summary Mode", id="summary-mode-title")
-            g = THEME_COLORS["green"]
             yield Static(
                 f"  [{g}]d[/]  Default  [dim]{dash} Full summary (Problem / Approach / Results)[/]\n"
                 f"  [{g}]q[/]  Quick    [dim]{dash} Fast abstract-only summary[/]\n"

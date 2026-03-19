@@ -6,8 +6,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from arxiv_browser.huggingface import HuggingFacePaper
-from arxiv_browser.semantic_scholar import SemanticScholarPaper
+from arxiv_browser.huggingface import HFDailyCacheSnapshot, HuggingFacePaper
+from arxiv_browser.semantic_scholar import (
+    S2PaperCacheSnapshot,
+    SemanticScholarPaper,
+)
 from arxiv_browser.services.enrichment_service import (
     load_or_fetch_hf_daily_cached,
     load_or_fetch_s2_paper_cached,
@@ -28,8 +31,8 @@ async def test_load_or_fetch_s2_cache_hit(tmp_path) -> None:
     )
 
     with patch(
-        "arxiv_browser.services.enrichment_service.load_s2_paper",
-        return_value=cached,
+        "arxiv_browser.services.enrichment_service.load_s2_paper_snapshot",
+        return_value=S2PaperCacheSnapshot(status="found", paper=cached),
     ):
         result = await load_or_fetch_s2_paper_cached(
             arxiv_id="2401.10001",
@@ -56,10 +59,13 @@ async def test_load_or_fetch_s2_fetch_and_save_on_cache_miss(tmp_path) -> None:
     )
 
     with (
-        patch("arxiv_browser.services.enrichment_service.load_s2_paper", return_value=None),
+        patch(
+            "arxiv_browser.services.enrichment_service.load_s2_paper_snapshot",
+            return_value=S2PaperCacheSnapshot(status="miss", paper=None),
+        ),
         patch(
             "arxiv_browser.services.enrichment_service.fetch_s2_paper",
-            new=AsyncMock(return_value=fetched),
+            new=AsyncMock(return_value=(fetched, True)),
         ),
         patch("arxiv_browser.services.enrichment_service.save_s2_paper") as save_mock,
     ):
@@ -78,7 +84,10 @@ async def test_load_or_fetch_s2_fetch_and_save_on_cache_miss(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_load_or_fetch_s2_include_status_reports_incomplete_fetch(tmp_path) -> None:
     with (
-        patch("arxiv_browser.services.enrichment_service.load_s2_paper", return_value=None),
+        patch(
+            "arxiv_browser.services.enrichment_service.load_s2_paper_snapshot",
+            return_value=S2PaperCacheSnapshot(status="miss", paper=None),
+        ),
         patch(
             "arxiv_browser.services.enrichment_service.fetch_s2_paper",
             new=AsyncMock(return_value=(None, False)),
@@ -113,7 +122,8 @@ async def test_load_or_fetch_hf_cache_hit(tmp_path) -> None:
     cached = {"2401.20001": cached_paper}
 
     with patch(
-        "arxiv_browser.services.enrichment_service.load_hf_daily_cache", return_value=cached
+        "arxiv_browser.services.enrichment_service.load_hf_daily_cache_snapshot",
+        return_value=HFDailyCacheSnapshot(status="found", papers=cached),
     ):
         result = await load_or_fetch_hf_daily_cached(
             db_path=tmp_path / "hf.db",
@@ -140,10 +150,13 @@ async def test_load_or_fetch_hf_fetch_and_save_on_cache_miss(tmp_path) -> None:
     ]
 
     with (
-        patch("arxiv_browser.services.enrichment_service.load_hf_daily_cache", return_value=None),
+        patch(
+            "arxiv_browser.services.enrichment_service.load_hf_daily_cache_snapshot",
+            return_value=HFDailyCacheSnapshot(status="miss", papers={}),
+        ),
         patch(
             "arxiv_browser.services.enrichment_service.fetch_hf_daily_papers",
-            new=AsyncMock(return_value=fetched),
+            new=AsyncMock(return_value=(fetched, True)),
         ),
         patch("arxiv_browser.services.enrichment_service.save_hf_daily_cache") as save_mock,
     ):
@@ -160,7 +173,10 @@ async def test_load_or_fetch_hf_fetch_and_save_on_cache_miss(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_load_or_fetch_hf_include_status_reports_incomplete_fetch(tmp_path) -> None:
     with (
-        patch("arxiv_browser.services.enrichment_service.load_hf_daily_cache", return_value=None),
+        patch(
+            "arxiv_browser.services.enrichment_service.load_hf_daily_cache_snapshot",
+            return_value=HFDailyCacheSnapshot(status="miss", papers={}),
+        ),
         patch(
             "arxiv_browser.services.enrichment_service.fetch_hf_daily_papers",
             new=AsyncMock(return_value=([], False)),

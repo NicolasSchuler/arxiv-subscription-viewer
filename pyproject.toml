@@ -35,7 +35,7 @@ dependencies = [
 ]
 
 [project.scripts]
-arxiv-viewer = "arxiv_browser.app:main"
+arxiv-viewer = "arxiv_browser.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/NicolasSchuler/arxiv-subscription-viewer"

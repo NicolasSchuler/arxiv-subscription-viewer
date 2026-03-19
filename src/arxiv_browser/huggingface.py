@@ -10,17 +10,14 @@ get empty list on failure for graceful degradation.
 from __future__ import annotations
 
 __all__ = [
-    # Constants
     "HF_DEFAULT_CACHE_TTL_HOURS",
-    # Data model
+    "HFDailyCacheSnapshot",
     "HuggingFacePaper",
-    # API fetch
     "fetch_hf_daily_papers",
-    # Cache / DB
     "get_hf_db_path",
     "init_hf_db",
     "load_hf_daily_cache",
-    # Parsing
+    "load_hf_daily_cache_snapshot",
     "parse_hf_paper_response",
     "save_hf_daily_cache",
 ]
@@ -70,6 +67,14 @@ class HuggingFacePaper:
     ai_keywords: tuple[str, ...]  # Immutable for caching
     github_repo: str  # Empty string if no repo
     github_stars: int  # 0 if no repo
+
+
+@dataclass(slots=True, frozen=True)
+class HFDailyCacheSnapshot:
+    """Resolved cache state for the daily HuggingFace snapshot."""
+
+    status: Literal["miss", "empty", "found"]
+    papers: dict[str, HuggingFacePaper]
 
 
 # ============================================================================
@@ -252,6 +257,13 @@ def init_hf_db(db_path: Path) -> None:
             "  fetched_at TEXT NOT NULL"
             ")"
         )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS hf_daily_fetch_state ("
+            "  cache_key TEXT PRIMARY KEY,"
+            "  status TEXT NOT NULL,"
+            "  fetched_at TEXT NOT NULL"
+            ")"
+        )
 
 
 def _hf_paper_to_json(paper: HuggingFacePaper) -> str:
@@ -311,6 +323,69 @@ def _is_fresh(fetched_at_str: str, ttl_hours: int) -> bool:
         return False
 
 
+_HF_DAILY_CACHE_KEY = "daily"
+
+
+def _load_hf_fetch_state(
+    conn: sqlite3.Connection,
+    ttl_hours: int,
+) -> tuple[Literal["empty", "found"] | None, str | None]:
+    """Load fresh daily snapshot state from metadata, if present."""
+    row = conn.execute(
+        "SELECT status, fetched_at FROM hf_daily_fetch_state WHERE cache_key = ?",
+        (_HF_DAILY_CACHE_KEY,),
+    ).fetchone()
+    if row is None:
+        return None, None
+    status, fetched_at = row
+    if not isinstance(status, str) or not isinstance(fetched_at, str):
+        return None, None
+    if not _is_fresh(fetched_at, ttl_hours):
+        return None, None
+    if status not in {"empty", "found"}:
+        return None, None
+    if status == "empty":
+        return "empty", fetched_at
+    return "found", fetched_at
+
+
+def load_hf_daily_cache_snapshot(
+    db_path: Path,
+    ttl_hours: int = HF_DEFAULT_CACHE_TTL_HOURS,
+) -> HFDailyCacheSnapshot:
+    """Load cached HF daily papers and preserve explicit empty-state metadata."""
+    if not db_path.exists():
+        return HFDailyCacheSnapshot(status="miss", papers={})
+    try:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
+            status, _ = _load_hf_fetch_state(conn, ttl_hours)
+            if status == "empty":
+                return HFDailyCacheSnapshot(status="empty", papers={})
+
+            rows = conn.execute("SELECT payload_json, fetched_at FROM hf_daily_papers").fetchall()
+            if not rows:
+                return HFDailyCacheSnapshot(status="miss", papers={})
+
+            # Check freshness of the first entry (all saved at same time)
+            _, fetched_at = rows[0]
+            if not _is_fresh(fetched_at, ttl_hours):
+                return HFDailyCacheSnapshot(status="miss", papers={})
+
+            result: dict[str, HuggingFacePaper] = {}
+            for payload, _ in rows:
+                paper = _json_to_hf_paper(payload)
+                if paper is not None:
+                    result[paper.arxiv_id] = paper
+            if result:
+                return HFDailyCacheSnapshot(status="found", papers=result)
+            if status == "found":
+                return HFDailyCacheSnapshot(status="miss", papers={})
+            return HFDailyCacheSnapshot(status="miss", papers={})
+    except sqlite3.Error:
+        logger.warning("Failed to load HF cache", exc_info=True)
+        return HFDailyCacheSnapshot(status="miss", papers={})
+
+
 def load_hf_daily_cache(
     db_path: Path, ttl_hours: int = HF_DEFAULT_CACHE_TTL_HOURS
 ) -> dict[str, HuggingFacePaper] | None:
@@ -320,26 +395,10 @@ def load_hf_daily_cache(
     stale, empty, or not yet cached. This reflects the bulk-fetch
     nature of the API — all rows share the same fetch time.
     """
-    if not db_path.exists():
-        return None
-    try:
-        with closing(sqlite3.connect(str(db_path))) as conn, conn:
-            rows = conn.execute("SELECT payload_json, fetched_at FROM hf_daily_papers").fetchall()
-            if not rows:
-                return None
-            # Check freshness of the first entry (all saved at same time)
-            _, fetched_at = rows[0]
-            if not _is_fresh(fetched_at, ttl_hours):
-                return None
-            result: dict[str, HuggingFacePaper] = {}
-            for payload, _ in rows:
-                paper = _json_to_hf_paper(payload)
-                if paper is not None:
-                    result[paper.arxiv_id] = paper
-            return result or None
-    except sqlite3.Error:
-        logger.warning("Failed to load HF cache", exc_info=True)
-        return None
+    snapshot = load_hf_daily_cache_snapshot(db_path, ttl_hours)
+    if snapshot.status == "found":
+        return snapshot.papers
+    return None
 
 
 def save_hf_daily_cache(db_path: Path, papers: list[HuggingFacePaper]) -> None:
@@ -352,6 +411,7 @@ def save_hf_daily_cache(db_path: Path, papers: list[HuggingFacePaper]) -> None:
         now = datetime.now(UTC).isoformat()
         with closing(sqlite3.connect(str(db_path))) as conn, conn:
             conn.execute("DELETE FROM hf_daily_papers")
+            status = "empty"
             for paper in papers:
                 payload = _hf_paper_to_json(paper)
                 conn.execute(
@@ -359,5 +419,11 @@ def save_hf_daily_cache(db_path: Path, papers: list[HuggingFacePaper]) -> None:
                     "VALUES (?, ?, ?)",
                     (paper.arxiv_id, payload, now),
                 )
+                status = "found"
+            conn.execute(
+                "INSERT OR REPLACE INTO hf_daily_fetch_state (cache_key, status, fetched_at) "
+                "VALUES (?, ?, ?)",
+                (_HF_DAILY_CACHE_KEY, status, now),
+            )
     except sqlite3.Error:
         logger.warning("Failed to save HF cache", exc_info=True)

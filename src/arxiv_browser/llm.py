@@ -497,12 +497,19 @@ def _extract_tags_from_json(data: Any) -> list[str] | None:
     if isinstance(data, dict) and "tags" in data:
         tags = data["tags"]
         if isinstance(tags, list):
-            # str(t) is called twice: once for the filter predicate and once for
-            # the output value.  This is intentional — it normalises non-string
-            # elements (e.g. integers) in both the guard and the result.
-            # A bare list (not wrapped in {"tags": …}) is rejected here to avoid
-            # accidentally treating any JSON array as a tag list.
-            return [str(t).strip().lower() for t in tags if str(t).strip()]
+            if not tags:
+                return []
+            normalized: list[str] = []
+            seen: set[str] = set()
+            for tag in tags:
+                if not isinstance(tag, str):
+                    continue
+                cleaned = tag.strip().lower()
+                if not cleaned or cleaned in seen:
+                    continue
+                seen.add(cleaned)
+                normalized.append(cleaned)
+            return normalized or None
     return None
 
 

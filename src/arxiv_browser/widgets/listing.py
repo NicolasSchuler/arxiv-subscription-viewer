@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 
 from textual.app import ComposeResult
 from textual.css.query import NoMatches
@@ -17,7 +18,14 @@ from arxiv_browser.query import (
     truncate_at_word_boundary,
 )
 from arxiv_browser.semantic_scholar import SemanticScholarPaper
-from arxiv_browser.themes import THEME_COLORS, get_tag_color
+from arxiv_browser.themes import (
+    DEFAULT_TAG_NAMESPACE_COLORS,
+    DEFAULT_THEME,
+    category_colors_for,
+    get_tag_color,
+    tag_namespace_colors_for,
+    theme_colors_for,
+)
 
 PREVIEW_ABSTRACT_MAX_LEN = 150  # Max abstract preview length in list items
 META_LINE_BUDGET = 78  # Visible character budget for list metadata row
@@ -123,27 +131,33 @@ def _build_meta_parts(
     hf_data: HuggingFacePaper | None,
     version_update: tuple[int, int] | None,
     relevance_score: tuple[int, str] | None,
+    theme_colors: Mapping[str, str],
+    category_colors: Mapping[str, str],
+    tag_namespace_colors: Mapping[str, str],
 ) -> list[str]:
     """Build ordered metadata parts with deterministic priority."""
     parts: list[str] = []
     if source == "api":
-        parts.append(f"[{THEME_COLORS['orange']}]API[/]")
-    parts.extend([f"[dim]{arxiv_id}[/]", format_categories(categories)])
+        parts.append(f"[{theme_colors['orange']}]API[/]")
+    parts.extend([f"[dim]{arxiv_id}[/]", format_categories(categories, category_colors)])
     if tags:
-        tag_str = " ".join(f"[{get_tag_color(tag)}]#{escape_rich_text(tag)}[/]" for tag in tags)
+        tag_str = " ".join(
+            f"[{get_tag_color(tag, tag_namespace_colors)}]#{escape_rich_text(tag)}[/]"
+            for tag in tags
+        )
         parts.append(tag_str)
     if s2_data is not None:
-        parts.append(f"[{THEME_COLORS['green']}]C{s2_data.citation_count}[/]")
+        parts.append(f"[{theme_colors['green']}]C{s2_data.citation_count}[/]")
     if hf_data is not None:
         hf_upvotes = _ACTIVE_META_GLYPHS["hf_upvotes"]
-        parts.append(f"[{THEME_COLORS['orange']}]{hf_upvotes}{hf_data.upvotes}[/]")
+        parts.append(f"[{theme_colors['orange']}]{hf_upvotes}{hf_data.upvotes}[/]")
     if version_update is not None:
         old_v, new_v = version_update
         version_arrow = _ACTIVE_META_GLYPHS["version_arrow"]
-        parts.append(f"[{THEME_COLORS['pink']}]v{old_v}{version_arrow}v{new_v}[/]")
+        parts.append(f"[{theme_colors['pink']}]v{old_v}{version_arrow}v{new_v}[/]")
     if relevance_score is not None:
         score, _ = relevance_score
-        color, sym = _relevance_badge_parts(score)
+        color, sym = _relevance_badge_parts(score, theme_colors=theme_colors)
         parts.append(f"[{color}]{sym}{score}/10[/]")
     return parts
 
@@ -154,36 +168,41 @@ def _render_title_line(
     metadata: PaperMetadata | None,
     watched: bool,
     ht: dict[str, list[str]],
+    theme_colors: Mapping[str, str],
 ) -> str:
     """Build the title line with selection/watch/star/read indicators."""
     prefix_parts: list[str] = []
     if selected:
-        prefix_parts.append(f"[{THEME_COLORS['green']}]{_ACTIVE_ICON_SET['selected']}[/]")
+        prefix_parts.append(f"[{theme_colors['green']}]{_ACTIVE_ICON_SET['selected']}[/]")
     if watched:
-        prefix_parts.append(f"[{THEME_COLORS['orange']}]{_ACTIVE_ICON_SET['watched']}[/]")
+        prefix_parts.append(f"[{theme_colors['orange']}]{_ACTIVE_ICON_SET['watched']}[/]")
     if metadata and metadata.starred:
-        prefix_parts.append(f"[{THEME_COLORS['yellow']}]{_ACTIVE_ICON_SET['starred']}[/]")
+        prefix_parts.append(f"[{theme_colors['yellow']}]{_ACTIVE_ICON_SET['starred']}[/]")
     if metadata and metadata.is_read:
-        prefix_parts.append(f"[{THEME_COLORS['muted']}]{_ACTIVE_ICON_SET['read']}[/]")
+        prefix_parts.append(f"[{theme_colors['muted']}]{_ACTIVE_ICON_SET['read']}[/]")
     prefix = " ".join(prefix_parts)
 
-    title_text = highlight_text(paper.title, ht.get("title", []), THEME_COLORS["accent"])
+    title_text = highlight_text(paper.title, ht.get("title", []), theme_colors["accent"])
     if metadata and metadata.is_read:
         title_text = f"[dim]{title_text}[/]"
     return f"{prefix} {title_text}" if prefix else title_text
 
 
-def _relevance_badge_parts(score: int) -> tuple[str, str]:
+def _relevance_badge_parts(
+    score: int,
+    theme_colors: Mapping[str, str] | None = None,
+) -> tuple[str, str]:
     """Return (color, symbol) for a relevance score badge.
 
     Uses distinct symbols alongside color so the badge is accessible
     to colorblind users (WCAG 1.4.1 — Use of Color).
     """
+    colors = theme_colors or DEFAULT_THEME
     if score >= 8:
-        return THEME_COLORS["green"], _ACTIVE_META_GLYPHS["relevance_high"]
+        return colors["green"], _ACTIVE_META_GLYPHS["relevance_high"]
     if score >= 5:
-        return THEME_COLORS["yellow"], _ACTIVE_META_GLYPHS["relevance_mid"]
-    return THEME_COLORS["muted"], _ACTIVE_META_GLYPHS["relevance_low"]
+        return colors["yellow"], _ACTIVE_META_GLYPHS["relevance_mid"]
+    return colors["muted"], _ACTIVE_META_GLYPHS["relevance_low"]
 
 
 def _render_meta_badges(
@@ -193,6 +212,9 @@ def _render_meta_badges(
     hf_data: HuggingFacePaper | None,
     version_update: tuple[int, int] | None,
     relevance_score: tuple[int, str] | None,
+    theme_colors: Mapping[str, str],
+    category_colors: Mapping[str, str],
+    tag_namespace_colors: Mapping[str, str],
 ) -> str:
     """Build the meta line with arxiv_id, categories, and badges."""
     parts = _build_meta_parts(
@@ -204,23 +226,30 @@ def _render_meta_badges(
         hf_data=hf_data,
         version_update=version_update,
         relevance_score=relevance_score,
+        theme_colors=theme_colors,
+        category_colors=category_colors,
+        tag_namespace_colors=tag_namespace_colors,
     )
     return _compress_meta_parts(parts)
 
 
-def _render_abstract_preview(abstract_text: str | None, ht: dict[str, list[str]]) -> str:
+def _render_abstract_preview(
+    abstract_text: str | None,
+    ht: dict[str, list[str]],
+    theme_colors: Mapping[str, str],
+) -> str:
     """Build the abstract preview line for the paper list."""
     if abstract_text is None:
         return "[dim italic]Loading abstract...[/]"
     if not abstract_text:
         return "[dim italic]No abstract available[/]"
     if len(abstract_text) <= PREVIEW_ABSTRACT_MAX_LEN:
-        highlighted = highlight_text(abstract_text, ht.get("abstract", []), THEME_COLORS["accent"])
+        highlighted = highlight_text(abstract_text, ht.get("abstract", []), theme_colors["accent"])
         return f"[dim italic]{highlighted}[/]"
     truncated = truncate_at_word_boundary(
         abstract_text, PREVIEW_ABSTRACT_MAX_LEN, ascii_mode=_ACTIVE_LISTING_ASCII_MODE
     )
-    highlighted = highlight_text(truncated, ht.get("abstract", []), THEME_COLORS["accent"])
+    highlighted = highlight_text(truncated, ht.get("abstract", []), theme_colors["accent"])
     return f"[dim italic]{highlighted}[/]"
 
 
@@ -237,18 +266,34 @@ def render_paper_option(
     hf_data: HuggingFacePaper | None = None,
     version_update: tuple[int, int] | None = None,
     relevance_score: tuple[int, str] | None = None,
+    theme_colors: Mapping[str, str] | None = None,
+    category_colors: Mapping[str, str] | None = None,
+    tag_namespace_colors: Mapping[str, str] | None = None,
 ) -> str:
     """Render a paper as Rich markup for OptionList display."""
     ht = highlight_terms or {"title": [], "author": [], "abstract": []}
+    colors = theme_colors or DEFAULT_THEME
+    resolved_category_colors = category_colors or category_colors_for(None)
+    resolved_tag_namespace_colors = tag_namespace_colors or DEFAULT_TAG_NAMESPACE_COLORS
 
     lines = [
-        _render_title_line(paper, selected, metadata, watched, ht),
-        highlight_text(paper.authors, ht.get("author", []), THEME_COLORS["accent"]),
-        _render_meta_badges(paper, metadata, s2_data, hf_data, version_update, relevance_score),
+        _render_title_line(paper, selected, metadata, watched, ht, colors),
+        highlight_text(paper.authors, ht.get("author", []), colors["accent"]),
+        _render_meta_badges(
+            paper,
+            metadata,
+            s2_data,
+            hf_data,
+            version_update,
+            relevance_score,
+            colors,
+            resolved_category_colors,
+            tag_namespace_colors or resolved_tag_namespace_colors,
+        ),
     ]
 
     if show_preview:
-        lines.append(_render_abstract_preview(abstract_text, ht))
+        lines.append(_render_abstract_preview(abstract_text, ht, colors))
 
     return "\n".join(lines)
 
@@ -280,6 +325,9 @@ class PaperListItem(ListItem):
         show_preview: bool = False,
         abstract_text: str | None = None,
         highlight_terms: dict[str, list[str]] | None = None,
+        theme_colors: Mapping[str, str] | None = None,
+        category_colors: Mapping[str, str] | None = None,
+        tag_namespace_colors: Mapping[str, str] | None = None,
     ) -> None:
         super().__init__()
         self.paper = paper
@@ -293,6 +341,9 @@ class PaperListItem(ListItem):
             "author": [],
             "abstract": [],
         }
+        self._theme_colors = dict(theme_colors or DEFAULT_THEME)
+        self._category_colors = dict(category_colors or category_colors_for(None))
+        self._tag_namespace_colors = dict(tag_namespace_colors or DEFAULT_TAG_NAMESPACE_COLORS)
         self._s2_data: SemanticScholarPaper | None = None
         self._hf_data: HuggingFacePaper | None = None
         self._version_update: tuple[int, int] | None = None
@@ -342,28 +393,29 @@ class PaperListItem(ListItem):
     def _get_title_text(self) -> str:
         """Get the formatted title text based on selection and metadata state."""
         prefix_parts = []
+        colors = theme_colors_for(self, self._theme_colors)
 
         # Selection indicator
         if self._selected:
-            prefix_parts.append(f"[{THEME_COLORS['green']}]{_ACTIVE_ICON_SET['selected']}[/]")
+            prefix_parts.append(f"[{colors['green']}]{_ACTIVE_ICON_SET['selected']}[/]")
 
         # Watched indicator
         if self._watched:
-            prefix_parts.append(f"[{THEME_COLORS['orange']}]{_ACTIVE_ICON_SET['watched']}[/]")
+            prefix_parts.append(f"[{colors['orange']}]{_ACTIVE_ICON_SET['watched']}[/]")
 
         # Starred indicator
         if self._metadata and self._metadata.starred:
-            prefix_parts.append(f"[{THEME_COLORS['yellow']}]{_ACTIVE_ICON_SET['starred']}[/]")
+            prefix_parts.append(f"[{colors['yellow']}]{_ACTIVE_ICON_SET['starred']}[/]")
 
         # Read indicator
         if self._metadata and self._metadata.is_read:
-            prefix_parts.append(f"[{THEME_COLORS['muted']}]{_ACTIVE_ICON_SET['read']}[/]")
+            prefix_parts.append(f"[{colors['muted']}]{_ACTIVE_ICON_SET['read']}[/]")
 
         prefix = " ".join(prefix_parts)
         title_text = highlight_text(
             self.paper.title,
             self._highlight_terms.get("title", []),
-            THEME_COLORS["accent"],
+            colors["accent"],
         )
         # Dim title for read papers — unread titles stay bold/bright
         is_read = self._metadata and self._metadata.is_read
@@ -375,14 +427,16 @@ class PaperListItem(ListItem):
 
     def _get_authors_text(self) -> str:
         """Get the formatted author text."""
+        colors = theme_colors_for(self, self._theme_colors)
         return highlight_text(
             self.paper.authors,
             self._highlight_terms.get("author", []),
-            THEME_COLORS["accent"],
+            colors["accent"],
         )
 
     def _get_meta_text(self) -> str:
         """Get the formatted metadata text."""
+        colors = theme_colors_for(self, self._theme_colors)
         parts = _build_meta_parts(
             source=self.paper.source,
             arxiv_id=self.paper.arxiv_id,
@@ -392,6 +446,9 @@ class PaperListItem(ListItem):
             hf_data=self._hf_data,
             version_update=self._version_update,
             relevance_score=self._relevance_score,
+            theme_colors=colors,
+            category_colors=category_colors_for(self, self._category_colors),
+            tag_namespace_colors=tag_namespace_colors_for(self, self._tag_namespace_colors),
         )
         return _compress_meta_parts(parts)
 
@@ -402,6 +459,7 @@ class PaperListItem(ListItem):
         Handles empty abstracts and truncates at word boundaries.
         """
         abstract = self._abstract_text
+        colors = theme_colors_for(self, self._theme_colors)
         if abstract is None:
             return "[dim italic]Loading abstract...[/]"
         if not abstract:
@@ -410,7 +468,7 @@ class PaperListItem(ListItem):
             highlighted = highlight_text(
                 abstract,
                 self._highlight_terms.get("abstract", []),
-                THEME_COLORS["accent"],
+                colors["accent"],
             )
             return f"[dim italic]{highlighted}[/]"
         # Truncate at word boundary for cleaner display
@@ -420,7 +478,7 @@ class PaperListItem(ListItem):
         highlighted = highlight_text(
             truncated,
             self._highlight_terms.get("abstract", []),
-            THEME_COLORS["accent"],
+            colors["accent"],
         )
         return f"[dim italic]{highlighted}[/]"
 

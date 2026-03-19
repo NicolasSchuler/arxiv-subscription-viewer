@@ -34,6 +34,7 @@ import time
 import webbrowser
 from collections import deque
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -321,7 +322,9 @@ from arxiv_browser.themes import (
     THEME_NAMES,
     THEME_TAG_NAMESPACE_COLORS,
     THEMES,
+    ThemeRuntime,
     _build_textual_theme,
+    build_theme_runtime,
     get_tag_color,
     parse_tag_namespace,
 )
@@ -503,6 +506,30 @@ FOOTER_CONTEXTS: dict[str, list[tuple[str, str]]] = {
     "search": _widget_chrome.build_search_footer_bindings(),
     "api": _widget_chrome.build_api_footer_bindings(),
 }
+
+
+@dataclass(slots=True, frozen=True)
+class _PaletteAppState:
+    """Minimal app state snapshot for command-palette availability decisions."""
+
+    in_arxiv_api_mode: bool
+    hf_active: bool
+    watch_filter_active: bool
+    show_abstract_preview: bool
+    detail_mode: str
+    active_query: str
+    has_history_navigation: bool
+    watch_list: list[WatchListEntry]
+    has_marks: bool
+    has_starred: bool
+    llm_configured: bool
+    has_visible_papers: bool
+    has_selection: bool
+    has_current_paper: bool
+    has_target_papers: bool
+    s2_active: bool
+    s2_data_loaded: bool
+
 
 # Command palette registry: (name, description, key_hint, action_name)
 # action_name maps to ArxivBrowser.action_* methods (or "" for non-action commands)
@@ -785,13 +812,19 @@ class ArxivBrowser(App):
         self.selected_ids: set[str] = set()  # Track selected arxiv_ids
         self._search_timer: Timer | None = None
         self._pending_query: str = ""
+        self._applied_query: str = ""
         self._detail_timer: Timer | None = None
         self._pending_detail_paper: Paper | None = None
         self._pending_detail_started_at: float | None = None
         self._badges_dirty: set[str] = set()
         self._badge_timer: Timer | None = None
+        self._sort_refresh_dirty: set[str] = set()
+        self._sort_refresh_timer: Timer | None = None
         self._sort_index: int = 0  # Index into SORT_OPTIONS
         self._services: AppServices = services or build_default_app_services()
+        self._shutting_down: bool = False
+        self._dataset_epoch: int = 0
+        self._theme_runtime: ThemeRuntime = build_theme_runtime("monokai")
 
         # Configuration and persistence
         self._config = config or UserConfig()
@@ -843,6 +876,7 @@ class ArxivBrowser(App):
 
         # Background task tracking (prevent GC of fire-and-forget tasks)
         self._background_tasks: set[asyncio.Task[None]] = set()
+        self._dataset_tasks: set[asyncio.Task[None]] = set()
 
         # PDF download state
         self._download_queue: deque[Paper] = deque()
@@ -938,6 +972,20 @@ class ArxivBrowser(App):
             self._services = services
         return services
 
+    def _resolved_theme_runtime(self) -> ThemeRuntime:
+        """Return app-owned runtime theme state, rebuilding a default when absent."""
+        runtime = getattr(self, "_theme_runtime", None)
+        if isinstance(runtime, ThemeRuntime):
+            return runtime
+        config = getattr(self, "_config", UserConfig())
+        runtime = build_theme_runtime(
+            config.theme_name,
+            theme_overrides=config.theme,
+            category_overrides=config.category_colors,
+        )
+        self._theme_runtime = runtime
+        return runtime
+
     def compose(self) -> ComposeResult:
         """Build the main UI layout: header, split panes for list/detail, and footer."""
         yield Header()
@@ -987,7 +1035,7 @@ class ArxivBrowser(App):
         # Initialize HF runtime state from config
         self._hf_active = self._config.hf_enabled
         if self._hf_active:
-            self._track_task(self._fetch_hf_daily())
+            self._track_dataset_task(self._fetch_hf_daily())
 
         # Initialize date navigator if in history mode
         if self._is_history_mode() and len(self._history_files) > 1:
@@ -1048,8 +1096,7 @@ class ArxivBrowser(App):
 
         Uses atomic swap pattern to avoid race conditions with timer callbacks.
         """
-        # Save session state before exit
-        self._save_session_state()
+        self._shutting_down = True
 
         # Clean up timers
         timer = self._search_timer
@@ -1064,8 +1111,17 @@ class ArxivBrowser(App):
         self._badge_timer = None
         if badge_timer is not None:
             badge_timer.stop()
+        sort_timer = getattr(self, "_sort_refresh_timer", None)
+        self._sort_refresh_timer = None
+        if sort_timer is not None:
+            sort_timer.stop()
+
+        # Save after timers are cancelled so a pending debounce cannot overwrite
+        # the last applied filter during teardown.
+        self._save_session_state()
 
         # Cancel tracked background tasks to avoid leaks during teardown.
+        self._cancel_dataset_tasks()
         background_tasks = getattr(self, "_background_tasks", set())
         pending = [task for task in background_tasks if not task.done()]
         for task in pending:
@@ -1205,12 +1261,54 @@ class ArxivBrowser(App):
             return
         self._track_task(date_nav.update_dates(self._history_files, self._current_date_index))
 
-    def _track_task(self, coro: Any) -> asyncio.Task[None]:
+    def _capture_dataset_epoch(self) -> int:
+        """Capture the current dataset epoch for stale-task guards."""
+        return getattr(self, "_dataset_epoch", 0)
+
+    def _is_current_dataset_epoch(self, epoch: int) -> bool:
+        """Return whether a task epoch still matches the live dataset."""
+        return not getattr(self, "_shutting_down", False) and epoch == getattr(
+            self, "_dataset_epoch", 0
+        )
+
+    def _advance_dataset_epoch(self) -> int:
+        """Invalidate dataset-bound async work and return the new epoch."""
+        self._dataset_epoch = getattr(self, "_dataset_epoch", 0) + 1
+        self._cancel_dataset_tasks()
+        return self._dataset_epoch
+
+    def _cancel_dataset_tasks(self) -> None:
+        """Cancel in-flight async work whose results belong to the prior dataset."""
+        dataset_tasks = list(getattr(self, "_dataset_tasks", set()))
+        for task in dataset_tasks:
+            if not task.done():
+                task.cancel()
+        if hasattr(self, "_dataset_tasks"):
+            self._dataset_tasks.clear()
+
+    def _track_task(self, coro: Any, *, dataset_bound: bool = False) -> asyncio.Task[None]:
         """Create an asyncio task and track it to prevent garbage collection."""
         task = asyncio.create_task(coro)
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
+        if dataset_bound:
+            self._dataset_tasks.add(task)
+            task.add_done_callback(self._dataset_tasks.discard)
         task.add_done_callback(self._on_task_done)
+        return task
+
+    def _track_dataset_task(self, coro: Any) -> asyncio.Task[None]:
+        """Track background work that must be cancelled on dataset swaps."""
+        tracker = self._track_task
+        if getattr(tracker, "__func__", None) is ArxivBrowser._track_task:
+            return tracker(coro, dataset_bound=True)
+
+        task = tracker(coro)
+        if isinstance(task, asyncio.Task):
+            dataset_tasks = getattr(self, "_dataset_tasks", None)
+            if dataset_tasks is not None:
+                dataset_tasks.add(task)
+                task.add_done_callback(dataset_tasks.discard)
         return task
 
     def _on_task_done(self, task: asyncio.Task[None]) -> None:
@@ -1220,6 +1318,8 @@ class ArxivBrowser(App):
         exc = task.exception()
         if exc is not None:
             logger.error("Unhandled exception in background task: %s", exc, exc_info=exc)
+            if getattr(self, "_shutting_down", False):
+                return
             try:
                 self.notify(str(exc)[:200], severity="error", title="Background task error")
             except Exception:
@@ -1230,50 +1330,38 @@ class ArxivBrowser(App):
 
         Layers: default → per-theme → user overrides.
         """
-        CATEGORY_COLORS.clear()
-        CATEGORY_COLORS.update(DEFAULT_CATEGORY_COLORS)
-        theme_cats = THEME_CATEGORY_COLORS.get(self._config.theme_name)
-        if theme_cats:
-            CATEGORY_COLORS.update(theme_cats)
-        CATEGORY_COLORS.update(self._config.category_colors)
+        theme_runtime = build_theme_runtime(
+            self._config.theme_name,
+            theme_overrides=self._config.theme,
+            category_overrides=self._config.category_colors,
+        )
+        self._theme_runtime = theme_runtime
         format_categories.cache_clear()
 
     def _apply_theme_overrides(self) -> None:
         """Apply theme overrides from config to both Rich markup and CSS variables.
 
         Layers: named base theme → per-key overrides from config.
-        Also updates TAG_NAMESPACE_COLORS for per-theme tag styling.
+        Also refreshes app-owned runtime theme state for tag/category styling.
         """
-        base = THEMES.get(self._config.theme_name, DEFAULT_THEME)
-        THEME_COLORS.clear()
-        THEME_COLORS.update(base)
-        THEME_COLORS.update(self._config.theme)
+        theme_runtime = build_theme_runtime(
+            self._config.theme_name,
+            theme_overrides=self._config.theme,
+            category_overrides=self._config.category_colors,
+        )
+        self._theme_runtime = theme_runtime
         # Rebuild and activate Textual theme for CSS variable resolution
         if self._config.theme:
-            merged = dict(base)
-            merged.update(self._config.theme)
             try:
-                self.register_theme(_build_textual_theme(self._config.theme_name, merged))
+                self.register_theme(
+                    _build_textual_theme(self._config.theme_name, theme_runtime.colors)
+                )
             except Exception as e:
                 logger.debug("Skipping theme registration in current context: %s", e, exc_info=True)
         try:
             self.theme = self._config.theme_name
         except Exception as e:
             logger.debug("Skipping theme activation in current context: %s", e, exc_info=True)
-        # Apply per-theme tag namespace colors
-        TAG_NAMESPACE_COLORS.clear()
-        TAG_NAMESPACE_COLORS.update(
-            {
-                "topic": "#66d9ef",
-                "status": "#a6e22e",
-                "project": "#fd971f",
-                "method": "#ae81ff",
-                "priority": "#f92672",
-            }
-        )
-        theme_ns = THEME_TAG_NAMESPACE_COLORS.get(self._config.theme_name)
-        if theme_ns:
-            TAG_NAMESPACE_COLORS.update(theme_ns)
 
     def _schedule_abstract_load(self, paper: Paper) -> None:
         """Schedule an abstract load with concurrency limits."""
@@ -1281,7 +1369,7 @@ class ArxivBrowser(App):
             return
         if len(self._abstract_loading) < MAX_ABSTRACT_LOADS:
             self._abstract_loading.add(paper.arxiv_id)
-            self._track_task(self._load_abstract_async(paper))
+            self._track_dataset_task(self._load_abstract_async(paper))
             return
         self._abstract_queue.append(paper)
         self._abstract_pending_ids.add(paper.arxiv_id)
@@ -1296,7 +1384,7 @@ class ArxivBrowser(App):
             if paper.arxiv_id in self._abstract_cache:
                 continue
             self._abstract_loading.add(paper.arxiv_id)
-            self._track_task(self._load_abstract_async(paper))
+            self._track_dataset_task(self._load_abstract_async(paper))
 
     def _get_abstract_text(self, paper: Paper, allow_async: bool) -> str | None:
         """Return cached abstract text, scheduling async load if needed."""
@@ -1320,13 +1408,18 @@ class ArxivBrowser(App):
 
     async def _load_abstract_async(self, paper: Paper) -> None:
         """Clean a paper's LaTeX abstract off-thread and update the display."""
+        task_epoch = self._capture_dataset_epoch()
         try:
             cleaned = await asyncio.to_thread(clean_latex, paper.abstract_raw)
+            if not self._is_current_dataset_epoch(task_epoch):
+                return
             self._abstract_cache[paper.arxiv_id] = cleaned
             # Only update if not already set (idempotent to avoid race conditions)
             if paper.abstract is None:
                 paper.abstract = cleaned
             self._update_abstract_display(paper.arxiv_id)
+        except asyncio.CancelledError:
+            raise
         except Exception:
             logger.warning("Abstract load failed for %s", paper.arxiv_id, exc_info=True)
         finally:
@@ -1430,7 +1523,7 @@ class ArxivBrowser(App):
         if snapshot is not None:
             self._config.session = SessionState(
                 scroll_index=snapshot.list_index,
-                current_filter=snapshot.search_query.strip(),
+                current_filter=snapshot.applied_query.strip(),
                 sort_index=snapshot.sort_index,
                 selected_ids=list(snapshot.selected_ids),
                 current_date=current_date_str,
@@ -1447,11 +1540,10 @@ class ArxivBrowser(App):
 
         try:
             list_view = self._get_paper_list_widget()
-            search_input = self._get_search_input_widget()
 
             self._config.session = SessionState(
                 scroll_index=list_view.highlighted if list_view.highlighted is not None else 0,
-                current_filter=search_input.value.strip(),
+                current_filter=self._get_active_query(),
                 sort_index=self._sort_index,
                 selected_ids=list(self.selected_ids),
                 current_date=current_date_str,
@@ -1460,7 +1552,7 @@ class ArxivBrowser(App):
             # DOM already torn down during shutdown, save with defaults
             self._config.session = SessionState(
                 scroll_index=0,
-                current_filter="",
+                current_filter=self._get_active_query(),
                 sort_index=self._sort_index,
                 selected_ids=list(self.selected_ids),
                 current_date=current_date_str,
@@ -1556,7 +1648,6 @@ class ArxivBrowser(App):
         """Capture local browsing state before entering API search mode."""
         try:
             list_view = self._get_paper_list_widget()
-            search_input = self._get_search_input_widget()
         except NoMatches:
             return None
 
@@ -1565,8 +1656,9 @@ class ArxivBrowser(App):
             papers_by_id=self._papers_by_id,
             selected_ids=set(self.selected_ids),
             sort_index=self._sort_index,
-            search_query=search_input.value.strip(),
+            search_query=self._get_live_query(),
             pending_query=self._pending_query,
+            applied_query=self._applied_query,
             watch_filter_active=self._watch_filter_active,
             active_bookmark_index=self._active_bookmark_index,
             list_index=list_view.highlighted if list_view.highlighted is not None else 0,
@@ -1581,11 +1673,15 @@ class ArxivBrowser(App):
         if snapshot is None:
             return
 
+        self._advance_dataset_epoch()
         self.all_papers = snapshot.all_papers
         self._papers_by_id = snapshot.papers_by_id
+        self.filtered_papers = self.all_papers.copy()
+        self._reset_dataset_view_state()
         self.selected_ids = set(snapshot.selected_ids)
         self._sort_index = snapshot.sort_index
         self._pending_query = snapshot.pending_query
+        self._applied_query = snapshot.applied_query
         self._watch_filter_active = snapshot.watch_filter_active
         self._active_bookmark_index = snapshot.active_bookmark_index
         self._highlight_terms = {
@@ -1684,6 +1780,7 @@ class ArxivBrowser(App):
         Use immediate=True for toggle-off cases where UX needs instant feedback.
         """
         self._badges_dirty.update(badge_types)
+        self._schedule_sort_sensitive_refresh(*badge_types, immediate=immediate)
         if immediate:
             old = self._badge_timer
             self._badge_timer = None
@@ -1721,8 +1818,15 @@ class ArxivBrowser(App):
         if "version" in dirty:
             dirty_ids.update(self._version_updates.keys())
 
+        if "relevance" in dirty:
+            dirty_ids.update(self._relevance_scores.keys())
+
         # Unknown badge type, or explicit full redraw request: fall back to full repaint.
-        if not dirty or refresh_all or any(kind not in {"s2", "hf", "version"} for kind in dirty):
+        if (
+            not dirty
+            or refresh_all
+            or any(kind not in {"s2", "hf", "version", "relevance"} for kind in dirty)
+        ):
             return list(range(len(self.filtered_papers)))
 
         if not dirty_ids:
@@ -1752,6 +1856,64 @@ class ArxivBrowser(App):
             len(self.filtered_papers),
         )
 
+    def _sort_sensitive_badge_kind(self, badge_kind: str) -> bool:
+        """Return whether the active sort order depends on a cache-backed badge."""
+        sort_index = getattr(self, "_sort_index", 0)
+        if sort_index < 0 or sort_index >= len(SORT_OPTIONS):
+            return False
+        sort_key = SORT_OPTIONS[sort_index]
+        return (
+            (badge_kind == "s2" and sort_key == "citations")
+            or (badge_kind == "hf" and sort_key == "trending")
+            or (badge_kind == "relevance" and sort_key == "relevance")
+        )
+
+    def _schedule_sort_sensitive_refresh(
+        self,
+        *badge_types: str,
+        immediate: bool = False,
+    ) -> None:
+        """Debounce re-sorts triggered by async cache updates."""
+        if not any(self._sort_sensitive_badge_kind(kind) for kind in badge_types):
+            return
+        self._sort_refresh_dirty.update(badge_types)
+        if immediate:
+            timer = self._sort_refresh_timer
+            self._sort_refresh_timer = None
+            if timer is not None:
+                timer.stop()
+            self._flush_sort_sensitive_refresh()
+            return
+        timer = self._sort_refresh_timer
+        self._sort_refresh_timer = None
+        if timer is not None:
+            timer.stop()
+        self._sort_refresh_timer = self.set_timer(
+            BADGE_COALESCE_DELAY,
+            self._flush_sort_sensitive_refresh,
+        )
+
+    def _flush_sort_sensitive_refresh(self) -> None:
+        """Re-sort the list when async cache updates affect ordering."""
+        self._sort_refresh_timer = None
+        dirty = self._sort_refresh_dirty.copy()
+        self._sort_refresh_dirty.clear()
+        if not dirty or not any(self._sort_sensitive_badge_kind(kind) for kind in dirty):
+            return
+
+        highlighted = self._get_current_paper()
+        highlighted_id = highlighted.arxiv_id if highlighted is not None else None
+        self._sort_papers()
+        self._refresh_list_view()
+        if highlighted_id is not None:
+            visible_index = self._resolve_visible_index(highlighted_id)
+            if visible_index is not None:
+                try:
+                    self._get_paper_list_widget().highlighted = visible_index
+                except NoMatches:
+                    return
+        self._refresh_detail_pane()
+
     # ========================================================================
     # Version tracking
     # ========================================================================
@@ -1766,6 +1928,7 @@ class ArxivBrowser(App):
 
     async def _check_versions_async(self, arxiv_ids: set[str]) -> None:
         """Background task: check starred papers for newer arXiv versions."""
+        task_epoch = self._capture_dataset_epoch()
         try:
             client = self._http_client
             if client is None:
@@ -1777,6 +1940,8 @@ class ArxivBrowser(App):
             total_batches = max(1, -(-len(id_list) // self.VERSION_CHECK_BATCH_SIZE))
 
             for i in range(0, len(id_list), self.VERSION_CHECK_BATCH_SIZE):
+                if not self._is_current_dataset_epoch(task_epoch):
+                    return
                 batch_num = i // self.VERSION_CHECK_BATCH_SIZE + 1
                 self._version_progress = (batch_num, total_batches)
                 self._update_footer()
@@ -1805,6 +1970,8 @@ class ArxivBrowser(App):
                     )
 
             # Compare with stored versions
+            if not self._is_current_dataset_epoch(task_epoch):
+                return
             updates_found = apply_version_updates(
                 version_map,
                 self._config.paper_metadata,
@@ -1825,6 +1992,8 @@ class ArxivBrowser(App):
                 )
             else:
                 self.notify("All starred papers are up to date", title="Versions")
+        except asyncio.CancelledError:
+            raise
         except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
             logger.warning(
                 "Version check failed (%s): %s",
@@ -1858,9 +2027,10 @@ class ArxivBrowser(App):
                 severity="error",
             )
         finally:
-            self._version_checking = False
-            self._version_progress = None
-            self._update_status_bar()
+            if self._is_current_dataset_epoch(task_epoch):
+                self._version_checking = False
+                self._version_progress = None
+                self._update_status_bar()
 
     def _version_update_for(self, arxiv_id: str) -> tuple[int, int] | None:
         """Return version update tuple if paper has an update, else None."""
@@ -1996,6 +2166,12 @@ class ArxivBrowser(App):
     def _debounced_filter(self) -> None:
         """Apply filter after debounce delay."""
         self._search_timer = None
+        if getattr(self, "_shutting_down", False):
+            return
+        try:
+            self._get_paper_list_widget()
+        except NoMatches:
+            return
         self._apply_filter(self._pending_query)
 
     @on(DateNavigator.JumpToDate)
@@ -2013,7 +2189,11 @@ class ArxivBrowser(App):
             self.action_next_date()
 
     def _get_active_query(self) -> str:
-        """Get the active search query, preferring the current input value."""
+        """Get the filter query currently applied to the paper list."""
+        return str(getattr(self, "_applied_query", "")).strip()
+
+    def _get_live_query(self) -> str:
+        """Get the current search text, even if debounce has not applied it yet."""
         try:
             return self._get_search_input_widget().value.strip()
         except (AttributeError, NoMatches):
@@ -2076,6 +2256,7 @@ class ArxivBrowser(App):
         query = query.strip()
         # Keep status/empty-state context synchronized with the applied filter.
         self._pending_query = query
+        self._applied_query = query
 
         # Clear match scores by default (only fuzzy search populates them)
         self._match_scores.clear()
@@ -2217,6 +2398,10 @@ class ArxivBrowser(App):
 
         Uses OptionList for virtual rendering — only visible lines are drawn.
         """
+        highlighted_id = None
+        current = self._get_current_paper()
+        if current is not None:
+            highlighted_id = current.arxiv_id
         self._cancel_pending_detail_update()
         self._rebuild_visible_index()
         option_list = self._get_paper_list_widget()
@@ -2228,7 +2413,10 @@ class ArxivBrowser(App):
                 for paper in self.filtered_papers
             ]
             option_list.add_options(options)
-            option_list.highlighted = 0
+            restored_index = (
+                self._resolve_visible_index(highlighted_id) if highlighted_id is not None else None
+            )
+            option_list.highlighted = restored_index if restored_index is not None else 0
         else:
             empty_msg = build_list_empty_message(
                 query=self._get_active_query(),
@@ -2246,6 +2434,7 @@ class ArxivBrowser(App):
     def _render_option(self, paper: Paper) -> str:
         """Render a single paper as Rich markup for OptionList."""
         aid = paper.arxiv_id
+        theme_runtime = self._resolved_theme_runtime()
         return render_paper_option(
             paper,
             selected=aid in self.selected_ids,
@@ -2258,6 +2447,9 @@ class ArxivBrowser(App):
             hf_data=self._hf_cache.get(aid) if self._hf_active else None,
             version_update=self._version_updates.get(aid),
             relevance_score=self._relevance_scores.get(aid),
+            theme_colors=theme_runtime.colors,
+            category_colors=theme_runtime.category_colors,
+            tag_namespace_colors=theme_runtime.tag_namespace_colors,
         )
 
     def _update_option_at_index(self, index: int) -> None:
@@ -2712,12 +2904,11 @@ class ArxivBrowser(App):
 
     def _get_target_papers(self) -> list[Paper]:
         """Get papers to export (selected or current)."""
-        details = self._get_paper_details_widget()
         return resolve_target_papers(
             filtered_papers=self.filtered_papers,
             selected_ids=self.selected_ids,
             papers_by_id=self._papers_by_id,
-            current_paper=details.paper,
+            current_paper=self._get_current_paper(),
         )
 
     # ========================================================================
@@ -2735,7 +2926,7 @@ class ArxivBrowser(App):
         if not source:  # User cancelled the source modal
             return
         if source == "s2":
-            self._track_task(self._show_s2_recommendations(paper))
+            self._track_dataset_task(self._show_s2_recommendations(paper))
         else:
             self._show_local_recommendations(paper)
 
@@ -2751,7 +2942,9 @@ class ArxivBrowser(App):
                 self.notify("Similarity indexing in progress...", title="Similar")
                 return
             self.notify("Indexing papers for similarity...", title="Similar")
-            self._tfidf_build_task = self._track_task(self._build_tfidf_index_async(corpus_key))
+            self._tfidf_build_task = self._track_dataset_task(
+                self._build_tfidf_index_async(corpus_key)
+            )
             return
 
         similar_papers = find_similar_papers(
@@ -2795,12 +2988,15 @@ class ArxivBrowser(App):
 
     async def _build_tfidf_index_async(self, corpus_key: str) -> None:
         """Build the TF-IDF index off the UI thread and publish it when fresh."""
+        task_epoch = self._capture_dataset_epoch()
         papers_snapshot = list(self.all_papers)
         try:
             index = await asyncio.to_thread(self._build_tfidf_index_for_similarity, papers_snapshot)
         except asyncio.CancelledError:
             raise
         except (OSError, RuntimeError, ValueError) as exc:
+            if not self._is_current_dataset_epoch(task_epoch):
+                return
             logger.warning(
                 "Failed to build similarity index (%s): %s",
                 type(exc).__name__,
@@ -2818,6 +3014,8 @@ class ArxivBrowser(App):
             )
             return
         except Exception as exc:
+            if not self._is_current_dataset_epoch(task_epoch):
+                return
             logger.warning(
                 "Unexpected similarity index build failure (%s): %s",
                 type(exc).__name__,
@@ -2835,8 +3033,11 @@ class ArxivBrowser(App):
             )
             return
         finally:
-            self._tfidf_build_task = None
+            if self._is_current_dataset_epoch(task_epoch):
+                self._tfidf_build_task = None
 
+        if not self._is_current_dataset_epoch(task_epoch):
+            return
         if corpus_key != build_similarity_corpus_key(self.all_papers):
             logger.debug("Discarded stale similarity index for corpus key %s", corpus_key)
             return
@@ -2858,9 +3059,12 @@ class ArxivBrowser(App):
 
     async def _show_s2_recommendations(self, paper: Paper) -> None:
         """Fetch S2 recommendations and show them in the modal."""
+        task_epoch = self._capture_dataset_epoch()
         try:
             self.notify("Fetching S2 recommendations...", title="S2")
             recs = await self._fetch_s2_recommendations_async(paper.arxiv_id)
+            if not self._is_current_dataset_epoch(task_epoch):
+                return
             if not recs:
                 self.notify(
                     build_actionable_warning(
@@ -2876,7 +3080,11 @@ class ArxivBrowser(App):
                 RecommendationsScreen(paper, similar),
                 self._on_recommendation_selected,
             )
+        except asyncio.CancelledError:
+            raise
         except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
+            if not self._is_current_dataset_epoch(task_epoch):
+                return
             logger.warning(
                 "Failed to show S2 recommendations for %s (%s): %s",
                 paper.arxiv_id,
@@ -2894,6 +3102,8 @@ class ArxivBrowser(App):
                 severity="error",
             )
         except Exception as exc:
+            if not self._is_current_dataset_epoch(task_epoch):
+                return
             logger.warning(
                 "Unexpected S2 recommendation failure for %s (%s): %s",
                 paper.arxiv_id,
@@ -2970,8 +3180,11 @@ class ArxivBrowser(App):
 
     async def _show_citation_graph(self, paper_id: str, title: str) -> None:
         """Fetch citation graph data and push the CitationGraphScreen."""
+        task_epoch = self._capture_dataset_epoch()
         try:
             refs, cites = await self._fetch_citation_graph(paper_id)
+            if not self._is_current_dataset_epoch(task_epoch):
+                return
             if not refs and not cites:
                 self.notify(
                     build_actionable_warning(
@@ -2994,7 +3207,11 @@ class ArxivBrowser(App):
                 ),
                 self._on_citation_graph_selected,
             )
+        except asyncio.CancelledError:
+            raise
         except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
+            if not self._is_current_dataset_epoch(task_epoch):
+                return
             logger.warning(
                 "Failed to show citation graph for %s (%s): %s",
                 paper_id,
@@ -3012,6 +3229,8 @@ class ArxivBrowser(App):
                 severity="error",
             )
         except Exception as exc:
+            if not self._is_current_dataset_epoch(task_epoch):
+                return
             logger.warning(
                 "Unexpected citation graph failure for %s (%s): %s",
                 paper_id,
@@ -3111,35 +3330,44 @@ class ArxivBrowser(App):
         }
         return group_map.get(action_name, "Commands")
 
-    def _build_command_palette_commands(self) -> list[PaletteCommand]:
-        """Return command palette rows with labels adapted to current app state."""
+    def _command_palette_state(self) -> _PaletteAppState:
+        """Capture the app state needed to shape command-palette entries."""
         config = getattr(self, "_config", None)
+        history_files = getattr(self, "_history_files", [])
         in_arxiv_api_mode = bool(getattr(self, "_in_arxiv_api_mode", False))
-        hf_active = bool(getattr(self, "_hf_active", False))
-        watch_filter_active = bool(getattr(self, "_watch_filter_active", False))
-        show_abstract_preview = bool(getattr(config, "show_abstract_preview", False))
-        detail_mode = getattr(self, "_detail_mode", "scan")
-        active_query = self._get_active_query()
-        has_history_navigation = bool(
-            getattr(self, "_history_files", []) and len(self._history_files) > 1
-        )
         watch_list = list(getattr(config, "watch_list", []))
         has_marks = bool(getattr(config, "marks", {}))
         metadata_values = getattr(config, "paper_metadata", {}).values() if config else []
-        has_starred = any(getattr(meta, "starred", False) for meta in metadata_values)
-        llm_configured = bool(isinstance(config, UserConfig) and _resolve_llm_command(config))
         filtered_papers = getattr(self, "filtered_papers", [])
-        has_visible_papers = bool(filtered_papers)
-        has_selection = bool(getattr(self, "selected_ids", set()))
         try:
             current_paper = self._get_current_paper()
         except AttributeError:
             current_paper = None
-        has_current_paper = current_paper is not None
-        has_target_papers = has_selection or has_current_paper
         s2_cache = getattr(self, "_s2_cache", {})
-        s2_data_loaded = bool(current_paper and current_paper.arxiv_id in s2_cache)
+        has_selection = bool(getattr(self, "selected_ids", set()))
 
+        return _PaletteAppState(
+            in_arxiv_api_mode=in_arxiv_api_mode,
+            hf_active=bool(getattr(self, "_hf_active", False)),
+            watch_filter_active=bool(getattr(self, "_watch_filter_active", False)),
+            show_abstract_preview=bool(getattr(config, "show_abstract_preview", False)),
+            detail_mode=getattr(self, "_detail_mode", "scan"),
+            active_query=self._get_active_query(),
+            has_history_navigation=bool(history_files and len(history_files) > 1),
+            watch_list=watch_list,
+            has_marks=has_marks,
+            has_starred=any(getattr(meta, "starred", False) for meta in metadata_values),
+            llm_configured=bool(isinstance(config, UserConfig) and _resolve_llm_command(config)),
+            has_visible_papers=bool(filtered_papers),
+            has_selection=has_selection,
+            has_current_paper=current_paper is not None,
+            has_target_papers=has_selection or current_paper is not None,
+            s2_active=bool(getattr(self, "_s2_active", False)),
+            s2_data_loaded=bool(current_paper and current_paper.arxiv_id in s2_cache),
+        )
+
+    def _palette_suggested_actions(self, state: _PaletteAppState) -> set[str]:
+        """Return the set of actions that should be visually suggested."""
         suggested_actions = {
             "toggle_search",
             "open_url",
@@ -3147,117 +3375,152 @@ class ArxivBrowser(App):
             "toggle_read",
             "export_menu",
         }
-        if in_arxiv_api_mode:
+        if state.in_arxiv_api_mode:
             suggested_actions.update({"ctrl_e_dispatch", "arxiv_search"})
-        if active_query:
+        if state.active_query:
             suggested_actions.update({"add_bookmark", "show_search_syntax"})
-        if has_selection:
+        if state.has_selection:
             suggested_actions.update({"edit_tags", "download_pdf"})
+        return suggested_actions
+
+    def _palette_entry_copy(
+        self,
+        name: str,
+        description: str,
+        action_name: str,
+        state: _PaletteAppState,
+    ) -> tuple[str, str]:
+        """Return the display copy for one palette command in the current state."""
+        if action_name == "ctrl_e_dispatch":
+            if state.in_arxiv_api_mode:
+                return "Exit Search Results", "Return to your local or history papers"
+            return "Toggle Semantic Scholar", "Enable or disable Semantic Scholar enrichment"
+        if action_name == "toggle_hf":
+            if state.hf_active:
+                return (
+                    "Disable HuggingFace Trending",
+                    "Hide HuggingFace badges and detail-pane matches",
+                )
+            return (
+                "Enable HuggingFace Trending",
+                "Show HuggingFace badges and detail-pane matches",
+            )
+        if action_name == "toggle_watch_filter" and state.watch_filter_active:
+            return "Show All Papers", "Return to the full paper list"
+        if action_name == "toggle_preview":
+            if state.show_abstract_preview:
+                return "Hide Abstract Preview", "Return to a denser paper list without snippets"
+            return "Show Abstract Preview", "Reveal abstract snippets in the paper list"
+        if action_name == "toggle_detail_mode":
+            if state.detail_mode == "scan":
+                return "Switch to Full Details", "Expand the detail pane for long-form reading"
+            return "Switch to Scan Details", "Return to a faster triage-focused detail view"
+        return name, description
+
+    def _palette_action_availability(
+        self,
+        action_name: str,
+        state: _PaletteAppState,
+    ) -> tuple[bool, str]:
+        """Return whether a palette command is enabled and what blocks it."""
+        blocked_reason = self._palette_basic_blocked_reason(action_name, state)
+        if blocked_reason:
+            return False, blocked_reason
+        blocked_reason = self._palette_enrichment_blocked_reason(action_name, state)
+        if blocked_reason:
+            return False, blocked_reason
+        blocked_reason = self._palette_llm_blocked_reason(action_name, state)
+        if blocked_reason:
+            return False, blocked_reason
+        return True, ""
+
+    def _palette_basic_blocked_reason(
+        self,
+        action_name: str,
+        state: _PaletteAppState,
+    ) -> str:
+        """Return generic non-LLM, non-enrichment blockers for a palette action."""
+        if (
+            action_name
+            in {
+                "open_url",
+                "open_pdf",
+                "download_pdf",
+                "copy_selected",
+                "export_menu",
+                "toggle_read",
+                "toggle_star",
+                "edit_notes",
+                "edit_tags",
+                "show_similar",
+                "add_to_collection",
+                "start_mark",
+            }
+            and not state.has_target_papers
+        ):
+            return "selection"
+        if action_name == "select_all" and not state.has_visible_papers:
+            return "visible papers"
+        if action_name == "clear_selection" and not state.has_selection:
+            return "selection"
+        if action_name == "add_bookmark" and not state.active_query:
+            return "an active search"
+        if action_name in {"prev_date", "next_date"} and not state.has_history_navigation:
+            return "history mode"
+        if action_name == "start_goto_mark" and not state.has_marks:
+            return "saved marks"
+        if action_name == "toggle_watch_filter" and not state.watch_list:
+            return "watch list entries"
+        if action_name == "check_versions" and not state.has_starred:
+            return "starred papers"
+        return ""
+
+    def _palette_enrichment_blocked_reason(
+        self,
+        action_name: str,
+        state: _PaletteAppState,
+    ) -> str:
+        """Return Semantic Scholar-related blockers for a palette action."""
+        if action_name == "fetch_s2":
+            if not state.has_current_paper:
+                return "selection"
+            if not state.s2_active:
+                return "Semantic Scholar enabled"
+        if action_name == "citation_graph":
+            if not state.has_current_paper:
+                return "selection"
+            if not state.s2_data_loaded:
+                return "S2 data"
+        return ""
+
+    def _palette_llm_blocked_reason(
+        self,
+        action_name: str,
+        state: _PaletteAppState,
+    ) -> str:
+        """Return LLM-related blockers for a palette action."""
+        if action_name not in {
+            "generate_summary",
+            "chat_with_paper",
+            "score_relevance",
+            "auto_tag",
+        }:
+            return ""
+        if not state.llm_configured:
+            return "LLM configuration"
+        if action_name != "score_relevance" and not state.has_target_papers:
+            return "selection"
+        return ""
+
+    def _build_command_palette_commands(self) -> list[PaletteCommand]:
+        """Return command palette rows with labels adapted to current app state."""
+        state = self._command_palette_state()
+        suggested_actions = self._palette_suggested_actions(state)
 
         commands: list[PaletteCommand] = []
         for name, description, key_hint, action_name in COMMAND_PALETTE_COMMANDS:
-            enabled = True
-            blocked_reason = ""
-            if action_name == "ctrl_e_dispatch":
-                if in_arxiv_api_mode:
-                    name = "Exit Search Results"
-                    description = "Return to your local or history papers"
-                else:
-                    name = "Toggle Semantic Scholar"
-                    description = "Enable or disable Semantic Scholar enrichment"
-            elif action_name == "toggle_hf":
-                if hf_active:
-                    name = "Disable HuggingFace Trending"
-                    description = "Hide HuggingFace badges and detail-pane matches"
-                else:
-                    name = "Enable HuggingFace Trending"
-                    description = "Show HuggingFace badges and detail-pane matches"
-            elif action_name == "toggle_watch_filter":
-                if watch_filter_active:
-                    name = "Show All Papers"
-                    description = "Return to the full paper list"
-                if not watch_list:
-                    enabled = False
-                    blocked_reason = "watch list entries"
-            elif action_name == "toggle_preview":
-                if show_abstract_preview:
-                    name = "Hide Abstract Preview"
-                    description = "Return to a denser paper list without snippets"
-                else:
-                    name = "Show Abstract Preview"
-                    description = "Reveal abstract snippets in the paper list"
-            elif action_name == "toggle_detail_mode":
-                if detail_mode == "scan":
-                    name = "Switch to Full Details"
-                    description = "Expand the detail pane for long-form reading"
-                else:
-                    name = "Switch to Scan Details"
-                    description = "Return to a faster triage-focused detail view"
-
-            if (
-                action_name
-                in {
-                    "open_url",
-                    "open_pdf",
-                    "download_pdf",
-                    "copy_selected",
-                    "export_menu",
-                    "toggle_read",
-                    "toggle_star",
-                    "edit_notes",
-                    "edit_tags",
-                    "show_similar",
-                    "add_to_collection",
-                    "start_mark",
-                }
-                and not has_target_papers
-            ):
-                enabled = False
-                blocked_reason = "selection"
-            elif action_name == "select_all" and not has_visible_papers:
-                enabled = False
-                blocked_reason = "visible papers"
-            elif action_name == "clear_selection" and not has_selection:
-                enabled = False
-                blocked_reason = "selection"
-            elif action_name == "add_bookmark" and not active_query:
-                enabled = False
-                blocked_reason = "an active search"
-            elif action_name in {"prev_date", "next_date"} and not has_history_navigation:
-                enabled = False
-                blocked_reason = "history mode"
-            elif action_name == "fetch_s2":
-                if not has_current_paper:
-                    enabled = False
-                    blocked_reason = "selection"
-                elif not getattr(self, "_s2_active", False):
-                    enabled = False
-                    blocked_reason = "Semantic Scholar enabled"
-            elif action_name == "citation_graph":
-                if not has_current_paper:
-                    enabled = False
-                    blocked_reason = "selection"
-                elif not s2_data_loaded:
-                    enabled = False
-                    blocked_reason = "S2 data"
-            elif action_name == "check_versions" and not has_starred:
-                enabled = False
-                blocked_reason = "starred papers"
-            elif action_name in {
-                "generate_summary",
-                "chat_with_paper",
-                "score_relevance",
-                "auto_tag",
-            }:
-                if not llm_configured:
-                    enabled = False
-                    blocked_reason = "LLM configuration"
-                elif action_name != "score_relevance" and not has_target_papers:
-                    enabled = False
-                    blocked_reason = "selection"
-            elif action_name == "start_goto_mark" and not has_marks:
-                enabled = False
-                blocked_reason = "saved marks"
+            name, description = self._palette_entry_copy(name, description, action_name, state)
+            enabled, blocked_reason = self._palette_action_availability(action_name, state)
 
             commands.append(
                 PaletteCommand(
@@ -3427,6 +3690,14 @@ class ArxivBrowser(App):
 
         return await _actions._generate_summary_async(
             self, paper, prompt_template, cmd_hash, mode_label, use_full_paper_content
+        )
+
+    async def _fetch_paper_content_async(self, paper: Paper) -> str:
+        """Fetch canonical paper content for LLM workflows via the shared client."""
+        return await _fetch_paper_content_async(
+            paper,
+            self._http_client,
+            timeout=SUMMARY_HTML_TIMEOUT,
         )
 
     # ========================================================================
@@ -3599,6 +3870,63 @@ class ArxivBrowser(App):
         self._refresh_detail_pane()
         self.notify(f"Tags updated: {', '.join(tags)}", title="Auto-Tag")
 
+    def _reset_dataset_view_state(self) -> None:
+        """Clear view-scoped caches and progress for a dataset swap."""
+        self._cancel_pending_detail_update()
+
+        badge_timer = self._badge_timer
+        self._badge_timer = None
+        if badge_timer is not None:
+            badge_timer.stop()
+        self._badges_dirty.clear()
+
+        sort_timer = self._sort_refresh_timer
+        self._sort_refresh_timer = None
+        if sort_timer is not None:
+            sort_timer.stop()
+        self._sort_refresh_dirty.clear()
+
+        self._abstract_cache.clear()
+        self._abstract_loading.clear()
+        self._abstract_queue.clear()
+        self._abstract_pending_ids.clear()
+        try:
+            self._get_paper_details_widget().clear_cache()
+        except NoMatches:
+            pass
+
+        self._paper_summaries.clear()
+        self._summary_loading.clear()
+        self._summary_mode_label.clear()
+        self._summary_command_hash.clear()
+
+        self._s2_cache.clear()
+        self._s2_loading.clear()
+        self._s2_api_error = False
+
+        self._hf_cache.clear()
+        self._hf_loading = False
+        self._hf_api_error = False
+
+        self._version_updates.clear()
+        self._version_checking = False
+        self._version_progress = None
+
+        self._relevance_scores.clear()
+        self._relevance_scoring_active = False
+        self._scoring_progress = None
+
+        self._auto_tag_active = False
+        self._auto_tag_progress = None
+        self._cancel_batch_requested = False
+
+        self._tfidf_index = None
+        self._tfidf_corpus_key = None
+        self._pending_similarity_paper_id = None
+        if self._tfidf_build_task is not None and not self._tfidf_build_task.done():
+            self._tfidf_build_task.cancel()
+        self._tfidf_build_task = None
+
     # ========================================================================
     # History Mode: Date Navigation
     # ========================================================================
@@ -3620,7 +3948,7 @@ class ArxivBrowser(App):
 
         _current_date, path = self._history_files[self._current_date_index]
         try:
-            self.all_papers = parse_arxiv_file(path)
+            papers = parse_arxiv_file(path)
         except OSError as e:
             self.notify(
                 f"Failed to load {path.name}: {e}",
@@ -3628,34 +3956,12 @@ class ArxivBrowser(App):
                 severity="error",
             )
             return False
+
+        self._advance_dataset_epoch()
+        self.all_papers = papers
         self._papers_by_id = {p.arxiv_id: p for p in self.all_papers}
         self.filtered_papers = self.all_papers.copy()
-
-        self._abstract_cache.clear()
-        self._abstract_loading.clear()
-        self._abstract_queue.clear()
-        self._abstract_pending_ids.clear()
-        try:
-            self._get_paper_details_widget().clear_cache()
-        except NoMatches:
-            pass
-        self._paper_summaries.clear()
-        self._summary_loading.clear()
-        self._summary_mode_label.clear()
-        self._summary_command_hash.clear()
-        self._s2_cache.clear()
-        self._s2_loading.clear()
-        self._hf_cache.clear()
-        self._hf_loading = False
-        self._version_updates.clear()
-        self._relevance_scores.clear()
-        self._relevance_scoring_active = False
-        self._tfidf_index = None
-        self._tfidf_corpus_key = None
-        self._pending_similarity_paper_id = None
-        if self._tfidf_build_task is not None and not self._tfidf_build_task.done():
-            self._tfidf_build_task.cancel()
-        self._tfidf_build_task = None
+        self._reset_dataset_view_state()
 
         # Clear selection when switching dates
         self.selected_ids.clear()
@@ -3667,12 +3973,12 @@ class ArxivBrowser(App):
         self._show_daily_digest()
 
         # Apply current filter and sort
-        query = self._get_search_input_widget().value.strip()
+        query = self._get_live_query()
         self._apply_filter(query)
 
         # Re-fetch HF data if active (since HF data is date-specific)
         if self._hf_active:
-            self._track_task(self._fetch_hf_daily())
+            self._track_dataset_task(self._fetch_hf_daily())
 
         # Update subtitle
         self._update_subtitle()
@@ -3735,6 +4041,7 @@ class ArxivBrowser(App):
             api_page = (self._arxiv_search_state.start // self._arxiv_search_state.max_results) + 1
         hf_match_count = count_hf_matches(self._hf_cache, self._papers_by_id)
         size = getattr(self, "size", None)
+        theme_runtime = self._resolved_theme_runtime()
 
         status.update(
             _widget_chrome.build_status_bar_text(
@@ -3759,6 +4066,7 @@ class ArxivBrowser(App):
                 version_checking=self._version_checking,
                 version_update_count=len(self._version_updates),
                 max_width=getattr(size, "width", None),
+                theme_colors=theme_runtime.colors,
             )
         )
         self._update_footer()
@@ -3828,12 +4136,14 @@ class ArxivBrowser(App):
                 search_visible = True
         except NoMatches:
             pass
+        theme_runtime = self._resolved_theme_runtime()
         return _widget_chrome.build_footer_mode_badge(
             relevance_scoring_active=self._relevance_scoring_active,
             version_checking=self._version_checking,
             search_visible=search_visible,
             in_arxiv_api_mode=self._in_arxiv_api_mode,
             selected_count=len(self.selected_ids),
+            theme_colors=theme_runtime.colors,
         )
 
     def _update_footer(self) -> None:
@@ -3856,11 +4166,16 @@ class ArxivBrowser(App):
 
         Args:
             paper: The paper to download.
-            client: Optional shared HTTP client. Creates a temporary one if None.
+            client: Shared HTTP client required for the download.
 
         Returns:
             True if download succeeded, False otherwise.
         """
+        if client is None:
+            logger.warning(
+                "Download skipped for %s: shared HTTP client unavailable", paper.arxiv_id
+            )
+            return False
         success = await self._get_services().download.download_pdf(
             paper=paper,
             config=self._config,

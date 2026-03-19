@@ -297,6 +297,7 @@ def _start_downloads(app: "ArxivBrowser") -> None:
         if paper.arxiv_id in app._downloading:
             continue
         app._downloading.add(paper.arxiv_id)
+        # Downloads should continue even if the visible dataset changes.
         app._track_task(app._process_single_download(paper))
 
 
@@ -306,6 +307,8 @@ async def _process_single_download(app: "ArxivBrowser", paper: Paper) -> None:
     try:
         success = await app._download_pdf_async(paper, app._http_client)
         app._download_results[paper.arxiv_id] = success
+    except asyncio.CancelledError:
+        raise
     except (OSError, RuntimeError, ValueError) as exc:
         logger.warning("Download failed for %s: %s", paper.arxiv_id, exc, exc_info=True)
         app._download_results[paper.arxiv_id] = False
@@ -319,18 +322,18 @@ async def _process_single_download(app: "ArxivBrowser", paper: Paper) -> None:
         app._download_results[paper.arxiv_id] = False
     finally:
         app._downloading.discard(paper.arxiv_id)
+        if not getattr(app, "_shutting_down", False):
+            # Update progress
+            completed = len(app._download_results)
+            total = app._download_total
+            app._update_download_progress(completed, total)
 
-        # Update progress
-        completed = len(app._download_results)
-        total = app._download_total
-        app._update_download_progress(completed, total)
+            # Start more downloads if queue has items
+            app._start_downloads()
 
-        # Start more downloads if queue has items
-        app._start_downloads()
-
-        # Check if batch is complete
-        if completed == total:
-            app._finish_download_batch()
+            # Check if batch is complete
+            if completed == total:
+                app._finish_download_batch()
 
 
 def _finish_download_batch(app: "ArxivBrowser") -> None:

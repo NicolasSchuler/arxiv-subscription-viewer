@@ -8,12 +8,17 @@ from arxiv_browser.services.arxiv_api_service import (
 from arxiv_browser.services.download_service import download_pdf
 from arxiv_browser.services.enrichment_service import (
     load_or_fetch_hf_daily_cached,
+    load_or_fetch_hf_daily_result,
     load_or_fetch_s2_paper_cached,
+    load_or_fetch_s2_paper_result,
+    load_or_fetch_s2_recommendations_cached,
+    load_or_fetch_s2_recommendations_result,
 )
 from arxiv_browser.services.interfaces import (
     AppServices,
     ArxivApiService,
     DownloadService,
+    EnrichmentService,
     LlmService,
     build_default_app_services,
 )
@@ -27,6 +32,7 @@ __all__ = [
     "AppServices",
     "ArxivApiService",
     "DownloadService",
+    "EnrichmentService",
     "LlmService",
     "build_default_app_services",
     "download_pdf",
@@ -35,7 +41,11 @@ __all__ = [
     "format_query_label",
     "generate_summary",
     "load_or_fetch_hf_daily_cached",
+    "load_or_fetch_hf_daily_result",
     "load_or_fetch_s2_paper_cached",
+    "load_or_fetch_s2_paper_result",
+    "load_or_fetch_s2_recommendations_cached",
+    "load_or_fetch_s2_recommendations_result",
     "score_relevance_once",
     "suggest_tags_once",
 ]

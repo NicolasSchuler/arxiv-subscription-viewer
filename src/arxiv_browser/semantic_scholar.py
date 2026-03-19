@@ -26,11 +26,14 @@ __all__ = [
     "init_s2_db",
     "load_s2_citation_graph",
     "load_s2_paper",
+    "load_s2_paper_snapshot",
     "load_s2_recommendations",
+    "load_s2_recommendations_snapshot",
     "parse_citation_entry",
     "parse_s2_paper_response",
     "save_s2_citation_graph",
     "save_s2_paper",
+    "save_s2_paper_not_found",
     "save_s2_recommendations",
 ]
 
@@ -107,6 +110,22 @@ class CitationEntry:
     year: int | None
     citation_count: int
     url: str  # arXiv URL if arxiv_id present, else S2 URL
+
+
+@dataclass(slots=True, frozen=True)
+class S2PaperCacheSnapshot:
+    """Resolved cache state for one S2 paper lookup."""
+
+    status: Literal["miss", "not_found", "found"]
+    paper: SemanticScholarPaper | None
+
+
+@dataclass(slots=True, frozen=True)
+class S2RecommendationsCacheSnapshot:
+    """Resolved cache state for one S2 recommendations lookup."""
+
+    status: Literal["miss", "empty", "found"]
+    papers: list[SemanticScholarPaper]
 
 
 # ============================================================================
@@ -357,6 +376,66 @@ async def fetch_s2_recommendations(
 
 
 @overload
+async def fetch_s2_recommendations_with_status(
+    arxiv_id: str,
+    client: httpx.AsyncClient,
+    limit: int = 10,
+    api_key: str = "",
+    timeout: int = S2_REQUEST_TIMEOUT,
+    include_status: Literal[False] = ...,
+) -> list[SemanticScholarPaper]: ...
+
+
+@overload
+async def fetch_s2_recommendations_with_status(
+    arxiv_id: str,
+    client: httpx.AsyncClient,
+    limit: int = 10,
+    api_key: str = "",
+    timeout: int = S2_REQUEST_TIMEOUT,
+    include_status: Literal[True] = ...,
+) -> tuple[list[SemanticScholarPaper], bool]: ...
+
+
+async def fetch_s2_recommendations_with_status(
+    arxiv_id: str,
+    client: httpx.AsyncClient,
+    limit: int = 10,
+    api_key: str = "",
+    timeout: int = S2_REQUEST_TIMEOUT,
+    include_status: bool = False,
+) -> list[SemanticScholarPaper] | tuple[list[SemanticScholarPaper], bool]:
+    """Fetch S2 recommendations while preserving request completion status."""
+    response = await _s2_get_with_retry(
+        client,
+        url=f"{S2_REC_BASE}/papers/forpaper/ARXIV:{arxiv_id}",
+        params={"fields": S2_REC_FIELDS, "limit": str(limit)},
+        api_key=api_key,
+        timeout=timeout,
+        label=f"S2 recs arXiv:{arxiv_id}",
+        include_status=True,
+    )
+    response, complete = response
+    if response is None:
+        return ([], complete) if include_status else []
+    payload = _parse_json_object(response, f"S2 recs arXiv:{arxiv_id}")
+    if payload is None:
+        return ([], False) if include_status else []
+    papers_data = payload.get("recommendedPapers")
+    if not isinstance(papers_data, list):
+        logger.warning("S2 recs arXiv:%s returned non-list recommendedPapers", arxiv_id)
+        return ([], False) if include_status else []
+    papers: list[SemanticScholarPaper] = []
+    for item in papers_data:
+        if not isinstance(item, dict):
+            continue
+        parsed = parse_s2_paper_response(item)
+        if parsed is not None:
+            papers.append(parsed)
+    return (papers, True) if include_status else papers
+
+
+@overload
 async def fetch_s2_references(
     paper_id: str,
     client: httpx.AsyncClient,
@@ -548,12 +627,26 @@ def init_s2_db(db_path: Path) -> None:
             ")"
         )
         conn.execute(
+            "CREATE TABLE IF NOT EXISTS s2_paper_fetch_state ("
+            "  arxiv_id TEXT PRIMARY KEY,"
+            "  status TEXT NOT NULL,"
+            "  fetched_at TEXT NOT NULL"
+            ")"
+        )
+        conn.execute(
             "CREATE TABLE IF NOT EXISTS s2_recommendations ("
             "  source_arxiv_id TEXT NOT NULL,"
             "  rank INTEGER NOT NULL,"
             "  payload_json TEXT NOT NULL,"
             "  fetched_at TEXT NOT NULL,"
             "  PRIMARY KEY (source_arxiv_id, rank)"
+            ")"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS s2_recommendation_fetch_state ("
+            "  source_arxiv_id TEXT PRIMARY KEY,"
+            "  status TEXT NOT NULL,"
+            "  fetched_at TEXT NOT NULL"
             ")"
         )
         conn.execute(
@@ -628,27 +721,93 @@ def _is_fresh(fetched_at_str: str, ttl_days: int) -> bool:
         return False
 
 
-def load_s2_paper(
-    db_path: Path, arxiv_id: str, ttl_days: int = S2_DEFAULT_CACHE_TTL_DAYS
-) -> SemanticScholarPaper | None:
-    """Load a cached S2 paper if it exists and is fresh."""
+def _load_s2_paper_fetch_state(
+    conn: sqlite3.Connection,
+    arxiv_id: str,
+    ttl_days: int,
+) -> tuple[Literal["found", "not_found"] | None, str | None]:
+    """Load fresh paper fetch metadata, if present."""
+    row = conn.execute(
+        "SELECT status, fetched_at FROM s2_paper_fetch_state WHERE arxiv_id = ?",
+        (arxiv_id,),
+    ).fetchone()
+    if row is None:
+        return None, None
+    status, fetched_at = row
+    if not isinstance(status, str) or not isinstance(fetched_at, str):
+        return None, None
+    if not _is_fresh(fetched_at, ttl_days):
+        return None, None
+    if status not in {"found", "not_found"}:
+        return None, None
+    if status == "not_found":
+        return "not_found", fetched_at
+    return "found", fetched_at
+
+
+def _load_s2_recommendation_fetch_state(
+    conn: sqlite3.Connection,
+    arxiv_id: str,
+    ttl_days: int,
+) -> tuple[Literal["found", "empty"] | None, str | None]:
+    """Load fresh recommendation fetch metadata, if present."""
+    row = conn.execute(
+        "SELECT status, fetched_at FROM s2_recommendation_fetch_state WHERE source_arxiv_id = ?",
+        (arxiv_id,),
+    ).fetchone()
+    if row is None:
+        return None, None
+    status, fetched_at = row
+    if not isinstance(status, str) or not isinstance(fetched_at, str):
+        return None, None
+    if not _is_fresh(fetched_at, ttl_days):
+        return None, None
+    if status not in {"found", "empty"}:
+        return None, None
+    if status == "empty":
+        return "empty", fetched_at
+    return "found", fetched_at
+
+
+def load_s2_paper_snapshot(
+    db_path: Path,
+    arxiv_id: str,
+    ttl_days: int = S2_DEFAULT_CACHE_TTL_DAYS,
+) -> S2PaperCacheSnapshot:
+    """Load a cached S2 paper and preserve explicit not-found metadata."""
     if not db_path.exists():
-        return None
+        return S2PaperCacheSnapshot(status="miss", paper=None)
     try:
         with closing(sqlite3.connect(str(db_path))) as conn, conn:
+            status, _ = _load_s2_paper_fetch_state(conn, arxiv_id, ttl_days)
+            if status == "not_found":
+                return S2PaperCacheSnapshot(status="not_found", paper=None)
             row = conn.execute(
                 "SELECT payload_json, fetched_at FROM s2_papers WHERE arxiv_id = ?",
                 (arxiv_id,),
             ).fetchone()
             if row is None:
-                return None
+                return S2PaperCacheSnapshot(status="miss", paper=None)
             payload, fetched_at = row
             if not _is_fresh(fetched_at, ttl_days):
-                return None
-            return _json_to_paper(payload)
+                return S2PaperCacheSnapshot(status="miss", paper=None)
+            paper = _json_to_paper(payload)
+            if paper is None:
+                return S2PaperCacheSnapshot(status="miss", paper=None)
+            return S2PaperCacheSnapshot(status="found", paper=paper)
     except sqlite3.Error:
         logger.warning("Failed to load S2 cache for %s", arxiv_id, exc_info=True)
-        return None
+        return S2PaperCacheSnapshot(status="miss", paper=None)
+
+
+def load_s2_paper(
+    db_path: Path, arxiv_id: str, ttl_days: int = S2_DEFAULT_CACHE_TTL_DAYS
+) -> SemanticScholarPaper | None:
+    """Load a cached S2 paper if it exists and is fresh."""
+    snapshot = load_s2_paper_snapshot(db_path, arxiv_id, ttl_days)
+    if snapshot.status == "found":
+        return snapshot.paper
+    return None
 
 
 def save_s2_paper(db_path: Path, paper: SemanticScholarPaper) -> None:
@@ -663,8 +822,66 @@ def save_s2_paper(db_path: Path, paper: SemanticScholarPaper) -> None:
                 "VALUES (?, ?, ?)",
                 (paper.arxiv_id, payload, now),
             )
+            conn.execute(
+                "INSERT OR REPLACE INTO s2_paper_fetch_state (arxiv_id, status, fetched_at) "
+                "VALUES (?, ?, ?)",
+                (paper.arxiv_id, "found", now),
+            )
     except sqlite3.Error:
         logger.warning("Failed to save S2 cache for %s", paper.arxiv_id, exc_info=True)
+
+
+def save_s2_paper_not_found(db_path: Path, arxiv_id: str) -> None:
+    """Persist a fresh 'not found' marker for an S2 paper lookup."""
+    try:
+        init_s2_db(db_path)
+        now = datetime.now(UTC).isoformat()
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
+            conn.execute("DELETE FROM s2_papers WHERE arxiv_id = ?", (arxiv_id,))
+            conn.execute(
+                "INSERT OR REPLACE INTO s2_paper_fetch_state (arxiv_id, status, fetched_at) "
+                "VALUES (?, ?, ?)",
+                (arxiv_id, "not_found", now),
+            )
+    except sqlite3.Error:
+        logger.warning("Failed to save S2 not-found cache for %s", arxiv_id, exc_info=True)
+
+
+def load_s2_recommendations_snapshot(
+    db_path: Path,
+    arxiv_id: str,
+    ttl_days: int = S2_REC_CACHE_TTL_DAYS,
+) -> S2RecommendationsCacheSnapshot:
+    """Load cached S2 recommendations and preserve explicit empty-state metadata."""
+    if not db_path.exists():
+        return S2RecommendationsCacheSnapshot(status="miss", papers=[])
+    try:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
+            status, _ = _load_s2_recommendation_fetch_state(conn, arxiv_id, ttl_days)
+            if status == "empty":
+                return S2RecommendationsCacheSnapshot(status="empty", papers=[])
+            rows = conn.execute(
+                "SELECT payload_json, fetched_at FROM s2_recommendations "
+                "WHERE source_arxiv_id = ? ORDER BY rank",
+                (arxiv_id,),
+            ).fetchall()
+            if not rows:
+                return S2RecommendationsCacheSnapshot(status="miss", papers=[])
+            # Check freshness of the first entry (all saved at same time)
+            _, fetched_at = rows[0]
+            if not _is_fresh(fetched_at, ttl_days):
+                return S2RecommendationsCacheSnapshot(status="miss", papers=[])
+            results: list[SemanticScholarPaper] = []
+            for payload, _ in rows:
+                paper = _json_to_paper(payload)
+                if paper is not None:
+                    results.append(paper)
+            if results:
+                return S2RecommendationsCacheSnapshot(status="found", papers=results)
+            return S2RecommendationsCacheSnapshot(status="miss", papers=[])
+    except sqlite3.Error:
+        logger.warning("Failed to load S2 recommendations for %s", arxiv_id, exc_info=True)
+        return S2RecommendationsCacheSnapshot(status="miss", papers=[])
 
 
 def load_s2_recommendations(
@@ -673,30 +890,10 @@ def load_s2_recommendations(
     ttl_days: int = S2_REC_CACHE_TTL_DAYS,
 ) -> list[SemanticScholarPaper]:
     """Load cached S2 recommendations for a paper."""
-    if not db_path.exists():
-        return []
-    try:
-        with closing(sqlite3.connect(str(db_path))) as conn, conn:
-            rows = conn.execute(
-                "SELECT payload_json, fetched_at FROM s2_recommendations "
-                "WHERE source_arxiv_id = ? ORDER BY rank",
-                (arxiv_id,),
-            ).fetchall()
-            if not rows:
-                return []
-            # Check freshness of the first entry (all saved at same time)
-            _, fetched_at = rows[0]
-            if not _is_fresh(fetched_at, ttl_days):
-                return []
-            results = []
-            for payload, _ in rows:
-                paper = _json_to_paper(payload)
-                if paper is not None:
-                    results.append(paper)
-            return results
-    except sqlite3.Error:
-        logger.warning("Failed to load S2 recommendations for %s", arxiv_id, exc_info=True)
-        return []
+    snapshot = load_s2_recommendations_snapshot(db_path, arxiv_id, ttl_days)
+    if snapshot.status == "found":
+        return snapshot.papers
+    return []
 
 
 def save_s2_recommendations(
@@ -714,6 +911,7 @@ def save_s2_recommendations(
                 "DELETE FROM s2_recommendations WHERE source_arxiv_id = ?",
                 (source_arxiv_id,),
             )
+            status = "empty"
             for rank, paper in enumerate(papers):
                 payload = _paper_to_json(paper)
                 conn.execute(
@@ -722,6 +920,12 @@ def save_s2_recommendations(
                     "VALUES (?, ?, ?, ?)",
                     (source_arxiv_id, rank, payload, now),
                 )
+                status = "found"
+            conn.execute(
+                "INSERT OR REPLACE INTO s2_recommendation_fetch_state "
+                "(source_arxiv_id, status, fetched_at) VALUES (?, ?, ?)",
+                (source_arxiv_id, status, now),
+            )
     except sqlite3.Error:
         logger.warning(
             "Failed to save S2 recommendations for %s",

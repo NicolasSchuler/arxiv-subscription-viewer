@@ -2,6 +2,6 @@
 
 import sys
 
-from arxiv_browser.app import main
+from arxiv_browser.cli import main
 
 sys.exit(main())

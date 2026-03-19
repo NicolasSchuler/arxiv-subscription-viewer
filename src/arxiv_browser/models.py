@@ -311,6 +311,7 @@ class LocalBrowseSnapshot:
     sort_index: int
     search_query: str
     pending_query: str
+    applied_query: str
     watch_filter_active: bool
     active_bookmark_index: int
     list_index: int

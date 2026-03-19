@@ -19,7 +19,7 @@ from arxiv_browser.action_messages import build_actionable_error
 from arxiv_browser.models import Paper
 from arxiv_browser.query import escape_rich_text, truncate_text
 from arxiv_browser.semantic_scholar import CitationEntry
-from arxiv_browser.themes import THEME_COLORS
+from arxiv_browser.themes import theme_colors_for
 
 logger = logging.getLogger(__name__)
 
@@ -203,6 +203,7 @@ class RecommendationsScreen(ModalScreen[str | None]):
     def on_mount(self) -> None:
         """Populate the list view with similar papers and focus it."""
         list_view = self.query_one("#recommendations-list", ListView)
+        green = theme_colors_for(self)["green"]
         for paper, score in self._similar_papers:
             safe_title = escape_rich_text(paper.title)
             safe_categories = escape_rich_text(paper.categories)
@@ -210,7 +211,7 @@ class RecommendationsScreen(ModalScreen[str | None]):
                 paper,
                 Static(f"[bold]{safe_title}[/]", classes="rec-title"),
                 Static(
-                    f"[dim]{paper.arxiv_id}[/] | {safe_categories} | [{THEME_COLORS['green']}]{score:.0%}[/] match",
+                    f"[dim]{paper.arxiv_id}[/] | {safe_categories} | [{green}]{score:.0%}[/] match",
                     classes="rec-meta",
                 ),
             )
@@ -451,9 +452,10 @@ class CitationGraphScreen(ModalScreen[str | None]):
 
     def _build_citation_item(self, entry: CitationEntry) -> CitationGraphListItem:
         """Build a list item widget for a single citation graph entry."""
+        colors = theme_colors_for(self)
         is_local = entry.arxiv_id != "" and entry.arxiv_id in self._local_arxiv_ids
         safe_title = escape_rich_text(entry.title)
-        local_badge = f" [{THEME_COLORS['green']}]\\[LOCAL][/]" if is_local else ""
+        local_badge = f" [{colors['green']}]\\[LOCAL][/]" if is_local else ""
         year_str = str(entry.year) if entry.year else "?"
         authors_short = truncate_text(entry.authors, 50) if entry.authors else ""
         return CitationGraphListItem(
@@ -464,7 +466,7 @@ class CitationGraphScreen(ModalScreen[str | None]):
             ),
             Static(
                 f"[dim]{year_str}[/] | {escape_rich_text(authors_short)}"
-                f" | [{THEME_COLORS['accent']}]{entry.citation_count} cites[/]",
+                f" | [{colors['accent']}]{entry.citation_count} cites[/]",
                 classes="cite-meta",
             ),
             is_local=is_local,
@@ -507,9 +509,8 @@ class CitationGraphScreen(ModalScreen[str | None]):
         from arxiv_browser._ascii import is_ascii_mode
 
         arrow = " -> " if is_ascii_mode() else " \u2192 "
-        breadcrumb = arrow.join(
-            f"[{THEME_COLORS['purple']}]{escape_rich_text(p)}[/]" for p in parts
-        )
+        purple = theme_colors_for(self)["purple"]
+        breadcrumb = arrow.join(f"[{purple}]{escape_rich_text(p)}[/]" for p in parts)
         self.query_one("#citation-graph-breadcrumb", Static).update(f"Citation Graph: {breadcrumb}")
 
     def _update_status(self) -> None:
@@ -523,10 +524,11 @@ class CitationGraphScreen(ModalScreen[str | None]):
         panel_name = "references" if active == "refs" else "cited by"
         depth = len(self._stack)
         depth_str = f" [dim](depth {depth})[/]" if depth > 0 else ""
+        purple = theme_colors_for(self)["purple"]
         self.query_one("#citation-graph-status", Static).update(
             f"[dim]Tab: switch panel | Enter: drill down | "
             f"o: open | g: go to local | Esc/q: back[/]"
-            f"  Active: [{THEME_COLORS['purple']}]{panel_name}[/]{depth_str}"
+            f"  Active: [{purple}]{panel_name}[/]{depth_str}"
         )
 
     def _get_active_list(self) -> ListView:

@@ -1906,13 +1906,28 @@ class TestStatusFilterRegressions:
 class TestModuleExports:
     """Tests for module public API."""
 
-    def test_all_exports_are_importable(self):
-        """All items in __all__ should be importable."""
+    def test_root_package_exports_are_importable(self):
+        """All items in the root-package ``__all__`` should be importable."""
         import arxiv_browser
-        from arxiv_browser.app import __all__
+        from arxiv_browser import __all__
 
         for name in __all__:
             assert hasattr(arxiv_browser, name), f"{name} not found in module"
+
+    def test_app_compatibility_exports_remain_importable(self):
+        """The legacy app module should keep exporting its full compatibility surface."""
+        import arxiv_browser.app as app_module
+        from arxiv_browser.app import __all__
+
+        for name in __all__:
+            assert hasattr(app_module, name), f"{name} not found in arxiv_browser.app"
+
+    def test_root_package_compatibility_exports_remain_importable(self):
+        """Legacy root-package imports should keep resolving via the app shim."""
+        from arxiv_browser import DEFAULT_THEME, highlight_text
+
+        assert DEFAULT_THEME["accent"]
+        assert callable(highlight_text)
 
     def test_main_exports_exist(self):
         """Key exports should be available."""
@@ -3693,6 +3708,47 @@ class TestArxivApiModeIntegration:
 
                 assert app._in_arxiv_api_mode is False
                 assert app.all_papers[0].arxiv_id == "2401.00001"
+
+    async def test_restore_local_snapshot_keeps_live_search_query(self, make_paper):
+        """Exiting API mode should restore the query text the user actually typed."""
+        from unittest.mock import patch
+
+        from textual.widgets import Input, OptionList
+
+        from arxiv_browser.app import ArxivBrowser
+        from arxiv_browser.models import LocalBrowseSnapshot
+
+        local_papers = [
+            make_paper(arxiv_id="2401.00001", title="Transformer Architecture"),
+            make_paper(arxiv_id="2401.00002", title="Other Paper"),
+        ]
+        app = ArxivBrowser(local_papers, restore_session=False)
+        with patch("arxiv_browser.app.save_config", return_value=True):
+            async with app.run_test():
+                app._local_browse_snapshot = LocalBrowseSnapshot(
+                    all_papers=local_papers,
+                    papers_by_id={p.arxiv_id: p for p in local_papers},
+                    selected_ids=set(),
+                    sort_index=0,
+                    search_query="Transformer",
+                    pending_query="Transformer",
+                    applied_query="",
+                    watch_filter_active=False,
+                    active_bookmark_index=0,
+                    list_index=0,
+                    sub_title="",
+                    highlight_terms={"title": [], "author": [], "abstract": []},
+                    match_scores={},
+                )
+
+                app._restore_local_browse_snapshot()
+
+                search_input = app.query_one("#search-input", Input)
+                option_list = app.query_one("#paper-list", OptionList)
+                assert search_input.value == "Transformer"
+                assert app._pending_query == "Transformer"
+                assert app._applied_query == "Transformer"
+                assert option_list.option_count == 1
 
 
 # ============================================================================
@@ -5626,8 +5682,7 @@ class TestS2AppActions:
     @pytest.mark.asyncio
     async def test_action_fetch_s2_dedupes_concurrent_calls(self, make_paper):
         import asyncio
-        import time
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import AsyncMock, MagicMock, patch
 
         from arxiv_browser.app import ArxivBrowser
 
@@ -5637,14 +5692,7 @@ class TestS2AppActions:
         with patch("arxiv_browser.app.save_config", return_value=True):
             async with app.run_test() as pilot:
                 app._s2_active = True
-                load_calls = 0
                 track_calls = 0
-
-                def fake_load_s2_paper(*_args, **_kwargs):
-                    nonlocal load_calls
-                    load_calls += 1
-                    time.sleep(0.05)
-                    return None
 
                 def fake_track_task(coro):
                     nonlocal track_calls
@@ -5652,13 +5700,13 @@ class TestS2AppActions:
                     coro.close()
                     return MagicMock()
 
+                app._fetch_s2_paper_async = AsyncMock(return_value=None)
                 app._track_task = fake_track_task
-                with patch("arxiv_browser.app.load_s2_paper", side_effect=fake_load_s2_paper):
-                    await asyncio.gather(app.action_fetch_s2(), app.action_fetch_s2())
-                    await pilot.pause(0)
+                await asyncio.gather(app.action_fetch_s2(), app.action_fetch_s2())
+                await pilot.pause(0)
 
-                assert load_calls == 1
                 assert track_calls == 1
+                assert app._fetch_s2_paper_async.call_count == 1
 
     def test_ctrl_e_dispatch_to_exit_api_mode(self):
         from unittest.mock import MagicMock
@@ -5726,6 +5774,61 @@ class TestDownloadBatchGuards:
         app._start_downloads.assert_not_called()
         app.notify.assert_called_once()
         assert "already in progress" in app.notify.call_args[0][0]
+
+    def test_reset_dataset_view_state_keeps_download_batch(self):
+        from collections import deque
+        from unittest.mock import MagicMock
+
+        from textual.css.query import NoMatches
+
+        from arxiv_browser.app import ArxivBrowser
+
+        download_item = object()
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._cancel_pending_detail_update = MagicMock()
+        app._badge_timer = None
+        app._sort_refresh_timer = None
+        app._badges_dirty = set()
+        app._sort_refresh_dirty = set()
+        app._abstract_cache = {}
+        app._abstract_loading = set()
+        app._abstract_queue = deque()
+        app._abstract_pending_ids = set()
+        app._get_paper_details_widget = MagicMock(side_effect=NoMatches())
+        app._paper_summaries = {}
+        app._summary_loading = set()
+        app._summary_mode_label = {}
+        app._summary_command_hash = {}
+        app._s2_cache = {}
+        app._s2_loading = set()
+        app._s2_api_error = False
+        app._hf_cache = {}
+        app._hf_loading = False
+        app._hf_api_error = False
+        app._version_updates = {}
+        app._version_checking = False
+        app._version_progress = None
+        app._relevance_scores = {}
+        app._relevance_scoring_active = False
+        app._scoring_progress = None
+        app._auto_tag_active = False
+        app._auto_tag_progress = None
+        app._cancel_batch_requested = False
+        app._download_queue = deque([download_item])
+        app._downloading = {"2401.12345"}
+        app._download_results = {"2401.12345": True}
+        app._download_total = 1
+        app._tfidf_index = object()
+        app._tfidf_corpus_key = "corpus"
+        app._pending_similarity_paper_id = "paper"
+        app._tfidf_build_task = None
+
+        app._reset_dataset_view_state()
+
+        assert list(app._download_queue) == [download_item]
+        assert app._downloading == {"2401.12345"}
+        assert app._download_results == {"2401.12345": True}
+        assert app._download_total == 1
 
 
 class TestRelevanceScoringGuards:
@@ -6069,8 +6172,7 @@ class TestHfAppState:
     @pytest.mark.asyncio
     async def test_fetch_hf_daily_dedupes_concurrent_calls(self, make_paper):
         import asyncio
-        import time
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import AsyncMock, MagicMock, patch
 
         from arxiv_browser.app import ArxivBrowser
 
@@ -6079,14 +6181,7 @@ class TestHfAppState:
 
         with patch("arxiv_browser.app.save_config", return_value=True):
             async with app.run_test() as pilot:
-                cache_calls = 0
                 track_calls = 0
-
-                def fake_load_hf_daily_cache(*_args, **_kwargs):
-                    nonlocal cache_calls
-                    cache_calls += 1
-                    time.sleep(0.05)
-                    return None
 
                 def fake_track_task(coro):
                     nonlocal track_calls
@@ -6094,15 +6189,13 @@ class TestHfAppState:
                     coro.close()
                     return MagicMock()
 
+                app._fetch_hf_daily_async = AsyncMock(return_value=None)
                 app._track_task = fake_track_task
-                with patch(
-                    "arxiv_browser.app.load_hf_daily_cache", side_effect=fake_load_hf_daily_cache
-                ):
-                    await asyncio.gather(app._fetch_hf_daily(), app._fetch_hf_daily())
-                    await pilot.pause(0)
+                await asyncio.gather(app._fetch_hf_daily(), app._fetch_hf_daily())
+                await pilot.pause(0)
 
-                assert cache_calls == 1
                 assert track_calls == 1
+                assert app._fetch_hf_daily_async.call_count == 1
 
 
 class TestBadgeCoalescing:
@@ -8153,21 +8246,17 @@ class TestThemeSwitcher:
         assert config.theme_name == "monokai"
 
     def test_apply_uses_named_theme(self):
-        from arxiv_browser.app import (
-            CATPPUCCIN_MOCHA_THEME,
-            THEME_COLORS,
-            ArxivBrowser,
-        )
+        from arxiv_browser.app import CATPPUCCIN_MOCHA_THEME, ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._config = UserConfig(theme_name="catppuccin-mocha")
         app._http_client = None
         app._apply_theme_overrides()
-        assert THEME_COLORS["accent"] == CATPPUCCIN_MOCHA_THEME["accent"]
-        assert THEME_COLORS["green"] == CATPPUCCIN_MOCHA_THEME["green"]
+        assert app._theme_runtime.colors["accent"] == CATPPUCCIN_MOCHA_THEME["accent"]
+        assert app._theme_runtime.colors["green"] == CATPPUCCIN_MOCHA_THEME["green"]
 
     def test_per_key_override_layers(self):
-        from arxiv_browser.app import CATPPUCCIN_MOCHA_THEME, THEME_COLORS, ArxivBrowser
+        from arxiv_browser.app import CATPPUCCIN_MOCHA_THEME, ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._config = UserConfig(
@@ -8177,18 +8266,30 @@ class TestThemeSwitcher:
         app._http_client = None
         app._apply_theme_overrides()
         # Per-key override wins over base theme
-        assert THEME_COLORS["accent"] == "#ff0000"
+        assert app._theme_runtime.colors["accent"] == "#ff0000"
         # Other keys come from the base theme
-        assert THEME_COLORS["green"] == CATPPUCCIN_MOCHA_THEME["green"]
+        assert app._theme_runtime.colors["green"] == CATPPUCCIN_MOCHA_THEME["green"]
 
     def test_unknown_theme_falls_back_to_default(self):
-        from arxiv_browser.app import DEFAULT_THEME, THEME_COLORS, ArxivBrowser
+        from arxiv_browser.app import DEFAULT_THEME, ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._config = UserConfig(theme_name="nonexistent-theme")
         app._http_client = None
         app._apply_theme_overrides()
-        assert THEME_COLORS["accent"] == DEFAULT_THEME["accent"]
+        assert app._theme_runtime.colors["accent"] == DEFAULT_THEME["accent"]
+
+    def test_category_overrides_rebuild_current_theme(self):
+        from arxiv_browser.app import ArxivBrowser, SOLARIZED_DARK_THEME
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._config = UserConfig(theme_name="catppuccin-mocha")
+        app._http_client = None
+        app._apply_theme_overrides()
+        app._config.theme_name = "solarized-dark"
+        app._apply_category_overrides()
+
+        assert app._theme_runtime.colors["accent"] == SOLARIZED_DARK_THEME["accent"]
 
 
 # ============================================================================
@@ -8496,11 +8597,7 @@ class TestSolarizedDarkTheme:
         assert restored.theme_name == "solarized-dark"
 
     def test_category_colors_update_on_theme(self):
-        from arxiv_browser.app import (
-            CATEGORY_COLORS,
-            THEME_CATEGORY_COLORS,
-            ArxivBrowser,
-        )
+        from arxiv_browser.app import THEME_CATEGORY_COLORS, ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._config = UserConfig(theme_name="solarized-dark")
@@ -8508,14 +8605,10 @@ class TestSolarizedDarkTheme:
         app._apply_category_overrides()
         expected = THEME_CATEGORY_COLORS["solarized-dark"]
         for cat, color in expected.items():
-            assert CATEGORY_COLORS[cat] == color
+            assert app._theme_runtime.category_colors[cat] == color
 
     def test_tag_namespace_colors_update_on_theme(self):
-        from arxiv_browser.app import (
-            TAG_NAMESPACE_COLORS,
-            THEME_TAG_NAMESPACE_COLORS,
-            ArxivBrowser,
-        )
+        from arxiv_browser.app import THEME_TAG_NAMESPACE_COLORS, ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._config = UserConfig(theme_name="solarized-dark")
@@ -8523,7 +8616,7 @@ class TestSolarizedDarkTheme:
         app._apply_theme_overrides()
         expected = THEME_TAG_NAMESPACE_COLORS["solarized-dark"]
         for ns, color in expected.items():
-            assert TAG_NAMESPACE_COLORS[ns] == color
+            assert app._theme_runtime.tag_namespace_colors[ns] == color
 
 
 # ============================================================================
@@ -11420,7 +11513,7 @@ class TestGetTargetPapers:
     def _make_mock_app(self, make_paper, papers=None, selected_ids=None):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import ArxivBrowser, PaperDetails
+        from arxiv_browser.app import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._http_client = None
@@ -11430,10 +11523,7 @@ class TestGetTargetPapers:
         app.filtered_papers = papers
         app._papers_by_id = {p.arxiv_id: p for p in papers}
         app.selected_ids = selected_ids or set()
-
-        mock_details = MagicMock(spec=PaperDetails)
-        mock_details.paper = papers[0] if papers else None
-        app.query_one = MagicMock(return_value=mock_details)
+        app._get_current_paper = MagicMock(return_value=papers[0] if papers else None)
 
         return app
 
@@ -11482,17 +11572,14 @@ class TestGetTargetPapers:
     def test_no_selection_no_current_paper_returns_empty(self, make_paper):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import ArxivBrowser, PaperDetails
+        from arxiv_browser.app import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._http_client = None
         app.filtered_papers = []
         app._papers_by_id = {}
         app.selected_ids = set()
-
-        mock_details = MagicMock(spec=PaperDetails)
-        mock_details.paper = None
-        app.query_one = MagicMock(return_value=mock_details)
+        app._get_current_paper = MagicMock(return_value=None)
 
         result = app._get_target_papers()
         assert result == []

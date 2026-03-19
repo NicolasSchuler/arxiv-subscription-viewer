@@ -5,7 +5,7 @@ from __future__ import annotations
 import functools
 import re
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
 
 from rich.markup import escape as escape_markup
@@ -16,7 +16,7 @@ from arxiv_browser.models import (
     QueryToken,
     WatchListEntry,
 )
-from arxiv_browser.themes import CATEGORY_COLORS, DEFAULT_CATEGORY_COLOR, THEME_COLORS
+from arxiv_browser.themes import DEFAULT_CATEGORY_COLOR, DEFAULT_CATEGORY_COLORS, DEFAULT_THEME
 
 if TYPE_CHECKING:
     from arxiv_browser.huggingface import HuggingFacePaper
@@ -106,7 +106,10 @@ _MD_INLINE_CODE_RE = re.compile(r"`([^`]+)`")
 _MD_BULLET_RE = re.compile(r"^(\s*)[-*]\s+", re.MULTILINE)
 
 
-def format_summary_as_rich(text: str) -> str:
+def format_summary_as_rich(
+    text: str,
+    theme_colors: Mapping[str, str] | None = None,
+) -> str:
     """Convert a markdown-formatted LLM summary to Rich markup.
 
     Handles headings, bold, inline code, and bullet lists — the typical
@@ -114,10 +117,11 @@ def format_summary_as_rich(text: str) -> str:
     """
     if not text:
         return ""
+    colors = theme_colors or DEFAULT_THEME
     # Escape first so user content is safe, then layer Rich markup on top
     out = escape_rich_text(text)
     # Headings: ## Foo → colored bold
-    heading_color = THEME_COLORS.get("accent", "#66d9ef")
+    heading_color = colors.get("accent", "#66d9ef")
 
     def _heading_repl(m: re.Match[str]) -> str:
         level = len(m.group(1))
@@ -130,7 +134,7 @@ def format_summary_as_rich(text: str) -> str:
     # Bold: **text** → [bold]text[/]
     out = _MD_BOLD_RE.sub(r"[bold]\1[/]", out)
     # Inline code: `code` → styled span
-    code_color = THEME_COLORS.get("green", "#a6e22e")
+    code_color = colors.get("green", "#a6e22e")
     out = _MD_INLINE_CODE_RE.sub(rf"[{code_color}]\1[/]", out)
     # Bullets: - item → • item (or - item in ASCII mode)
     from arxiv_browser._ascii import is_ascii_mode
@@ -362,13 +366,29 @@ def to_rpn(tokens: list[QueryToken]) -> list[QueryToken]:
 
 
 @functools.lru_cache(maxsize=256)
-def format_categories(categories: str) -> str:
-    """Format categories with colors. Results are automatically cached via lru_cache."""
+def _format_categories_cached(
+    categories: str,
+    color_items: tuple[tuple[str, str], ...],
+) -> str:
+    """Format categories with colors for a specific resolved palette."""
+    category_colors = dict(color_items)
     parts = []
     for cat in categories.split():
-        color = CATEGORY_COLORS.get(cat, DEFAULT_CATEGORY_COLOR)
+        color = category_colors.get(cat, DEFAULT_CATEGORY_COLOR)
         parts.append(f"[{color}]{cat}[/]")
     return " ".join(parts)
+
+
+def format_categories(
+    categories: str,
+    category_colors: Mapping[str, str] | None = None,
+) -> str:
+    """Format categories with colors using the provided or default palette."""
+    palette = category_colors or DEFAULT_CATEGORY_COLORS
+    return _format_categories_cached(categories, tuple(sorted(palette.items())))
+
+
+format_categories.cache_clear = _format_categories_cached.cache_clear  # type: ignore[attr-defined]
 
 
 # ============================================================================

@@ -11,6 +11,7 @@ from arxiv_browser.services.interfaces import (
     AppServices,
     ArxivApiService,
     DownloadService,
+    EnrichmentService,
     LlmService,
     build_default_app_services,
 )
@@ -23,6 +24,7 @@ def test_build_default_app_services_protocol_compatible() -> None:
     assert isinstance(services.arxiv_api, ArxivApiService)
     assert isinstance(services.llm, LlmService)
     assert isinstance(services.download, DownloadService)
+    assert isinstance(services.enrichment, EnrichmentService)
 
 
 @pytest.mark.asyncio
@@ -51,7 +53,7 @@ async def test_default_arxiv_api_adapter_delegates(make_paper) -> None:
             sleep=AsyncMock(),
         )
         papers = await services.arxiv_api.fetch_page(
-            client=None,
+            client=AsyncMock(),
             request=request,
             start=0,
             max_results=10,
@@ -129,9 +131,62 @@ async def test_default_download_adapter_delegates(make_paper) -> None:
         ok = await services.download.download_pdf(
             paper=paper,
             config=UserConfig(),
-            client=None,
+            client=AsyncMock(),
             timeout_seconds=30,
         )
 
     assert ok is True
     download.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_default_enrichment_adapter_delegates(tmp_path) -> None:
+    services = build_default_app_services()
+    client = AsyncMock()
+
+    with (
+        patch(
+            "arxiv_browser.services.interfaces._enrichment.load_or_fetch_s2_paper_result",
+            new=AsyncMock(return_value="s2-result"),
+        ) as s2_fetch,
+        patch(
+            "arxiv_browser.services.interfaces._enrichment.load_or_fetch_hf_daily_result",
+            new=AsyncMock(return_value="hf-result"),
+        ) as hf_fetch,
+        patch(
+            "arxiv_browser.services.interfaces._enrichment.load_or_fetch_s2_recommendations_result",
+            new=AsyncMock(return_value="rec-result"),
+        ) as rec_fetch,
+    ):
+        assert (
+            await services.enrichment.load_or_fetch_s2_paper(
+                arxiv_id="2401.12345",
+                db_path=tmp_path / "s2.db",
+                cache_ttl_days=7,
+                client=client,
+                api_key="key",
+            )
+            == "s2-result"
+        )
+        assert (
+            await services.enrichment.load_or_fetch_hf_daily(
+                db_path=tmp_path / "hf.db",
+                cache_ttl_hours=6,
+                client=client,
+            )
+            == "hf-result"
+        )
+        assert (
+            await services.enrichment.load_or_fetch_s2_recommendations(
+                arxiv_id="2401.12345",
+                db_path=tmp_path / "s2.db",
+                cache_ttl_days=7,
+                client=client,
+                api_key="key",
+            )
+            == "rec-result"
+        )
+
+    s2_fetch.assert_awaited_once()
+    hf_fetch.assert_awaited_once()
+    rec_fetch.assert_awaited_once()

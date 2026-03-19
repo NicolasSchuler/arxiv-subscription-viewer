@@ -44,7 +44,7 @@ async def enforce_rate_limit(
 
 async def fetch_page(
     *,
-    client: httpx.AsyncClient | None,
+    client: httpx.AsyncClient,
     request: ArxivSearchRequest,
     start: int,
     max_results: int,
@@ -63,21 +63,12 @@ async def fetch_page(
     headers = {"User-Agent": user_agent}
 
     async def _do_request() -> httpx.Response:
-        if client is not None:
-            resp = await client.get(
-                ARXIV_API_URL,
-                params=params,
-                headers=headers,
-                timeout=timeout_seconds,
-            )
-        else:
-            async with httpx.AsyncClient() as tmp_client:
-                resp = await tmp_client.get(
-                    ARXIV_API_URL,
-                    params=params,
-                    headers=headers,
-                    timeout=timeout_seconds,
-                )
+        resp = await client.get(
+            ARXIV_API_URL,
+            params=params,
+            headers=headers,
+            timeout=timeout_seconds,
+        )
         resp.raise_for_status()
         return resp
 

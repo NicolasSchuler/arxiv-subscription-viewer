@@ -9,11 +9,6 @@ import pytest
 
 from arxiv_browser.app import (
     _HIGHLIGHT_PATTERN_CACHE,
-    CATEGORY_COLORS,
-    DEFAULT_CATEGORY_COLORS,
-    DEFAULT_THEME,
-    TAG_NAMESPACE_COLORS,
-    THEME_COLORS,
     Paper,
     PaperMetadata,
     SearchBookmark,
@@ -23,36 +18,14 @@ from arxiv_browser.app import (
     format_categories,
 )
 
-# ── Module-level dict isolation ──────────────────────────────────────────────
+# ── Cache isolation ──────────────────────────────────────────────────────────
 
 
 @pytest.fixture(autouse=True)
 def _reset_global_dicts():
-    """Restore CATEGORY_COLORS, THEME_COLORS, and clear LRU cache after each test.
-
-    ArxivBrowser.__init__ mutates these module-level dicts. Without this fixture
-    tests that instantiate ArxivBrowser would pollute the state for later tests.
-    """
+    """Clear global caches that are intentionally process-wide between tests."""
     yield
-    # Restore module-level dicts
-    CATEGORY_COLORS.clear()
-    CATEGORY_COLORS.update(DEFAULT_CATEGORY_COLORS)
-    THEME_COLORS.clear()
-    THEME_COLORS.update(DEFAULT_THEME)
-    # Clear LRU cache that captured stale color values
     format_categories.cache_clear()
-    # Reset tag namespace colors
-    TAG_NAMESPACE_COLORS.clear()
-    TAG_NAMESPACE_COLORS.update(
-        {
-            "topic": "#66d9ef",
-            "status": "#a6e22e",
-            "project": "#fd971f",
-            "method": "#ae81ff",
-            "priority": "#fd4d8e",
-        }
-    )
-    # Clear highlight pattern cache
     _HIGHLIGHT_PATTERN_CACHE.clear()
 
 

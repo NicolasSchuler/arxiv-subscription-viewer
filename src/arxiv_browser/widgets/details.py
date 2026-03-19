@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 
 from textual.widgets import Static
 
@@ -16,7 +17,16 @@ from arxiv_browser.query import (
     truncate_at_word_boundary,
 )
 from arxiv_browser.semantic_scholar import SemanticScholarPaper
-from arxiv_browser.themes import THEME_COLORS, get_tag_color, parse_tag_namespace
+from arxiv_browser.themes import (
+    DEFAULT_CATEGORY_COLORS,
+    DEFAULT_TAG_NAMESPACE_COLORS,
+    DEFAULT_THEME,
+    category_colors_for,
+    get_tag_color,
+    parse_tag_namespace,
+    tag_namespace_colors_for,
+    theme_colors_for,
+)
 from arxiv_browser.widgets.listing import _relevance_badge_parts
 
 # Maximum number of cached detail pane renderings (FIFO eviction)
@@ -80,6 +90,9 @@ def _detail_cache_key(
     relevance: tuple[int, str] | None = None,
     collapsed_sections: list[str] | None = None,
     detail_mode: str = "full",
+    theme_colors: Mapping[str, str] | None = None,
+    category_colors: Mapping[str, str] | None = None,
+    tag_namespace_colors: Mapping[str, str] | None = None,
 ) -> tuple:
     """Build a stable, hashable cache key for rendered detail markup.
 
@@ -143,6 +156,9 @@ def _detail_cache_key(
         if hf_data is not None
         else None
     )
+    resolved_theme_colors = dict(theme_colors or DEFAULT_THEME)
+    resolved_category_colors = dict(category_colors or DEFAULT_CATEGORY_COLORS)
+    resolved_tag_namespace_colors = dict(tag_namespace_colors or DEFAULT_TAG_NAMESPACE_COLORS)
     return (
         paper.arxiv_id,
         paper.title,
@@ -165,7 +181,9 @@ def _detail_cache_key(
         relevance,
         tuple(collapsed_sections) if collapsed_sections else (),
         detail_mode,
-        tuple(sorted(THEME_COLORS.items())),
+        tuple(sorted(resolved_theme_colors.items())),
+        tuple(sorted(resolved_category_colors.items())),
+        tuple(sorted(resolved_tag_namespace_colors.items())),
         _ACTIVE_DETAIL_GLYPH_MODE,
     )
 
@@ -178,12 +196,21 @@ def _truncate_detail_text(text: str, max_len: int) -> str:
 class PaperDetails(Static):
     """Widget to display full paper details."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        theme_colors: Mapping[str, str] | None = None,
+        category_colors: Mapping[str, str] | None = None,
+        tag_namespace_colors: Mapping[str, str] | None = None,
+    ) -> None:
         """Initialise the detail pane with an empty markup cache."""
         super().__init__()
         self._paper: Paper | None = None
         self._detail_cache: dict[tuple, str] = {}
         self._detail_cache_order: list[tuple] = []
+        self._theme_colors = dict(theme_colors or DEFAULT_THEME)
+        self._category_colors = dict(category_colors or DEFAULT_CATEGORY_COLORS)
+        self._tag_namespace_colors = dict(tag_namespace_colors or DEFAULT_TAG_NAMESPACE_COLORS)
 
     def update_paper(
         self,
@@ -211,6 +238,9 @@ class PaperDetails(Static):
         loading = abstract_text is None and paper.abstract is None
         if abstract_text is None:
             abstract_text = paper.abstract or ""
+        colors = theme_colors_for(self, self._theme_colors)
+        category_colors = category_colors_for(self, self._category_colors)
+        tag_namespace_colors = tag_namespace_colors_for(self, self._tag_namespace_colors)
 
         # Check detail cache before rebuilding markup
         cache_key = _detail_cache_key(
@@ -229,6 +259,9 @@ class PaperDetails(Static):
             relevance=relevance,
             collapsed_sections=collapsed_sections,
             detail_mode=detail_mode,
+            theme_colors=colors,
+            category_colors=category_colors,
+            tag_namespace_colors=tag_namespace_colors,
         )
         cached = self._detail_cache.get(cache_key)
         if cached is not None:
@@ -239,22 +272,23 @@ class PaperDetails(Static):
 
         sections = [
             self._render_title(paper),
-            self._render_metadata(paper),
+            self._render_metadata(paper, category_colors),
             self._render_abstract(
                 abstract_text,
                 loading,
                 highlight_terms,
                 "abstract" in collapsed,
                 detail_mode,
+                colors,
             ),
-            self._render_authors(paper, "authors" in collapsed, detail_mode),
-            self._render_tags(tags, "tags" in collapsed),
-            self._render_relevance(relevance, "relevance" in collapsed),
+            self._render_authors(paper, "authors" in collapsed, detail_mode, colors),
+            self._render_tags(tags, "tags" in collapsed, colors, tag_namespace_colors),
+            self._render_relevance(relevance, "relevance" in collapsed, colors),
             self._render_summary(summary, summary_loading, summary_mode, "summary" in collapsed),
-            self._render_s2(s2_data, s2_loading, "s2" in collapsed),
-            self._render_hf(hf_data, "hf" in collapsed),
-            self._render_version(paper, version_update, "version" in collapsed),
-            self._render_url(paper),
+            self._render_s2(s2_data, s2_loading, "s2" in collapsed, colors),
+            self._render_hf(hf_data, "hf" in collapsed, colors),
+            self._render_version(paper, version_update, "version" in collapsed, colors),
+            self._render_url(paper, colors),
         ]
         markup = "\n\n".join(s for s in sections if s)
 
@@ -276,19 +310,27 @@ class PaperDetails(Static):
     def _render_title(self, paper: Paper) -> str:
         """Return Rich markup for the paper title."""
         safe_title = escape_rich_text(paper.title)
-        return f"[bold {THEME_COLORS['text']}]{safe_title}[/]"
+        return f"[bold {theme_colors_for(self, self._theme_colors)['text']}]{safe_title}[/]"
 
-    def _render_metadata(self, paper: Paper) -> str:
+    def _render_metadata(
+        self,
+        paper: Paper,
+        category_colors: Mapping[str, str] | None = None,
+    ) -> str:
         """Return Rich markup for arXiv ID, date, categories, and comments."""
+        colors = theme_colors_for(self, self._theme_colors)
+        resolved_category_colors = category_colors or category_colors_for(
+            self, self._category_colors
+        )
         safe_date = escape_rich_text(paper.date)
         safe_comments = escape_rich_text(paper.comments or "")
         lines = [
-            f"  [bold {THEME_COLORS['accent']}]arXiv:[/] [{THEME_COLORS['purple']}]{paper.arxiv_id}[/]",
-            f"  [bold {THEME_COLORS['accent']}]Date:[/] {safe_date}",
-            f"  [bold {THEME_COLORS['accent']}]Categories:[/] {format_categories(paper.categories)}",
+            f"  [bold {colors['accent']}]arXiv:[/] [{colors['purple']}]{paper.arxiv_id}[/]",
+            f"  [bold {colors['accent']}]Date:[/] {safe_date}",
+            f"  [bold {colors['accent']}]Categories:[/] {format_categories(paper.categories, resolved_category_colors)}",
         ]
         if paper.comments:
-            lines.append(f"  [bold {THEME_COLORS['accent']}]Comments:[/] [dim]{safe_comments}[/]")
+            lines.append(f"  [bold {colors['accent']}]Comments:[/] [dim]{safe_comments}[/]")
         return "\n".join(lines)
 
     def _render_abstract(
@@ -298,8 +340,10 @@ class PaperDetails(Static):
         highlight_terms: list[str] | None,
         is_collapsed: bool,
         detail_mode: str,
+        theme_colors: Mapping[str, str] | None = None,
     ) -> str:
         """Return Rich markup for the abstract section with optional highlighting."""
+        resolved_theme_colors = theme_colors or theme_colors_for(self, self._theme_colors)
         collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
         expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
         if is_collapsed:
@@ -310,7 +354,11 @@ class PaperDetails(Static):
                 if detail_mode == "scan"
                 else abstract_text
             )
-            safe_abstract = highlight_text(abstract_body, highlight_terms, THEME_COLORS["accent"])
+            safe_abstract = highlight_text(
+                abstract_body,
+                highlight_terms,
+                resolved_theme_colors["accent"],
+            )
         else:
             abstract_body = (
                 _truncate_detail_text(abstract_text, DETAIL_SCAN_ABSTRACT_LEN)
@@ -318,17 +366,24 @@ class PaperDetails(Static):
                 else abstract_text
             )
             safe_abstract = escape_rich_text(abstract_body)
-        lines = [f"[bold {THEME_COLORS['orange']}]{expanded_glyph} Abstract[/]"]
+        lines = [f"[bold {resolved_theme_colors['orange']}]{expanded_glyph} Abstract[/]"]
         if loading:
             lines.append("  [dim italic]Loading abstract...[/]")
         elif abstract_text:
-            lines.append(f"  [{THEME_COLORS['text']}]{safe_abstract}[/]")
+            lines.append(f"  [{resolved_theme_colors['text']}]{safe_abstract}[/]")
         else:
             lines.append("  [dim italic]No abstract available[/]")
         return "\n".join(lines)
 
-    def _render_authors(self, paper: Paper, is_collapsed: bool, detail_mode: str) -> str:
+    def _render_authors(
+        self,
+        paper: Paper,
+        is_collapsed: bool,
+        detail_mode: str,
+        theme_colors: Mapping[str, str] | None = None,
+    ) -> str:
         """Return Rich markup for the authors section."""
+        resolved_theme_colors = theme_colors or theme_colors_for(self, self._theme_colors)
         collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
         expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
         if is_collapsed:
@@ -340,19 +395,29 @@ class PaperDetails(Static):
         )
         safe_authors = escape_rich_text(authors_text)
         return (
-            f"[bold {THEME_COLORS['green']}]{expanded_glyph} Authors[/]\n"
-            f"  [{THEME_COLORS['text']}]{safe_authors}[/]"
+            f"[bold {resolved_theme_colors['green']}]{expanded_glyph} Authors[/]\n"
+            f"  [{resolved_theme_colors['text']}]{safe_authors}[/]"
         )
 
-    def _render_tags(self, tags: list[str] | None, is_collapsed: bool) -> str:
+    def _render_tags(
+        self,
+        tags: list[str] | None,
+        is_collapsed: bool,
+        theme_colors: Mapping[str, str] | None = None,
+        tag_namespace_colors: Mapping[str, str] | None = None,
+    ) -> str:
         """Return Rich markup for user-assigned tags grouped by namespace."""
+        resolved_theme_colors = theme_colors or theme_colors_for(self, self._theme_colors)
+        resolved_tag_namespace_colors = tag_namespace_colors or tag_namespace_colors_for(
+            self, self._tag_namespace_colors
+        )
         collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
         expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
         if not tags:
             return ""
         if is_collapsed:
             return f"[dim]{collapsed_glyph} Tags ({len(tags)})[/]"
-        lines = [f"[bold {THEME_COLORS['accent']}]{expanded_glyph} Tags[/]"]
+        lines = [f"[bold {resolved_theme_colors['accent']}]{expanded_glyph} Tags[/]"]
         namespaced: dict[str, list[str]] = {}
         unnamespaced: list[str] = []
         for tag in tags:
@@ -362,34 +427,43 @@ class PaperDetails(Static):
             else:
                 unnamespaced.append(val)
         for ns in sorted(namespaced):
-            color = get_tag_color(f"{ns}:")
+            color = get_tag_color(f"{ns}:", resolved_tag_namespace_colors)
             safe_ns = escape_rich_text(ns)
             vals = ", ".join(escape_rich_text(v) for v in namespaced[ns])
             lines.append(f"  [{color}]{safe_ns}:[/] {vals}")
         if unnamespaced:
-            color = get_tag_color("")
+            color = get_tag_color("", resolved_tag_namespace_colors)
             safe_unnamespaced = ", ".join(escape_rich_text(v) for v in unnamespaced)
             lines.append(f"  [{color}]{safe_unnamespaced}[/]")
         return "\n".join(lines)
 
-    def _render_relevance(self, relevance: tuple[int, str] | None, is_collapsed: bool) -> str:
+    def _render_relevance(
+        self,
+        relevance: tuple[int, str] | None,
+        is_collapsed: bool,
+        theme_colors: Mapping[str, str] | None = None,
+    ) -> str:
         """Return Rich markup for the relevance score and reason."""
         if relevance is None:
             return ""
+        resolved_theme_colors = theme_colors or theme_colors_for(self, self._theme_colors)
         rel_score, rel_reason = relevance
-        score_color, score_sym = _relevance_badge_parts(rel_score)
+        score_color, score_sym = _relevance_badge_parts(
+            rel_score,
+            theme_colors=resolved_theme_colors,
+        )
         score_sym = _relevance_symbol_for_mode(score_sym)
         collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
         expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
         if is_collapsed:
             return f"[dim]{collapsed_glyph} Relevance ({score_sym}{rel_score}/10)[/]"
         lines = [
-            f"[bold {THEME_COLORS['accent']}]{expanded_glyph} Relevance[/]",
-            f"  [bold {THEME_COLORS['accent']}]Score:[/] [{score_color}]{score_sym}{rel_score}/10[/]",
+            f"[bold {resolved_theme_colors['accent']}]{expanded_glyph} Relevance[/]",
+            f"  [bold {resolved_theme_colors['accent']}]Score:[/] [{score_color}]{score_sym}{rel_score}/10[/]",
         ]
         if rel_reason:
             safe_reason = escape_rich_text(rel_reason)
-            lines.append(f"  [{THEME_COLORS['text']}]{safe_reason}[/]")
+            lines.append(f"  [{resolved_theme_colors['text']}]{safe_reason}[/]")
         return "\n".join(lines)
 
     def _render_summary(
@@ -400,6 +474,7 @@ class PaperDetails(Static):
         is_collapsed: bool,
     ) -> str:
         """Return Rich markup for the AI-generated summary section."""
+        colors = theme_colors_for(self, self._theme_colors)
         summary_header = "AI Summary"
         if summary_mode:
             summary_header += f" ({summary_mode})"
@@ -414,13 +489,13 @@ class PaperDetails(Static):
             return f"[dim]{collapsed_glyph} {summary_header}{hint}[/]"
         if summary_loading:
             return (
-                f"[bold {THEME_COLORS['purple']}]{expanded_glyph} {summary_prefix}{summary_header}[/]\n"
+                f"[bold {colors['purple']}]{expanded_glyph} {summary_prefix}{summary_header}[/]\n"
                 f"  [dim italic]{summary_loading_prefix}Generating summary...[/]"
             )
         if summary:
-            rendered_summary = format_summary_as_rich(summary)
+            rendered_summary = format_summary_as_rich(summary, theme_colors=colors)
             return (
-                f"[bold {THEME_COLORS['purple']}]{expanded_glyph} {summary_prefix}{summary_header}[/]\n"
+                f"[bold {colors['purple']}]{expanded_glyph} {summary_prefix}{summary_header}[/]\n"
                 f"{rendered_summary}"
             )
         return ""
@@ -430,10 +505,12 @@ class PaperDetails(Static):
         s2_data: SemanticScholarPaper | None,
         s2_loading: bool,
         is_collapsed: bool,
+        theme_colors: Mapping[str, str] | None = None,
     ) -> str:
         """Return Rich markup for the Semantic Scholar data section."""
         if not s2_loading and not s2_data:
             return ""
+        resolved_theme_colors = theme_colors or theme_colors_for(self, self._theme_colors)
         collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
         expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
         if is_collapsed:
@@ -443,51 +520,63 @@ class PaperDetails(Static):
             return f"[dim]{collapsed_glyph} Semantic Scholar{hint}[/]"
         if s2_loading:
             return (
-                f"[bold {THEME_COLORS['green']}]{expanded_glyph} Semantic Scholar[/]\n"
+                f"[bold {resolved_theme_colors['green']}]{expanded_glyph} Semantic Scholar[/]\n"
                 "  [dim italic]Fetching data...[/]"
             )
         if s2_data:
             lines = [
-                f"[bold {THEME_COLORS['green']}]{expanded_glyph} Semantic Scholar[/]",
-                f"  [bold {THEME_COLORS['accent']}]Citations:[/] {s2_data.citation_count}",
-                f"  [bold {THEME_COLORS['accent']}]Influential:[/] {s2_data.influential_citation_count}",
+                f"[bold {resolved_theme_colors['green']}]{expanded_glyph} Semantic Scholar[/]",
+                f"  [bold {resolved_theme_colors['accent']}]Citations:[/] {s2_data.citation_count}",
+                f"  [bold {resolved_theme_colors['accent']}]Influential:[/] {s2_data.influential_citation_count}",
             ]
             if s2_data.fields_of_study:
                 fos = ", ".join(escape_rich_text(field) for field in s2_data.fields_of_study)
-                lines.append(f"  [bold {THEME_COLORS['accent']}]Fields:[/] {fos}")
+                lines.append(f"  [bold {resolved_theme_colors['accent']}]Fields:[/] {fos}")
             if s2_data.tldr:
                 safe_tldr = escape_rich_text(s2_data.tldr)
                 lines.append(
-                    f"  [bold {THEME_COLORS['accent']}]TLDR:[/] [{THEME_COLORS['text']}]{safe_tldr}[/]"
+                    f"  [bold {resolved_theme_colors['accent']}]TLDR:[/] "
+                    f"[{resolved_theme_colors['text']}]{safe_tldr}[/]"
                 )
             return "\n".join(lines)
         return ""
 
-    def _render_hf(self, hf_data: HuggingFacePaper | None, is_collapsed: bool) -> str:
+    def _render_hf(
+        self,
+        hf_data: HuggingFacePaper | None,
+        is_collapsed: bool,
+        theme_colors: Mapping[str, str] | None = None,
+    ) -> str:
         """Return Rich markup for the HuggingFace metadata section."""
         if not hf_data:
             return ""
+        resolved_theme_colors = theme_colors or theme_colors_for(self, self._theme_colors)
         collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
         expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
         hf_upvotes = _ACTIVE_DETAIL_GLYPHS["hf_upvotes"]
         if is_collapsed:
             return f"[dim]{collapsed_glyph} HuggingFace ({hf_upvotes}{hf_data.upvotes})[/]"
-        lines = [f"[bold {THEME_COLORS['orange']}]{expanded_glyph} HuggingFace[/]"]
-        hf_parts = [f"  [bold {THEME_COLORS['accent']}]Upvotes:[/] {hf_data.upvotes}"]
+        lines = [f"[bold {resolved_theme_colors['orange']}]{expanded_glyph} HuggingFace[/]"]
+        hf_parts = [f"  [bold {resolved_theme_colors['accent']}]Upvotes:[/] {hf_data.upvotes}"]
         if hf_data.num_comments > 0:
-            hf_parts.append(f"  [bold {THEME_COLORS['accent']}]Comments:[/] {hf_data.num_comments}")
+            hf_parts.append(
+                f"  [bold {resolved_theme_colors['accent']}]Comments:[/] {hf_data.num_comments}"
+            )
         lines.extend(hf_parts)
         if hf_data.github_repo:
             stars_str = f" ({hf_data.github_stars} stars)" if hf_data.github_stars else ""
             safe_repo = escape_rich_text(hf_data.github_repo)
-            lines.append(f"  [bold {THEME_COLORS['accent']}]GitHub:[/] {safe_repo}{stars_str}")
+            lines.append(
+                f"  [bold {resolved_theme_colors['accent']}]GitHub:[/] {safe_repo}{stars_str}"
+            )
         if hf_data.ai_keywords:
             kw = ", ".join(escape_rich_text(keyword) for keyword in hf_data.ai_keywords)
-            lines.append(f"  [bold {THEME_COLORS['accent']}]Keywords:[/] {kw}")
+            lines.append(f"  [bold {resolved_theme_colors['accent']}]Keywords:[/] {kw}")
         if hf_data.ai_summary:
             safe_summary = escape_rich_text(hf_data.ai_summary)
             lines.append(
-                f"  [bold {THEME_COLORS['accent']}]AI Summary:[/] [{THEME_COLORS['text']}]{safe_summary}[/]"
+                f"  [bold {resolved_theme_colors['accent']}]AI Summary:[/] "
+                f"[{resolved_theme_colors['text']}]{safe_summary}[/]"
             )
         return "\n".join(lines)
 
@@ -496,10 +585,12 @@ class PaperDetails(Static):
         paper: Paper,
         version_update: tuple[int, int] | None,
         is_collapsed: bool,
+        theme_colors: Mapping[str, str] | None = None,
     ) -> str:
         """Return Rich markup for the version update section."""
         if version_update is None:
             return ""
+        resolved_theme_colors = theme_colors or theme_colors_for(self, self._theme_colors)
         old_v, new_v = version_update
         collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
         expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
@@ -507,15 +598,25 @@ class PaperDetails(Static):
         if is_collapsed:
             return f"[dim]{collapsed_glyph} Version Update (v{old_v}{version_arrow}v{new_v})[/]"
         return (
-            f"[bold {THEME_COLORS['pink']}]{expanded_glyph} Version Update[/]\n"
-            f"  [bold {THEME_COLORS['accent']}]Updated:[/] [{THEME_COLORS['pink']}]v{old_v} {version_arrow} v{new_v}[/]\n"
-            f"  [bold {THEME_COLORS['accent']}]View diff:[/] [{THEME_COLORS['accent']}]https://arxivdiff.org/abs/{paper.arxiv_id}[/]"
+            f"[bold {resolved_theme_colors['pink']}]{expanded_glyph} Version Update[/]\n"
+            f"  [bold {resolved_theme_colors['accent']}]Updated:[/] "
+            f"[{resolved_theme_colors['pink']}]v{old_v} {version_arrow} v{new_v}[/]\n"
+            f"  [bold {resolved_theme_colors['accent']}]View diff:[/] "
+            f"[{resolved_theme_colors['accent']}]https://arxivdiff.org/abs/{paper.arxiv_id}[/]"
         )
 
-    def _render_url(self, paper: Paper) -> str:
+    def _render_url(
+        self,
+        paper: Paper,
+        theme_colors: Mapping[str, str] | None = None,
+    ) -> str:
         """Return Rich markup for the paper URL footer."""
+        resolved_theme_colors = theme_colors or theme_colors_for(self, self._theme_colors)
         safe_url = escape_rich_text(paper.url)
-        return f"[bold {THEME_COLORS['pink']}]URL[/]\n  [{THEME_COLORS['accent']}]{safe_url}[/]"
+        return (
+            f"[bold {resolved_theme_colors['pink']}]URL[/]\n"
+            f"  [{resolved_theme_colors['accent']}]{safe_url}[/]"
+        )
 
     def clear_cache(self) -> None:
         """Clear the rendered markup cache."""

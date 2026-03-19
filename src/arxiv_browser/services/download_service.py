@@ -18,7 +18,7 @@ async def download_pdf(
     *,
     paper: Paper,
     config: UserConfig,
-    client: httpx.AsyncClient | None,
+    client: httpx.AsyncClient,
     timeout_seconds: int,
 ) -> bool:
     """Download a single PDF using atomic temp-file replacement."""
@@ -48,11 +48,7 @@ async def download_pdf(
                         if chunk:
                             tmp_file.write(chunk)
 
-        if client is not None:
-            await _stream_to_tmp(client)
-        else:
-            async with httpx.AsyncClient() as tmp_client:
-                await _stream_to_tmp(tmp_client)
+        await _stream_to_tmp(client)
 
         os.replace(tmp_path, path)
         return True

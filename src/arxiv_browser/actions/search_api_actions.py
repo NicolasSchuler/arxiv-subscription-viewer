@@ -154,6 +154,7 @@ def _apply_arxiv_search_results(
     if not was_in_api_mode and app._local_browse_snapshot is None:
         app._local_browse_snapshot = app._capture_local_browse_snapshot()
 
+    app._advance_dataset_epoch()
     app._in_arxiv_api_mode = True
     app._arxiv_search_state = ArxivSearchModeState(
         request=request,
@@ -164,12 +165,14 @@ def _apply_arxiv_search_results(
     # API mode has its own paper set and selection state.
     app.all_papers = papers
     app.filtered_papers = papers.copy()
+    app._reset_dataset_view_state()
     app._papers_by_id = {paper.arxiv_id: paper for paper in papers}
     app.selected_ids.clear()
     if not was_in_api_mode:
         # First API entry starts unfiltered; subsequent pages preserve user choice.
         app._watch_filter_active = False
     app._pending_query = ""
+    app._applied_query = ""
     app._highlight_terms = {"title": [], "author": [], "abstract": []}
     app._match_scores.clear()
     try:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import date
 from pathlib import Path
 
@@ -15,7 +15,7 @@ from textual.widgets import Label, Static
 from arxiv_browser.models import QueryToken, SearchBookmark
 from arxiv_browser.parsing import count_papers_in_file
 from arxiv_browser.query import escape_rich_text, pill_label_for_token
-from arxiv_browser.themes import THEME_COLORS
+from arxiv_browser.themes import DEFAULT_THEME, theme_colors_for
 
 DATE_NAV_WINDOW_SIZE = 5
 DATE_NAV_ARROW_WIDTH = 3
@@ -135,13 +135,15 @@ def build_footer_mode_badge(
     search_visible: bool,
     in_arxiv_api_mode: bool,
     selected_count: int,
+    theme_colors: Mapping[str, str] | None = None,
 ) -> str:
     """Build Rich-markup mode badge text for footer state."""
-    pink = THEME_COLORS["pink"]
-    accent = THEME_COLORS["accent"]
-    orange = THEME_COLORS["orange"]
-    green = THEME_COLORS["green"]
-    panel_alt = THEME_COLORS["panel_alt"]
+    colors = theme_colors or DEFAULT_THEME
+    pink = colors["pink"]
+    accent = colors["accent"]
+    orange = colors["orange"]
+    green = colors["green"]
+    panel_alt = colors["panel_alt"]
     if relevance_scoring_active:
         return f"[bold {pink} on {panel_alt}] SCORING [/]"
     if version_checking:
@@ -178,8 +180,10 @@ def build_status_bar_text(
     version_checking: bool,
     version_update_count: int,
     max_width: int | None = None,
+    theme_colors: Mapping[str, str] | None = None,
 ) -> str:
     """Build semantic status bar text for current UI/application state."""
+    colors = theme_colors or DEFAULT_THEME
     if max_width is not None and max_width <= 100:
         compact_parts = _build_compact_status_parts(
             total=total,
@@ -227,6 +231,7 @@ def build_status_bar_text(
         hf_api_error=hf_api_error,
         version_checking=version_checking,
         version_update_count=version_update_count,
+        theme_colors=colors,
     )
     sep = _ACTIVE_CHROME_GLYPHS["separator"]
     rendered = f" [dim]{sep}[/] ".join(parts)
@@ -245,18 +250,23 @@ def _compact_primary_segment(
 
 
 def _full_primary_segment(
-    *, total: int, filtered: int, query: str, watch_filter_active: bool
+    *,
+    total: int,
+    filtered: int,
+    query: str,
+    watch_filter_active: bool,
+    theme_colors: Mapping[str, str],
 ) -> str:
     """Build the first rich segment (query/watch/default)."""
     if query:
         truncated_query = query if len(query) <= 30 else query[:27] + "..."
         safe_query = escape_rich_text(truncated_query)
         return (
-            f"[{THEME_COLORS['accent']}]{filtered}[/][dim]/{total} matching [/]"
-            f'[{THEME_COLORS["accent"]}]"{safe_query}"[/]'
+            f"[{theme_colors['accent']}]{filtered}[/][dim]/{total} matching [/]"
+            f'[{theme_colors["accent"]}]"{safe_query}"[/]'
         )
     if watch_filter_active:
-        return f"[{THEME_COLORS['orange']}]{filtered}[/][dim]/{total} watched[/]"
+        return f"[{theme_colors['orange']}]{filtered}[/][dim]/{total} watched[/]"
     return f"[dim]{total} papers[/]"
 
 
@@ -283,12 +293,13 @@ def _full_flag_segment(
     label: str,
     color: str,
     api_error: bool = False,
+    theme_colors: Mapping[str, str],
 ) -> str | None:
     """Return rich-markup status text for S2/HF style toggles."""
     if not active:
         return None
     if api_error:
-        return f"[{THEME_COLORS['orange']}]{label}:err[/]"
+        return f"[{theme_colors['orange']}]{label}:err[/]"
     if loading:
         return f"[{color}]{label} loading...[/]"
     if count > 0:
@@ -391,6 +402,7 @@ def _build_full_status_parts(
     hf_api_error: bool = False,
     version_checking: bool,
     version_update_count: int,
+    theme_colors: Mapping[str, str],
 ) -> list[str]:
     """Build rich status tokens for regular widths."""
     parts = [
@@ -399,30 +411,32 @@ def _build_full_status_parts(
             filtered=filtered,
             query=query,
             watch_filter_active=watch_filter_active,
+            theme_colors=theme_colors,
         ),
         f"[dim]Sort: {sort_label}[/]",
     ]
     if selected_count > 0:
-        parts.insert(1, f"[bold {THEME_COLORS['green']}]{selected_count} selected[/]")
+        parts.insert(1, f"[bold {theme_colors['green']}]{selected_count} selected[/]")
     if in_arxiv_api_mode and api_page is not None:
         parts.extend(
             [
-                f"[{THEME_COLORS['orange']}]API[/]",
+                f"[{theme_colors['orange']}]API[/]",
                 f"[dim]Page: {api_page}[/]",
             ]
         )
         if arxiv_api_loading:
-            parts.append(f"[{THEME_COLORS['orange']}]Loading...[/]")
+            parts.append(f"[{theme_colors['orange']}]Loading...[/]")
     if show_abstract_preview:
-        parts.append(f"[{THEME_COLORS['purple']}]Preview[/]")
+        parts.append(f"[{theme_colors['purple']}]Preview[/]")
 
     s2_segment = _full_flag_segment(
         active=s2_active,
         loading=s2_loading,
         count=s2_count,
         label="S2",
-        color=THEME_COLORS["green"],
+        color=theme_colors["green"],
         api_error=s2_api_error,
+        theme_colors=theme_colors,
     )
     if s2_segment:
         parts.append(s2_segment)
@@ -432,16 +446,17 @@ def _build_full_status_parts(
         loading=hf_loading,
         count=hf_match_count,
         label="HF",
-        color=THEME_COLORS["orange"],
+        color=theme_colors["orange"],
         api_error=hf_api_error,
+        theme_colors=theme_colors,
     )
     if hf_segment:
         parts.append(hf_segment)
 
     if version_checking:
-        parts.append(f"[{THEME_COLORS['pink']}]Checking versions...[/]")
+        parts.append(f"[{theme_colors['pink']}]Checking versions...[/]")
     elif version_update_count > 0:
-        parts.append(f"[{THEME_COLORS['pink']}]{version_update_count} updated[/]")
+        parts.append(f"[{theme_colors['pink']}]{version_update_count} updated[/]")
     return parts
 
 
@@ -515,8 +530,9 @@ class ContextFooter(Static):
 
     def render_bindings(self, bindings: list[tuple[str, str]], mode_badge: str = "") -> None:
         """Update the footer with a list of (key, label) binding hints."""
-        accent = THEME_COLORS["accent"]
-        muted = THEME_COLORS["muted"]
+        colors = theme_colors_for(self)
+        accent = colors["accent"]
+        muted = colors["muted"]
         parts = []
         if mode_badge:
             parts.append(mode_badge)

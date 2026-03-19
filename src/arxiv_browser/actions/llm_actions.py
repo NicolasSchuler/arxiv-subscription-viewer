@@ -349,7 +349,7 @@ def _on_summary_mode_selected(app, mode: str | None, paper: Paper, command_templ
     app._summary_loading.add(arxiv_id)
     app._summary_mode_label[arxiv_id] = mode_label
     app._update_abstract_display(arxiv_id)
-    app._track_task(
+    app._track_dataset_task(
         app._generate_summary_async(
             paper,
             prompt_template,
@@ -370,6 +370,7 @@ async def _generate_summary_async(
 ) -> None:
     """Run the LLM CLI tool asynchronously and update the UI."""
     _sync_app_globals()
+    task_epoch = app._capture_dataset_epoch()
     arxiv_id = paper.arxiv_id
     generated_summary = False
     try:
@@ -385,12 +386,10 @@ async def _generate_summary_async(
             provider=app._llm_provider,
             use_full_paper_content=use_full_paper_content,
             summary_timeout_seconds=app._config.llm_timeout,
-            fetch_paper_content=lambda selected_paper: _fetch_paper_content_async(
-                selected_paper,
-                app._http_client,
-                timeout=SUMMARY_HTML_TIMEOUT,
-            ),
+            fetch_paper_content=app._fetch_paper_content_async,
         )
+        if not app._is_current_dataset_epoch(task_epoch):
+            return
         if summary is None:
             app.notify(
                 (error or "LLM command failed")[:200],
@@ -408,22 +407,31 @@ async def _generate_summary_async(
         generated_summary = True
         app.notify("Summary generated", title="AI Summary")
 
+    except asyncio.CancelledError:
+        raise
     except ValueError as e:
+        if not app._is_current_dataset_epoch(task_epoch):
+            return
         # Config/template errors — show the descriptive message directly
         logger.warning("Summary config error for %s: %s", arxiv_id, e)
         app.notify(str(e), title="AI Summary", severity="error", timeout=10)
     except _RECOVERABLE_ACTION_ERRORS as exc:
+        if not app._is_current_dataset_epoch(task_epoch):
+            return
         _log_action_failure(f"summary generation for {arxiv_id}", exc)
         app.notify("Summary failed", title="AI Summary", severity="error")
     except Exception as exc:
+        if not app._is_current_dataset_epoch(task_epoch):
+            return
         _log_action_failure(f"summary generation for {arxiv_id}", exc, unexpected=True)
         app.notify("Summary failed", title="AI Summary", severity="error")
     finally:
-        app._summary_loading.discard(arxiv_id)
-        if not generated_summary and arxiv_id not in app._paper_summaries:
-            app._summary_mode_label.pop(arxiv_id, None)
-            app._summary_command_hash.pop(arxiv_id, None)
-        app._update_abstract_display(arxiv_id)
+        if app._is_current_dataset_epoch(task_epoch):
+            app._summary_loading.discard(arxiv_id)
+            if not generated_summary and arxiv_id not in app._paper_summaries:
+                app._summary_mode_label.pop(arxiv_id, None)
+                app._summary_command_hash.pop(arxiv_id, None)
+            app._update_abstract_display(arxiv_id)
 
 
 def action_chat_with_paper(app: "ArxivBrowser") -> None:
@@ -451,13 +459,16 @@ def _start_chat_with_paper(app: "ArxivBrowser") -> None:
         logger.warning("LLM provider unexpectedly None in _start_chat_with_paper")
         return
     app.notify("Fetching paper content...", title="Chat")
-    app._track_task(app._open_chat_screen(paper, app._llm_provider))
+    app._track_dataset_task(app._open_chat_screen(paper, app._llm_provider))
 
 
 async def _open_chat_screen(app: "ArxivBrowser", paper: Paper, provider: CLIProvider) -> None:
     """Fetch paper content and open the chat modal."""
     _sync_app_globals()
-    paper_content = await _fetch_paper_content_async(paper, app._http_client)
+    task_epoch = app._capture_dataset_epoch()
+    paper_content = await app._fetch_paper_content_async(paper)
+    if not app._is_current_dataset_epoch(task_epoch):
+        return
     app.push_screen(
         PaperChatScreen(paper, provider, paper_content, timeout=app._config.llm_timeout)
     )
@@ -521,7 +532,7 @@ def _start_relevance_scoring(app: "ArxivBrowser", command_template: str, interes
     app._relevance_scoring_active = True
     app._update_footer()
     papers = list(app.all_papers)
-    app._track_task(app._score_relevance_batch_async(papers, command_template, interests))
+    app._track_dataset_task(app._score_relevance_batch_async(papers, command_template, interests))
 
 
 def action_edit_interests(app: "ArxivBrowser") -> None:
@@ -573,6 +584,7 @@ async def _score_relevance_batch_async(
             prompt context.
     """
     _sync_app_globals()
+    task_epoch = app._capture_dataset_epoch()
     try:
         interests_hash = _compute_command_hash(command_template, interests)
 
@@ -580,6 +592,8 @@ async def _score_relevance_batch_async(
         cached_scores = await asyncio.to_thread(
             _load_all_relevance_scores, app._relevance_db_path, interests_hash
         )
+        if not app._is_current_dataset_epoch(task_epoch):
+            return
 
         # Populate in-memory cache with DB-cached scores
         for aid, score_data in cached_scores.items():
@@ -626,6 +640,8 @@ async def _score_relevance_batch_async(
                         provider=app._llm_provider,
                         timeout_seconds=app._config.llm_timeout,
                     )
+                    if not app._is_current_dataset_epoch(task_epoch):
+                        return
                     if parsed is None:
                         failed += 1
                         return
@@ -647,6 +663,8 @@ async def _score_relevance_batch_async(
                     app._update_relevance_badge(paper.arxiv_id)
                     scored += 1
 
+                except asyncio.CancelledError:
+                    raise
                 except _RECOVERABLE_ACTION_ERRORS as exc:
                     _log_action_failure(f"relevance scoring for {paper.arxiv_id}", exc)
                     failed += 1
@@ -656,19 +674,22 @@ async def _score_relevance_batch_async(
                     )
                     failed += 1
                 finally:
-                    done += 1
-                    app._scoring_progress = (done, total)
-                    app._update_footer()
+                    if app._is_current_dataset_epoch(task_epoch):
+                        done += 1
+                        app._scoring_progress = (done, total)
+                        app._update_footer()
 
-                    # Progress notification every 5 papers
-                    if done % 5 == 0:
-                        app.notify(
-                            f"Scoring relevance {done}/{total}...",
-                            title="Relevance",
-                        )
+                        # Progress notification every 5 papers
+                        if done % 5 == 0:
+                            app.notify(
+                                f"Scoring relevance {done}/{total}...",
+                                title="Relevance",
+                            )
 
         tasks = [score_one(p) for p in uncached]
         await asyncio.gather(*tasks)
+        if not app._is_current_dataset_epoch(task_epoch):
+            return
 
         if cancelled:
             app.notify(
@@ -689,23 +710,33 @@ async def _score_relevance_batch_async(
         app._mark_badges_dirty("relevance")
         app._refresh_detail_pane()
 
+    except asyncio.CancelledError:
+        raise
     except _RECOVERABLE_ACTION_ERRORS as exc:
+        if not app._is_current_dataset_epoch(task_epoch):
+            return
         _log_action_failure("relevance batch scoring", exc)
         app.notify("Relevance scoring failed", title="Relevance", severity="error")
     except Exception as exc:
+        if not app._is_current_dataset_epoch(task_epoch):
+            return
         _log_action_failure("relevance batch scoring", exc, unexpected=True)
         app.notify("Relevance scoring failed", title="Relevance", severity="error")
     finally:
-        app._relevance_scoring_active = False
-        app._scoring_progress = None
-        app._cancel_batch_requested = False
-        app._update_footer()
+        if app._is_current_dataset_epoch(task_epoch):
+            app._relevance_scoring_active = False
+            app._scoring_progress = None
+            app._cancel_batch_requested = False
+            app._update_footer()
 
 
 def _update_relevance_badge(app: "ArxivBrowser", arxiv_id: str) -> None:
     """Update a single list item's relevance badge."""
     _sync_app_globals()
-    app._update_option_for_paper(arxiv_id)
+    app._mark_badges_dirty("relevance")
+    current = app._get_current_paper()
+    if current is not None and current.arxiv_id == arxiv_id:
+        app._refresh_detail_pane()
 
 
 def action_auto_tag(app: "ArxivBrowser") -> None:
@@ -741,7 +772,7 @@ def _start_auto_tag_flow(app: "ArxivBrowser") -> None:
             return
         app._auto_tag_progress = (0, len(papers))
         app._update_footer()
-        app._track_task(app._auto_tag_batch_async(papers, taxonomy))
+        app._track_dataset_task(app._auto_tag_batch_async(papers, taxonomy))
     else:
         paper = app._get_current_paper()
         if not paper:
@@ -749,7 +780,48 @@ def _start_auto_tag_flow(app: "ArxivBrowser") -> None:
             app.notify("No paper selected", title="Auto-Tag", severity="warning")
             return
         current_tags = (app._tags_for(paper.arxiv_id) or [])[:]
-        app._track_task(app._auto_tag_single_async(paper, taxonomy, current_tags))
+        app._track_dataset_task(app._auto_tag_single_async(paper, taxonomy, current_tags))
+
+
+def _maybe_cancel_auto_tag_batch(
+    app: "ArxivBrowser",
+    *,
+    index: int,
+    total: int,
+    tagged: int,
+) -> bool:
+    """Handle user-requested batch cancellation and report partial progress."""
+    if not getattr(app, "_cancel_batch_requested", False):
+        return False
+    if tagged > 0:
+        app._save_config_or_warn("partial auto-tag results")
+    app.notify(
+        f"Auto-tagging cancelled after {index - 1}/{total} papers ({tagged} tagged)",
+        title="Auto-Tag",
+    )
+    return True
+
+
+def _apply_auto_tag_batch_result(
+    app: "ArxivBrowser",
+    *,
+    paper: Paper,
+    suggested: list[str],
+    taxonomy: list[str],
+) -> None:
+    """Merge one auto-tag suggestion result into paper metadata and taxonomy."""
+    meta = app._get_or_create_metadata(paper.arxiv_id)
+    meta.tags = list(dict.fromkeys(meta.tags + suggested))
+    for tag in suggested:
+        if tag not in taxonomy:
+            taxonomy.append(tag)
+
+
+def _auto_tag_failure_message(tagged: int) -> str:
+    """Return the standard batch auto-tag failure message."""
+    if tagged:
+        return f"Auto-tagging failed ({tagged} tagged before error)"
+    return "Auto-tagging failed"
 
 
 async def _auto_tag_single_async(
@@ -760,8 +832,11 @@ async def _auto_tag_single_async(
 ) -> None:
     """Auto-tag a single paper: call LLM, show suggestion modal."""
     _sync_app_globals()
+    task_epoch = app._capture_dataset_epoch()
     try:
         suggested = await app._call_auto_tag_llm(paper, taxonomy)
+        if not app._is_current_dataset_epoch(task_epoch):
+            return
         if suggested is None:
             app.notify("Auto-tagging failed", title="Auto-Tag", severity="warning")
             return
@@ -771,15 +846,22 @@ async def _auto_tag_single_async(
             AutoTagSuggestModal(paper.title, suggested, current_tags),
             lambda tags: app._on_auto_tag_accepted(tags, paper.arxiv_id),
         )
+    except asyncio.CancelledError:
+        raise
     except _RECOVERABLE_ACTION_ERRORS as exc:
+        if not app._is_current_dataset_epoch(task_epoch):
+            return
         _log_action_failure(f"auto-tag single for {paper.arxiv_id}", exc)
         app.notify("Auto-tagging failed", title="Auto-Tag", severity="error")
     except Exception as exc:
+        if not app._is_current_dataset_epoch(task_epoch):
+            return
         _log_action_failure(f"auto-tag single for {paper.arxiv_id}", exc, unexpected=True)
         app.notify("Auto-tagging failed", title="Auto-Tag", severity="error")
     finally:
-        app._auto_tag_active = False
-        app._update_footer()
+        if app._is_current_dataset_epoch(task_epoch):
+            app._auto_tag_active = False
+            app._update_footer()
 
 
 async def _auto_tag_batch_async(
@@ -789,6 +871,7 @@ async def _auto_tag_batch_async(
 ) -> None:
     """Batch auto-tag: call LLM for each paper, apply directly."""
     _sync_app_globals()
+    task_epoch = app._capture_dataset_epoch()
     try:
         total = len(papers)
         tagged = 0
@@ -797,32 +880,27 @@ async def _auto_tag_batch_async(
         app._auto_tag_progress = (0, total)
         app._update_footer()
         for i, paper in enumerate(papers, start=1):
-            if getattr(app, "_cancel_batch_requested", False):
-                if tagged > 0:
-                    app._save_config_or_warn("partial auto-tag results")
-                app.notify(
-                    f"Auto-tagging cancelled after {i - 1}/{total} papers ({tagged} tagged)",
-                    title="Auto-Tag",
-                )
+            if not app._is_current_dataset_epoch(task_epoch):
+                return
+            if _maybe_cancel_auto_tag_batch(app, index=i, total=total, tagged=tagged):
                 break
 
             app._auto_tag_progress = (i, total)
             app._update_footer()
             suggested = await app._call_auto_tag_llm(paper, taxonomy)
+            if not app._is_current_dataset_epoch(task_epoch):
+                return
             if suggested is None:
                 failed += 1
                 continue
 
-            # Apply tags directly in batch mode (merge with existing)
-            meta = app._get_or_create_metadata(paper.arxiv_id)
-            merged = list(dict.fromkeys(meta.tags + suggested))
-            meta.tags = merged
+            _apply_auto_tag_batch_result(
+                app,
+                paper=paper,
+                suggested=suggested,
+                taxonomy=taxonomy,
+            )
             tagged += 1
-
-            # Update taxonomy for subsequent papers
-            for tag in suggested:
-                if tag not in taxonomy:
-                    taxonomy.append(tag)
 
         app._save_config_or_warn("auto-tag results")
         app._mark_badges_dirty("tags", immediate=True)
@@ -833,30 +911,33 @@ async def _auto_tag_batch_async(
             msg += f" ({failed} failed)"
         app.notify(msg, title="Auto-Tag")
 
+    except asyncio.CancelledError:
+        raise
     except _RECOVERABLE_ACTION_ERRORS as exc:
+        if not app._is_current_dataset_epoch(task_epoch):
+            return
         _log_action_failure("auto-tag batch", exc)
         if tagged > 0:
             app._save_config_or_warn("partial auto-tag results")
         app.notify(
-            f"Auto-tagging failed ({tagged} tagged before error)"
-            if tagged
-            else "Auto-tagging failed",
+            _auto_tag_failure_message(tagged),
             title="Auto-Tag",
             severity="error",
         )
     except Exception as exc:
+        if not app._is_current_dataset_epoch(task_epoch):
+            return
         _log_action_failure("auto-tag batch", exc, unexpected=True)
         if tagged > 0:
             app._save_config_or_warn("partial auto-tag results")
         app.notify(
-            f"Auto-tagging failed ({tagged} tagged before error)"
-            if tagged
-            else "Auto-tagging failed",
+            _auto_tag_failure_message(tagged),
             title="Auto-Tag",
             severity="error",
         )
     finally:
-        app._auto_tag_active = False
-        app._auto_tag_progress = None
-        app._cancel_batch_requested = False
-        app._update_footer()
+        if app._is_current_dataset_epoch(task_epoch):
+            app._auto_tag_active = False
+            app._auto_tag_progress = None
+            app._cancel_batch_requested = False
+            app._update_footer()

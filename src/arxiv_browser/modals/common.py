@@ -28,7 +28,7 @@ from textual.widgets import (
 )
 
 from arxiv_browser.models import DETAIL_SECTION_NAMES, WATCH_MATCH_TYPES, WatchListEntry
-from arxiv_browser.themes import THEME_COLORS
+from arxiv_browser.themes import theme_colors_for
 
 logger = logging.getLogger(__name__)
 
@@ -168,10 +168,9 @@ class HelpScreen(ModalScreen[None]):
         self._sections = raw
         self._footer_note = footer_note
 
-    @staticmethod
-    def _render_section_lines(entries: list[tuple[str, str]]) -> str:
+    def _render_section_lines(self, entries: list[tuple[str, str]]) -> str:
         """Render key-description pairs as theme-coloured markup lines."""
-        green = THEME_COLORS["green"]
+        green = theme_colors_for(self)["green"]
         lines = [f"  [{green}]{key}[/]  {description}" for key, description in entries]
         return "\n".join(lines)
 
@@ -228,10 +227,11 @@ class HelpScreen(ModalScreen[None]):
             return
 
         widgets: list[Label | Static] = []
+        colors = theme_colors_for(self)
         for section_name, entries in filtered:
             widgets.append(
                 Label(
-                    f"[{THEME_COLORS['accent']}]{section_name}[/]",
+                    f"[{colors['accent']}]{section_name}[/]",
                     classes="help-section-title",
                 )
             )
@@ -390,13 +390,13 @@ class ExportMenuModal(ModalScreen[str]):
     def compose(self) -> ComposeResult:
         """Yield the export dialog with clipboard and file format options."""
         s = "s" if self._paper_count != 1 else ""
+        g = theme_colors_for(self)["green"]
         with Vertical(id="export-dialog"):
             yield Label(
                 f"Export Papers ({self._paper_count} selected{s})",
                 id="export-title",
             )
             yield Label("[bold]Clipboard[/bold]", classes="export-section")
-            g = THEME_COLORS["green"]
             yield Static(
                 f"  [{g}]c[/]  Plain text     [{g}]b[/]  BibTeX\n"
                 f"  [{g}]m[/]  Markdown       [{g}]r[/]  RIS\n"
@@ -537,21 +537,23 @@ class MetadataSnapshotPickerModal(ModalScreen[Path | None]):
         """Populate the list view with snapshot entries and focus it."""
         list_view = self.query_one("#metadata-snapshot-list", ListView)
         list_view.clear()
+        muted = theme_colors_for(self)["muted"]
         for snapshot in self._snapshots:
-            label = self._format_snapshot_label(snapshot)
+            label = self._format_snapshot_label(snapshot, muted)
             list_view.mount(MetadataSnapshotItem(snapshot, Label(label)))
         if list_view.children:
             list_view.index = 0
         list_view.focus()
 
     @staticmethod
-    def _format_snapshot_label(snapshot: Path) -> str:
+    def _format_snapshot_label(snapshot: Path, muted_color: str | None = None) -> str:
         """Format a snapshot filename with its last-modified timestamp."""
         try:
             modified = datetime.fromtimestamp(snapshot.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
         except OSError:
             modified = "unknown time"
-        return f"{snapshot.name}  [{THEME_COLORS['muted']}]modified {modified}[/]"
+        muted = muted_color or theme_colors_for(None)["muted"]
+        return f"{snapshot.name}  [{muted}]modified {modified}[/]"
 
     def action_choose(self) -> None:
         """Dismiss with the currently highlighted snapshot path."""
@@ -932,7 +934,7 @@ class SectionToggleModal(ModalScreen[list[str] | None]):
 
     def _render_list(self) -> str:
         """Render all section names with their current expanded/collapsed state."""
-        g = THEME_COLORS["green"]
+        g = theme_colors_for(self)["green"]
         lines = []
         for key, section in _SECTION_TOGGLE_KEYS.items():
             name = DETAIL_SECTION_NAMES[section]

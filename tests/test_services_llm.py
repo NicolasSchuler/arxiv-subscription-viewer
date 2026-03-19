@@ -276,7 +276,7 @@ async def test_score_relevance_missing_fields(make_paper) -> None:
 
 @pytest.mark.asyncio
 async def test_suggest_tags_null_in_list(make_paper) -> None:
-    """Null values in the tags list should be coerced to strings and filtered."""
+    """Non-string values in the tags list should be ignored."""
     paper = make_paper(arxiv_id="2401.40007")
     provider = SimpleNamespace(
         execute=AsyncMock(
@@ -295,10 +295,7 @@ async def test_suggest_tags_null_in_list(make_paper) -> None:
         timeout_seconds=30,
     )
 
-    # null → str(None) = "None" → "none" after lowering; "valid:tag" kept as-is
-    assert result is not None
-    assert "valid:tag" in result
-    assert "none" in result
+    assert result == ["valid:tag"]
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import deque
 from datetime import date, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -22,7 +23,11 @@ from arxiv_browser.app import (
     _resolve_papers,
 )
 from arxiv_browser.huggingface import HuggingFacePaper
-from arxiv_browser.semantic_scholar import CitationEntry, SemanticScholarPaper
+from arxiv_browser.semantic_scholar import (
+    CitationEntry,
+    S2RecommendationsCacheSnapshot,
+    SemanticScholarPaper,
+)
 
 
 def _new_app() -> ArxivBrowser:
@@ -967,10 +972,10 @@ class TestS2AndHfCoverage:
         assert "Next step:" in app.notify.call_args[0][0]
 
         app._s2_active = True
-        with patch("arxiv_browser.app.load_s2_paper", return_value=_make_s2_paper(paper.arxiv_id)):
-            await app.action_fetch_s2()
+        app._s2_cache[paper.arxiv_id] = _make_s2_paper(paper.arxiv_id)
+        await app.action_fetch_s2()
 
-        assert paper.arxiv_id in app._s2_cache
+        assert "already loaded" in app.notify.call_args[0][0]
         app._track_task.assert_not_called()
         assert paper.arxiv_id not in app._s2_loading
 
@@ -993,38 +998,18 @@ class TestS2AndHfCoverage:
         app._get_current_paper = MagicMock(return_value=paper)
         app._s2_active = True
 
-        with patch("arxiv_browser.app.load_s2_paper", side_effect=RuntimeError("db error")):
-            await app.action_fetch_s2()
-        assert "Could not fetch Semantic Scholar data." in app.notify.call_args[0][0]
-        assert paper.arxiv_id not in app._s2_loading
-        assert app._update_status_bar.call_count == 2
-
         tracked = []
 
         def track_task(coro):
             tracked.append(coro)
             coro.close()
 
-        app._track_task = MagicMock(side_effect=track_task)
+        app._track_dataset_task = MagicMock(side_effect=track_task)
         app._update_status_bar.reset_mock()
-        with patch("arxiv_browser.app.load_s2_paper", return_value=None):
-            await app.action_fetch_s2()
-        app._track_task.assert_called_once()
+        await app.action_fetch_s2()
+        app._track_dataset_task.assert_called_once()
         assert paper.arxiv_id in app._s2_loading
         app._update_status_bar.assert_called_once()
-
-        app._track_task.reset_mock()
-        app._update_status_bar.reset_mock()
-        app._s2_loading.clear()
-        app._s2_api_error = True
-        cached = _make_s2_paper(paper.arxiv_id)
-        with patch("arxiv_browser.app.load_s2_paper", return_value=cached):
-            await app.action_fetch_s2()
-        assert app._s2_cache[paper.arxiv_id] is cached
-        assert app._s2_api_error is False
-        app._track_task.assert_not_called()
-        assert paper.arxiv_id not in app._s2_loading
-        assert app._update_status_bar.call_count == 2
 
     @pytest.mark.asyncio
     async def test_fetch_s2_paper_async_success_and_no_data(self, tmp_path):
@@ -1039,29 +1024,43 @@ class TestS2AndHfCoverage:
         app.notify = MagicMock()
         app._update_status_bar = MagicMock()
         app._refresh_detail_pane = MagicMock()
-        app._refresh_current_list_item = MagicMock()
+        app._mark_badges_dirty = MagicMock()
+        app._get_ui_refresh_coordinator = MagicMock(
+            return_value=SimpleNamespace(refresh_detail_pane=app._refresh_detail_pane)
+        )
+        app._services = SimpleNamespace(
+            enrichment=SimpleNamespace(
+                load_or_fetch_s2_paper=AsyncMock(
+                    return_value=SimpleNamespace(
+                        state="found",
+                        paper=_make_s2_paper("2401.30003"),
+                        complete=True,
+                        from_cache=False,
+                    )
+                )
+            )
+        )
 
-        with (
-            patch(
-                "arxiv_browser.app._load_or_fetch_s2_paper_cached",
-                return_value=(_make_s2_paper("2401.30003"), True),
-            ),
-        ):
-            await app._fetch_s2_paper_async("2401.30003")
+        await app._fetch_s2_paper_async("2401.30003")
 
         assert "2401.30003" in app._s2_cache
         assert "2401.30003" not in app._s2_loading
         assert app._s2_api_error is False
         app._update_status_bar.assert_called_once()
+        app._mark_badges_dirty.assert_called_once_with("s2")
 
         app._s2_loading.add("2401.30004")
         app._s2_api_error = True
         app._update_status_bar.reset_mock()
-        with patch(
-            "arxiv_browser.app._load_or_fetch_s2_paper_cached",
-            return_value=(None, True),
-        ):
-            await app._fetch_s2_paper_async("2401.30004")
+        app._services.enrichment.load_or_fetch_s2_paper = AsyncMock(
+            return_value=SimpleNamespace(
+                state="not_found",
+                paper=None,
+                complete=True,
+                from_cache=False,
+            )
+        )
+        await app._fetch_s2_paper_async("2401.30004")
         assert "No Semantic Scholar data was found for this paper." in app.notify.call_args[0][0]
         assert "2401.30004" not in app._s2_loading
         assert app._s2_api_error is False
@@ -1069,11 +1068,15 @@ class TestS2AndHfCoverage:
 
         app._s2_loading.add("2401.30005")
         app._update_status_bar.reset_mock()
-        with patch(
-            "arxiv_browser.app._load_or_fetch_s2_paper_cached",
-            return_value=(None, False),
-        ):
-            await app._fetch_s2_paper_async("2401.30005")
+        app._services.enrichment.load_or_fetch_s2_paper = AsyncMock(
+            return_value=SimpleNamespace(
+                state="unavailable",
+                paper=None,
+                complete=False,
+                from_cache=False,
+            )
+        )
+        await app._fetch_s2_paper_async("2401.30005")
         assert "Could not fetch Semantic Scholar data." in app.notify.call_args[0][0]
         assert "2401.30005" not in app._s2_loading
         assert app._s2_api_error is True
@@ -1092,18 +1095,7 @@ class TestS2AndHfCoverage:
         app._update_status_bar = MagicMock()
         app._refresh_detail_pane = MagicMock()
         app._mark_badges_dirty = MagicMock()
-        app._track_task = MagicMock()
-
-        hf = _make_hf_paper("2401.40001")
-        with patch("arxiv_browser.app.load_hf_daily_cache", return_value={"2401.40001": hf}):
-            await app._fetch_hf_daily()
-        assert app._hf_cache["2401.40001"] is hf
-        app._track_task.assert_not_called()
-
-        app._hf_loading = False
-        with patch("arxiv_browser.app.load_hf_daily_cache", side_effect=RuntimeError("db")):
-            await app._fetch_hf_daily()
-        assert "Could not fetch HuggingFace trending data." in app.notify.call_args[0][0]
+        app._track_dataset_task = MagicMock()
 
         tracked = []
 
@@ -1111,11 +1103,10 @@ class TestS2AndHfCoverage:
             tracked.append(coro)
             coro.close()
 
-        app._track_task = MagicMock(side_effect=track_task)
+        app._track_dataset_task = MagicMock(side_effect=track_task)
         app._hf_loading = False
-        with patch("arxiv_browser.app.load_hf_daily_cache", return_value=None):
-            await app._fetch_hf_daily()
-        app._track_task.assert_called_once()
+        await app._fetch_hf_daily()
+        app._track_dataset_task.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_fetch_hf_daily_async_success_and_empty(self, tmp_path):
@@ -1131,34 +1122,61 @@ class TestS2AndHfCoverage:
         app._update_status_bar = MagicMock()
         app._refresh_detail_pane = MagicMock()
         app._mark_badges_dirty = MagicMock()
+        app._get_ui_refresh_coordinator = MagicMock(
+            return_value=SimpleNamespace(refresh_detail_pane=app._refresh_detail_pane)
+        )
+        app._services = SimpleNamespace(
+            enrichment=SimpleNamespace(
+                load_or_fetch_hf_daily=AsyncMock(
+                    return_value=SimpleNamespace(
+                        state="found",
+                        papers=[_make_hf_paper("2401.40002")],
+                        complete=True,
+                        from_cache=False,
+                    )
+                )
+            )
+        )
 
         hf = _make_hf_paper("2401.40002")
-        with patch(
-            "arxiv_browser.app._load_or_fetch_hf_daily_cached",
-            return_value=([hf], True),
-        ):
-            await app._fetch_hf_daily_async()
+        app._services.enrichment.load_or_fetch_hf_daily = AsyncMock(
+            return_value=SimpleNamespace(
+                state="found",
+                papers=[hf],
+                complete=True,
+                from_cache=False,
+            )
+        )
+        await app._fetch_hf_daily_async()
         assert app._hf_cache["2401.40002"] is hf
         assert app._hf_loading is False
         assert app._hf_api_error is False
 
         app._hf_loading = True
         app._hf_api_error = True
-        with patch(
-            "arxiv_browser.app._load_or_fetch_hf_daily_cached",
-            return_value=([], True),
-        ):
-            await app._fetch_hf_daily_async()
+        app._services.enrichment.load_or_fetch_hf_daily = AsyncMock(
+            return_value=SimpleNamespace(
+                state="empty",
+                papers=[],
+                complete=True,
+                from_cache=False,
+            )
+        )
+        await app._fetch_hf_daily_async()
         assert "No HuggingFace trending data was returned." in app.notify.call_args[0][0]
         assert app._hf_loading is False
         assert app._hf_api_error is False
 
         app._hf_loading = True
-        with patch(
-            "arxiv_browser.app._load_or_fetch_hf_daily_cached",
-            return_value=([], False),
-        ):
-            await app._fetch_hf_daily_async()
+        app._services.enrichment.load_or_fetch_hf_daily = AsyncMock(
+            return_value=SimpleNamespace(
+                state="unavailable",
+                papers=[],
+                complete=False,
+                from_cache=False,
+            )
+        )
+        await app._fetch_hf_daily_async()
         assert "Could not fetch HuggingFace trending data." in app.notify.call_args[0][0]
         assert app._hf_loading is False
         assert app._hf_api_error is True
@@ -1203,6 +1221,28 @@ class TestDownloadClipboardAndOpenCoverage:
         app._update_download_progress.assert_called_once_with(1, 1)
         app._start_downloads.assert_called_once()
         app._finish_download_batch.assert_called_once()
+
+    def test_start_downloads_tracks_non_dataset_tasks(self, make_paper):
+        app = _new_app()
+        paper = make_paper(arxiv_id="2401.50009")
+        app._download_queue = deque([paper])
+        app._downloading = set()
+
+        tracked = []
+
+        def track_task(coro):
+            tracked.append(coro)
+            coro.close()
+
+        app._track_task = MagicMock(side_effect=track_task)
+        app._track_dataset_task = MagicMock()
+
+        app._start_downloads()
+
+        app._track_task.assert_called_once()
+        app._track_dataset_task.assert_not_called()
+        assert tracked
+        assert paper.arxiv_id in app._downloading
 
     @pytest.mark.asyncio
     async def test_process_single_download_handles_download_exception(self, make_paper):
@@ -2271,15 +2311,15 @@ class TestBestEffortS2CacheWrite:
 
         with (
             patch(
-                "arxiv_browser.app.load_s2_recommendations",
-                return_value=[],
+                "arxiv_browser.services.enrichment_service.load_s2_recommendations_snapshot",
+                return_value=S2RecommendationsCacheSnapshot(status="miss", papers=[]),
             ),
             patch(
-                "arxiv_browser.app.fetch_s2_recommendations",
-                return_value=[rec],
+                "arxiv_browser.services.enrichment_service.fetch_s2_recommendations_with_status",
+                new=AsyncMock(return_value=([rec], True)),
             ),
             patch(
-                "arxiv_browser.app.save_s2_recommendations",
+                "arxiv_browser.services.enrichment_service.save_s2_recommendations",
                 side_effect=OSError("disk full"),
             ),
         ):

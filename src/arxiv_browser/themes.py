@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Any, cast
 
 from textual.theme import Theme as TextualTheme
 
@@ -10,7 +14,7 @@ from textual.theme import Theme as TextualTheme
 DEFAULT_CATEGORY_COLOR = "#888888"
 
 # Category color mapping (Monokai-inspired palette)
-DEFAULT_CATEGORY_COLORS = {
+DEFAULT_CATEGORY_COLORS: dict[str, str] = {
     "cs.AI": "#fd4d8e",  # Monokai pink (WCAG AA)
     "cs.CL": "#66d9ef",  # Monokai blue
     "cs.LG": "#a6e22e",  # Monokai green
@@ -23,9 +27,7 @@ DEFAULT_CATEGORY_COLORS = {
     "cs.CR": "#fd971f",  # Monokai orange
 }
 
-CATEGORY_COLORS = DEFAULT_CATEGORY_COLORS.copy()
-
-DEFAULT_THEME = {
+DEFAULT_THEME: dict[str, str] = {
     "background": "#272822",
     "panel": "#1e1e1e",
     "panel_alt": "#3e3d32",
@@ -253,18 +255,125 @@ THEME_TAG_NAMESPACE_COLORS: dict[str, dict[str, str]] = {
     },
 }
 
-THEME_COLORS = DEFAULT_THEME.copy()
-
 # Tag namespace colors (Monokai palette)
-TAG_NAMESPACE_COLORS: dict[str, str] = {
+DEFAULT_TAG_NAMESPACE_COLORS: dict[str, str] = {
     "topic": "#66d9ef",  # blue
     "status": "#a6e22e",  # green
     "project": "#fd971f",  # orange
     "method": "#ae81ff",  # purple
     "priority": "#fd4d8e",  # pink (WCAG AA)
 }
+CATEGORY_COLORS: Mapping[str, str] = MappingProxyType(DEFAULT_CATEGORY_COLORS.copy())
+THEME_COLORS: Mapping[str, str] = MappingProxyType(DEFAULT_THEME.copy())
+TAG_NAMESPACE_COLORS: Mapping[str, str] = MappingProxyType(DEFAULT_TAG_NAMESPACE_COLORS.copy())
 # Fallback palette for unknown namespaces (deterministic via hash)
 _TAG_FALLBACK_COLORS = ["#66d9ef", "#a6e22e", "#fd971f", "#ae81ff", "#fd4d8e", "#e6db74"]
+
+
+@dataclass(frozen=True, slots=True)
+class ThemeRuntime:
+    """Resolved runtime theme state owned by the app instance."""
+
+    name: str
+    colors: dict[str, str]
+    category_colors: dict[str, str]
+    tag_namespace_colors: dict[str, str]
+
+
+def resolve_theme_colors(
+    theme_name: str,
+    overrides: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """Resolve display colors for a theme name plus user overrides."""
+    resolved = dict(THEMES.get(theme_name, DEFAULT_THEME))
+    if overrides:
+        resolved.update(overrides)
+    return resolved
+
+
+def resolve_category_colors(
+    theme_name: str,
+    overrides: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """Resolve category badge colors for a theme name plus user overrides."""
+    resolved = dict(DEFAULT_CATEGORY_COLORS)
+    theme_colors = THEME_CATEGORY_COLORS.get(theme_name)
+    if theme_colors:
+        resolved.update(theme_colors)
+    if overrides:
+        resolved.update(overrides)
+    return resolved
+
+
+def resolve_tag_namespace_colors(theme_name: str) -> dict[str, str]:
+    """Resolve tag namespace colors for a theme name."""
+    resolved = dict(DEFAULT_TAG_NAMESPACE_COLORS)
+    theme_colors = THEME_TAG_NAMESPACE_COLORS.get(theme_name)
+    if theme_colors:
+        resolved.update(theme_colors)
+    return resolved
+
+
+def build_theme_runtime(
+    theme_name: str,
+    *,
+    theme_overrides: Mapping[str, str] | None = None,
+    category_overrides: Mapping[str, str] | None = None,
+) -> ThemeRuntime:
+    """Build resolved runtime theme state for the current app config."""
+    return ThemeRuntime(
+        name=theme_name,
+        colors=resolve_theme_colors(theme_name, theme_overrides),
+        category_colors=resolve_category_colors(theme_name, category_overrides),
+        tag_namespace_colors=resolve_tag_namespace_colors(theme_name),
+    )
+
+
+def _runtime_theme(owner: object | None) -> ThemeRuntime | None:
+    """Return app-owned runtime theme state when available."""
+    if owner is None:
+        return None
+    app = owner
+    if not isinstance(getattr(owner, "_theme_runtime", None), ThemeRuntime):
+        try:
+            app = cast(Any, owner).app
+        except Exception:
+            app = owner
+    runtime = getattr(app, "_theme_runtime", None)
+    return runtime if isinstance(runtime, ThemeRuntime) else None
+
+
+def theme_colors_for(
+    owner: object | None,
+    fallback: Mapping[str, str] | None = None,
+) -> Mapping[str, str]:
+    """Resolve the current theme color map for a widget/screen/app."""
+    runtime = _runtime_theme(owner)
+    if runtime is not None:
+        return runtime.colors
+    return fallback or THEME_COLORS
+
+
+def category_colors_for(
+    owner: object | None,
+    fallback: Mapping[str, str] | None = None,
+) -> Mapping[str, str]:
+    """Resolve the current category color map for a widget/screen/app."""
+    runtime = _runtime_theme(owner)
+    if runtime is not None:
+        return runtime.category_colors
+    return fallback or CATEGORY_COLORS
+
+
+def tag_namespace_colors_for(
+    owner: object | None,
+    fallback: Mapping[str, str] | None = None,
+) -> Mapping[str, str]:
+    """Resolve the current tag namespace color map for a widget/screen/app."""
+    runtime = _runtime_theme(owner)
+    if runtime is not None:
+        return runtime.tag_namespace_colors
+    return fallback or TAG_NAMESPACE_COLORS
 
 
 def parse_tag_namespace(tag: str) -> tuple[str, str]:
@@ -281,17 +390,18 @@ def parse_tag_namespace(tag: str) -> tuple[str, str]:
     return ("", tag)
 
 
-def get_tag_color(tag: str) -> str:
+def get_tag_color(tag: str, tag_namespace_colors: Mapping[str, str] | None = None) -> str:
     """Return a display color for a tag based on its namespace.
 
     Known namespaces get their assigned color. Unknown namespaces get a
     deterministic color via hash. Tags without a namespace get default purple.
     """
     ns, _ = parse_tag_namespace(tag)
+    namespace_colors = tag_namespace_colors or TAG_NAMESPACE_COLORS
     if not ns:
         return "#ae81ff"  # default purple for unnamespaced tags
-    if ns in TAG_NAMESPACE_COLORS:
-        return TAG_NAMESPACE_COLORS[ns]
+    if ns in namespace_colors:
+        return namespace_colors[ns]
     # Deterministic color for unknown namespaces
     digest = hashlib.sha256(ns.encode("utf-8")).digest()
     idx = int.from_bytes(digest[:2], "big") % len(_TAG_FALLBACK_COLORS)
@@ -303,6 +413,7 @@ __all__ = [
     "CATPPUCCIN_MOCHA_THEME",
     "DEFAULT_CATEGORY_COLOR",
     "DEFAULT_CATEGORY_COLORS",
+    "DEFAULT_TAG_NAMESPACE_COLORS",
     "DEFAULT_THEME",
     "HIGH_CONTRAST_THEME",
     "SOLARIZED_DARK_THEME",
@@ -313,6 +424,14 @@ __all__ = [
     "THEME_COLORS",
     "THEME_NAMES",
     "THEME_TAG_NAMESPACE_COLORS",
+    "ThemeRuntime",
+    "build_theme_runtime",
+    "category_colors_for",
     "get_tag_color",
     "parse_tag_namespace",
+    "resolve_category_colors",
+    "resolve_tag_namespace_colors",
+    "resolve_theme_colors",
+    "tag_namespace_colors_for",
+    "theme_colors_for",
 ]

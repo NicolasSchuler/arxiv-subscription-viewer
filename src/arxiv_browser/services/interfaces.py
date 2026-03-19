@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 import httpx
@@ -12,6 +13,7 @@ from arxiv_browser.llm_providers import LLMProvider
 from arxiv_browser.models import ArxivSearchRequest, Paper, UserConfig
 from arxiv_browser.services import arxiv_api_service as _arxiv_api
 from arxiv_browser.services import download_service as _download
+from arxiv_browser.services import enrichment_service as _enrichment
 from arxiv_browser.services import llm_service as _llm
 
 
@@ -37,7 +39,7 @@ class ArxivApiService(Protocol):
     async def fetch_page(
         self,
         *,
-        client: httpx.AsyncClient | None,
+        client: httpx.AsyncClient,
         request: ArxivSearchRequest,
         start: int,
         max_results: int,
@@ -97,10 +99,49 @@ class DownloadService(Protocol):
         *,
         paper: Paper,
         config: UserConfig,
-        client: httpx.AsyncClient | None,
+        client: httpx.AsyncClient,
         timeout_seconds: int,
     ) -> bool:
         """Download a paper PDF and return success."""
+        ...
+
+
+@runtime_checkable
+class EnrichmentService(Protocol):
+    """Interface for enrichment/cache-backed app operations."""
+
+    async def load_or_fetch_s2_paper(
+        self,
+        *,
+        arxiv_id: str,
+        db_path: Path,
+        cache_ttl_days: int,
+        client: httpx.AsyncClient,
+        api_key: str,
+    ) -> _enrichment.S2PaperFetchResult:
+        """Load or fetch one S2 paper, preserving not-found state."""
+        ...
+
+    async def load_or_fetch_hf_daily(
+        self,
+        *,
+        db_path: Path,
+        cache_ttl_hours: int,
+        client: httpx.AsyncClient,
+    ) -> _enrichment.HFDailyFetchResult:
+        """Load or fetch the HF daily snapshot, preserving empty state."""
+        ...
+
+    async def load_or_fetch_s2_recommendations(
+        self,
+        *,
+        arxiv_id: str,
+        db_path: Path,
+        cache_ttl_days: int,
+        client: httpx.AsyncClient,
+        api_key: str,
+    ) -> _enrichment.S2RecommendationsFetchResult:
+        """Load or fetch S2 recommendations, preserving empty state."""
         ...
 
 
@@ -130,7 +171,7 @@ class DefaultArxivApiService:
     async def fetch_page(
         self,
         *,
-        client: httpx.AsyncClient | None,
+        client: httpx.AsyncClient,
         request: ArxivSearchRequest,
         start: int,
         max_results: int,
@@ -212,7 +253,7 @@ class DefaultDownloadService:
         *,
         paper: Paper,
         config: UserConfig,
-        client: httpx.AsyncClient | None,
+        client: httpx.AsyncClient,
         timeout_seconds: int,
     ) -> bool:
         """Download a paper PDF and return success."""
@@ -224,6 +265,60 @@ class DefaultDownloadService:
         )
 
 
+class DefaultEnrichmentService:
+    """Default adapter that delegates to enrichment/cache services."""
+
+    async def load_or_fetch_s2_paper(
+        self,
+        *,
+        arxiv_id: str,
+        db_path: Path,
+        cache_ttl_days: int,
+        client: httpx.AsyncClient,
+        api_key: str,
+    ) -> _enrichment.S2PaperFetchResult:
+        """Load or fetch one S2 paper, preserving not-found state."""
+        return await _enrichment.load_or_fetch_s2_paper_result(
+            arxiv_id=arxiv_id,
+            db_path=db_path,
+            cache_ttl_days=cache_ttl_days,
+            client=client,
+            api_key=api_key,
+        )
+
+    async def load_or_fetch_hf_daily(
+        self,
+        *,
+        db_path: Path,
+        cache_ttl_hours: int,
+        client: httpx.AsyncClient,
+    ) -> _enrichment.HFDailyFetchResult:
+        """Load or fetch the HF daily snapshot, preserving empty state."""
+        return await _enrichment.load_or_fetch_hf_daily_result(
+            db_path=db_path,
+            cache_ttl_hours=cache_ttl_hours,
+            client=client,
+        )
+
+    async def load_or_fetch_s2_recommendations(
+        self,
+        *,
+        arxiv_id: str,
+        db_path: Path,
+        cache_ttl_days: int,
+        client: httpx.AsyncClient,
+        api_key: str,
+    ) -> _enrichment.S2RecommendationsFetchResult:
+        """Load or fetch S2 recommendations, preserving empty state."""
+        return await _enrichment.load_or_fetch_s2_recommendations_result(
+            arxiv_id=arxiv_id,
+            db_path=db_path,
+            cache_ttl_days=cache_ttl_days,
+            client=client,
+            api_key=api_key,
+        )
+
+
 @dataclass(slots=True)
 class AppServices:
     """Aggregated service interfaces consumed by the app layer."""
@@ -231,6 +326,7 @@ class AppServices:
     arxiv_api: ArxivApiService
     llm: LlmService
     download: DownloadService
+    enrichment: EnrichmentService
 
 
 def build_default_app_services() -> AppServices:
@@ -239,6 +335,7 @@ def build_default_app_services() -> AppServices:
         arxiv_api=DefaultArxivApiService(),
         llm=DefaultLlmService(),
         download=DefaultDownloadService(),
+        enrichment=DefaultEnrichmentService(),
     )
 
 
@@ -246,6 +343,7 @@ __all__ = [
     "AppServices",
     "ArxivApiService",
     "DownloadService",
+    "EnrichmentService",
     "LlmService",
     "build_default_app_services",
 ]

@@ -101,36 +101,17 @@ async def test_fetch_page_uses_shared_client(make_paper) -> None:
 
 
 @pytest.mark.asyncio
-async def test_fetch_page_without_shared_client_uses_temp_client(make_paper) -> None:
+async def test_fetch_page_requires_explicit_client(make_paper) -> None:
     request = ArxivSearchRequest(query="transformers", field="all", category="")
-    response = MagicMock()
-    response.text = "<feed/>"
-    response.raise_for_status = MagicMock()
-
-    class DummyClient:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def get(self, *_args, **_kwargs):
-            return response
 
     with (
         patch(
             "arxiv_browser.services.arxiv_api_service.build_arxiv_search_query",
             return_value="all:transformers",
         ),
-        patch(
-            "arxiv_browser.services.arxiv_api_service.parse_arxiv_api_feed",
-            return_value=[make_paper()],
-        ),
-        patch(
-            "arxiv_browser.services.arxiv_api_service.httpx.AsyncClient", return_value=DummyClient()
-        ),
+        pytest.raises(AttributeError),
     ):
-        papers = await fetch_page(
+        await fetch_page(
             client=None,
             request=request,
             start=0,
@@ -138,6 +119,3 @@ async def test_fetch_page_without_shared_client_uses_temp_client(make_paper) -> 
             timeout_seconds=30,
             user_agent="arxiv-subscription-viewer/1.0",
         )
-
-    assert len(papers) == 1
-    response.raise_for_status.assert_called_once()
