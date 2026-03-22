@@ -7,6 +7,8 @@ from typing import Any
 
 import pytest
 
+import arxiv_browser.browser._runtime as browser_runtime
+import arxiv_browser.browser.core as browser_core
 from arxiv_browser.app import (
     _HIGHLIGHT_PATTERN_CACHE,
     Paper,
@@ -33,6 +35,15 @@ def _reset_global_dicts():
     set_ascii_icons(False)
     set_detail_ascii_glyphs(False)
     set_chrome_ascii_glyphs(False)
+
+
+@pytest.fixture(autouse=True)
+def _shorten_browser_debounce_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reduce UI timer windows so Textual integration tests are less host-sensitive."""
+    monkeypatch.setattr(browser_core, "SEARCH_DEBOUNCE_DELAY", 0.05)
+    monkeypatch.setattr(browser_core, "DETAIL_PANE_DEBOUNCE_DELAY", 0.01)
+    monkeypatch.setattr(browser_core, "BADGE_COALESCE_DELAY", 0.01)
+    monkeypatch.setattr(browser_runtime, "BADGE_COALESCE_DELAY", 0.01)
 
 
 # ── Factories ────────────────────────────────────────────────────────────────

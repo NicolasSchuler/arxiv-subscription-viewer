@@ -780,17 +780,22 @@ def _normalize_cli_argv(argv: list[str] | None) -> list[str]:
         if token in _ROOT_FLAG_OPTIONS:
             index += 1
             continue
-        if token == "--color":  # nosec B105 - CLI color flag, not a credential
+        if _is_color_flag(token):
+            if token.startswith("--color="):
+                index += 1
+                continue
             if index + 1 >= len(args):
                 return args
             index += 2
             continue
-        if token.startswith("--color="):
-            index += 1
-            continue
         break
 
     return [*args[:index], "browse", *args[index:]]
+
+
+def _is_color_flag(token: str) -> bool:
+    """Return whether a token spells the CLI color flag."""
+    return token == "--color" or token.startswith("--color=")  # nosec B105
 
 
 @dataclass(slots=True)
@@ -840,9 +845,7 @@ def main(
     if getattr(args, "command", None) == "config-path":
         return _print_config_path()
 
-    color_flag_explicit = any(
-        token == "--color" or token.startswith("--color=") for token in normalized_argv
-    )
+    color_flag_explicit = any(_is_color_flag(token) for token in normalized_argv)
     if args.no_color:
         color_mode = "never"
     elif color_flag_explicit:
