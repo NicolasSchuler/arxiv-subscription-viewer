@@ -20,6 +20,7 @@ from arxiv_browser.huggingface import (
     get_hf_db_path,
     init_hf_db,
     load_hf_daily_cache,
+    load_hf_daily_cache_snapshot,
     parse_hf_paper_response,
     save_hf_daily_cache,
 )
@@ -558,3 +559,64 @@ class TestInitHfDbOsError:
             pytest.raises(sqlite3.OperationalError, match="Cannot create DB directory"),
         ):
             init_hf_db(db_path)
+
+
+class TestHfCacheSnapshotBranches:
+    def test_snapshot_status_and_error_paths(self, tmp_path) -> None:
+        import sqlite3
+        from contextlib import closing
+
+        db_path = tmp_path / "hf.db"
+        paper = _make_paper()
+
+        assert load_hf_daily_cache_snapshot(db_path).status == "miss"
+
+        save_hf_daily_cache(db_path, [paper])
+        snapshot = load_hf_daily_cache_snapshot(db_path)
+        assert snapshot.status == "found"
+        assert snapshot.papers[paper.arxiv_id].title == paper.title
+
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
+            old_time = (
+                datetime.now(UTC) - timedelta(hours=HF_DEFAULT_CACHE_TTL_HOURS + 1)
+            ).isoformat()
+            conn.execute("UPDATE hf_daily_papers SET fetched_at = ?", (old_time,))
+            conn.execute("UPDATE hf_daily_fetch_state SET fetched_at = ?", (old_time,))
+        assert load_hf_daily_cache_snapshot(db_path).status == "miss"
+
+        save_hf_daily_cache(db_path, [])
+        snapshot = load_hf_daily_cache_snapshot(db_path)
+        assert snapshot.status == "empty"
+
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
+            conn.execute("DELETE FROM hf_daily_papers")
+            conn.execute(
+                "INSERT OR REPLACE INTO hf_daily_fetch_state (cache_key, status, fetched_at) "
+                "VALUES (?, ?, ?)",
+                ("daily", "invalid", datetime.now(UTC).isoformat()),
+            )
+        assert load_hf_daily_cache_snapshot(db_path).status == "miss"
+
+        with patch("arxiv_browser.huggingface.sqlite3.connect", side_effect=sqlite3.Error("boom")):
+            assert load_hf_daily_cache_snapshot(db_path).status == "miss"
+
+    @pytest.mark.asyncio
+    async def test_fetch_and_save_error_branches(self, tmp_path) -> None:
+        import sqlite3
+
+        request = httpx.Request("GET", "https://huggingface.co/api/daily_papers")
+        client = AsyncMock(spec=httpx.AsyncClient)
+
+        client.get.side_effect = httpx.HTTPError("boom")
+        result, complete = await fetch_hf_daily_papers(client, include_status=True)
+        assert result == []
+        assert complete is False
+
+        client.get.side_effect = httpx.ReadError("broken", request=request)
+        result, complete = await fetch_hf_daily_papers(client, include_status=True)
+        assert result == []
+        assert complete is False
+
+        db_path = tmp_path / "hf.db"
+        with patch("arxiv_browser.huggingface.sqlite3.connect", side_effect=sqlite3.Error("boom")):
+            save_hf_daily_cache(db_path, [])

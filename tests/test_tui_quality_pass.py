@@ -615,6 +615,53 @@ async def test_help_screen_has_filter_input_and_filters(make_paper):
             assert "No matches" in no_match.render().plain
 
 
+def test_help_ui_helper_branches_cover_binding_resolution_and_ascii_mode():
+    from textual.binding import Binding
+
+    import arxiv_browser.help_ui as help_ui
+    from arxiv_browser._ascii import set_ascii_mode
+
+    assert help_ui._format_help_key("slash") == "/"
+    assert help_ui._format_help_key("question_mark") == "?"
+    assert help_ui._format_help_key("ctrl+shift+slash") == "Ctrl+Shift+slash"
+
+    bindings = help_ui._iter_binding_definitions(
+        [("ctrl+p", "command_palette", "Commands"), Binding("q", "show_help", "Help")]
+    )
+    assert [binding.action for binding in bindings] == ["command_palette", "show_help"]
+    assert help_ui._binding_for_help_action(bindings, "command_palette").key == "ctrl+p"
+    assert (
+        help_ui._binding_for_help_action(
+            [("x", "toggle_preview(extra)", "Preview")], "toggle_preview"
+        ).action
+        == "toggle_preview(extra)"
+    )
+    assert help_ui._binding_for_help_action(bindings, "missing") is None
+
+    set_ascii_mode(True)
+    try:
+        sections = help_ui.build_help_sections(
+            [Binding("ctrl+p", "command_palette", "Commands")],
+            search_first=True,
+        )
+        section_names = [name for name, _ in sections]
+        assert section_names[0] == "Getting Started"
+        assert section_names[1] == "Search Syntax"
+        assert any(name == "Standard - Organize" for name in section_names)
+        core_entries = list(next(entries for name, entries in sections if name == "Core Actions"))
+        assert ("Ctrl+p", "Search examples & operators") in core_entries
+        assert ("Ctrl+p", "Commands") in core_entries
+
+        sections_no_search = help_ui.build_help_sections(
+            [Binding("ctrl+p", "command_palette", "Commands")],
+            search_first=False,
+        )
+        assert sections_no_search[1][0] == "Search Syntax"
+        assert any(name == "Power - Research Tools" for name, _ in sections_no_search)
+    finally:
+        set_ascii_mode(False)
+
+
 @pytest.mark.asyncio
 async def test_watch_list_modal_add_update_delete_and_save(make_paper):
     app = ArxivBrowser([make_paper()], restore_session=False)
@@ -849,3 +896,202 @@ def test_flush_badge_refresh_uses_computed_sparse_indices(make_paper):
 
     app._flush_badge_refresh()
     app._update_option_at_index.assert_called_once_with(1)
+
+
+@pytest.mark.asyncio
+async def test_modal_tail_branches_cover_common_search_and_citation_edges(make_paper, tmp_path):
+    from textual.css.query import NoMatches
+
+    from arxiv_browser._ascii import set_ascii_mode
+    from arxiv_browser.modals.citations import CitationGraphScreen, RecommendationSourceModal
+    from arxiv_browser.modals.common import (
+        ConfirmModal,
+        HelpScreen,
+        MetadataSnapshotPickerModal,
+        SectionToggleModal,
+        WatchListModal,
+    )
+    from arxiv_browser.modals.search import ArxivSearchModal, CommandPaletteModal
+
+    class _PaletteListStub:
+        def __init__(self) -> None:
+            self.options: list[object] = []
+            self.option_count = 0
+            self.highlighted = None
+
+        def clear_options(self) -> None:
+            self.options.clear()
+            self.option_count = 0
+
+        def add_option(self, option: object) -> None:
+            self.options.append(option)
+            self.option_count = len(self.options)
+
+        def get_option_at_index(self, index: int) -> object:
+            return self.options[index]
+
+    class _PanelStub:
+        def __init__(self) -> None:
+            self.classes: set[str] = set()
+            self.focused = False
+
+        def add_class(self, class_name: str) -> None:
+            self.classes.add(class_name)
+
+        def remove_class(self, class_name: str) -> None:
+            self.classes.discard(class_name)
+
+        def focus(self) -> None:
+            self.focused = True
+
+    set_ascii_mode(True)
+    try:
+        help_modal = HelpScreen()
+        assert all("\u00b7" not in name for name, _ in help_modal._sections)
+    finally:
+        set_ascii_mode(False)
+
+    confirm_modal = ConfirmModal("Proceed?")
+    confirm_modal.dismiss = MagicMock()
+    confirm_modal.action_confirm()
+    confirm_modal.action_cancel()
+    confirm_modal.on_yes()
+    confirm_modal.on_no()
+    assert confirm_modal.dismiss.call_args_list[0].args == (True,)
+    assert confirm_modal.dismiss.call_args_list[1].args == (False,)
+
+    snapshot = tmp_path / "arxiv-2026-03-07.json"
+    snapshot.write_text("{}", encoding="utf-8")
+    picker = MetadataSnapshotPickerModal([snapshot])
+    picker.dismiss = MagicMock()
+    picker.query_one = MagicMock(return_value=SimpleNamespace(highlighted_child=None))
+    picker.action_choose()
+    picker.dismiss.assert_called_once_with(None)
+    picker.dismiss.reset_mock()
+    with patch("pathlib.Path.stat", side_effect=OSError("boom")):
+        label = picker._format_snapshot_label(snapshot)
+    assert "unknown time" in label
+    picker.on_list_selected(SimpleNamespace(item=object()))
+    picker.dismiss.assert_not_called()
+
+    watch_modal = WatchListModal(
+        [WatchListEntry(pattern="graph", match_type="author", case_sensitive=False)]
+    )
+    watch_modal.query_one = MagicMock(
+        side_effect=lambda selector, _type=None: {
+            "#watch-pattern": SimpleNamespace(value="diffusion"),
+            "#watch-type": SimpleNamespace(value="bogus"),
+            "#watch-case": SimpleNamespace(value=True),
+        }[selector]
+    )
+    entry = watch_modal._build_entry_from_form()
+    assert entry is not None and entry.match_type == "author"
+
+    section_modal = SectionToggleModal(["abstract"])
+    section_modal.query_one = MagicMock(side_effect=NoMatches("missing"))
+    section_modal.action_toggle_a()
+    section_modal._toggle("z")
+    assert section_modal._collapsed == {"abstract", "authors"}
+
+    search_modal = ArxivSearchModal(initial_query="seed", initial_field="bad-field")
+    search_modal.dismiss = MagicMock()
+    search_modal.notify = MagicMock()
+    search_modal.query_one = MagicMock(
+        side_effect=lambda selector, _type=None: {
+            "#arxiv-search-query": SimpleNamespace(value="graph"),
+            "#arxiv-search-field": SimpleNamespace(value="title"),
+            "#arxiv-search-category": SimpleNamespace(value="cs.AI"),
+        }[selector]
+    )
+    search_modal.on_query_submitted()
+    search_modal.on_category_submitted()
+    search_modal.on_search_pressed()
+    search_modal.on_cancel_pressed()
+    assert search_modal.dismiss.call_args_list[-1].args == (None,)
+
+    palette_modal = CommandPaletteModal([])
+    palette_list = _PaletteListStub()
+    palette_modal.query_one = MagicMock(return_value=palette_list)
+    palette_modal._populate_results("")
+    assert "No commands available" in str(palette_list.get_option_at_index(0).prompt)
+    palette_modal._populate_results("watch")
+    assert "No commands match" in str(palette_list.get_option_at_index(0).prompt)
+    palette_modal.dismiss = MagicMock()
+    palette_modal.key_enter()
+    palette_modal.dismiss.assert_not_called()
+    palette_modal.action_cancel()
+    palette_modal.dismiss.assert_called_once_with("")
+    palette_modal._highlight_first_enabled(
+        SimpleNamespace(
+            option_count=2,
+            highlighted=None,
+            get_option_at_index=lambda idx: SimpleNamespace(disabled=idx == 0),
+        )
+    )
+
+    root = make_paper(arxiv_id="2401.00001", title="Root")
+    refs = [
+        SimpleNamespace(
+            s2_paper_id="s2:ref",
+            arxiv_id="2401.00002",
+            title="Ref",
+            authors="A. Author",
+            year=2024,
+            citation_count=1,
+            url="https://arxiv.org/abs/2401.00002",
+        )
+    ]
+    cites = []
+    screen = CitationGraphScreen(
+        root_title=root.title,
+        root_paper_id=root.arxiv_id,
+        references=refs,
+        citations=cites,
+        fetch_callback=MagicMock(return_value=([], [])),
+        local_arxiv_ids=frozenset({"2401.00002"}),
+    )
+    screen.dismiss = MagicMock()
+    screen._populate_lists = MagicMock()
+    screen._update_breadcrumb = MagicMock()
+    active_list = SimpleNamespace(focus=MagicMock())
+    screen._get_active_list = MagicMock(return_value=active_list)
+    screen._stack = [("s2:prev", "Prev", [], [])]
+    screen.action_back_or_close()
+    assert screen._current_paper_id == "s2:prev"
+    screen._stack = []
+    screen.action_back_or_close()
+    screen.dismiss.assert_called_with(None)
+
+    refs_panel = _PanelStub()
+    cites_panel = _PanelStub()
+    screen._active_panel = "refs"
+    screen._update_status = MagicMock()
+    screen.query_one = MagicMock(
+        side_effect=lambda selector, _type=None: (
+            refs_panel if selector == "#refs-list" else cites_panel
+        )
+    )
+    screen.action_switch_panel()
+    assert screen._active_panel == "cites"
+    screen.action_switch_panel()
+    assert screen._active_panel == "refs"
+
+    screen._get_highlighted_entry = MagicMock(
+        return_value=SimpleNamespace(
+            entry=SimpleNamespace(url="https://example.com", arxiv_id="2401.00002"),
+            is_local=True,
+        )
+    )
+    with patch("arxiv_browser.modals.citations.webbrowser.open") as browser_open:
+        screen.action_open_url()
+        browser_open.assert_called_once_with("https://example.com")
+    screen.dismiss = MagicMock()
+    screen.action_go_to_local()
+    screen.dismiss.assert_called_once_with("2401.00002")
+
+    source_modal = RecommendationSourceModal()
+    source_modal.dismiss = MagicMock()
+    source_modal.action_local()
+    source_modal.action_s2()
+    source_modal.action_cancel()
+    assert source_modal.dismiss.call_args_list[-1].args == ("",)

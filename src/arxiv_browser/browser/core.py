@@ -283,8 +283,8 @@ FUZZY_LIMIT = 100  # Maximum number of results to return
 BOOKMARK_NAME_MAX_LEN = 15  # Max bookmark name display length
 MAX_ABSTRACT_LOADS = 32  # Maximum concurrent abstract loads
 
-# History file discovery limit
-MAX_HISTORY_FILES = 365  # Optional caller-provided cap for history discovery.
+# History file discovery cap retained for custom callers/tests.
+MAX_HISTORY_FILES = 365  # Compatibility constant for callers that want capped discovery.
 
 # arXiv API search settings
 ARXIV_API_URL = "https://export.arxiv.org/api/query"

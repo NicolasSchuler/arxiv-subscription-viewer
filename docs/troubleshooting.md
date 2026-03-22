@@ -132,7 +132,7 @@ Not all arXiv papers are indexed by Semantic Scholar. When a paper isn't found, 
 
 **API rate limiting:**
 
-Without an API key, you're subject to S2's public rate limits. Requests retry up to 3 times with exponential backoff (1s → 2s → 4s). If you hit limits frequently, add an API key:
+Without an API key, you're subject to S2's public rate limits. Requests retry up to 2 times after the initial attempt (3 total attempts) with exponential backoff (1s → 2s). If you hit limits frequently, add an API key:
 
 ```json
 {
@@ -177,7 +177,7 @@ HuggingFace Daily Papers only tracks a curated subset of arXiv papers. Most pape
 
 **API unreachable:**
 
-The HF API has a 15-second timeout with 3 retries. If the endpoint returns 404 or non-JSON data, the viewer falls back to an empty result. Check your network connection if no HF data loads at all.
+The HF API has a 15-second timeout and the same 3-attempt retry budget (1s → 2s backoff). If the endpoint returns 404 or non-JSON data, the viewer falls back to an empty result. Check your network connection if no HF data loads at all.
 
 **Stale cache:**
 

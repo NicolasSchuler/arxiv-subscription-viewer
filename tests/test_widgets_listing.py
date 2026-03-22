@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from unittest.mock import MagicMock
 
+import pytest
 from textual.css.query import NoMatches
 
 from arxiv_browser.huggingface import HuggingFacePaper
@@ -16,6 +18,11 @@ from arxiv_browser.widgets.listing import (
     PaperHighlightTerms,
     PaperListItem,
     PaperRowRenderState,
+    _coerce_paper_row_state,
+    _compress_meta_parts,
+    _normalize_highlight_terms,
+    _normalize_paper_row_state,
+    _render_abstract_preview,
     render_paper_option,
     set_ascii_icons,
 )
@@ -268,6 +275,50 @@ def test_paper_list_item_compose_respects_preview_flag(make_paper):
     assert len(list(with_preview.compose())) == 4
 
 
+def test_listing_helper_branch_matrix(make_paper):
+    paper = make_paper(arxiv_id="2401.77777")
+
+    terms = PaperHighlightTerms(title=("graph",), author=("author",), abstract=("text",))
+    assert _normalize_highlight_terms(terms) is terms
+    normalized = _normalize_highlight_terms(
+        {"title": ["graph"], "author": ["author"], "abstract": ["text"]}
+    )
+    assert normalized.title == ("graph",)
+    assert normalized.author == ("author",)
+    assert normalized.abstract == ("text",)
+    assert _normalize_highlight_terms(None) == PaperHighlightTerms()
+
+    state = PaperRowRenderState(paper=paper)
+    assert _normalize_paper_row_state(state).paper is paper
+    with pytest.raises(TypeError):
+        _coerce_paper_row_state("bad", {})
+    with pytest.raises(TypeError):
+        _coerce_paper_row_state(state, {"metadata": None})
+
+    assert _compress_meta_parts([]) == ""
+    assert _compress_meta_parts(["one", "two"]) == "one  two"
+    compressed = _compress_meta_parts(["x" * 40, "y" * 40, "z" * 40], budget=12)
+    assert len(compressed) <= 12
+
+    assert "Loading abstract" in _render_abstract_preview(replace(state, abstract_text=None))
+    assert "No abstract available" in _render_abstract_preview(replace(state, abstract_text=""))
+    assert "Short abstract" in _render_abstract_preview(
+        replace(state, abstract_text="Short abstract")
+    )
+    preview = _render_abstract_preview(replace(state, abstract_text=("word " * 80).strip()))
+    assert preview.endswith("[/]")
+
+    item = PaperListItem(paper, show_preview=True)
+    item._abstract_text = "preview"
+    item._s2_data = None
+    item._hf_data = None
+    item._version_update = (2, 3)
+    item._relevance_score = (8, "good")
+    assert item._abstract_text == "preview"
+    assert item._version_update == (2, 3)
+    assert item._relevance_score == (8, "good")
+
+
 # ============================================================================
 # truncate_at_word_boundary tests
 # ============================================================================
@@ -329,6 +380,219 @@ class TestTruncateAtWordBoundary:
         result = truncate_at_word_boundary("hello world", 3, ascii_mode=True)
         assert result == "..."
         assert len(result) <= 3
+
+
+def test_chrome_helper_branches_cover_status_and_date_navigation_helpers():
+    from datetime import date
+    from pathlib import Path
+
+    import pytest
+
+    import arxiv_browser.widgets.chrome as chrome_mod
+
+    base_colors = dict(chrome_mod.DEFAULT_THEME)
+
+    state = chrome_mod.StatusBarState(
+        total=10,
+        filtered=3,
+        query="graph",
+        watch_filter_active=True,
+        selected_count=2,
+        sort_label="date",
+        in_arxiv_api_mode=True,
+        api_page=4,
+        arxiv_api_loading=True,
+        show_abstract_preview=True,
+        s2_active=True,
+        s2_loading=False,
+        s2_count=5,
+        s2_api_error=False,
+        hf_active=True,
+        hf_loading=False,
+        hf_match_count=4,
+        hf_api_error=False,
+        version_checking=True,
+        version_update_count=1,
+        max_width=80,
+        theme_colors=base_colors,
+    )
+
+    coerced = chrome_mod._coerce_status_bar_state(state, {})
+    assert coerced.theme_colors == base_colors
+    legacy = chrome_mod._coerce_status_bar_state(
+        None,
+        {
+            "total": 10,
+            "filtered": 3,
+            "query": "",
+            "watch_filter_active": False,
+            "selected_count": 0,
+            "sort_label": "date",
+            "in_arxiv_api_mode": False,
+            "api_page": None,
+            "arxiv_api_loading": False,
+            "show_abstract_preview": False,
+            "s2_active": False,
+            "s2_loading": False,
+            "s2_count": 0,
+        },
+    )
+    assert legacy.total == 10
+    with pytest.raises(TypeError):
+        chrome_mod._coerce_status_bar_state(state, {"total": 1})
+
+    assert (
+        chrome_mod._compact_primary_segment(
+            total=10, filtered=3, query="graph", watch_filter_active=False
+        )
+        == "3/10 match"
+    )
+    assert (
+        chrome_mod._compact_primary_segment(
+            total=10, filtered=3, query="", watch_filter_active=True
+        )
+        == "3/10 watched"
+    )
+    assert (
+        chrome_mod._compact_primary_segment(
+            total=10, filtered=10, query="", watch_filter_active=False
+        )
+        == "10 papers"
+    )
+
+    assert (
+        chrome_mod._full_primary_segment(
+            total=10,
+            filtered=3,
+            query="a" * 40,
+            watch_filter_active=False,
+            theme_colors=base_colors,
+        ).count("...")
+        == 1
+    )
+    assert (
+        chrome_mod._compact_flag_segment(active=False, loading=False, count=0, label="S2") is None
+    )
+    assert (
+        chrome_mod._compact_flag_segment(active=True, loading=True, count=0, label="S2")
+        == "S2 Loading..."
+    )
+    assert (
+        chrome_mod._compact_flag_segment(active=True, loading=False, count=2, label="HF") == "HF:2"
+    )
+    assert (
+        chrome_mod._compact_flag_segment(
+            active=True, loading=False, count=0, label="HF", api_error=True
+        )
+        == "HF:err"
+    )
+
+    compact_parts = chrome_mod._build_compact_status_parts(state)
+    assert "graph" not in " | ".join(compact_parts)
+    assert any(part.startswith("API p4") for part in compact_parts)
+    assert any(part.startswith("S2") for part in compact_parts)
+
+    full_parts = chrome_mod._build_full_status_parts(
+        chrome_mod.StatusBarState(
+            total=10,
+            filtered=3,
+            query="graph",
+            watch_filter_active=True,
+            selected_count=2,
+            sort_label="date",
+            in_arxiv_api_mode=True,
+            api_page=4,
+            arxiv_api_loading=True,
+            show_abstract_preview=True,
+            s2_active=True,
+            s2_loading=True,
+            s2_count=5,
+            s2_api_error=False,
+            hf_active=True,
+            hf_loading=True,
+            hf_match_count=4,
+            hf_api_error=False,
+            version_checking=False,
+            version_update_count=1,
+            max_width=120,
+            theme_colors=base_colors,
+        )
+    )
+    assert any("Preview" in part for part in full_parts)
+    assert any("S2 loading" in part for part in full_parts)
+    assert any("HF loading" in part for part in full_parts)
+    assert all("Checking versions" not in part for part in full_parts)
+
+    assert chrome_mod._render_compact_status(["a", "b", "c"], 6).endswith("...")
+    assert chrome_mod._truncate_rich_text("[bold]hello[/] world", 5).endswith("...")
+    assert chrome_mod._truncate_rich_text("[bold]hello[/]", None) == "[bold]hello[/]"
+
+    assert chrome_mod.build_selection_footer_bindings(3)[0] == ("o", "open(3)")
+    assert chrome_mod.build_search_footer_bindings()[-1] == ("?", "help")
+    assert chrome_mod.build_api_footer_bindings()[1] == ("Esc/Ctrl+e", "exit")
+    assert chrome_mod.build_browse_footer_bindings(
+        s2_active=True,
+        has_starred=True,
+        llm_configured=True,
+        has_history_navigation=True,
+    )[5] == ("[/]", "dates")
+    assert chrome_mod.build_footer_mode_badge(
+        relevance_scoring_active=True,
+        version_checking=False,
+        search_visible=False,
+        in_arxiv_api_mode=False,
+        selected_count=0,
+        theme_colors=base_colors,
+    ).startswith("[bold")
+
+    assert chrome_mod._compute_window_bounds(0, 0, 5) == (0, 0)
+    assert chrome_mod._compute_window_bounds(10, 8, 5) == (5, 10)
+    assert (
+        chrome_mod._format_date_nav_label(
+            date(2026, 1, 2),
+            count=4,
+            mode=chrome_mod.DATE_NAV_LABEL_WITH_COUNTS,
+        )
+        == "Jan 02(4)"
+    )
+    assert (
+        chrome_mod._format_date_nav_label(
+            date(2026, 1, 2),
+            count=None,
+            mode=chrome_mod.DATE_NAV_LABEL_MONTH_DAY,
+        )
+        == "Jan 02"
+    )
+    assert (
+        chrome_mod._format_date_nav_label(
+            date(2026, 1, 2),
+            count=None,
+            mode=chrome_mod.DATE_NAV_LABEL_NUMERIC,
+        )
+        == "01-02"
+    )
+    assert chrome_mod._estimate_date_nav_width(["Jan 01", "Jan 02"]) > 0
+
+    history = [
+        (date(2026, 1, 3), Path("/tmp/2026-01-03.txt")),
+        (date(2026, 1, 2), Path("/tmp/2026-01-02.txt")),
+        (date(2026, 1, 1), Path("/tmp/2026-01-01.txt")),
+    ]
+    start, end, mode = chrome_mod._compute_responsive_date_plan(
+        history,
+        current_index=1,
+        width=0,
+        get_count=lambda _idx: 1,
+    )
+    assert (start, end, mode) == (0, 3, chrome_mod.DATE_NAV_LABEL_WITH_COUNTS)
+    start, end, mode = chrome_mod._compute_responsive_date_plan(
+        history,
+        current_index=1,
+        width=200,
+        get_count=lambda idx: idx + 1,
+    )
+    assert start <= 1 <= end
+    assert mode in chrome_mod.DATE_NAV_LABEL_MODES
 
 
 # ============================================================================

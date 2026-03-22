@@ -23,7 +23,7 @@ Files must be named `YYYY-MM-DD.txt`. The app auto-loads the newest file on star
 | `[` | Previous (older) date |
 | `]` | Next (newer) date |
 
-Session state (including current date) persists across runs. Falls back to `arxiv.txt` if no `history/` directory exists. Limited to the 365 most recent files.
+Session state (including current date) persists across runs. Falls back to `arxiv.txt` if no `history/` directory exists.
 
 ## CLI Options
 

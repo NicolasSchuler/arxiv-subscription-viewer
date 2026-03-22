@@ -73,7 +73,7 @@ Configure file exports and PDF handling. See [export.md](export.md) for detailed
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `theme_name` | `string` | `"monokai"` | Active color theme. Options: `"monokai"`, `"catppuccin"`, `"solarized"`, `"high_contrast"`. Cycle with `Ctrl+t`. |
+| `theme_name` | `string` | `"monokai"` | Active color theme. Serialized values: `"monokai"`, `"catppuccin-mocha"`, `"solarized-dark"`, `"high-contrast"`. UI labels: Monokai, Catppuccin, Solarized, High Contrast. Cycle with `Ctrl+t`. |
 | `theme` | `dict[str, str]` | `{}` | Legacy theme color overrides. Prefer `theme_name` for new configs. |
 | `collapsed_sections` | `list[str]` | `["tags", "relevance", "summary", "s2", "hf", "version"]` | Detail pane sections that start collapsed. Valid keys: `"authors"`, `"abstract"`, `"tags"`, `"relevance"`, `"summary"`, `"s2"`, `"hf"`, `"version"`. Toggle with `Ctrl+d`. |
 

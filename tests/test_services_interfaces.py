@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -190,3 +191,109 @@ async def test_default_enrichment_adapter_delegates(tmp_path) -> None:
     s2_fetch.assert_awaited_once()
     hf_fetch.assert_awaited_once()
     rec_fetch.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_protocol_method_bodies_return_none_without_adapters() -> None:
+    dummy = object()
+    request = ArxivSearchRequest(query="graph", field="title", category="cs.AI")
+
+    assert ArxivApiService.format_query_label(dummy, request) is None
+    assert (
+        await ArxivApiService.enforce_rate_limit(
+            dummy,
+            last_request_at=0.0,
+            min_interval_seconds=1.0,
+            now=lambda: 0.0,
+            sleep=AsyncMock(),
+        )
+        is None
+    )
+    assert (
+        await ArxivApiService.fetch_page(
+            dummy,
+            client=AsyncMock(),
+            request=request,
+            start=0,
+            max_results=10,
+            timeout_seconds=30,
+            user_agent="agent",
+        )
+        is None
+    )
+
+    assert (
+        await LlmService.generate_summary(
+            dummy,
+            paper=object(),
+            prompt_template="{paper_content}",
+            provider=AsyncMock(),
+            use_full_paper_content=False,
+            summary_timeout_seconds=10,
+            fetch_paper_content=AsyncMock(),
+        )
+        is None
+    )
+    assert (
+        await LlmService.score_relevance_once(
+            dummy,
+            paper=object(),
+            interests="ml",
+            provider=AsyncMock(),
+            timeout_seconds=10,
+        )
+        is None
+    )
+    assert (
+        await LlmService.suggest_tags_once(
+            dummy,
+            paper=object(),
+            taxonomy=["topic:ml"],
+            provider=AsyncMock(),
+            timeout_seconds=10,
+        )
+        is None
+    )
+
+    assert (
+        await DownloadService.download_pdf(
+            dummy,
+            paper=object(),
+            config=UserConfig(),
+            client=AsyncMock(),
+            timeout_seconds=10,
+        )
+        is None
+    )
+
+    assert (
+        await EnrichmentService.load_or_fetch_s2_paper(
+            dummy,
+            arxiv_id="2401.1",
+            db_path=Path("/tmp/s2.db"),
+            cache_ttl_days=7,
+            client=AsyncMock(),
+            api_key="",
+        )
+        is None
+    )
+    assert (
+        await EnrichmentService.load_or_fetch_hf_daily(
+            dummy,
+            db_path=Path("/tmp/hf.db"),
+            cache_ttl_hours=6,
+            client=AsyncMock(),
+        )
+        is None
+    )
+    assert (
+        await EnrichmentService.load_or_fetch_s2_recommendations(
+            dummy,
+            arxiv_id="2401.1",
+            db_path=Path("/tmp/s2.db"),
+            cache_ttl_days=7,
+            client=AsyncMock(),
+            api_key="",
+        )
+        is None
+    )

@@ -28,7 +28,7 @@ Quick-reference for AI agents. See `CLAUDE.md` for full architecture, patterns, 
 
 ## Key Rules
 
-- **No circular imports**: Sub-modules must never import from `app.py`
+- **Avoid circular imports**: Sub-modules should import canonical modules directly; only the narrow compatibility bridge may import from `app.py` when preserving legacy patch surfaces.
 - **Soft Python file-size target**: Keep repo-tracked `.py` files at or below 1250 lines when feasible; do not grow existing over-cap files, and prefer extracting cohesive modules/tests over adding more code to them
 - **Function signature limit**: No new function or method in `src/` may exceed 6 effective named parameters; group related inputs into dataclasses, state objects, or request objects
 - **Test mock paths**: Patch at the module where the function is *resolved* (see CLAUDE.md Import Patterns)

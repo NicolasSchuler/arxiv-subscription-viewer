@@ -23,7 +23,14 @@ src/arxiv_browser/
 │   ├── llm_actions.py          # Summary, relevance, auto-tag, chat actions
 │   ├── search_api_actions.py   # arXiv API search actions
 │   └── ui_actions.py           # Sort, theme, navigation, UI toggle actions
-├── app.py                # ArxivBrowser App class + re-export bridge
+├── browser/              # Browser app mixins + compatibility helpers
+│   ├── __init__.py       # Browser package exports from browser/core.py
+│   ├── _runtime.py       # Shared browser runtime imports + compatibility syncing
+│   ├── browse.py         # Dataset/filter state mixin
+│   ├── chrome.py         # Detail-pane/footer/command-palette mixin
+│   ├── core.py           # ArxivBrowser implementation + CLI bootstrap
+│   └── discovery.py      # Similarity/recommendation/version-tracking mixin
+├── app.py                # Compatibility shim + re-export bridge
 ├── cli.py                # CLI argument parsing + bootstrap
 ├── config.py             # Config persistence: load/save/export/import
 ├── enrichment.py         # Enrichment toggle helpers
@@ -42,7 +49,7 @@ src/arxiv_browser/
 │   ├── arxiv_api_service.py    # arXiv API search + feed parsing
 │   ├── download_service.py     # PDF download to local folder
 │   ├── enrichment_service.py   # S2 + HF batch enrichment
-│   ├── interfaces.py           # Service facade (unified API for app.py)
+│   ├── interfaces.py           # Service facade (unified API for browser/core.py and app.py shim)
 │   └── llm_service.py          # LLM subprocess orchestration
 ├── similarity.py         # TF-IDF index, cosine + Jaccard similarity
 ├── themes.py             # Color palettes, category colors, Textual themes
@@ -103,7 +110,7 @@ actions/*              ← action_messages, actions/_runtime
 app.py                 ← all above
 ```
 
-No module imports from `app.py` — this prevents circular dependencies. Modal, widget, action, and service submodules follow the same DAG constraint. `app.py` re-exports all public symbols from sub-modules via `from arxiv_browser.X import *` for backward compatibility. `modals/__init__.py`, `widgets/__init__.py`, and `services/__init__.py` provide flat imports for extracted classes.
+Submodules should import canonical modules directly; the browser compatibility seam may import `app.py` when it needs to preserve the legacy patch surface. Modal, widget, action, and service submodules otherwise follow the same DAG constraint. `app.py` re-exports all public symbols from sub-modules via `from arxiv_browser.X import *` for backward compatibility. `modals/__init__.py`, `widgets/__init__.py`, and `services/__init__.py` provide flat imports for extracted classes.
 
 ### Data Models (`models.py`)
 
@@ -125,9 +132,9 @@ No module imports from `app.py` — this prevents circular dependencies. Modal, 
 - **`export.py`**: `format_paper_as_bibtex()`, `format_papers_as_csv()`, `format_paper_as_ris()`
 - **`themes.py`**: `get_tag_color()`, `parse_tag_namespace()`, `TEXTUAL_THEMES`
 
-### UI Components (`widgets/` + `app.py`)
+### UI Components (`widgets/` + `browser/` + `app.py`)
 
-- `ArxivBrowser` (`app.py`) - Main Textual App class
+- `ArxivBrowser` (`browser/core.py`, re-exported via `app.py`) - Main Textual App class
 - `PaperListItem` (`widgets/listing.py`) - Custom ListItem with selection/metadata display
 - `PaperDetails` (`widgets/details.py`) - Rich-formatted paper detail view
 - `BookmarkTabBar` (`widgets/chrome.py`) - Horizontal bookmark tabs widget
@@ -153,47 +160,39 @@ No module imports from `app.py` — this prevents circular dependencies. Modal, 
 - Pre-computed watch list matches (`_watched_paper_ids` set)
 - Timer-based debouncing for search input (0.3s delay)
 - Batch DOM updates in `_refresh_list_view()`
-- History file discovery limited to 365 files
+- History file discovery returns newest-first results; callers can pass an explicit limit when they need to cap the list
 
 ### External Modules
 
 - **`semantic_scholar.py`**: S2 API client, `SemanticScholarPaper` / `CitationEntry` dataclasses, SQLite cache for papers, recommendations, and citation graphs
 - **`huggingface.py`**: HuggingFace Daily Papers API client, `HuggingFacePaper` dataclass, SQLite cache
 
-### Test Suite (23 files)
+### Test Suite
 
-**Core:**
-- **`test_arxiv_browser.py`**: Parsing, similarity, export, config, UI integration, WCAG contrast
-- **`test_integration.py`**: End-to-end workflows, fixtures, export validation, debug logging
-- **`test_config_import_and_load.py`**: Config import/load edge cases
-- **`test_export_security_and_session_parse.py`**: Export security, session state parsing
-- **`test_main_module.py`**: `__main__.py` entry point
+Representative current coverage:
 
-**Services:**
-- **`test_services_arxiv_api.py`**: arXiv API search service
-- **`test_services_download.py`**: PDF download service
-- **`test_services_enrichment.py`**: S2 + HF enrichment service
-- **`test_services_interfaces.py`**: Service facade
-- **`test_services_llm.py`**: LLM service orchestration
+**Core and model coverage:**
+- `test_arxiv_core_parsing.py`: parsing, LaTeX cleaning, exports, config, and query helpers
+- `test_arxiv_cli_and_restore.py`: CLI bootstrap, history restore, and startup modes
+- `test_config_import_and_load.py`: config import/load edge cases
+- `test_arxiv_module_and_query_helpers.py`: helper utilities and public API re-exports
+- `test_main_module.py`: `python -m arxiv_browser` entry point
 
-**External APIs:**
-- **`test_semantic_scholar.py`**: S2 response parsing, cache, API, citation graph
-- **`test_huggingface.py`**: HF response parsing, cache, API
-- **`test_llm_providers.py`**: LLM provider protocol, CLI subprocess
-- **`test_llm_command_guards.py`**: LLM command safety guards
+**Services and external APIs:**
+- `test_services_*.py`: arXiv API, download, enrichment, service facade, and LLM orchestration
+- `test_semantic_scholar_*.py`: S2 parsing, cache, recommendations, and citation graph
+- `test_huggingface.py`: HF Daily Papers parsing and cache
+- `test_llm_*.py`: LLM providers, command guards, and integration
 
-**UI:**
-- **`test_app_coverage_actions.py`**: App action method coverage
-- **`test_modals_editing.py`**: Editing modals
-- **`test_modals_llm.py`**: LLM modals
-- **`test_widgets_listing.py`**: Widget listing
-- **`test_tui_quality_pass.py`**: TUI quality checks
-- **`test_io_actions_viewer_args.py`**: I/O actions, viewer arguments
+**UI and integration:**
+- `test_app_actions_*.py`: app action coverage across bookmarks, collections, I/O, search, similarity, relevance, and auto-tag
+- `test_modals_*.py`: modal screens
+- `test_widgets_listing.py`: paper list rendering
+- `test_tui_*.py`: TUI interaction and visual regression checks
+- `test_arxiv_textual_browse_integration.py`: browse-mode end-to-end flows
 
-**Other:**
-- **`test_properties.py`**: Property-based tests (Hypothesis)
-- **`test_sqlite_connection_lifecycle.py`**: SQLite connection management
-- **`test_benchmarks.py`**: Performance regression (marked `@pytest.mark.slow`)
+**Tooling and packaging:**
+- `test_check_docs_sync.py`, `test_code_quality_signatures.py`, `test_completions.py`, `test_packaging_smoke.py`, `test_benchmarks.py`
 
 ## Code Style
 
@@ -228,7 +227,7 @@ No module imports from `app.py` — this prevents circular dependencies. Modal, 
 - **Backward compat**: `from arxiv_browser.app import Paper` — still works via re-export bridge
 - **Mock paths in tests**: Patch at the module where the function is *resolved*, not where it's re-exported:
   - Functions called by other functions in the same module: patch at the actual module (e.g., `"arxiv_browser.config.get_config_path"`)
-  - Functions called by `ArxivBrowser` (resolves from `app.py`): patch at `"arxiv_browser.app.X"`
+  - Functions called by `ArxivBrowser`: patch the module where the symbol is resolved. Canonical implementations live under `arxiv_browser.browser.*`, but the compatibility shim still exposes many names through `arxiv_browser.app.X`.
   - Modal classes in tests: `from arxiv_browser.modals import X` (not `from arxiv_browser.app import X`)
   - S2/HF modules: `"arxiv_browser.semantic_scholar.X"`, `"arxiv_browser.huggingface.X"`
 
@@ -268,7 +267,7 @@ just test
 just test-quick
 
 # Run specific test class
-uv run pytest -v tests/test_arxiv_browser.py::TestCleanLatex
+uv run pytest -v tests/test_arxiv_core_parsing.py::TestCleanLatex
 
 # Run tests matching pattern
 uv run pytest -k "bibtex"
