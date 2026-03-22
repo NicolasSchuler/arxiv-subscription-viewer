@@ -161,33 +161,10 @@ def _coerce_detail_state(
 def _detail_cache_key_for_state(state: DetailRenderState) -> tuple:
     """Build a stable, hashable cache key for rendered detail markup.
 
-    All mutable or unhashable inputs (lists, objects, long strings) are
-    converted to tuples or digested so the resulting tuple can be used as a
-    ``dict`` key.
-
-    Args:
-        paper: The paper whose detail pane is being rendered.
-        abstract_text: Fetched full abstract text (may be ``None`` while
-            loading).
-        abstract_loading: True while the abstract is being fetched.
-        summary: LLM-generated summary text (may be ``None``).
-        summary_loading: True while the summary is being generated.
-        highlight_terms: Per-field search highlight terms.
-        s2_data: Semantic Scholar enrichment data (``None`` if unavailable).
-        s2_loading: True while S2 data is being fetched.
-        hf_data: HuggingFace enrichment data (``None`` if unavailable).
-        version_update: ``(old_version, new_version)`` tuple when a newer
-            version has been detected, otherwise ``None``.
-        summary_mode: Active summary mode key (e.g. ``"default"``).
-        tags: User-assigned tags for this paper.
-        relevance: ``(score, reason)`` relevance tuple, or ``None``.
-        collapsed_sections: List of currently collapsed detail section keys.
-        detail_mode: Active detail density mode (``"full"`` or ``"scan"``).
-
-    Returns:
-        A flat tuple of hashable values that uniquely identifies the rendered
-        state.  Two calls with identical logical inputs will produce equal
-        tuples; any change in displayed content will produce a different tuple.
+    ``state`` may contain mutable collections, rich objects, and very long text
+    fields. This helper normalizes those pieces into hashable tuples or short
+    digests so the result can be used as a compact ``dict`` key for the render
+    cache. Any visible change in the detail pane should produce a different key.
     """
     if state.paper is None:
         return ("empty", _ACTIVE_DETAIL_GLYPH_MODE)

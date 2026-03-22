@@ -5,8 +5,8 @@
 <h1 align="center">arXiv Subscription Viewer</h1>
 
 <p align="center">
-  <b>Browse, search, and manage arXiv papers from your terminal.</b><br>
-  Fuzzy search · AI summaries · citation graphs · PDF downloads · export to BibTeX/Markdown/CSV
+  <b>Triage arXiv papers from your terminal.</b><br>
+  History mode or live API search · keyboard-first review · optional citation and LLM enrichment
 </p>
 
 <p align="center">
@@ -14,6 +14,11 @@
 </p>
 
 ## 🚀 Getting Started
+
+Use whichever entry path matches how you already follow papers:
+
+- **`history/` workflow**: review local daily digests with persistent date navigation, bookmarks, notes, and collections.
+- **Live arXiv search**: start directly from the API when you want the newest matching papers without preparing local files first.
 
 ```bash
 # Install
@@ -29,7 +34,7 @@ arxiv-viewer search --query "diffusion transformer" --field title
 # Paginate through results (instead of collecting the newest day)
 arxiv-viewer search --query "attention" --mode page --max-results 100
 
-# Browse from email digest files (see docs/history-mode.md)
+# Browse from a local history/ archive (see docs/history-mode.md)
 arxiv-viewer browse
 
 # List local history dates
@@ -50,6 +55,32 @@ arxiv-viewer config-path
 > Global options: `--version` · `--debug` (log to file) · `--ascii` (ASCII-only icons) · `--color auto|always|never` · `--no-color`
 >
 > Debug log paths: `~/.config/arxiv-browser/debug.log` (Linux) · `~/Library/Application Support/arxiv-browser/debug.log` (macOS) · `%APPDATA%/arxiv-browser/debug.log` (Windows)
+
+## 🧭 Choose A Workflow
+
+### `history/` archive
+
+Run the viewer from the directory that contains your `history/` folder:
+
+```bash
+mkdir -p ~/research/arxiv/history
+cd ~/research/arxiv
+# Save a digest as history/2026-02-13.txt
+arxiv-viewer
+```
+
+This path is best when you review daily digests in order and want persistent local state.
+
+### Live arXiv search
+
+Use the API-first path when you want to start from current arXiv results:
+
+```bash
+arxiv-viewer search --category cs.AI
+arxiv-viewer search --query "diffusion transformer" --field title
+```
+
+If something looks off, run `arxiv-viewer doctor` to check config, history discovery, CLI setup, and environment assumptions.
 
 ## ✨ Highlights
 
@@ -101,6 +132,7 @@ Config lives at `~/.config/arxiv-browser/config.json` (Linux), `~/Library/Applic
 
 See the **[full documentation](docs/)** for:
 
+- 🧭 [Docs start page](docs/README.md)
 - 🤖 [AI summary & LLM setup](docs/llm-setup.md)
 - 📊 [Semantic Scholar integration](docs/semantic-scholar.md)
 - 🔥 [HuggingFace trending](docs/huggingface.md)

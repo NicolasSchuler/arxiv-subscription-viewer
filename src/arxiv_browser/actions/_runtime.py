@@ -28,6 +28,10 @@ from rapidfuzz import fuzz
 from textual.app import ScreenStackError
 from textual.css.query import NoMatches
 
+# Keep the wildcard imports in one place: extracted action modules import from
+# this runtime bundle instead of assembling their own dependencies or reaching
+# back into ``arxiv_browser.app``. That makes the action layer's dependency
+# surface explicit while still supporting the temporary compatibility bridge.
 from arxiv_browser.action_messages import *
 from arxiv_browser.cli import ARXIV_API_MIN_INTERVAL_SECONDS
 from arxiv_browser.config import *

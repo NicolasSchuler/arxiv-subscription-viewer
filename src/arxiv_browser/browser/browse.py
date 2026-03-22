@@ -9,8 +9,15 @@ from arxiv_browser.browser._runtime import *
 
 @sync_app_methods
 class BrowseMixin:
+    """Dataset and filter state transitions shared by the main browser app."""
+
     def _capture_local_browse_snapshot(self) -> LocalBrowseSnapshot | None:
-        """Capture local browsing state before entering API search mode."""
+        """Capture the local-library view before switching into API search mode.
+
+        The snapshot intentionally preserves everything needed to restore the
+        user-visible browsing state later: current dataset, sort/filter state,
+        selection, highlight terms, visible-list position, and subtitle text.
+        """
         try:
             list_view = self._get_paper_list_widget()
         except NoMatches:
@@ -33,7 +40,14 @@ class BrowseMixin:
         )
 
     def _restore_local_browse_snapshot(self) -> None:
-        """Restore the browsing state saved before API search mode."""
+        """Restore the local-library view saved before API search mode.
+
+        Restoring advances the dataset epoch first so stale background work from
+        the temporary API dataset will not publish into the restored local
+        dataset. After the core state is restored, this method recomputes watch
+        matches, reapplies the saved query, and rebuilds the visible list focus
+        so the UI returns to the same logical place the user left.
+        """
         snapshot = self._local_browse_snapshot
         if snapshot is None:
             return
@@ -143,14 +157,14 @@ class BrowseMixin:
         return [p for p, _ in top_papers]
 
     def _apply_filter(self, query: str) -> None:
-        """Filter papers by various criteria.
+        """Apply the current query and refresh all dependent dataset UI state.
 
-        Supported filters:
-        - cat:<category>  - Filter by category (e.g., cat:cs.AI)
-        - tag:<tag>       - Filter by tag (e.g., tag:to-read)
-        - unread          - Show only unread papers
-        - starred         - Show only starred papers
-        - <text>          - Fuzzy search on title/author
+        Query execution runs through the shared query engine, then intersects
+        with the optional watch filter, reapplies the active sort order, and
+        refreshes list/detail/bookmark UI surfaces. Keeping the whole sequence
+        here ensures the visible dataset, highlight terms, status text, and
+        bookmark state stay in sync after both local typing and API-mode
+        restoration.
         """
         perf_start = time.perf_counter() if logger.isEnabledFor(logging.DEBUG) else None
         query = query.strip()

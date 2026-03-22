@@ -1,6 +1,6 @@
 # 🔍 Search Filters & Advanced Queries
 
-Press `/` to open the search box. Use the hint row for quick examples like `cat:cs.AI`, `author:hinton`, `unread`, or `"large language"`. Press `Escape` to close search or exit API/search-results mode.
+Press `/` to open the search box against your currently loaded dataset. Use the hint row for quick examples like `cat:cs.AI`, `author:hinton`, `unread`, or `"large language"`. Press `Escape` to close search or exit API/search-results mode.
 
 ## Filter Prefixes
 
@@ -49,7 +49,7 @@ Save up to 9 frequent searches for quick access:
 
 ## arXiv API Search
 
-Press `A` to search all of arXiv via the API:
+Press `A` in the app, or start from the CLI, to search all of arXiv via the API:
 
 ```bash
 # CLI startup equivalents
@@ -68,6 +68,8 @@ API field options: `all`, `title`, `author`, `abstract`. Default page size is co
 ```
 
 Values are clamped to the range `1..200`.
+
+If API search or paging behaves unexpectedly, run `arxiv-viewer doctor` to check your environment and confirm the app can distinguish local-history mode from live-search mode.
 
 ---
 

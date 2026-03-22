@@ -5,9 +5,14 @@ Common issues and how to fix them.
 > **Quick diagnostic:** Run `arxiv-viewer doctor` to check your environment,
 > config file, LLM setup, history directory, and more in one command.
 
+This guide assumes both supported entry paths:
+
+- `history/` mode for local dated digest files
+- `search` mode for live arXiv API results
+
 ## No Papers Loaded
 
-**Symptom:** The viewer opens but the paper list is empty.
+**Symptom:** The viewer opens but the paper list is empty, or `browse` mode loads nothing.
 
 **File not found:**
 
@@ -15,7 +20,7 @@ Common issues and how to fix them.
 Error: papers.txt not found
 ```
 
-Check the path you passed with `-i`. In history mode (no `-i`), the viewer looks for `YYYY-MM-DD.txt` files inside a `history/` subdirectory relative to the current working directory.
+Check the path you passed with `-i`. In history mode (no `-i`), the viewer looks for `YYYY-MM-DD.txt` files inside a `history/` subdirectory relative to the current working directory. `arxiv-viewer doctor` will report which directory it is inspecting and whether it found any history files.
 
 ```bash
 # Explicit file
@@ -50,6 +55,16 @@ Error: papers.txt permission denied
 ```
 
 Check file permissions with `ls -la <file>`.
+
+**Expected search-mode behavior:**
+
+If you do not use local files, prefer:
+
+```bash
+arxiv-viewer search --category cs.AI
+```
+
+An empty search page is a different problem from missing local history files.
 
 ---
 

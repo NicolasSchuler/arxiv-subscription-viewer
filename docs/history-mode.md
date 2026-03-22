@@ -1,10 +1,10 @@
 # 📅 History Mode & Email Ingestion
 
-Browse daily arXiv email digests stored as dated text files.
+Use history mode when you already save daily digests locally and want the app to behave like a keyboard-first review queue. If you do not keep local files, skip to [Search & Filters](search-filters.md) and start with `arxiv-viewer search ...` instead.
 
 ## Directory Setup
 
-Create a `history/` directory where you run `arxiv-viewer`:
+Create a `history/` directory in the workspace where you run `arxiv-viewer`:
 
 ```
 ~/research/arxiv/
@@ -37,7 +37,7 @@ arxiv-viewer browse --no-restore      # Ignore saved session state
 
 ## Automating Email Ingestion
 
-`arxiv-viewer` only needs dated text files in `history/`, so any email automation that writes `history/YYYY-MM-DD.txt` will work.
+`arxiv-viewer` only needs dated text files in `history/`, so any automation that writes `history/YYYY-MM-DD.txt` will work. If the app is not finding your files, run `arxiv-viewer doctor` to confirm the current working directory and history discovery status.
 
 **Recommended setup:**
 

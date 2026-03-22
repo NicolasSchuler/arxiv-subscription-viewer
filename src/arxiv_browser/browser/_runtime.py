@@ -1,5 +1,12 @@
 # ruff: noqa: F401, F403, F405
-"""Shared runtime imports and patch-surface syncing for browser modules."""
+"""Shared runtime imports and patch-surface syncing for browser modules.
+
+This module is the compatibility seam between the newer browser-package mixins
+and the legacy ``arxiv_browser.app`` patch surface that some tests still target.
+Browser mixins import from here so they can share one dependency bundle and so
+their callables can refresh same-named globals from ``app.py`` immediately
+before execution.
+"""
 
 from __future__ import annotations
 
@@ -231,11 +238,23 @@ def build_list_empty_message(
 
 
 def sync_browser_globals(namespace: dict[str, object]) -> None:
-    """Sync browser-module globals from the compatibility app module."""
+    """Refresh one browser module's globals from the legacy app patch surface.
+
+    During the compatibility window, tests may monkeypatch symbols on
+    ``arxiv_browser.app`` rather than on the extracted browser modules directly.
+    Re-syncing just before a method call keeps those patches visible inside the
+    browser package without reintroducing app-module imports in every mixin.
+    """
     sync_app_globals(namespace)
 
 
 def _sync_wrapped_callable(func):
+    """Wrap a callable so browser globals are refreshed before each invocation.
+
+    The wrapper preserves sync vs async behavior. The important invariant is
+    that every public mixin method sees the latest compatibility patches before
+    any imported helper is resolved from its defining module's globals.
+    """
     if inspect.iscoroutinefunction(func):
 
         @functools.wraps(func)
@@ -254,7 +273,12 @@ def _sync_wrapped_callable(func):
 
 
 def sync_app_methods(cls):
-    """Wrap class callables so each invocation re-syncs app-module globals."""
+    """Decorate a mixin/class so every callable re-syncs compatibility globals.
+
+    This is applied to extracted mixins whose methods previously lived in
+    ``arxiv_browser.app``. It keeps constructor-time imports static while still
+    honoring one-release shims and test patches aimed at the old module path.
+    """
     for name, value in list(cls.__dict__.items()):
         if name.startswith("__"):
             continue

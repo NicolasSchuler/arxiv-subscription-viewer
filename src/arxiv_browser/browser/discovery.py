@@ -9,10 +9,18 @@ from arxiv_browser.browser._runtime import *
 
 @sync_app_methods
 class DiscoveryMixin:
+    """Async discovery workflows for versions, similarity, and recommendations."""
+
     VERSION_CHECK_BATCH_SIZE = 40  # IDs per API request (URL length safe)
 
     async def _check_versions_async(self, arxiv_ids: set[str]) -> None:
-        """Background task: check starred papers for newer arXiv versions."""
+        """Check starred papers for newer arXiv versions against the live API.
+
+        The task captures the current dataset epoch and abandons publication if
+        the user changes datasets mid-flight. That keeps version notifications,
+        badge updates, and progress state from leaking across local/API mode or
+        filter-scope transitions.
+        """
         task_epoch = self._capture_dataset_epoch()
         try:
             client = self._http_client
@@ -147,7 +155,13 @@ class DiscoveryMixin:
             self._show_local_recommendations(paper)
 
     def _show_local_recommendations(self, paper: Paper) -> None:
-        """Show TF-IDF + metadata local recommendations."""
+        """Show local recommendations, building the TF-IDF index lazily if needed.
+
+        Similarity indexing is intentionally corpus-scoped to ``self.all_papers``
+        rather than the currently filtered subset. When the corpus changes, the
+        previous index is treated as stale and rebuilt in the background before
+        the recommendation modal is shown.
+        """
         corpus_key = build_similarity_corpus_key(self.all_papers)
         tfidf_index = getattr(self, "_tfidf_index", None)
         tfidf_corpus_key = getattr(self, "_tfidf_corpus_key", None)
@@ -203,7 +217,13 @@ class DiscoveryMixin:
         return TfidfIndex.build(papers, text_fn=_text_for)
 
     async def _build_tfidf_index_async(self, corpus_key: str) -> None:
-        """Build the TF-IDF index off the UI thread and publish it when fresh."""
+        """Build the TF-IDF index off the UI thread and publish it only if fresh.
+
+        The build uses a snapshot of the current paper corpus plus the captured
+        dataset epoch. If either the epoch or corpus key changes before
+        publication, the completed index is discarded rather than attached to a
+        newer dataset.
+        """
         task_epoch = self._capture_dataset_epoch()
         papers_snapshot = list(self.all_papers)
         try:

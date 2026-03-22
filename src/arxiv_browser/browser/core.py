@@ -75,7 +75,12 @@ class _PaletteAppState:
 
 @dataclass(slots=True)
 class ArxivBrowserOptions:
-    """Optional constructor inputs for `ArxivBrowser`."""
+    """Normalized constructor inputs for ``ArxivBrowser``.
+
+    This is the forward-looking constructor shape. The browser still accepts a
+    legacy positional/keyword argument form, and those calls are coerced into
+    this dataclass before app initialization continues.
+    """
 
     config: UserConfig | None = None
     restore_session: bool = True
@@ -100,7 +105,13 @@ def _coerce_browser_options(
     legacy_args: tuple[Any, ...],
     legacy_kwargs: dict[str, Any],
 ) -> ArxivBrowserOptions:
-    """Accept new options objects plus legacy positional/keyword constructor args."""
+    """Normalize new-style options plus the legacy constructor calling convention.
+
+    The compatibility goal is that existing callers can continue passing the
+    older positional/keyword shape while new code can pass one options object.
+    This helper rejects ambiguous mixed usage and always returns a fresh
+    ``ArxivBrowserOptions`` instance for downstream initialization.
+    """
     if options is not None:
         if isinstance(options, ArxivBrowserOptions):
             if legacy_args or legacy_kwargs:

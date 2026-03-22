@@ -243,7 +243,13 @@ class QueryToken:
 
 @dataclass(slots=True)
 class UserConfig:
-    """Complete user configuration including session state and preferences."""
+    """Complete persisted user configuration.
+
+    This dataclass mixes a few categories of state:
+    persistent library metadata (notes/tags/collections), UI preferences,
+    optional enrichment/configuration knobs, trust decisions for shell-backed
+    commands, and lightweight session restore state for the next launch.
+    """
 
     paper_metadata: dict[str, PaperMetadata] = field(default_factory=dict)
     watch_list: list[WatchListEntry] = field(default_factory=list)
@@ -303,7 +309,12 @@ class ArxivSearchModeState:
 
 @dataclass(slots=True)
 class LocalBrowseSnapshot:
-    """Snapshot of local browsing state to restore after API search mode."""
+    """Snapshot of the pre-API local browsing state.
+
+    The browser stores one of these before switching into live arXiv API mode
+    so it can later restore the previous local dataset, filter/sort context,
+    selection, highlights, and visible-list position as one coherent transition.
+    """
 
     all_papers: list[Paper]
     papers_by_id: dict[str, Paper]
