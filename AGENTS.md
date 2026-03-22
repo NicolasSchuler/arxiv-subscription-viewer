@@ -9,18 +9,19 @@ Quick-reference for AI agents. See `CLAUDE.md` for full architecture, patterns, 
 - **Auto-fix**: `just format`
 - **Docs drift**: `just docs-check`
 - **Dashboard**: `just report`
+- **Contributor docs**: `CONTRIBUTING.md`
 
 ## Before Making Changes
 
 1. Read the relevant source files before editing
-2. Run `just check` to establish a clean baseline
-3. After changes, run `just check` again to verify nothing broke
+2. For code changes, run `just check` to establish a clean baseline
+3. After changes, run `just check` again to verify nothing broke (`just docs-check` is the targeted minimum for docs-sync edits; see `CONTRIBUTING.md`)
 
 ## Must-Pass Gates (CI enforced)
 
 - `just lint` — zero ruff errors, formatting matches
 - `just typecheck` — zero pyright errors (basic mode)
-- `just test` — all tests pass, overall coverage >= 60%, `app.py` coverage >= 80%, and the signature-count structural guard passes
+- `just test` — all tests pass, overall coverage >= 95% (from `pyproject.toml`), `app.py` coverage >= 80%, and the signature-count structural guard passes
 - `uv run xenon src/arxiv_browser/ --max-absolute C --max-modules C --max-average B`
 - `just dead-code` / `just security` / `just deps` — zero findings each
 - Repo-tracked Python file-size soft-cap report: warning-only at > 1250 lines, near-cap reporting at > 1000 lines

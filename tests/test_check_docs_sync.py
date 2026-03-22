@@ -71,3 +71,134 @@ complete -c arxiv-viewer -n '__fish_use_subcommand' -a doctor -d 'Run diagnostic
         assert module._check_completions(cli_text, completions_text) == [
             "zsh completions missing subcommand: doctor"
         ]
+
+
+class TestCheckConfigReference:
+    """Regression tests for persisted config documentation coverage."""
+
+    def test_check_config_reference_passes_for_documented_persisted_keys(self):
+        module = _load_check_docs_sync_module()
+
+        models_text = """
+from dataclasses import dataclass
+
+
+@dataclass
+class UserConfig:
+    version: int = 1
+    llm_max_retries: int = 1
+    llm_timeout: int = 120
+    onboarding_seen: bool = False
+    config_defaulted: bool = False
+"""
+        config_text = """
+def _config_to_dict(config):
+    return {
+        "version": config.version,
+        "llm_max_retries": config.llm_max_retries,
+        "llm_timeout": config.llm_timeout,
+        "onboarding_seen": config.onboarding_seen,
+        "session": {
+            "scroll_index": config.session.scroll_index,
+        },
+    }
+"""
+        config_reference_text = """
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `version` | `int` | `1` | Managed by the app. |
+| `llm_max_retries` | `int` | `1` | Retry count. |
+| `llm_timeout` | `int` | `120` | Timeout in seconds. |
+| `onboarding_seen` | `bool` | `false` | First-run onboarding dismissed. |
+| `session.scroll_index` | `int` | `0` | Restored scroll position. |
+"""
+
+        assert module._check_config_reference(models_text, config_text, config_reference_text) == []
+
+    def test_check_config_reference_reports_missing_persisted_keys(self):
+        module = _load_check_docs_sync_module()
+
+        models_text = """
+from dataclasses import dataclass
+
+
+@dataclass
+class UserConfig:
+    llm_max_retries: int = 1
+    llm_timeout: int = 120
+    onboarding_seen: bool = False
+    config_defaulted: bool = False
+"""
+        config_text = """
+def _config_to_dict(config):
+    return {
+        "llm_max_retries": config.llm_max_retries,
+        "llm_timeout": config.llm_timeout,
+        "onboarding_seen": config.onboarding_seen,
+    }
+"""
+        config_reference_text = """
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `llm_max_retries` | `int` | `1` | Retry count. |
+"""
+
+        assert module._check_config_reference(models_text, config_text, config_reference_text) == [
+            "docs/config-reference.md missing persisted config key: llm_timeout",
+            "docs/config-reference.md missing persisted config key: onboarding_seen",
+        ]
+
+
+class TestCheckDocsIndexNavigation:
+    """Regression tests for docs landing-page guide navigation."""
+
+    def test_check_docs_index_navigation_passes_when_feature_guides_are_linked(self):
+        module = _load_check_docs_sync_module()
+
+        docs_readme_text = """
+## Feature Guides
+
+| Document | Description |
+|----------|-------------|
+| [history-mode.md](history-mode.md) | History workflow |
+| [config-reference.md](config-reference.md) | Config reference |
+| [troubleshooting.md](troubleshooting.md) | Common issues |
+
+## Internal Development Docs
+
+- [tui-style-guide.md](tui-style-guide.md)
+"""
+        docs_index_text = """
+<html>
+  <body>
+    <a href="./history-mode.md">History mode</a>
+    <a href="config-reference.md#top">Config reference</a>
+    <a href="/docs/troubleshooting.md?ref=landing">Troubleshooting</a>
+  </body>
+</html>
+"""
+
+        assert module._check_docs_index_navigation(docs_readme_text, docs_index_text) == []
+
+    def test_check_docs_index_navigation_reports_missing_feature_guide_links(self):
+        module = _load_check_docs_sync_module()
+
+        docs_readme_text = """
+## Feature Guides
+
+| Document | Description |
+|----------|-------------|
+| [history-mode.md](history-mode.md) | History workflow |
+| [config-reference.md](config-reference.md) | Config reference |
+"""
+        docs_index_text = """
+<html>
+  <body>
+    <a href="history-mode.md">History mode</a>
+  </body>
+</html>
+"""
+
+        assert module._check_docs_index_navigation(docs_readme_text, docs_index_text) == [
+            "docs/index.html missing guide navigation link: config-reference.md"
+        ]

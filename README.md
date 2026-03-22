@@ -130,9 +130,17 @@ making it easy to navigate between papers you're comparing or revisiting.
 
 Config lives at `~/.config/arxiv-browser/config.json` (Linux), `~/Library/Application Support/arxiv-browser/config.json` (macOS), or `%APPDATA%/arxiv-browser/config.json` (Windows).
 
+If you want the best documentation entry point for your context:
+
+- 🌐 **Published guide hub**: [nicolasschuler.github.io/arxiv-subscription-viewer](https://nicolasschuler.github.io/arxiv-subscription-viewer/)
+- 📚 **Repository docs index**: [docs/README.md](docs/README.md)
+- ⚙️ **Direct config reference**: [docs/config-reference.md](docs/config-reference.md)
+
 See the **[full documentation](docs/)** for:
 
 - 🧭 [Docs start page](docs/README.md)
+- 🌐 [Published docs landing page](https://nicolasschuler.github.io/arxiv-subscription-viewer/)
+- ⚙️ [Configuration reference](docs/config-reference.md)
 - 🤖 [AI summary & LLM setup](docs/llm-setup.md)
 - 📊 [Semantic Scholar integration](docs/semantic-scholar.md)
 - 🔥 [HuggingFace trending](docs/huggingface.md)

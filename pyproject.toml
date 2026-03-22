@@ -39,6 +39,7 @@ arxiv-viewer = "arxiv_browser.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/NicolasSchuler/arxiv-subscription-viewer"
+Documentation = "https://nicolasschuler.github.io/arxiv-subscription-viewer/"
 Repository = "https://github.com/NicolasSchuler/arxiv-subscription-viewer"
 Issues = "https://github.com/NicolasSchuler/arxiv-subscription-viewer/issues"
 Changelog = "https://github.com/NicolasSchuler/arxiv-subscription-viewer/releases"

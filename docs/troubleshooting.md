@@ -3,12 +3,31 @@
 Common issues and how to fix them.
 
 > **Quick diagnostic:** Run `arxiv-viewer doctor` to check your environment,
-> config file, LLM setup, history directory, and more in one command.
+> current working directory, LLM setup, export paths, and more in one command.
 
 This guide assumes both supported entry paths:
 
 - `history/` mode for local dated digest files
 - `search` mode for live arXiv API results
+
+## `arxiv-viewer doctor`
+
+Run this from the same directory you normally launch the app from:
+
+```bash
+arxiv-viewer doctor
+```
+
+It reports:
+
+- config file path/status
+- whether `./history/` contains `YYYY-MM-DD.txt` files
+- resolved LLM command or preset, including `{prompt}` placeholder checks, shell-fallback policy, and whether the binary is on `PATH`
+- whether Semantic Scholar / HuggingFace are enabled
+- export/PDF directories and whether they'll be created on first use
+- whether the current terminal is an interactive TTY
+
+Exit code is `0` when no warnings are found, `1` when `doctor` reports issues.
 
 ## No Papers Loaded
 
@@ -94,13 +113,22 @@ echo "hello" | claude -p "say hi"
 
 **Trust not accepted:**
 
-Custom `llm_command` values (and presets on first use) prompt for trust approval via a confirmation dialog. If you dismiss the dialog, the action is cancelled. The trust hash is stored in `config.json` under `trusted_llm_command_hashes` so you're only prompted once per unique command.
+Custom `llm_command` values prompt for trust approval via a confirmation dialog. If you dismiss the dialog, the action is cancelled. The trust hash is stored in `config.json` under `trusted_llm_command_hashes` so you're only prompted once per unique custom command.
 
-If you change `llm_command` or `llm_preset`, you'll be prompted again for the new command.
+If you change `llm_command`, you'll be prompted again for the new command.
 
-**Timeout (120 seconds):**
+**Timeouts or retries need tuning:**
 
-LLM commands have a 120-second timeout. Long prompts with `{paper_content}` (full paper text) may exceed this on slower models. If summaries consistently time out, try a faster model or a shorter prompt template using only `{abstract}`.
+Each LLM attempt uses `llm_timeout` (default `120`, range `10..600`). Transient failures can retry up to `llm_max_retries` times (default `1`, range `0..5`). Long prompts with `{paper_content}` may need a higher timeout or fewer full-paper requests on slower models.
+
+```json
+{
+  "llm_timeout": 180,
+  "llm_max_retries": 2
+}
+```
+
+If you're not sure which command the app is actually using, run `arxiv-viewer doctor`.
 
 **Invalid prompt template:**
 

@@ -8,13 +8,25 @@ Press `/` to open the search box against your currently loaded dataset. Use the 
 |--------|---------|-------------|
 | `cat:` | `cat:cs.AI` | Filter by arXiv category |
 | `tag:` | `tag:to-read` | Filter by custom tag |
+| `tag:` (quoted) | `tag:"to read"` | Match a tag value containing spaces |
 | `author:` | `author:hinton` | Filter by author name |
+| `author:` (quoted) | `author:"Geoffrey Hinton"` | Match a multi-word author substring |
 | `title:` | `title:transformer` | Filter by title substring |
+| `title:` (quoted) | `title:"large language"` | Match a multi-word title phrase |
 | `abstract:` | `abstract:attention` | Filter by abstract substring |
+| `abstract:` (quoted) | `abstract:"reinforcement learning"` | Match a multi-word abstract phrase |
 | `unread` | `unread` | Show only unread papers |
 | `starred` | `starred` | Show only starred papers |
 | (text) | `transformer` | Fuzzy search title/authors |
-| `"..."` | `"large language"` | Match exact phrase |
+| `"..."` | `"large language"` | Match a quoted phrase |
+
+## Query Rules
+
+- Adjacent terms imply `AND`: `cat:cs.AI unread` is the same as `cat:cs.AI AND unread`.
+- Quoted values keep spaces inside one term: `author:"Geoffrey Hinton"`.
+- Unquoted field values stop at the next space, so use quotes when a field value contains spaces.
+- Operator precedence is `NOT` > `AND` > `OR`.
+- Parentheses are not supported.
 
 ## Boolean Operators
 
@@ -25,6 +37,15 @@ cat:cs.AI AND author:hinton
 unread OR starred
 NOT cat:math
 cat:cs.LG AND title:transformer AND unread
+author:"Geoffrey Hinton" title:"neural networks"
+cat:cs.AI unread NOT tag:archived
+```
+
+The last two examples rely on implicit `AND`, so they behave like:
+
+```
+author:"Geoffrey Hinton" AND title:"neural networks"
+cat:cs.AI AND unread AND NOT tag:archived
 ```
 
 | Key | Action |
@@ -69,7 +90,7 @@ API field options: `all`, `title`, `author`, `abstract`. Default page size is co
 
 Values are clamped to the range `1..200`.
 
-If API search or paging behaves unexpectedly, run `arxiv-viewer doctor` to check your environment and confirm the app can distinguish local-history mode from live-search mode.
+If API search or paging behaves unexpectedly, run `arxiv-viewer doctor` from your usual launch directory to confirm whether the app sees local `history/` files or is operating purely in live-search mode.
 
 ---
 

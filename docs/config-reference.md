@@ -20,6 +20,7 @@ The file is created on first run. If it becomes corrupt (invalid JSON), the app 
 |-----|------|---------|-------------|
 | `version` | `int` | `1` | Config schema version. Managed by the app. |
 | `config_defaulted` | `bool` | `false` | Set to `true` when a corrupt config was replaced with defaults. Not persisted. |
+| `onboarding_seen` | `bool` | `false` | Tracks whether the first-run help overlay has been dismissed. Managed by the app. |
 | `show_abstract_preview` | `bool` | `false` | Show inline abstract preview in the paper list. Toggle with `p`. |
 | `detail_mode` | `string` | `"scan"` | Detail pane density. `"scan"` (compact) or `"full"` (expanded). |
 | `prefer_pdf_url` | `bool` | `false` | When `true`, `o` opens the PDF URL instead of the abstract page. |
@@ -33,10 +34,12 @@ Configure AI summaries, paper chat, relevance scoring, and auto-tagging. See [ll
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `llm_preset` | `string` | `""` | Named preset: `"claude"`, `"codex"`, `"llm"`, `"copilot"`, `"opencode"`, or `""` (custom). |
-| `llm_command` | `string` | `""` | Shell command template, e.g. `"claude -p {prompt}"`. Ignored when a preset is set. |
+| `llm_preset` | `string` | `""` | Named preset: `"claude"`, `"codex"`, `"llm"`, `"copilot"`, `"opencode"`, or `""`. Used when `llm_command` is empty. |
+| `llm_command` | `string` | `""` | Shell command template, e.g. `"claude -p {prompt}"`. Takes precedence over `llm_preset` when non-empty. |
 | `llm_prompt_template` | `string` | `""` | Custom prompt template. Placeholders: `{title}`, `{authors}`, `{categories}`, `{abstract}`, `{arxiv_id}`, `{paper_content}`. Empty uses the built-in default. |
 | `allow_llm_shell_fallback` | `bool` | `true` | Allow commands that require shell parsing. Set `false` to reject shell-only templates. |
+| `llm_max_retries` | `int` | `1` | Retries for transient LLM failures such as timeouts or non-zero exits. Range `0..5` (`1` means up to 2 total attempts). |
+| `llm_timeout` | `int` | `120` | Seconds to wait for each LLM attempt before timing out. Range `10..600`. |
 | `trusted_llm_command_hashes` | `list[str]` | `[]` | SHA-256 hashes of LLM commands the user has approved. **Managed by the app** — do not edit. |
 
 ## Semantic Scholar
