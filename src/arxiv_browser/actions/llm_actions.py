@@ -9,6 +9,7 @@ fetching, and the security trust-gate for LLM and PDF-viewer commands.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from arxiv_browser.actions._runtime import *
@@ -23,6 +24,19 @@ def _sync_app_globals() -> None:
 
 
 _RECOVERABLE_ACTION_ERRORS = (OSError, RuntimeError, ValueError, TypeError)
+
+
+@dataclass(slots=True)
+class CommandTrustRequest:
+    """Deferred trust-prompt request for an external command."""
+
+    command_template: str
+    title: str
+    prompt_heading: str
+    trust_button_label: str
+    cancel_message: str
+    trusted_hashes: list[str]
+    on_trusted: Callable[[], None]
 
 
 def _log_action_failure(action: str, exc: Exception, *, unexpected: bool = False) -> None:
@@ -107,14 +121,7 @@ def _is_pdf_viewer_trusted(app: "ArxivBrowser", viewer_cmd: str) -> bool:
 
 def _ensure_command_trusted(
     app,
-    *,
-    command_template: str,
-    title: str,
-    prompt_heading: str,
-    trust_button_label: str,
-    cancel_message: str,
-    trusted_hashes: list[str],
-    on_trusted: Callable[[], None],
+    request: CommandTrustRequest,
 ) -> bool:
     """Show a trust confirmation prompt for a custom shell command.
 
@@ -139,31 +146,35 @@ def _ensure_command_trusted(
         The caller should not continue inline after this returns.
     """
     _sync_app_globals()
-    command_preview = truncate_text(command_template, 120)
+    command_preview = truncate_text(request.command_template, 120)
 
     def _on_decision(confirmed: bool | None) -> None:
         if not confirmed:
-            app.notify(cancel_message, title=title, severity="warning")
+            app.notify(request.cancel_message, title=request.title, severity="warning")
             return
-        if app._remember_trusted_hash(command_template, trusted_hashes, title):
-            on_trusted()
+        if app._remember_trusted_hash(
+            request.command_template,
+            request.trusted_hashes,
+            request.title,
+        ):
+            request.on_trusted()
 
     try:
         app.push_screen(
             ConfirmModal(
-                f"{prompt_heading}\n"
+                f"{request.prompt_heading}\n"
                 f"{command_preview}\n\n"
                 "This command executes on your machine.\n"
-                f"Confirm to trust and {trust_button_label.lower()}."
+                f"Confirm to trust and {request.trust_button_label.lower()}."
             ),
             _on_decision,
         )
         return False
     except ScreenStackError:
-        logger.debug("Unable to show %s trust prompt", title, exc_info=True)
+        logger.debug("Unable to show %s trust prompt", request.title, exc_info=True)
         app.notify(
-            f"Could not confirm {title.lower()} command trust; action cancelled.",
-            title=title,
+            f"Could not confirm {request.title.lower()} command trust; action cancelled.",
+            title=request.title,
             severity="warning",
         )
         return False
@@ -194,13 +205,15 @@ def _ensure_llm_command_trusted(
     if app._is_llm_command_trusted(command_template):
         return True
     return app._ensure_command_trusted(
-        command_template=command_template,
-        title="LLM",
-        prompt_heading="Run untrusted custom LLM command?",
-        trust_button_label="Run",
-        cancel_message="LLM command cancelled",
-        trusted_hashes=app._config.trusted_llm_command_hashes,
-        on_trusted=on_trusted,
+        CommandTrustRequest(
+            command_template=command_template,
+            title="LLM",
+            prompt_heading="Run untrusted custom LLM command?",
+            trust_button_label="Run",
+            cancel_message="LLM command cancelled",
+            trusted_hashes=app._config.trusted_llm_command_hashes,
+            on_trusted=on_trusted,
+        )
     )
 
 
@@ -227,13 +240,15 @@ def _ensure_pdf_viewer_trusted(
     if app._is_pdf_viewer_trusted(viewer_cmd):
         return True
     return app._ensure_command_trusted(
-        command_template=viewer_cmd,
-        title="PDF",
-        prompt_heading="Run untrusted custom PDF viewer command?",
-        trust_button_label="Open",
-        cancel_message="PDF open cancelled",
-        trusted_hashes=app._config.trusted_pdf_viewer_hashes,
-        on_trusted=on_trusted,
+        CommandTrustRequest(
+            command_template=viewer_cmd,
+            title="PDF",
+            prompt_heading="Run untrusted custom PDF viewer command?",
+            trust_button_label="Open",
+            cancel_message="PDF open cancelled",
+            trusted_hashes=app._config.trusted_pdf_viewer_hashes,
+            on_trusted=on_trusted,
+        )
     )
 
 

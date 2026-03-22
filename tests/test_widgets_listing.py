@@ -7,11 +7,18 @@ from unittest.mock import MagicMock
 
 from textual.css.query import NoMatches
 
-from arxiv_browser.app import PaperListItem, PaperMetadata, render_paper_option
 from arxiv_browser.huggingface import HuggingFacePaper
+from arxiv_browser.models import PaperMetadata
 from arxiv_browser.query import truncate_at_word_boundary
 from arxiv_browser.semantic_scholar import SemanticScholarPaper
-from arxiv_browser.widgets.listing import set_ascii_icons
+from arxiv_browser.widgets.chrome import StatusBarState
+from arxiv_browser.widgets.listing import (
+    PaperHighlightTerms,
+    PaperListItem,
+    PaperRowRenderState,
+    render_paper_option,
+    set_ascii_icons,
+)
 
 
 def _visible_text(text: str) -> str:
@@ -24,8 +31,35 @@ def test_set_ascii_icons_changes_rendered_selection_marker(make_paper):
     set_ascii_icons(True)
     try:
         ascii_text = render_paper_option(
-            paper,
-            selected=True,
+            PaperRowRenderState(
+                paper=paper,
+                selected=True,
+                hf_data=HuggingFacePaper(
+                    arxiv_id=paper.arxiv_id,
+                    title=paper.title,
+                    upvotes=7,
+                    num_comments=0,
+                    ai_summary="",
+                    ai_keywords=(),
+                    github_repo="",
+                    github_stars=0,
+                ),
+                version_update=(1, 2),
+                relevance_score=(9, "high"),
+            ),
+        )
+        assert "[x]" in ascii_text
+        assert "^7" in ascii_text
+        assert "v1->v2" in ascii_text
+        assert "*9/10" in ascii_text
+    finally:
+        set_ascii_icons(False)
+
+    unicode_text = render_paper_option(PaperRowRenderState(paper=paper, selected=True))
+    assert "●" in unicode_text
+    unicode_meta = render_paper_option(
+        PaperRowRenderState(
+            paper=paper,
             hf_data=HuggingFacePaper(
                 arxiv_id=paper.arxiv_id,
                 title=paper.title,
@@ -38,30 +72,7 @@ def test_set_ascii_icons_changes_rendered_selection_marker(make_paper):
             ),
             version_update=(1, 2),
             relevance_score=(9, "high"),
-        )
-        assert "[x]" in ascii_text
-        assert "^7" in ascii_text
-        assert "v1->v2" in ascii_text
-        assert "*9/10" in ascii_text
-    finally:
-        set_ascii_icons(False)
-
-    unicode_text = render_paper_option(paper, selected=True)
-    assert "●" in unicode_text
-    unicode_meta = render_paper_option(
-        paper,
-        hf_data=HuggingFacePaper(
-            arxiv_id=paper.arxiv_id,
-            title=paper.title,
-            upvotes=7,
-            num_comments=0,
-            ai_summary="",
-            ai_keywords=(),
-            github_repo="",
-            github_stars=0,
         ),
-        version_update=(1, 2),
-        relevance_score=(9, "high"),
     )
     assert "↑7" in unicode_meta
     assert "v1→v2" in unicode_meta
@@ -72,11 +83,16 @@ def test_paper_list_item_title_and_authors_text(make_paper):
     paper = make_paper(title="Transformer Study", authors="Alice Author")
     metadata = PaperMetadata(arxiv_id=paper.arxiv_id, starred=True, is_read=True)
     item = PaperListItem(
-        paper,
-        selected=True,
-        watched=True,
-        metadata=metadata,
-        highlight_terms={"title": ["Transformer"], "author": ["Author"], "abstract": []},
+        PaperRowRenderState(
+            paper=paper,
+            selected=True,
+            watched=True,
+            metadata=metadata,
+            highlight_terms=PaperHighlightTerms(
+                title=("Transformer",),
+                author=("Author",),
+            ),
+        )
     )
 
     title_text = item._get_title_text()
@@ -375,24 +391,26 @@ class TestAsciiModeNoUnicodeLeaks:
         set_ascii_glyphs(True)
         try:
             result = build_status_bar_text(
-                total=100,
-                filtered=50,
-                query="test",
-                watch_filter_active=False,
-                selected_count=0,
-                sort_label="date",
-                in_arxiv_api_mode=False,
-                api_page=None,
-                arxiv_api_loading=False,
-                show_abstract_preview=False,
-                s2_active=True,
-                s2_loading=False,
-                s2_count=10,
-                hf_active=True,
-                hf_loading=False,
-                hf_match_count=5,
-                version_checking=False,
-                version_update_count=0,
+                StatusBarState(
+                    total=100,
+                    filtered=50,
+                    query="test",
+                    watch_filter_active=False,
+                    selected_count=0,
+                    sort_label="date",
+                    in_arxiv_api_mode=False,
+                    api_page=None,
+                    arxiv_api_loading=False,
+                    show_abstract_preview=False,
+                    s2_active=True,
+                    s2_loading=False,
+                    s2_count=10,
+                    hf_active=True,
+                    hf_loading=False,
+                    hf_match_count=5,
+                    version_checking=False,
+                    version_update_count=0,
+                )
             )
             # Strip Rich tags before checking
             plain = re.sub(r"\[[^\]]*]", "", result)

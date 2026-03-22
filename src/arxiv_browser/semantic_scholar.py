@@ -16,6 +16,7 @@ __all__ = [
     "S2_DEFAULT_CACHE_TTL_DAYS",
     "S2_REC_CACHE_TTL_DAYS",
     "CitationEntry",
+    "S2Request",
     "SemanticScholarPaper",
     "fetch_s2_citations",
     "fetch_s2_paper",
@@ -128,6 +129,17 @@ class S2RecommendationsCacheSnapshot:
     papers: list[SemanticScholarPaper]
 
 
+@dataclass(slots=True, frozen=True)
+class S2Request:
+    """One Semantic Scholar GET request plus retry/logging metadata."""
+
+    url: str
+    params: dict[str, str]
+    api_key: str = ""
+    timeout: int = S2_REQUEST_TIMEOUT
+    label: str = ""
+
+
 # ============================================================================
 # Response Parsing
 # ============================================================================
@@ -204,50 +216,43 @@ def parse_citation_entry(data: dict) -> CitationEntry | None:
 # ============================================================================
 
 
-@overload
-async def _s2_get_with_retry(
-    client: httpx.AsyncClient,
-    url: str,
-    params: dict[str, str],
-    api_key: str,
-    timeout: int,
-    label: str,
-    include_status: Literal[False] = ...,
-) -> httpx.Response | None: ...
-
-
-@overload
-async def _s2_get_with_retry(
-    client: httpx.AsyncClient,
-    url: str,
-    params: dict[str, str],
-    api_key: str,
-    timeout: int,
-    label: str,
-    include_status: Literal[True],
-) -> tuple[httpx.Response | None, bool]: ...
+def _build_s2_headers(request: S2Request) -> dict[str, str]:
+    """Build request headers for one S2 API call."""
+    headers: dict[str, str] = {}
+    if request.api_key:
+        headers["x-api-key"] = request.api_key
+    return headers
 
 
 async def _s2_get_with_retry(
     client: httpx.AsyncClient,
-    url: str,
-    params: dict[str, str],
-    api_key: str,
-    timeout: int,
-    label: str,
-    include_status: bool = False,
-) -> httpx.Response | None | tuple[httpx.Response | None, bool]:
+    request: S2Request,
+) -> httpx.Response | None:
+    """Send a GET request with retries and return only the response object."""
+    response, _ = await _s2_get_with_retry_status(client, request)
+    return response
+
+
+async def _s2_get_with_retry_status(
+    client: httpx.AsyncClient,
+    request: S2Request,
+) -> tuple[httpx.Response | None, bool]:
     """Send a GET request with exponential backoff retry on 429/5xx.
 
     Returns the response on 200, or None on terminal failure (404, other 4xx,
-    exhausted retries, timeout, or network error). Never raises.
+    exhausted retries, timeout, or network error). Never raises. The boolean
+    indicates whether the request path completed cleanly enough for callers to
+    cache an empty result (404 => complete, malformed/transport error => not).
     """
-    headers: dict[str, str] = {}
-    if api_key:
-        headers["x-api-key"] = api_key
+    headers = _build_s2_headers(request)
 
     async def _do_request() -> httpx.Response:
-        response = await client.get(url, params=params, headers=headers, timeout=timeout)
+        response = await client.get(
+            request.url,
+            params=request.params,
+            headers=headers,
+            timeout=request.timeout,
+        )
         response.raise_for_status()
         return response
 
@@ -256,22 +261,22 @@ async def _s2_get_with_retry(
             _do_request,
             max_retries=S2_MAX_RETRIES - 1,
             backoff_base=S2_INITIAL_BACKOFF,
-            operation=label,
+            operation=request.label,
         )
-        return (response, True) if include_status else response
+        return response, True
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 404:
-            logger.info("%s not found", label)
-            return (None, True) if include_status else None
+            logger.info("%s not found", request.label)
+            return None, True
         else:
-            logger.warning("%s returned %d", label, exc.response.status_code)
-        return (None, False) if include_status else None
+            logger.warning("%s returned %d", request.label, exc.response.status_code)
+        return None, False
     except (httpx.ConnectError, httpx.TimeoutException, httpx.ReadError):
-        logger.warning("%s timeout/connection error after retries", label)
-        return (None, False) if include_status else None
+        logger.warning("%s timeout/connection error after retries", request.label)
+        return None, False
     except httpx.HTTPError:
-        logger.warning("%s HTTP error", label, exc_info=True)
-        return (None, False) if include_status else None
+        logger.warning("%s HTTP error", request.label, exc_info=True)
+        return None, False
 
 
 def _parse_json_object(response: httpx.Response, label: str) -> dict[str, Any] | None:
@@ -320,14 +325,15 @@ async def fetch_s2_paper(
     means the request or parse path failed. A 404 counts as complete and yields
     (None, True).
     """
-    response, complete = await _s2_get_with_retry(
+    response, complete = await _s2_get_with_retry_status(
         client,
-        url=f"{S2_API_BASE}/paper/ARXIV:{arxiv_id}",
-        params={"fields": S2_PAPER_FIELDS},
-        api_key=api_key,
-        timeout=timeout,
-        label=f"S2 paper arXiv:{arxiv_id}",
-        include_status=True,
+        S2Request(
+            url=f"{S2_API_BASE}/paper/ARXIV:{arxiv_id}",
+            params={"fields": S2_PAPER_FIELDS},
+            api_key=api_key,
+            timeout=timeout,
+            label=f"S2 paper arXiv:{arxiv_id}",
+        ),
     )
     if response is None:
         return (None, complete) if include_status else None
@@ -350,11 +356,13 @@ async def fetch_s2_recommendations(
     """Fetch recommended papers from S2 Recommendations API."""
     response = await _s2_get_with_retry(
         client,
-        url=f"{S2_REC_BASE}/papers/forpaper/ARXIV:{arxiv_id}",
-        params={"fields": S2_REC_FIELDS, "limit": str(limit)},
-        api_key=api_key,
-        timeout=timeout,
-        label=f"S2 recs arXiv:{arxiv_id}",
+        S2Request(
+            url=f"{S2_REC_BASE}/papers/forpaper/ARXIV:{arxiv_id}",
+            params={"fields": S2_REC_FIELDS, "limit": str(limit)},
+            api_key=api_key,
+            timeout=timeout,
+            label=f"S2 recs arXiv:{arxiv_id}",
+        ),
     )
     if response is None:
         return []
@@ -406,16 +414,16 @@ async def fetch_s2_recommendations_with_status(
     include_status: bool = False,
 ) -> list[SemanticScholarPaper] | tuple[list[SemanticScholarPaper], bool]:
     """Fetch S2 recommendations while preserving request completion status."""
-    response = await _s2_get_with_retry(
+    response, complete = await _s2_get_with_retry_status(
         client,
-        url=f"{S2_REC_BASE}/papers/forpaper/ARXIV:{arxiv_id}",
-        params={"fields": S2_REC_FIELDS, "limit": str(limit)},
-        api_key=api_key,
-        timeout=timeout,
-        label=f"S2 recs arXiv:{arxiv_id}",
-        include_status=True,
+        S2Request(
+            url=f"{S2_REC_BASE}/papers/forpaper/ARXIV:{arxiv_id}",
+            params={"fields": S2_REC_FIELDS, "limit": str(limit)},
+            api_key=api_key,
+            timeout=timeout,
+            label=f"S2 recs arXiv:{arxiv_id}",
+        ),
     )
-    response, complete = response
     if response is None:
         return ([], complete) if include_status else []
     payload = _parse_json_object(response, f"S2 recs arXiv:{arxiv_id}")
@@ -472,11 +480,13 @@ async def fetch_s2_references(
     """
     response = await _s2_get_with_retry(
         client,
-        url=f"{S2_API_BASE}/paper/{paper_id}/references",
-        params={"fields": S2_CITATION_FIELDS, "limit": str(limit)},
-        api_key=api_key,
-        timeout=timeout,
-        label=f"S2 refs {paper_id}",
+        S2Request(
+            url=f"{S2_API_BASE}/paper/{paper_id}/references",
+            params={"fields": S2_CITATION_FIELDS, "limit": str(limit)},
+            api_key=api_key,
+            timeout=timeout,
+            label=f"S2 refs {paper_id}",
+        ),
     )
     if response is None:
         return ([], False) if include_status else []
@@ -553,15 +563,17 @@ async def fetch_s2_citations(
         label = f"S2 cites {paper_id}"
         response = await _s2_get_with_retry(
             client,
-            url=f"{S2_API_BASE}/paper/{paper_id}/citations",
-            params={
-                "fields": S2_CITATION_FIELDS,
-                "limit": str(page_limit),
-                "offset": str(offset),
-            },
-            api_key=api_key,
-            timeout=timeout,
-            label=label,
+            S2Request(
+                url=f"{S2_API_BASE}/paper/{paper_id}/citations",
+                params={
+                    "fields": S2_CITATION_FIELDS,
+                    "limit": str(page_limit),
+                    "offset": str(offset),
+                },
+                api_key=api_key,
+                timeout=timeout,
+                label=label,
+            ),
         )
         if response is None:
             complete = False

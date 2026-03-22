@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import Any
 
 from textual.widgets import Static
 
@@ -74,26 +76,89 @@ def _relevance_symbol_for_mode(symbol: str) -> str:
     }.get(symbol, symbol)
 
 
-def _detail_cache_key(
-    paper: Paper,
+@dataclass(frozen=True, slots=True)
+class DetailRenderState:
+    """Complete render state for the detail pane."""
+
+    paper: Paper | None
+    abstract_text: str = ""
+    abstract_loading: bool = False
+    summary: str | None = None
+    summary_loading: bool = False
+    highlight_terms: tuple[str, ...] = ()
+    s2_data: SemanticScholarPaper | None = None
+    s2_loading: bool = False
+    hf_data: HuggingFacePaper | None = None
+    version_update: tuple[int, int] | None = None
+    summary_mode: str = ""
+    tags: tuple[str, ...] = ()
+    relevance: tuple[int, str] | None = None
+    collapsed_sections: tuple[str, ...] = ()
+    detail_mode: str = "full"
+    theme_colors: Mapping[str, str] = field(default_factory=lambda: dict(DEFAULT_THEME))
+    category_colors: Mapping[str, str] = field(
+        default_factory=lambda: dict(DEFAULT_CATEGORY_COLORS)
+    )
+    tag_namespace_colors: Mapping[str, str] = field(
+        default_factory=lambda: dict(DEFAULT_TAG_NAMESPACE_COLORS)
+    )
+
+
+def _normalize_detail_state(state: DetailRenderState) -> DetailRenderState:
+    """Return a normalized detail state with copied mappings and tuples."""
+    return DetailRenderState(
+        paper=state.paper,
+        abstract_text=state.abstract_text,
+        abstract_loading=state.abstract_loading,
+        summary=state.summary,
+        summary_loading=state.summary_loading,
+        highlight_terms=tuple(state.highlight_terms or ()),
+        s2_data=state.s2_data,
+        s2_loading=state.s2_loading,
+        hf_data=state.hf_data,
+        version_update=state.version_update,
+        summary_mode=state.summary_mode,
+        tags=tuple(state.tags or ()),
+        relevance=state.relevance,
+        collapsed_sections=tuple(state.collapsed_sections or ()),
+        detail_mode=state.detail_mode,
+        theme_colors=dict(state.theme_colors or DEFAULT_THEME),
+        category_colors=dict(state.category_colors or DEFAULT_CATEGORY_COLORS),
+        tag_namespace_colors=dict(state.tag_namespace_colors or DEFAULT_TAG_NAMESPACE_COLORS),
+    )
+
+
+def _coerce_detail_state(
+    state_or_paper: Paper | DetailRenderState | None,
     abstract_text: str | None,
-    abstract_loading: bool = False,
-    summary: str | None = None,
-    summary_loading: bool = False,
-    highlight_terms: list[str] | None = None,
-    s2_data: SemanticScholarPaper | None = None,
-    s2_loading: bool = False,
-    hf_data: HuggingFacePaper | None = None,
-    version_update: tuple[int, int] | None = None,
-    summary_mode: str = "",
-    tags: list[str] | None = None,
-    relevance: tuple[int, str] | None = None,
-    collapsed_sections: list[str] | None = None,
-    detail_mode: str = "full",
-    theme_colors: Mapping[str, str] | None = None,
-    category_colors: Mapping[str, str] | None = None,
-    tag_namespace_colors: Mapping[str, str] | None = None,
-) -> tuple:
+    legacy_kwargs: Mapping[str, Any],
+) -> DetailRenderState | None:
+    """Accept either a full detail state or the legacy paper+kwargs shape."""
+    if isinstance(state_or_paper, DetailRenderState):
+        if abstract_text is not None or legacy_kwargs:
+            raise TypeError("DetailRenderState cannot be combined with legacy detail arguments")
+        return _normalize_detail_state(state_or_paper)
+    if state_or_paper is None:
+        if abstract_text is not None or legacy_kwargs:
+            raise TypeError("Legacy detail arguments require a paper")
+        return None
+
+    kwargs = dict(legacy_kwargs)
+    abstract_loading = bool(
+        kwargs.pop("abstract_loading", abstract_text is None and state_or_paper.abstract is None)
+    )
+    resolved_abstract = state_or_paper.abstract or "" if abstract_text is None else abstract_text
+    return _normalize_detail_state(
+        DetailRenderState(
+            paper=state_or_paper,
+            abstract_text=resolved_abstract,
+            abstract_loading=abstract_loading,
+            **kwargs,
+        )
+    )
+
+
+def _detail_cache_key_for_state(state: DetailRenderState) -> tuple:
     """Build a stable, hashable cache key for rendered detail markup.
 
     All mutable or unhashable inputs (lists, objects, long strings) are
@@ -124,6 +189,9 @@ def _detail_cache_key(
         state.  Two calls with identical logical inputs will produce equal
         tuples; any change in displayed content will produce a different tuple.
     """
+    if state.paper is None:
+        return ("empty", _ACTIVE_DETAIL_GLYPH_MODE)
+
     # Convert mutable/unhashable structures to tuples.
     # SHA-256 digests are used for abstract_text and summary because these
     # strings can be thousands of characters long.  Including the raw text in
@@ -131,61 +199,74 @@ def _detail_cache_key(
     # A 64-character hex digest is unique enough for a 100-entry FIFO cache and
     # keeps each key small and fast to compare.
     abstract_digest = (
-        hashlib.sha256(abstract_text.encode("utf-8")).hexdigest() if abstract_text else ""
+        hashlib.sha256(state.abstract_text.encode("utf-8")).hexdigest()
+        if state.abstract_text
+        else ""
     )
-    summary_digest = hashlib.sha256(summary.encode("utf-8")).hexdigest() if summary else ""
+    summary_digest = (
+        hashlib.sha256(state.summary.encode("utf-8")).hexdigest() if state.summary else ""
+    )
     s2_key = (
         (
-            s2_data.citation_count,
-            s2_data.influential_citation_count,
-            tuple(s2_data.fields_of_study),
-            s2_data.tldr,
+            state.s2_data.citation_count,
+            state.s2_data.influential_citation_count,
+            tuple(state.s2_data.fields_of_study),
+            state.s2_data.tldr,
         )
-        if s2_data is not None
+        if state.s2_data is not None
         else None
     )
     hf_key = (
         (
-            hf_data.upvotes,
-            hf_data.num_comments,
-            hf_data.github_repo,
-            hf_data.github_stars,
-            tuple(hf_data.ai_keywords),
-            hf_data.ai_summary,
+            state.hf_data.upvotes,
+            state.hf_data.num_comments,
+            state.hf_data.github_repo,
+            state.hf_data.github_stars,
+            tuple(state.hf_data.ai_keywords),
+            state.hf_data.ai_summary,
         )
-        if hf_data is not None
+        if state.hf_data is not None
         else None
     )
-    resolved_theme_colors = dict(theme_colors or DEFAULT_THEME)
-    resolved_category_colors = dict(category_colors or DEFAULT_CATEGORY_COLORS)
-    resolved_tag_namespace_colors = dict(tag_namespace_colors or DEFAULT_TAG_NAMESPACE_COLORS)
     return (
-        paper.arxiv_id,
-        paper.title,
-        paper.authors,
-        paper.date,
-        paper.categories,
-        paper.comments,
-        paper.url,
+        state.paper.arxiv_id,
+        state.paper.title,
+        state.paper.authors,
+        state.paper.date,
+        state.paper.categories,
+        state.paper.comments,
+        state.paper.url,
         abstract_digest,
-        abstract_loading,
+        state.abstract_loading,
         summary_digest,
-        summary_loading,
-        tuple(highlight_terms) if highlight_terms else (),
+        state.summary_loading,
+        state.highlight_terms,
         s2_key,
-        s2_loading,
+        state.s2_loading,
         hf_key,
-        version_update,
-        summary_mode,
-        tuple(tags) if tags else (),
-        relevance,
-        tuple(collapsed_sections) if collapsed_sections else (),
-        detail_mode,
-        tuple(sorted(resolved_theme_colors.items())),
-        tuple(sorted(resolved_category_colors.items())),
-        tuple(sorted(resolved_tag_namespace_colors.items())),
+        state.version_update,
+        state.summary_mode,
+        state.tags,
+        state.relevance,
+        state.collapsed_sections,
+        state.detail_mode,
+        tuple(sorted(state.theme_colors.items())),
+        tuple(sorted(state.category_colors.items())),
+        tuple(sorted(state.tag_namespace_colors.items())),
         _ACTIVE_DETAIL_GLYPH_MODE,
     )
+
+
+def _detail_cache_key(
+    state_or_paper: Paper | DetailRenderState,
+    abstract_text: str | None = None,
+    **legacy_kwargs: Any,
+) -> tuple:
+    """Compatibility wrapper for computing detail cache keys."""
+    state = _coerce_detail_state(state_or_paper, abstract_text, legacy_kwargs)
+    if state is None:
+        return ("empty", _ACTIVE_DETAIL_GLYPH_MODE)
+    return _detail_cache_key_for_state(state)
 
 
 def _truncate_detail_text(text: str, max_len: int) -> str:
@@ -212,83 +293,81 @@ class PaperDetails(Static):
         self._category_colors = dict(category_colors or DEFAULT_CATEGORY_COLORS)
         self._tag_namespace_colors = dict(tag_namespace_colors or DEFAULT_TAG_NAMESPACE_COLORS)
 
-    def update_paper(
-        self,
-        paper: Paper | None,
-        abstract_text: str | None = None,
-        summary: str | None = None,
-        summary_loading: bool = False,
-        highlight_terms: list[str] | None = None,
-        s2_data: SemanticScholarPaper | None = None,
-        s2_loading: bool = False,
-        hf_data: HuggingFacePaper | None = None,
-        version_update: tuple[int, int] | None = None,
-        summary_mode: str = "",
-        tags: list[str] | None = None,
-        relevance: tuple[int, str] | None = None,
-        collapsed_sections: list[str] | None = None,
-        detail_mode: str = "full",
-    ) -> None:
-        """Update the displayed paper details."""
+    def update_state(self, state: DetailRenderState | None) -> None:
+        """Update the displayed paper details from a complete render state."""
+        resolved_state = _normalize_detail_state(state) if state is not None else None
+        paper = resolved_state.paper if resolved_state is not None else None
         self._paper = paper
-        if paper is None:
+        if resolved_state is None or paper is None:
             self.update("[dim italic]Select a paper to view details[/]")
             return
 
-        loading = abstract_text is None and paper.abstract is None
-        if abstract_text is None:
-            abstract_text = paper.abstract or ""
-        colors = theme_colors_for(self, self._theme_colors)
-        category_colors = category_colors_for(self, self._category_colors)
-        tag_namespace_colors = tag_namespace_colors_for(self, self._tag_namespace_colors)
+        state = DetailRenderState(
+            paper=paper,
+            abstract_text=resolved_state.abstract_text,
+            abstract_loading=resolved_state.abstract_loading,
+            summary=resolved_state.summary,
+            summary_loading=resolved_state.summary_loading,
+            highlight_terms=resolved_state.highlight_terms,
+            s2_data=resolved_state.s2_data,
+            s2_loading=resolved_state.s2_loading,
+            hf_data=resolved_state.hf_data,
+            version_update=resolved_state.version_update,
+            summary_mode=resolved_state.summary_mode,
+            tags=resolved_state.tags,
+            relevance=resolved_state.relevance,
+            collapsed_sections=resolved_state.collapsed_sections,
+            detail_mode=resolved_state.detail_mode,
+            theme_colors=theme_colors_for(self, resolved_state.theme_colors),
+            category_colors=category_colors_for(self, resolved_state.category_colors),
+            tag_namespace_colors=tag_namespace_colors_for(
+                self,
+                resolved_state.tag_namespace_colors,
+            ),
+        )
 
         # Check detail cache before rebuilding markup
-        cache_key = _detail_cache_key(
-            paper,
-            abstract_text,
-            abstract_loading=loading,
-            summary=summary,
-            summary_loading=summary_loading,
-            highlight_terms=highlight_terms,
-            s2_data=s2_data,
-            s2_loading=s2_loading,
-            hf_data=hf_data,
-            version_update=version_update,
-            summary_mode=summary_mode,
-            tags=tags,
-            relevance=relevance,
-            collapsed_sections=collapsed_sections,
-            detail_mode=detail_mode,
-            theme_colors=colors,
-            category_colors=category_colors,
-            tag_namespace_colors=tag_namespace_colors,
-        )
+        cache_key = _detail_cache_key_for_state(state)
         cached = self._detail_cache.get(cache_key)
         if cached is not None:
             self.update(cached)
             return
 
-        collapsed = set(collapsed_sections) if collapsed_sections else set()
+        collapsed = set(state.collapsed_sections)
 
         sections = [
             self._render_title(paper),
-            self._render_metadata(paper, category_colors),
+            self._render_metadata(paper, state.category_colors),
             self._render_abstract(
-                abstract_text,
-                loading,
-                highlight_terms,
+                state.abstract_text,
+                state.abstract_loading,
+                list(state.highlight_terms),
                 "abstract" in collapsed,
-                detail_mode,
-                colors,
+                state.detail_mode,
+                state.theme_colors,
             ),
-            self._render_authors(paper, "authors" in collapsed, detail_mode, colors),
-            self._render_tags(tags, "tags" in collapsed, colors, tag_namespace_colors),
-            self._render_relevance(relevance, "relevance" in collapsed, colors),
-            self._render_summary(summary, summary_loading, summary_mode, "summary" in collapsed),
-            self._render_s2(s2_data, s2_loading, "s2" in collapsed, colors),
-            self._render_hf(hf_data, "hf" in collapsed, colors),
-            self._render_version(paper, version_update, "version" in collapsed, colors),
-            self._render_url(paper, colors),
+            self._render_authors(
+                paper, "authors" in collapsed, state.detail_mode, state.theme_colors
+            ),
+            self._render_tags(
+                list(state.tags),
+                "tags" in collapsed,
+                state.theme_colors,
+                state.tag_namespace_colors,
+            ),
+            self._render_relevance(state.relevance, "relevance" in collapsed, state.theme_colors),
+            self._render_summary(
+                state.summary,
+                state.summary_loading,
+                state.summary_mode,
+                "summary" in collapsed,
+            ),
+            self._render_s2(state.s2_data, state.s2_loading, "s2" in collapsed, state.theme_colors),
+            self._render_hf(state.hf_data, "hf" in collapsed, state.theme_colors),
+            self._render_version(
+                paper, state.version_update, "version" in collapsed, state.theme_colors
+            ),
+            self._render_url(paper, state.theme_colors),
         ]
         markup = "\n\n".join(s for s in sections if s)
 
@@ -301,9 +380,18 @@ class PaperDetails(Static):
 
         self.update(markup)
 
+    def update_paper(
+        self,
+        paper: Paper | None,
+        abstract_text: str | None = None,
+        **legacy_kwargs: Any,
+    ) -> None:
+        """Compatibility wrapper for the legacy detail update API."""
+        self.update_state(_coerce_detail_state(paper, abstract_text, legacy_kwargs))
+
     # -- Section renderers ------------------------------------------------
     # Each _render_* method returns a Rich markup string for one detail pane
-    # section, or "" when the section should be hidden.  The update_paper()
+    # section, or "" when the section should be hidden.  The update_state()
     # orchestrator joins non-empty results with newlines.
     # ----------------------------------------------------------------------
 
@@ -631,6 +719,8 @@ class PaperDetails(Static):
 
 __all__ = [
     "DETAIL_CACHE_MAX",
+    "DetailRenderState",
     "PaperDetails",
+    "_detail_cache_key",
     "set_ascii_glyphs",
 ]

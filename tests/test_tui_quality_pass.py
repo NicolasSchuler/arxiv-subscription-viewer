@@ -26,13 +26,13 @@ from arxiv_browser.app import (
     DateNavigator,
     FilterPillBar,
     PaperCollection,
-    PaperListItem,
     RecommendationSourceModal,
     RecommendationsScreen,
     WatchListEntry,
     WatchListModal,
     tokenize_query,
 )
+from arxiv_browser.widgets.listing import PaperListItem
 
 
 async def _open_modal(app: ArxivBrowser, pilot, modal) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.metadata
+import inspect
 import logging
 import logging.handlers
 import os
@@ -13,6 +14,7 @@ import shutil
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -791,21 +793,38 @@ def _normalize_cli_argv(argv: list[str] | None) -> list[str]:
     return [*args[:index], "browse", *args[index:]]
 
 
-def main(
-    argv: list[str] | None = None,
-    *,
-    load_config_fn: Callable[[], UserConfig] = load_config,
-    discover_history_files_fn: Callable[[Path], list[tuple[date, Path]]] = discover_history_files,
+@dataclass(slots=True)
+class CliDependencies:
+    """Injectable collaborators for CLI entry-point tests and wrappers."""
+
+    load_config_fn: Callable[[], UserConfig] = load_config
+    discover_history_files_fn: Callable[[Path], list[tuple[date, Path]]] = discover_history_files
     resolve_papers_fn: Callable[
         [argparse.Namespace, Path, UserConfig, list[tuple[date, Path]]],
         ResolvePapersResult,
-    ] = _resolve_papers,
-    configure_logging_fn: Callable[[bool], None] = _configure_logging,
-    configure_color_mode_fn: Callable[[str], None] = _configure_color_mode,
-    validate_interactive_tty_fn: Callable[[], bool] = _validate_interactive_tty,
-    app_factory: Callable[..., Any] | None = None,
+    ] = _resolve_papers
+    configure_logging_fn: Callable[[bool], None] = _configure_logging
+    configure_color_mode_fn: Callable[[str], None] = _configure_color_mode
+    validate_interactive_tty_fn: Callable[[], bool] = _validate_interactive_tty
+    app_factory: Callable[..., Any] | None = None
+    app_factory_supports_options: bool | None = None
+
+
+def _app_factory_accepts_options(app_factory: Callable[..., Any]) -> bool:
+    """Return whether the factory explicitly opts into the new `options=` seam."""
+    try:
+        return "options" in inspect.signature(app_factory).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def main(
+    argv: list[str] | None = None,
+    *,
+    deps: CliDependencies | None = None,
 ) -> int:
     """Main entry point. Returns exit code."""
+    dependencies = deps or CliDependencies()
     parser = _build_cli_parser()
     normalized_argv = _normalize_cli_argv(argv)
     args = parser.parse_args(normalized_argv)
@@ -832,17 +851,17 @@ def main(
         color_mode = "never"
     else:
         color_mode = args.color
-    configure_color_mode_fn(color_mode)
-    configure_logging_fn(args.debug)
+    dependencies.configure_color_mode_fn(color_mode)
+    dependencies.configure_logging_fn(args.debug)
     logger.debug("arxiv-viewer starting, cwd=%s", Path.cwd())
 
     base_dir = Path.cwd()
 
     # Load user config early (needed for session restore)
-    config = load_config_fn()
+    config = dependencies.load_config_fn()
 
     # Discover history files
-    history_files = discover_history_files_fn(base_dir)
+    history_files = dependencies.discover_history_files_fn(base_dir)
 
     # Handle `doctor`
     if getattr(args, "command", None) == "doctor":
@@ -869,7 +888,7 @@ def main(
         return 0
 
     # Determine which file(s) to load
-    result = resolve_papers_fn(args, base_dir, config, history_files)
+    result = dependencies.resolve_papers_fn(args, base_dir, config, history_files)
     if isinstance(result, int):
         return result
     papers, history_files, current_date_index = result
@@ -885,7 +904,7 @@ def main(
         )
         return 1
 
-    if not validate_interactive_tty_fn():
+    if not dependencies.validate_interactive_tty_fn():
         print(
             "Error: arxiv-viewer requires an interactive TTY for the full UI.",
             file=sys.stderr,
@@ -903,26 +922,48 @@ def main(
     # Sort papers alphabetically by title
     papers.sort(key=lambda p: p.title.lower())
 
+    from arxiv_browser.app import ArxivBrowserOptions as _ArxivBrowserOptions
+
+    app_factory = dependencies.app_factory
     if app_factory is None:
         from arxiv_browser.app import ArxivBrowser as _ArxivBrowser
 
         app_factory = _ArxivBrowser
 
-    app = app_factory(
-        papers,
-        config=config,
-        restore_session=False
+    restore_session = (
+        False
         if getattr(args, "command", None) == "search"
-        else not bool(getattr(args, "no_restore", False)),
+        else not bool(getattr(args, "no_restore", False))
+    )
+    browser_options = _ArxivBrowserOptions(
+        config=config,
+        restore_session=restore_session,
         history_files=history_files,
         current_date_index=current_date_index,
         ascii_icons=args.ascii,
     )
+
+    supports_options = dependencies.app_factory_supports_options
+    if supports_options is None:
+        supports_options = _app_factory_accepts_options(app_factory)
+
+    if supports_options:
+        app = app_factory(papers, options=browser_options)
+    else:
+        app = app_factory(
+            papers,
+            config=config,
+            restore_session=restore_session,
+            history_files=history_files,
+            current_date_index=current_date_index,
+            ascii_icons=args.ascii,
+        )
     app.run()
     return 0
 
 
 __all__ = [
+    "CliDependencies",
     "_api_mode_requested",
     "_build_cli_parser",
     "_configure_color_mode",

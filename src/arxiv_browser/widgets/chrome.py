@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal
@@ -97,6 +99,71 @@ def build_api_footer_bindings() -> list[tuple[str, str]]:
     return list(_API_FOOTER_BINDINGS)
 
 
+@dataclass(frozen=True, slots=True)
+class StatusBarState:
+    """Semantic status-bar state for the current app view."""
+
+    total: int
+    filtered: int
+    query: str
+    watch_filter_active: bool
+    selected_count: int
+    sort_label: str
+    in_arxiv_api_mode: bool
+    api_page: int | None
+    arxiv_api_loading: bool
+    show_abstract_preview: bool
+    s2_active: bool
+    s2_loading: bool
+    s2_count: int
+    s2_api_error: bool = False
+    hf_active: bool = False
+    hf_loading: bool = False
+    hf_match_count: int = 0
+    hf_api_error: bool = False
+    version_checking: bool = False
+    version_update_count: int = 0
+    max_width: int | None = None
+    theme_colors: Mapping[str, str] = field(default_factory=lambda: dict(DEFAULT_THEME))
+
+
+def _coerce_status_bar_state(
+    state: StatusBarState | None,
+    legacy_kwargs: Mapping[str, Any],
+) -> StatusBarState:
+    """Accept either the new status-state object or the legacy kwargs shape."""
+    if state is not None:
+        if legacy_kwargs:
+            raise TypeError("StatusBarState cannot be combined with legacy keyword args")
+        return StatusBarState(
+            total=state.total,
+            filtered=state.filtered,
+            query=state.query,
+            watch_filter_active=state.watch_filter_active,
+            selected_count=state.selected_count,
+            sort_label=state.sort_label,
+            in_arxiv_api_mode=state.in_arxiv_api_mode,
+            api_page=state.api_page,
+            arxiv_api_loading=state.arxiv_api_loading,
+            show_abstract_preview=state.show_abstract_preview,
+            s2_active=state.s2_active,
+            s2_loading=state.s2_loading,
+            s2_count=state.s2_count,
+            s2_api_error=state.s2_api_error,
+            hf_active=state.hf_active,
+            hf_loading=state.hf_loading,
+            hf_match_count=state.hf_match_count,
+            hf_api_error=state.hf_api_error,
+            version_checking=state.version_checking,
+            version_update_count=state.version_update_count,
+            max_width=state.max_width,
+            theme_colors=dict(state.theme_colors or DEFAULT_THEME),
+        )
+    kwargs = dict(legacy_kwargs)
+    kwargs["theme_colors"] = dict(kwargs.get("theme_colors") or DEFAULT_THEME)
+    return StatusBarState(**kwargs)
+
+
 def build_selection_footer_bindings(selected_count: int) -> list[tuple[str, str]]:
     """Build selection-mode footer bindings with dynamic open(n) label."""
     bindings = build_selection_footer_base_bindings()
@@ -158,84 +225,19 @@ def build_footer_mode_badge(
 
 
 def build_status_bar_text(
-    *,
-    total: int,
-    filtered: int,
-    query: str,
-    watch_filter_active: bool,
-    selected_count: int,
-    sort_label: str,
-    in_arxiv_api_mode: bool,
-    api_page: int | None,
-    arxiv_api_loading: bool,
-    show_abstract_preview: bool,
-    s2_active: bool,
-    s2_loading: bool,
-    s2_count: int,
-    s2_api_error: bool = False,
-    hf_active: bool,
-    hf_loading: bool,
-    hf_match_count: int,
-    hf_api_error: bool = False,
-    version_checking: bool,
-    version_update_count: int,
-    max_width: int | None = None,
-    theme_colors: Mapping[str, str] | None = None,
+    state: StatusBarState | None = None,
+    **legacy_kwargs: Any,
 ) -> str:
     """Build semantic status bar text for current UI/application state."""
-    colors = theme_colors or DEFAULT_THEME
-    if max_width is not None and max_width <= 100:
-        compact_parts = _build_compact_status_parts(
-            total=total,
-            filtered=filtered,
-            query=query,
-            watch_filter_active=watch_filter_active,
-            selected_count=selected_count,
-            sort_label=sort_label,
-            in_arxiv_api_mode=in_arxiv_api_mode,
-            api_page=api_page,
-            arxiv_api_loading=arxiv_api_loading,
-            show_abstract_preview=show_abstract_preview,
-            s2_active=s2_active,
-            s2_loading=s2_loading,
-            s2_count=s2_count,
-            s2_api_error=s2_api_error,
-            hf_active=hf_active,
-            hf_loading=hf_loading,
-            hf_match_count=hf_match_count,
-            hf_api_error=hf_api_error,
-            version_checking=version_checking,
-            version_update_count=version_update_count,
-            max_width=max_width,
-        )
-        return _render_compact_status(compact_parts, max_width)
+    resolved_state = _coerce_status_bar_state(state, legacy_kwargs)
+    if resolved_state.max_width is not None and resolved_state.max_width <= 100:
+        compact_parts = _build_compact_status_parts(resolved_state)
+        return _render_compact_status(compact_parts, resolved_state.max_width)
 
-    parts = _build_full_status_parts(
-        total=total,
-        filtered=filtered,
-        query=query,
-        watch_filter_active=watch_filter_active,
-        selected_count=selected_count,
-        sort_label=sort_label,
-        in_arxiv_api_mode=in_arxiv_api_mode,
-        api_page=api_page,
-        arxiv_api_loading=arxiv_api_loading,
-        show_abstract_preview=show_abstract_preview,
-        s2_active=s2_active,
-        s2_loading=s2_loading,
-        s2_count=s2_count,
-        s2_api_error=s2_api_error,
-        hf_active=hf_active,
-        hf_loading=hf_loading,
-        hf_match_count=hf_match_count,
-        hf_api_error=hf_api_error,
-        version_checking=version_checking,
-        version_update_count=version_update_count,
-        theme_colors=colors,
-    )
+    parts = _build_full_status_parts(resolved_state)
     sep = _ACTIVE_CHROME_GLYPHS["separator"]
     rendered = f" [dim]{sep}[/] ".join(parts)
-    return _truncate_rich_text(rendered, max_width)
+    return _truncate_rich_text(rendered, resolved_state.max_width)
 
 
 def _compact_primary_segment(
@@ -285,178 +287,113 @@ def _compact_flag_segment(
     return label
 
 
-def _full_flag_segment(
-    *,
-    active: bool,
-    loading: bool,
-    count: int,
-    label: str,
-    color: str,
-    api_error: bool = False,
-    theme_colors: Mapping[str, str],
-) -> str | None:
-    """Return rich-markup status text for S2/HF style toggles."""
-    if not active:
-        return None
-    if api_error:
-        return f"[{theme_colors['orange']}]{label}:err[/]"
-    if loading:
-        return f"[{color}]{label} loading...[/]"
-    if count > 0:
-        return f"[{color}]{label}:{count}[/]"
-    return f"[{color}]{label}[/]"
-
-
-def _build_compact_status_parts(
-    *,
-    total: int,
-    filtered: int,
-    query: str,
-    watch_filter_active: bool,
-    selected_count: int,
-    sort_label: str,
-    in_arxiv_api_mode: bool,
-    api_page: int | None,
-    arxiv_api_loading: bool,
-    show_abstract_preview: bool,
-    s2_active: bool,
-    s2_loading: bool,
-    s2_count: int,
-    s2_api_error: bool = False,
-    hf_active: bool,
-    hf_loading: bool,
-    hf_match_count: int,
-    hf_api_error: bool = False,
-    version_checking: bool,
-    version_update_count: int,
-    max_width: int,
-) -> list[str]:
+def _build_compact_status_parts(state: StatusBarState) -> list[str]:
     """Build compact status tokens for narrow terminals."""
     parts = [
         _compact_primary_segment(
-            total=total,
-            filtered=filtered,
-            query=query,
-            watch_filter_active=watch_filter_active,
+            total=state.total,
+            filtered=state.filtered,
+            query=state.query,
+            watch_filter_active=state.watch_filter_active,
         )
     ]
-    if in_arxiv_api_mode and api_page is not None:
-        api_segment = f"API p{api_page}"
-        if arxiv_api_loading:
+    if state.in_arxiv_api_mode and state.api_page is not None:
+        api_segment = f"API p{state.api_page}"
+        if state.arxiv_api_loading:
             api_segment += " loading"
         parts.append(api_segment)
-    elif arxiv_api_loading:
+    elif state.arxiv_api_loading:
         parts.append("API loading")
 
-    if selected_count > 0:
-        parts.append(f"{selected_count} sel")
+    if state.selected_count > 0:
+        parts.append(f"{state.selected_count} sel")
 
-    parts.append(f"sort:{sort_label}")
+    parts.append(f"sort:{state.sort_label}")
 
     s2_segment = _compact_flag_segment(
-        active=s2_active,
-        loading=s2_loading,
-        count=s2_count,
+        active=state.s2_active,
+        loading=state.s2_loading,
+        count=state.s2_count,
         label="S2",
-        api_error=s2_api_error,
+        api_error=state.s2_api_error,
     )
     if s2_segment:
         parts.append(s2_segment)
 
-    if max_width >= 90:
+    if state.max_width is not None and state.max_width >= 90:
         hf_segment = _compact_flag_segment(
-            active=hf_active,
-            loading=hf_loading,
-            count=hf_match_count,
+            active=state.hf_active,
+            loading=state.hf_loading,
+            count=state.hf_match_count,
             label="HF",
-            api_error=hf_api_error,
+            api_error=state.hf_api_error,
         )
         if hf_segment:
             parts.append(hf_segment)
 
     # Keep compact mode focused on immediate context. Preview/version details
     # stay in full-width mode to reduce narrow-screen cognitive load.
-    _ = (show_abstract_preview, version_checking, version_update_count)
+    _ = (
+        state.show_abstract_preview,
+        state.version_checking,
+        state.version_update_count,
+    )
     return parts
 
 
-def _build_full_status_parts(
-    *,
-    total: int,
-    filtered: int,
-    query: str,
-    watch_filter_active: bool,
-    selected_count: int,
-    sort_label: str,
-    in_arxiv_api_mode: bool,
-    api_page: int | None,
-    arxiv_api_loading: bool,
-    show_abstract_preview: bool,
-    s2_active: bool,
-    s2_loading: bool,
-    s2_count: int,
-    s2_api_error: bool = False,
-    hf_active: bool,
-    hf_loading: bool,
-    hf_match_count: int,
-    hf_api_error: bool = False,
-    version_checking: bool,
-    version_update_count: int,
-    theme_colors: Mapping[str, str],
-) -> list[str]:
+def _build_full_status_parts(state: StatusBarState) -> list[str]:
     """Build rich status tokens for regular widths."""
     parts = [
         _full_primary_segment(
-            total=total,
-            filtered=filtered,
-            query=query,
-            watch_filter_active=watch_filter_active,
-            theme_colors=theme_colors,
+            total=state.total,
+            filtered=state.filtered,
+            query=state.query,
+            watch_filter_active=state.watch_filter_active,
+            theme_colors=state.theme_colors,
         ),
-        f"[dim]Sort: {sort_label}[/]",
+        f"[dim]Sort: {state.sort_label}[/]",
     ]
-    if selected_count > 0:
-        parts.insert(1, f"[bold {theme_colors['green']}]{selected_count} selected[/]")
-    if in_arxiv_api_mode and api_page is not None:
+    if state.selected_count > 0:
+        parts.insert(
+            1,
+            f"[bold {state.theme_colors['green']}]{state.selected_count} selected[/]",
+        )
+    if state.in_arxiv_api_mode and state.api_page is not None:
         parts.extend(
             [
-                f"[{theme_colors['orange']}]API[/]",
-                f"[dim]Page: {api_page}[/]",
+                f"[{state.theme_colors['orange']}]API[/]",
+                f"[dim]Page: {state.api_page}[/]",
             ]
         )
-        if arxiv_api_loading:
-            parts.append(f"[{theme_colors['orange']}]Loading...[/]")
-    if show_abstract_preview:
-        parts.append(f"[{theme_colors['purple']}]Preview[/]")
+        if state.arxiv_api_loading:
+            parts.append(f"[{state.theme_colors['orange']}]Loading...[/]")
+    if state.show_abstract_preview:
+        parts.append(f"[{state.theme_colors['purple']}]Preview[/]")
 
-    s2_segment = _full_flag_segment(
-        active=s2_active,
-        loading=s2_loading,
-        count=s2_count,
-        label="S2",
-        color=theme_colors["green"],
-        api_error=s2_api_error,
-        theme_colors=theme_colors,
-    )
-    if s2_segment:
-        parts.append(s2_segment)
+    if state.s2_active:
+        if state.s2_api_error:
+            parts.append(f"[{state.theme_colors['orange']}]S2:err[/]")
+        elif state.s2_loading:
+            parts.append(f"[{state.theme_colors['green']}]S2 loading...[/]")
+        elif state.s2_count > 0:
+            parts.append(f"[{state.theme_colors['green']}]S2:{state.s2_count}[/]")
+        else:
+            parts.append(f"[{state.theme_colors['green']}]S2[/]")
 
-    hf_segment = _full_flag_segment(
-        active=hf_active,
-        loading=hf_loading,
-        count=hf_match_count,
-        label="HF",
-        color=theme_colors["orange"],
-        api_error=hf_api_error,
-        theme_colors=theme_colors,
-    )
-    if hf_segment:
-        parts.append(hf_segment)
+    if state.hf_active:
+        if state.hf_api_error:
+            parts.append(f"[{state.theme_colors['orange']}]HF:err[/]")
+        elif state.hf_loading:
+            parts.append(f"[{state.theme_colors['orange']}]HF loading...[/]")
+        elif state.hf_match_count > 0:
+            parts.append(f"[{state.theme_colors['orange']}]HF:{state.hf_match_count}[/]")
+        else:
+            parts.append(f"[{state.theme_colors['orange']}]HF[/]")
 
-    if version_checking:
-        parts.append(f"[{theme_colors['pink']}]Checking versions...[/]")
-    elif version_update_count > 0:
-        parts.append(f"[{theme_colors['pink']}]{version_update_count} updated[/]")
+    if state.version_checking:
+        parts.append(f"[{state.theme_colors['pink']}]Checking versions...[/]")
+    elif state.version_update_count > 0:
+        parts.append(f"[{state.theme_colors['pink']}]{state.version_update_count} updated[/]")
     return parts
 
 
@@ -1089,6 +1026,7 @@ __all__ = [
     "ContextFooter",
     "DateNavigator",
     "FilterPillBar",
+    "StatusBarState",
     "build_api_footer_bindings",
     "build_browse_footer_bindings",
     "build_footer_mode_badge",

@@ -17,6 +17,9 @@ from arxiv_browser.app import (
     WatchListEntry,
     format_categories,
 )
+from arxiv_browser.widgets.chrome import set_ascii_glyphs as set_chrome_ascii_glyphs
+from arxiv_browser.widgets.details import set_ascii_glyphs as set_detail_ascii_glyphs
+from arxiv_browser.widgets.listing import set_ascii_icons
 
 # ── Cache isolation ──────────────────────────────────────────────────────────
 
@@ -27,6 +30,9 @@ def _reset_global_dicts():
     yield
     format_categories.cache_clear()
     _HIGHLIGHT_PATTERN_CACHE.clear()
+    set_ascii_icons(False)
+    set_detail_ascii_glyphs(False)
+    set_chrome_ascii_glyphs(False)
 
 
 # ── Factories ────────────────────────────────────────────────────────────────

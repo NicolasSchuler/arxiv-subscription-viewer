@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass, field, replace
+from typing import Any
 
 from textual.app import ComposeResult
 from textual.css.query import NoMatches
@@ -74,6 +76,78 @@ def set_ascii_icons(enabled: bool) -> None:
     _ACTIVE_META_GLYPHS = _META_GLYPH_SETS["ascii"] if enabled else _META_GLYPH_SETS["unicode"]
 
 
+@dataclass(frozen=True, slots=True)
+class PaperHighlightTerms:
+    """Normalized per-field search terms used for one rendered paper row."""
+
+    title: tuple[str, ...] = ()
+    author: tuple[str, ...] = ()
+    abstract: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class PaperRowRenderState:
+    """Complete render state for one paper row in the main list."""
+
+    paper: Paper
+    selected: bool = False
+    metadata: PaperMetadata | None = None
+    watched: bool = False
+    show_preview: bool = False
+    abstract_text: str | None = None
+    highlight_terms: PaperHighlightTerms = field(default_factory=PaperHighlightTerms)
+    s2_data: SemanticScholarPaper | None = None
+    hf_data: HuggingFacePaper | None = None
+    version_update: tuple[int, int] | None = None
+    relevance_score: tuple[int, str] | None = None
+    theme_colors: Mapping[str, str] = field(default_factory=lambda: dict(DEFAULT_THEME))
+    category_colors: Mapping[str, str] = field(
+        default_factory=lambda: dict(category_colors_for(None))
+    )
+    tag_namespace_colors: Mapping[str, str] = field(
+        default_factory=lambda: dict(DEFAULT_TAG_NAMESPACE_COLORS)
+    )
+
+
+def _normalize_highlight_terms(
+    raw_terms: Mapping[str, list[str]] | PaperHighlightTerms | None,
+) -> PaperHighlightTerms:
+    """Normalize highlight terms to immutable tuples."""
+    if isinstance(raw_terms, PaperHighlightTerms):
+        return raw_terms
+    terms = raw_terms or {}
+    return PaperHighlightTerms(
+        title=tuple(terms.get("title", [])),
+        author=tuple(terms.get("author", [])),
+        abstract=tuple(terms.get("abstract", [])),
+    )
+
+
+def _normalize_paper_row_state(state: PaperRowRenderState) -> PaperRowRenderState:
+    """Return a normalized paper-row state with copied mappings."""
+    return replace(
+        state,
+        highlight_terms=_normalize_highlight_terms(state.highlight_terms),
+        theme_colors=dict(state.theme_colors or DEFAULT_THEME),
+        category_colors=dict(state.category_colors or category_colors_for(None)),
+        tag_namespace_colors=dict(state.tag_namespace_colors or DEFAULT_TAG_NAMESPACE_COLORS),
+    )
+
+
+def _coerce_paper_row_state(
+    state_or_paper: Paper | PaperRowRenderState,
+    legacy_kwargs: Mapping[str, Any],
+) -> PaperRowRenderState:
+    """Accept either the new render-state object or the legacy paper+kwargs shape."""
+    if isinstance(state_or_paper, PaperRowRenderState):
+        if legacy_kwargs:
+            raise TypeError("PaperRowRenderState cannot be combined with legacy keyword args")
+        return _normalize_paper_row_state(state_or_paper)
+    if not isinstance(state_or_paper, Paper):
+        raise TypeError("render input must be a Paper or PaperRowRenderState")
+    return _normalize_paper_row_state(PaperRowRenderState(paper=state_or_paper, **legacy_kwargs))
+
+
 def _visible_text_length(text: str) -> int:
     """Return printable width estimate by stripping simple Rich tags."""
     return len(_RICH_TAG_RE.sub("", text))
@@ -121,69 +195,59 @@ def _compress_meta_parts(parts: list[str], budget: int = META_LINE_BUDGET) -> st
     return _truncate_visible_text(_join_meta_parts(kept), budget)
 
 
-def _build_meta_parts(
-    *,
-    source: str,
-    arxiv_id: str,
-    categories: str,
-    tags: list[str] | None,
-    s2_data: SemanticScholarPaper | None,
-    hf_data: HuggingFacePaper | None,
-    version_update: tuple[int, int] | None,
-    relevance_score: tuple[int, str] | None,
-    theme_colors: Mapping[str, str],
-    category_colors: Mapping[str, str],
-    tag_namespace_colors: Mapping[str, str],
-) -> list[str]:
+def _build_meta_parts(state: PaperRowRenderState) -> list[str]:
     """Build ordered metadata parts with deterministic priority."""
     parts: list[str] = []
-    if source == "api":
-        parts.append(f"[{theme_colors['orange']}]API[/]")
-    parts.extend([f"[dim]{arxiv_id}[/]", format_categories(categories, category_colors)])
+    if state.paper.source == "api":
+        parts.append(f"[{state.theme_colors['orange']}]API[/]")
+    parts.extend(
+        [
+            f"[dim]{state.paper.arxiv_id}[/]",
+            format_categories(state.paper.categories, state.category_colors),
+        ]
+    )
+    tags = state.metadata.tags if state.metadata else None
     if tags:
         tag_str = " ".join(
-            f"[{get_tag_color(tag, tag_namespace_colors)}]#{escape_rich_text(tag)}[/]"
+            f"[{get_tag_color(tag, state.tag_namespace_colors)}]#{escape_rich_text(tag)}[/]"
             for tag in tags
         )
         parts.append(tag_str)
-    if s2_data is not None:
-        parts.append(f"[{theme_colors['green']}]C{s2_data.citation_count}[/]")
-    if hf_data is not None:
+    if state.s2_data is not None:
+        parts.append(f"[{state.theme_colors['green']}]C{state.s2_data.citation_count}[/]")
+    if state.hf_data is not None:
         hf_upvotes = _ACTIVE_META_GLYPHS["hf_upvotes"]
-        parts.append(f"[{theme_colors['orange']}]{hf_upvotes}{hf_data.upvotes}[/]")
-    if version_update is not None:
-        old_v, new_v = version_update
+        parts.append(f"[{state.theme_colors['orange']}]{hf_upvotes}{state.hf_data.upvotes}[/]")
+    if state.version_update is not None:
+        old_v, new_v = state.version_update
         version_arrow = _ACTIVE_META_GLYPHS["version_arrow"]
-        parts.append(f"[{theme_colors['pink']}]v{old_v}{version_arrow}v{new_v}[/]")
-    if relevance_score is not None:
-        score, _ = relevance_score
-        color, sym = _relevance_badge_parts(score, theme_colors=theme_colors)
+        parts.append(f"[{state.theme_colors['pink']}]v{old_v}{version_arrow}v{new_v}[/]")
+    if state.relevance_score is not None:
+        score, _ = state.relevance_score
+        color, sym = _relevance_badge_parts(score, theme_colors=state.theme_colors)
         parts.append(f"[{color}]{sym}{score}/10[/]")
     return parts
 
 
-def _render_title_line(
-    paper: Paper,
-    selected: bool,
-    metadata: PaperMetadata | None,
-    watched: bool,
-    ht: dict[str, list[str]],
-    theme_colors: Mapping[str, str],
-) -> str:
+def _render_title_line(state: PaperRowRenderState) -> str:
     """Build the title line with selection/watch/star/read indicators."""
     prefix_parts: list[str] = []
-    if selected:
-        prefix_parts.append(f"[{theme_colors['green']}]{_ACTIVE_ICON_SET['selected']}[/]")
-    if watched:
-        prefix_parts.append(f"[{theme_colors['orange']}]{_ACTIVE_ICON_SET['watched']}[/]")
-    if metadata and metadata.starred:
-        prefix_parts.append(f"[{theme_colors['yellow']}]{_ACTIVE_ICON_SET['starred']}[/]")
-    if metadata and metadata.is_read:
-        prefix_parts.append(f"[{theme_colors['muted']}]{_ACTIVE_ICON_SET['read']}[/]")
+    if state.selected:
+        prefix_parts.append(f"[{state.theme_colors['green']}]{_ACTIVE_ICON_SET['selected']}[/]")
+    if state.watched:
+        prefix_parts.append(f"[{state.theme_colors['orange']}]{_ACTIVE_ICON_SET['watched']}[/]")
+    if state.metadata and state.metadata.starred:
+        prefix_parts.append(f"[{state.theme_colors['yellow']}]{_ACTIVE_ICON_SET['starred']}[/]")
+    if state.metadata and state.metadata.is_read:
+        prefix_parts.append(f"[{state.theme_colors['muted']}]{_ACTIVE_ICON_SET['read']}[/]")
     prefix = " ".join(prefix_parts)
 
-    title_text = highlight_text(paper.title, ht.get("title", []), theme_colors["accent"])
-    if metadata and metadata.is_read:
+    title_text = highlight_text(
+        state.paper.title,
+        list(state.highlight_terms.title),
+        state.theme_colors["accent"],
+    )
+    if state.metadata and state.metadata.is_read:
         title_text = f"[dim]{title_text}[/]"
     return f"{prefix} {title_text}" if prefix else title_text
 
@@ -205,95 +269,55 @@ def _relevance_badge_parts(
     return colors["muted"], _ACTIVE_META_GLYPHS["relevance_low"]
 
 
-def _render_meta_badges(
-    paper: Paper,
-    metadata: PaperMetadata | None,
-    s2_data: SemanticScholarPaper | None,
-    hf_data: HuggingFacePaper | None,
-    version_update: tuple[int, int] | None,
-    relevance_score: tuple[int, str] | None,
-    theme_colors: Mapping[str, str],
-    category_colors: Mapping[str, str],
-    tag_namespace_colors: Mapping[str, str],
-) -> str:
+def _render_meta_badges(state: PaperRowRenderState) -> str:
     """Build the meta line with arxiv_id, categories, and badges."""
-    parts = _build_meta_parts(
-        source=paper.source,
-        arxiv_id=paper.arxiv_id,
-        categories=paper.categories,
-        tags=metadata.tags if metadata else None,
-        s2_data=s2_data,
-        hf_data=hf_data,
-        version_update=version_update,
-        relevance_score=relevance_score,
-        theme_colors=theme_colors,
-        category_colors=category_colors,
-        tag_namespace_colors=tag_namespace_colors,
-    )
-    return _compress_meta_parts(parts)
+    return _compress_meta_parts(_build_meta_parts(state))
 
 
-def _render_abstract_preview(
-    abstract_text: str | None,
-    ht: dict[str, list[str]],
-    theme_colors: Mapping[str, str],
-) -> str:
+def _render_abstract_preview(state: PaperRowRenderState) -> str:
     """Build the abstract preview line for the paper list."""
-    if abstract_text is None:
+    if state.abstract_text is None:
         return "[dim italic]Loading abstract...[/]"
-    if not abstract_text:
+    if not state.abstract_text:
         return "[dim italic]No abstract available[/]"
-    if len(abstract_text) <= PREVIEW_ABSTRACT_MAX_LEN:
-        highlighted = highlight_text(abstract_text, ht.get("abstract", []), theme_colors["accent"])
+    if len(state.abstract_text) <= PREVIEW_ABSTRACT_MAX_LEN:
+        highlighted = highlight_text(
+            state.abstract_text,
+            list(state.highlight_terms.abstract),
+            state.theme_colors["accent"],
+        )
         return f"[dim italic]{highlighted}[/]"
     truncated = truncate_at_word_boundary(
-        abstract_text, PREVIEW_ABSTRACT_MAX_LEN, ascii_mode=_ACTIVE_LISTING_ASCII_MODE
+        state.abstract_text,
+        PREVIEW_ABSTRACT_MAX_LEN,
+        ascii_mode=_ACTIVE_LISTING_ASCII_MODE,
     )
-    highlighted = highlight_text(truncated, ht.get("abstract", []), theme_colors["accent"])
+    highlighted = highlight_text(
+        truncated,
+        list(state.highlight_terms.abstract),
+        state.theme_colors["accent"],
+    )
     return f"[dim italic]{highlighted}[/]"
 
 
 def render_paper_option(
-    paper: Paper,
-    *,
-    selected: bool = False,
-    metadata: PaperMetadata | None = None,
-    watched: bool = False,
-    show_preview: bool = False,
-    abstract_text: str | None = None,
-    highlight_terms: dict[str, list[str]] | None = None,
-    s2_data: SemanticScholarPaper | None = None,
-    hf_data: HuggingFacePaper | None = None,
-    version_update: tuple[int, int] | None = None,
-    relevance_score: tuple[int, str] | None = None,
-    theme_colors: Mapping[str, str] | None = None,
-    category_colors: Mapping[str, str] | None = None,
-    tag_namespace_colors: Mapping[str, str] | None = None,
+    state_or_paper: Paper | PaperRowRenderState,
+    **legacy_kwargs: Any,
 ) -> str:
     """Render a paper as Rich markup for OptionList display."""
-    ht = highlight_terms or {"title": [], "author": [], "abstract": []}
-    colors = theme_colors or DEFAULT_THEME
-    resolved_category_colors = category_colors or category_colors_for(None)
-    resolved_tag_namespace_colors = tag_namespace_colors or DEFAULT_TAG_NAMESPACE_COLORS
-
+    state = _coerce_paper_row_state(state_or_paper, legacy_kwargs)
     lines = [
-        _render_title_line(paper, selected, metadata, watched, ht, colors),
-        highlight_text(paper.authors, ht.get("author", []), colors["accent"]),
-        _render_meta_badges(
-            paper,
-            metadata,
-            s2_data,
-            hf_data,
-            version_update,
-            relevance_score,
-            colors,
-            resolved_category_colors,
-            tag_namespace_colors or resolved_tag_namespace_colors,
+        _render_title_line(state),
+        highlight_text(
+            state.paper.authors,
+            list(state.highlight_terms.author),
+            state.theme_colors["accent"],
         ),
+        _render_meta_badges(state),
     ]
 
-    if show_preview:
-        lines.append(_render_abstract_preview(abstract_text, ht, colors))
+    if state.show_preview:
+        lines.append(_render_abstract_preview(state))
 
     return "\n".join(lines)
 
@@ -318,139 +342,127 @@ class PaperListItem(ListItem):
 
     def __init__(
         self,
-        paper: Paper,
-        selected: bool = False,
-        metadata: PaperMetadata | None = None,
-        watched: bool = False,
-        show_preview: bool = False,
-        abstract_text: str | None = None,
-        highlight_terms: dict[str, list[str]] | None = None,
-        theme_colors: Mapping[str, str] | None = None,
-        category_colors: Mapping[str, str] | None = None,
-        tag_namespace_colors: Mapping[str, str] | None = None,
+        state_or_paper: Paper | PaperRowRenderState,
+        **legacy_kwargs: Any,
     ) -> None:
         super().__init__()
-        self.paper = paper
-        self._selected = selected
-        self._metadata = metadata
-        self._watched = watched
-        self._show_preview = show_preview
-        self._abstract_text = abstract_text
-        self._highlight_terms = highlight_terms or {
-            "title": [],
-            "author": [],
-            "abstract": [],
-        }
-        self._theme_colors = dict(theme_colors or DEFAULT_THEME)
-        self._category_colors = dict(category_colors or category_colors_for(None))
-        self._tag_namespace_colors = dict(tag_namespace_colors or DEFAULT_TAG_NAMESPACE_COLORS)
-        self._s2_data: SemanticScholarPaper | None = None
-        self._hf_data: HuggingFacePaper | None = None
-        self._version_update: tuple[int, int] | None = None
-        self._relevance_score: tuple[int, str] | None = None
-        if selected:
+        self._state = _coerce_paper_row_state(state_or_paper, legacy_kwargs)
+        self.paper = self._state.paper
+        if self._state.selected:
             self.add_class("selected")
 
     @property
     def is_selected(self) -> bool:
-        return self._selected
+        return self._state.selected
 
     @property
     def metadata(self) -> PaperMetadata | None:
-        return self._metadata
+        return self._state.metadata
+
+    @property
+    def _abstract_text(self) -> str | None:
+        """Compatibility alias for legacy tests touching internal preview state."""
+        return self._state.abstract_text
+
+    @_abstract_text.setter
+    def _abstract_text(self, value: str | None) -> None:
+        self._state = replace(self._state, abstract_text=value)
+
+    @property
+    def _s2_data(self) -> SemanticScholarPaper | None:
+        """Compatibility alias for legacy tests touching internal S2 state."""
+        return self._state.s2_data
+
+    @_s2_data.setter
+    def _s2_data(self, value: SemanticScholarPaper | None) -> None:
+        self._state = replace(self._state, s2_data=value)
+
+    @property
+    def _hf_data(self) -> HuggingFacePaper | None:
+        """Compatibility alias for legacy tests touching internal HF state."""
+        return self._state.hf_data
+
+    @_hf_data.setter
+    def _hf_data(self, value: HuggingFacePaper | None) -> None:
+        self._state = replace(self._state, hf_data=value)
+
+    @property
+    def _version_update(self) -> tuple[int, int] | None:
+        """Compatibility alias for legacy tests touching version state."""
+        return self._state.version_update
+
+    @_version_update.setter
+    def _version_update(self, value: tuple[int, int] | None) -> None:
+        self._state = replace(self._state, version_update=value)
+
+    @property
+    def _relevance_score(self) -> tuple[int, str] | None:
+        """Compatibility alias for legacy tests touching relevance state."""
+        return self._state.relevance_score
+
+    @_relevance_score.setter
+    def _relevance_score(self, value: tuple[int, str] | None) -> None:
+        self._state = replace(self._state, relevance_score=value)
 
     def set_metadata(self, metadata: PaperMetadata | None) -> None:
         """Update metadata and refresh display."""
-        self._metadata = metadata
+        self._state = replace(self._state, metadata=metadata)
         self._update_display()
 
     def set_abstract_text(self, text: str | None) -> None:
         """Update abstract text for preview and refresh display."""
-        self._abstract_text = text
-        if self._show_preview:
+        self._state = replace(self._state, abstract_text=text)
+        if self._state.show_preview:
             self._update_display()
 
     def update_s2_data(self, s2_data: SemanticScholarPaper | None) -> None:
         """Update Semantic Scholar data and refresh display."""
-        self._s2_data = s2_data
+        self._state = replace(self._state, s2_data=s2_data)
         self._update_display()
 
     def update_hf_data(self, hf_data: HuggingFacePaper | None) -> None:
         """Update HuggingFace data and refresh display."""
-        self._hf_data = hf_data
+        self._state = replace(self._state, hf_data=hf_data)
         self._update_display()
 
     def update_version_data(self, version_update: tuple[int, int] | None) -> None:
         """Update version tracking data and refresh display."""
-        self._version_update = version_update
+        self._state = replace(self._state, version_update=version_update)
         self._update_display()
 
     def update_relevance_data(self, relevance: tuple[int, str] | None) -> None:
         """Update relevance score data and refresh display."""
-        self._relevance_score = relevance
+        self._state = replace(self._state, relevance_score=relevance)
         self._update_display()
+
+    def _resolved_state(self) -> PaperRowRenderState:
+        """Return the current row state with widget-resolved theme mappings."""
+        return replace(
+            self._state,
+            theme_colors=theme_colors_for(self, self._state.theme_colors),
+            category_colors=category_colors_for(self, self._state.category_colors),
+            tag_namespace_colors=tag_namespace_colors_for(
+                self,
+                self._state.tag_namespace_colors,
+            ),
+        )
 
     def _get_title_text(self) -> str:
         """Get the formatted title text based on selection and metadata state."""
-        prefix_parts = []
-        colors = theme_colors_for(self, self._theme_colors)
-
-        # Selection indicator
-        if self._selected:
-            prefix_parts.append(f"[{colors['green']}]{_ACTIVE_ICON_SET['selected']}[/]")
-
-        # Watched indicator
-        if self._watched:
-            prefix_parts.append(f"[{colors['orange']}]{_ACTIVE_ICON_SET['watched']}[/]")
-
-        # Starred indicator
-        if self._metadata and self._metadata.starred:
-            prefix_parts.append(f"[{colors['yellow']}]{_ACTIVE_ICON_SET['starred']}[/]")
-
-        # Read indicator
-        if self._metadata and self._metadata.is_read:
-            prefix_parts.append(f"[{colors['muted']}]{_ACTIVE_ICON_SET['read']}[/]")
-
-        prefix = " ".join(prefix_parts)
-        title_text = highlight_text(
-            self.paper.title,
-            self._highlight_terms.get("title", []),
-            colors["accent"],
-        )
-        # Dim title for read papers — unread titles stay bold/bright
-        is_read = self._metadata and self._metadata.is_read
-        if is_read:
-            title_text = f"[dim]{title_text}[/]"
-        if prefix:
-            return f"{prefix} {title_text}"
-        return title_text
+        return _render_title_line(self._resolved_state())
 
     def _get_authors_text(self) -> str:
         """Get the formatted author text."""
-        colors = theme_colors_for(self, self._theme_colors)
+        state = self._resolved_state()
         return highlight_text(
             self.paper.authors,
-            self._highlight_terms.get("author", []),
-            colors["accent"],
+            list(state.highlight_terms.author),
+            state.theme_colors["accent"],
         )
 
     def _get_meta_text(self) -> str:
         """Get the formatted metadata text."""
-        colors = theme_colors_for(self, self._theme_colors)
-        parts = _build_meta_parts(
-            source=self.paper.source,
-            arxiv_id=self.paper.arxiv_id,
-            categories=self.paper.categories,
-            tags=self._metadata.tags if self._metadata else None,
-            s2_data=self._s2_data,
-            hf_data=self._hf_data,
-            version_update=self._version_update,
-            relevance_score=self._relevance_score,
-            theme_colors=colors,
-            category_colors=category_colors_for(self, self._category_colors),
-            tag_namespace_colors=tag_namespace_colors_for(self, self._tag_namespace_colors),
-        )
-        return _compress_meta_parts(parts)
+        return _render_meta_badges(self._resolved_state())
 
     def _get_preview_text(self) -> str:
         """Get truncated abstract preview text.
@@ -458,47 +470,25 @@ class PaperListItem(ListItem):
         Returns formatted Rich markup for the abstract preview.
         Handles empty abstracts and truncates at word boundaries.
         """
-        abstract = self._abstract_text
-        colors = theme_colors_for(self, self._theme_colors)
-        if abstract is None:
-            return "[dim italic]Loading abstract...[/]"
-        if not abstract:
-            return "[dim italic]No abstract available[/]"
-        if len(abstract) <= PREVIEW_ABSTRACT_MAX_LEN:
-            highlighted = highlight_text(
-                abstract,
-                self._highlight_terms.get("abstract", []),
-                colors["accent"],
-            )
-            return f"[dim italic]{highlighted}[/]"
-        # Truncate at word boundary for cleaner display
-        truncated = truncate_at_word_boundary(
-            abstract, PREVIEW_ABSTRACT_MAX_LEN, ascii_mode=_ACTIVE_LISTING_ASCII_MODE
-        )
-        highlighted = highlight_text(
-            truncated,
-            self._highlight_terms.get("abstract", []),
-            colors["accent"],
-        )
-        return f"[dim italic]{highlighted}[/]"
+        return _render_abstract_preview(self._resolved_state())
 
     def _update_selection_class(self) -> None:
         """Update the CSS class based on selection state."""
-        if self._selected:
+        if self._state.selected:
             self.add_class("selected")
         else:
             self.remove_class("selected")
 
     def toggle_selected(self) -> bool:
         """Toggle selection state and return new state."""
-        self._selected = not self._selected
+        self._state = replace(self._state, selected=not self._state.selected)
         self._update_selection_class()
         self._update_display()
-        return self._selected
+        return self._state.selected
 
     def set_selected(self, selected: bool) -> None:
         """Set selection state."""
-        self._selected = selected
+        self._state = replace(self._state, selected=selected)
         self._update_selection_class()
         self._update_display()
 
@@ -511,7 +501,7 @@ class PaperListItem(ListItem):
             title_widget.update(self._get_title_text())
             authors_widget.update(self._get_authors_text())
             meta_widget.update(self._get_meta_text())
-            if self._show_preview:
+            if self._state.show_preview:
                 preview_widget = self.query_one(".paper-preview", Static)
                 preview_widget.update(self._get_preview_text())
         except NoMatches:
@@ -521,12 +511,14 @@ class PaperListItem(ListItem):
         yield Static(self._get_title_text(), classes="paper-title")
         yield Static(self._get_authors_text(), classes="paper-authors")
         yield Static(self._get_meta_text(), classes="paper-meta")
-        if self._show_preview:
+        if self._state.show_preview:
             yield Static(self._get_preview_text(), classes="paper-preview")
 
 
 __all__ = [
     "PREVIEW_ABSTRACT_MAX_LEN",
+    "PaperHighlightTerms",
     "PaperListItem",
+    "PaperRowRenderState",
     "render_paper_option",
 ]
