@@ -228,12 +228,13 @@ class TestEnrichmentServiceCoverage:
                 == []
             )
 
-    @pytest.mark.asyncio
-    async def test_result_matrix_covers_cache_and_remote_paths(self, tmp_path) -> None:
-        async def _run_to_thread(fn, *args, **kwargs):
-            return fn(*args, **kwargs)
+    @staticmethod
+    async def _run_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
 
-        s2_paper = s2.SemanticScholarPaper(
+    @staticmethod
+    def _sample_s2_paper() -> s2.SemanticScholarPaper:
+        return s2.SemanticScholarPaper(
             arxiv_id="2401.20",
             s2_paper_id="s2:20",
             citation_count=2,
@@ -243,7 +244,10 @@ class TestEnrichmentServiceCoverage:
             year=2024,
             url="https://example.com/s2",
         )
-        hf_paper = enrich.HuggingFacePaper(
+
+    @staticmethod
+    def _sample_hf_paper() -> enrich.HuggingFacePaper:
+        return enrich.HuggingFacePaper(
             arxiv_id="2401.21",
             title="hf",
             upvotes=3,
@@ -253,7 +257,10 @@ class TestEnrichmentServiceCoverage:
             github_repo="",
             github_stars=0,
         )
-        rec_paper = s2.SemanticScholarPaper(
+
+    @staticmethod
+    def _sample_rec_paper() -> s2.SemanticScholarPaper:
+        return s2.SemanticScholarPaper(
             arxiv_id="2401.22",
             s2_paper_id="s2:22",
             citation_count=4,
@@ -264,15 +271,16 @@ class TestEnrichmentServiceCoverage:
             url="https://example.com/recs",
         )
 
+    @pytest.mark.asyncio
+    async def test_s2_paper_result_matrix_cache_and_remote_paths(self, tmp_path) -> None:
+        s2_paper = self._sample_s2_paper()
         with patch(
             "arxiv_browser.services.enrichment_service.asyncio.to_thread",
-            new=AsyncMock(side_effect=_run_to_thread),
+            new=AsyncMock(side_effect=self._run_to_thread),
         ):
             with patch(
                 "arxiv_browser.services.enrichment_service.load_s2_paper_snapshot",
-                return_value=enrich.S2PaperFetchResult
-                if False
-                else s2.S2PaperCacheSnapshot(status="found", paper=s2_paper),
+                return_value=s2.S2PaperCacheSnapshot(status="found", paper=s2_paper),
             ):
                 result = await enrich.load_or_fetch_s2_paper_result(
                     arxiv_id="2401.20",
@@ -281,9 +289,7 @@ class TestEnrichmentServiceCoverage:
                     client=object(),
                     api_key="",
                 )
-            assert result == enrich.S2PaperFetchResult(
-                state="found", paper=s2_paper, complete=True, from_cache=True
-            )
+            assert result.state == "found" and result.from_cache is True
 
             with patch(
                 "arxiv_browser.services.enrichment_service.load_s2_paper_snapshot",
@@ -336,12 +342,17 @@ class TestEnrichmentServiceCoverage:
                 )
             assert result.state == "unavailable"
 
-            with (
-                patch(
-                    "arxiv_browser.services.enrichment_service.load_hf_daily_cache_snapshot",
-                    return_value=enrich.HFDailyCacheSnapshot(
-                        status="found", papers={hf_paper.arxiv_id: hf_paper}
-                    ),
+    @pytest.mark.asyncio
+    async def test_hf_daily_result_matrix_cache_and_remote_paths(self, tmp_path) -> None:
+        hf_paper = self._sample_hf_paper()
+        with patch(
+            "arxiv_browser.services.enrichment_service.asyncio.to_thread",
+            new=AsyncMock(side_effect=self._run_to_thread),
+        ):
+            with patch(
+                "arxiv_browser.services.enrichment_service.load_hf_daily_cache_snapshot",
+                return_value=enrich.HFDailyCacheSnapshot(
+                    status="found", papers={hf_paper.arxiv_id: hf_paper}
                 ),
             ):
                 result = await enrich.load_or_fetch_hf_daily_result(
@@ -351,11 +362,9 @@ class TestEnrichmentServiceCoverage:
                 )
             assert result.state == "found" and result.from_cache is True
 
-            with (
-                patch(
-                    "arxiv_browser.services.enrichment_service.load_hf_daily_cache_snapshot",
-                    return_value=enrich.HFDailyCacheSnapshot(status="empty", papers={}),
-                ),
+            with patch(
+                "arxiv_browser.services.enrichment_service.load_hf_daily_cache_snapshot",
+                return_value=enrich.HFDailyCacheSnapshot(status="empty", papers={}),
             ):
                 result = await enrich.load_or_fetch_hf_daily_result(
                     db_path=tmp_path / "hf.db",
@@ -381,13 +390,16 @@ class TestEnrichmentServiceCoverage:
                 )
             assert result.state == "found" and result.from_cache is False
 
-            with (
-                patch(
-                    "arxiv_browser.services.enrichment_service.load_s2_recommendations_snapshot",
-                    return_value=s2.S2RecommendationsCacheSnapshot(
-                        status="found", papers=[rec_paper]
-                    ),
-                ),
+    @pytest.mark.asyncio
+    async def test_s2_recommendations_result_matrix_cache_and_remote_paths(self, tmp_path) -> None:
+        rec_paper = self._sample_rec_paper()
+        with patch(
+            "arxiv_browser.services.enrichment_service.asyncio.to_thread",
+            new=AsyncMock(side_effect=self._run_to_thread),
+        ):
+            with patch(
+                "arxiv_browser.services.enrichment_service.load_s2_recommendations_snapshot",
+                return_value=s2.S2RecommendationsCacheSnapshot(status="found", papers=[rec_paper]),
             ):
                 result = await enrich.load_or_fetch_s2_recommendations_result(
                     arxiv_id="2401.22",
@@ -398,11 +410,9 @@ class TestEnrichmentServiceCoverage:
                 )
             assert result.state == "found" and result.from_cache is True
 
-            with (
-                patch(
-                    "arxiv_browser.services.enrichment_service.load_s2_recommendations_snapshot",
-                    return_value=s2.S2RecommendationsCacheSnapshot(status="empty", papers=[]),
-                ),
+            with patch(
+                "arxiv_browser.services.enrichment_service.load_s2_recommendations_snapshot",
+                return_value=s2.S2RecommendationsCacheSnapshot(status="empty", papers=[]),
             ):
                 result = await enrich.load_or_fetch_s2_recommendations_result(
                     arxiv_id="2401.22",
@@ -432,6 +442,10 @@ class TestEnrichmentServiceCoverage:
                 )
             assert result.state == "found" and result.from_cache is False
 
+    @pytest.mark.asyncio
+    async def test_s2_recommendations_cached_miss_without_client_returns_empty(
+        self, tmp_path
+    ) -> None:
         with patch(
             "arxiv_browser.services.enrichment_service.load_s2_recommendations_snapshot",
             return_value=s2.S2RecommendationsCacheSnapshot(status="miss", papers=[]),

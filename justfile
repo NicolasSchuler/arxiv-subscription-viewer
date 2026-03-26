@@ -31,7 +31,8 @@ docs-check:
 
 # Run tests with coverage report
 test:
-    uv run pytest --cov --cov-report=term-missing
+    uv run pytest --cov --cov-branch --cov-fail-under=0 --cov-report=term-missing --cov-report=json
+    uv run python scripts/check_coverage_thresholds.py coverage.json --statements=95 --branches=85
     uv run coverage report --include=src/arxiv_browser/app.py --fail-under=80
 
 # Run tests without coverage (faster, stop on first failure)
@@ -88,7 +89,8 @@ ci:
     @uv run pyright
     @echo ""
     @echo "=== Tests ==="
-    @uv run pytest --cov --cov-report=term-missing
+    @uv run pytest --cov --cov-branch --cov-fail-under=0 --cov-report=term-missing --cov-report=json
+    @uv run python scripts/check_coverage_thresholds.py coverage.json --statements=95 --branches=85
     @uv run coverage report --include=src/arxiv_browser/app.py --fail-under=80
     @echo ""
     @echo "=== Dependency Check ==="

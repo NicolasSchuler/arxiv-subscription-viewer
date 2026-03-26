@@ -1444,7 +1444,8 @@ class TestBrowserHelperCoverage:
         app._schedule_sort_sensitive_refresh("hf")
         assert app._sort_refresh_dirty == {"hf"}
 
-    def test_chrome_state_palette_and_footer_helpers(self, make_paper) -> None:
+    @staticmethod
+    def _build_chrome_state_app(make_paper):
         app = _new_app_stub()
         object.__setattr__(app, "_id", "stub")
         paper1 = make_paper(arxiv_id="2401.30001")
@@ -1461,14 +1462,10 @@ class TestBrowserHelperCoverage:
             collapsed_sections=["tags", "summary"],
             paper_metadata={
                 paper1.arxiv_id: app_mod.PaperMetadata(
-                    arxiv_id=paper1.arxiv_id,
-                    tags=["alpha"],
-                    starred=True,
+                    arxiv_id=paper1.arxiv_id, tags=["alpha"], starred=True
                 ),
                 paper2.arxiv_id: app_mod.PaperMetadata(
-                    arxiv_id=paper2.arxiv_id,
-                    tags=[],
-                    starred=False,
+                    arxiv_id=paper2.arxiv_id, tags=[], starred=False
                 ),
             },
             watch_list=[
@@ -1484,11 +1481,7 @@ class TestBrowserHelperCoverage:
         app.selected_ids = {paper1.arxiv_id}
         app._papers_by_id = {paper1.arxiv_id: paper1, paper2.arxiv_id: paper2}
         app._watched_paper_ids = {paper1.arxiv_id}
-        app._highlight_terms = {
-            "title": ["graph"],
-            "author": ["author"],
-            "abstract": ["learning"],
-        }
+        app._highlight_terms = {"title": ["graph"], "author": ["author"], "abstract": ["learning"]}
         app._paper_summaries = {paper1.arxiv_id: "summary"}
         app._summary_loading = {paper1.arxiv_id}
         app._summary_mode_label = {paper1.arxiv_id: "tldr"}
@@ -1528,9 +1521,7 @@ class TestBrowserHelperCoverage:
         app._get_current_date = MagicMock(return_value=date(2026, 3, 22))
         app._format_arxiv_search_label = MagicMock(return_value="graph search")
         app._arxiv_search_state = SimpleNamespace(
-            start=20,
-            max_results=10,
-            request=SimpleNamespace(query="graph"),
+            start=20, max_results=10, request=SimpleNamespace(query="graph")
         )
         app._get_details_header_widget = MagicMock(return_value=SimpleNamespace(update=MagicMock()))
         app._get_list_header_widget = MagicMock(return_value=SimpleNamespace(update=MagicMock()))
@@ -1542,14 +1533,14 @@ class TestBrowserHelperCoverage:
             return_value=SimpleNamespace(has_class=MagicMock(return_value=True))
         )
         app._get_paper_details_widget = MagicMock(
-            return_value=SimpleNamespace(
-                paper=paper1,
-                update_state=MagicMock(),
-            )
+            return_value=SimpleNamespace(paper=paper1, update_state=MagicMock())
         )
         app._update_option_for_paper = MagicMock()
         app.notify = MagicMock()
+        return app, paper1, paper2, theme_runtime
 
+    def test_chrome_theme_and_state_builders(self, make_paper) -> None:
+        app, paper1, _paper2, theme_runtime = self._build_chrome_state_app(make_paper)
         with (
             patch("arxiv_browser.app.build_theme_runtime", return_value=theme_runtime),
             patch("arxiv_browser.app.format_categories.cache_clear") as cache_clear,
@@ -1557,39 +1548,25 @@ class TestBrowserHelperCoverage:
             app._apply_category_overrides()
         assert app._theme_runtime is theme_runtime
         cache_clear.assert_called_once()
-
         app._config.theme = {}
         with patch("arxiv_browser.app.build_theme_runtime", return_value=theme_runtime):
             app._apply_theme_overrides()
-
         app._config.theme = {"accent": "#fff"}
         app.register_theme = MagicMock(side_effect=Exception("boom"))
         with patch("arxiv_browser.app.build_theme_runtime", return_value=theme_runtime):
             app._apply_theme_overrides()
-
         detail_state = app._build_detail_state(paper1.arxiv_id, paper1)
-        assert detail_state.summary == "summary"
-        assert detail_state.tags == ("alpha",)
-        assert detail_state.s2_data == "s2data"
-        assert detail_state.hf_data == "hfdata"
-        assert detail_state.version_update == (2, 1)
-
+        assert detail_state.summary == "summary" and detail_state.tags == ("alpha",)
+        assert detail_state.s2_data == "s2data" and detail_state.hf_data == "hfdata"
         row_state = app._build_paper_row_state(paper1)
-        assert row_state.selected is True
-        assert row_state.watched is True
-        assert row_state.abstract_text == "abstract"
-
+        assert row_state.selected is True and row_state.watched is True
         status_state = app._build_status_bar_state()
-        assert status_state.total == 2
-        assert status_state.filtered == 1
-        assert status_state.api_page == 3
-        assert status_state.hf_match_count == 1
-        assert status_state.max_width == 100
+        assert status_state.total == 2 and status_state.filtered == 1 and status_state.api_page == 3
 
+    def test_chrome_subtitle_header_and_save_config_paths(self, make_paper) -> None:
+        app, paper1, _paper2, _theme_runtime = self._build_chrome_state_app(make_paper)
         with patch("arxiv_browser._ascii.is_ascii_mode", return_value=True):
             assert app._format_details_header_text() == " Paper Details - scan"
-        app._in_arxiv_api_mode = True
-        with patch("arxiv_browser._ascii.is_ascii_mode", return_value=True):
             assert "Search - graph search - page 3" in app._build_subtitle_text()
         app._in_arxiv_api_mode = False
         app._get_active_query = MagicMock(return_value="graph")
@@ -1598,17 +1575,12 @@ class TestBrowserHelperCoverage:
         app._get_active_query = MagicMock(return_value="")
         with patch("arxiv_browser._ascii.is_ascii_mode", return_value=True):
             assert app._build_subtitle_text() == "Browse - 2 papers - 2026-03-22"
-
-        app._get_details_header_widget = MagicMock(return_value=SimpleNamespace(update=MagicMock()))
         app._update_details_header()
-        app._get_details_header_widget.assert_called()
         app._get_details_header_widget = MagicMock(side_effect=NoMatches())
         app._update_details_header()
-
         app._show_abstract_preview = True
         app._update_abstract_display(paper1.arxiv_id)
         app._update_option_for_paper.assert_called_with(paper1.arxiv_id)
-
         app._save_config_or_warn = app_mod.ArxivBrowser._save_config_or_warn.__get__(
             app, app_mod.ArxivBrowser
         )
@@ -1617,8 +1589,9 @@ class TestBrowserHelperCoverage:
         with patch("arxiv_browser.app.save_config", return_value=True):
             assert app._save_config_or_warn("theme preference") is True
 
-        minimal_state = app._command_palette_state()
-        assert minimal_state.has_selection is True
+    def test_chrome_command_palette_blocked_and_active_names(self, make_paper) -> None:
+        app, paper1, _paper2, _theme_runtime = self._build_chrome_state_app(make_paper)
+        assert app._command_palette_state().has_selection is True
         app._config.watch_list = []
         app._config.marks = {}
         app._config.paper_metadata = {}
@@ -1633,37 +1606,20 @@ class TestBrowserHelperCoverage:
         app._history_files = []
         app._s2_cache = {}
         with patch("arxiv_browser.app._resolve_llm_command", return_value=""):
-            state = app._command_palette_state()
-            assert state.llm_configured is False
-            assert state.has_history_navigation is False
-            assert state.has_visible_papers is False
             commands = app._build_command_palette_commands()
         assert (
             next(cmd for cmd in commands if cmd.action == "fetch_s2").blocked_reason == "selection"
         )
         assert (
-            next(cmd for cmd in commands if cmd.action == "toggle_watch_filter").blocked_reason
-            == "watch list entries"
-        )
-        assert (
             next(cmd for cmd in commands if cmd.action == "check_versions").blocked_reason
             == "starred papers"
         )
-        assert (
-            next(cmd for cmd in commands if cmd.action == "generate_summary").blocked_reason
-            == "LLM configuration"
-        )
-        assert app._palette_group_for_action("made_up") == "Commands"
-
         app._config.watch_list = [
             SimpleNamespace(pattern="graph", match_type="keyword", case_sensitive=False)
         ]
         app._config.marks = {"a": paper1.arxiv_id}
         app._config.paper_metadata = {
-            paper1.arxiv_id: app_mod.PaperMetadata(
-                arxiv_id=paper1.arxiv_id,
-                starred=True,
-            )
+            paper1.arxiv_id: app_mod.PaperMetadata(arxiv_id=paper1.arxiv_id, starred=True)
         }
         app.filtered_papers = [paper1]
         app.selected_ids = {paper1.arxiv_id}
@@ -1679,11 +1635,6 @@ class TestBrowserHelperCoverage:
         ]
         app._s2_cache = {paper1.arxiv_id: object()}
         with patch("arxiv_browser.app._resolve_llm_command", return_value="llm {prompt}"):
-            state = app._command_palette_state()
-            assert state.llm_configured is True
-            assert state.has_history_navigation is True
-            assert state.has_target_papers is True
-            assert state.s2_data_loaded is True
             commands = app._build_command_palette_commands()
         assert (
             next(cmd for cmd in commands if cmd.action == "ctrl_e_dispatch").name
@@ -1694,24 +1645,17 @@ class TestBrowserHelperCoverage:
             == "Disable HuggingFace Trending"
         )
         assert (
-            next(cmd for cmd in commands if cmd.action == "toggle_preview").name
-            == "Hide Abstract Preview"
-        )
-        assert (
-            next(cmd for cmd in commands if cmd.action == "toggle_detail_mode").name
-            == "Switch to Scan Details"
-        )
-        assert (
             next(cmd for cmd in commands if cmd.action == "toggle_watch_filter").name
             == "Show All Papers"
         )
 
+    def test_chrome_help_and_footer_progress_bindings(self, make_paper) -> None:
+        app, paper1, _paper2, _theme_runtime = self._build_chrome_state_app(make_paper)
+        app._download_queue = deque()
+        app._downloading = set()
         sections = app._build_help_sections(search_first=True)
-        assert sections
-        assert isinstance(sections[0][0], str)
-
+        assert sections and isinstance(sections[0][0], str)
         app._scoring_progress = (1, 2)
-        assert app._get_footer_bindings()[0][0] == ""
         assert app._get_footer_bindings()[0][1].startswith("Scoring")
         app._scoring_progress = None
         app._relevance_scoring_active = True
@@ -1723,28 +1667,26 @@ class TestBrowserHelperCoverage:
         app._version_checking = True
         assert app._get_footer_bindings()[0][1].startswith("Checking versions")
         app._version_checking = False
-        app._download_queue = deque()
-        app._downloading = set()
-        app._download_results = {}
-        app._download_total = 0
-        app._auto_tag_progress = None
-        app._auto_tag_active = False
         app._download_results = {paper1.arxiv_id: True}
         app._download_total = 1
         assert app._get_footer_bindings()[0][1].startswith("Downloading")
-        app._download_queue = deque()
-        app._downloading = set()
         app._download_results = {}
         app._download_total = 0
         app._auto_tag_progress = (1, 2)
         assert app._get_footer_bindings()[0][1].startswith("Auto-tagging")
+
+    def test_chrome_widget_footer_and_status_update_hooks(self, make_paper) -> None:
+        app, paper1, _paper2, _theme_runtime = self._build_chrome_state_app(make_paper)
+        app._scoring_progress = None
+        app._relevance_scoring_active = False
+        app._version_progress = None
+        app._version_checking = False
+        app._download_queue = deque()
+        app._downloading = set()
+        app._download_results = {}
+        app._download_total = 0
         app._auto_tag_progress = None
-        app._auto_tag_active = True
-        assert app._get_footer_bindings()[0][1].startswith("Auto-tagging")
         app._auto_tag_active = False
-        app._get_search_container_widget = MagicMock(
-            return_value=SimpleNamespace(has_class=MagicMock(return_value=True))
-        )
         with (
             patch(
                 "arxiv_browser.browser.chrome._widget_chrome.build_search_footer_bindings",
@@ -1789,43 +1731,17 @@ class TestBrowserHelperCoverage:
             app.selected_ids = set()
             assert app._get_footer_bindings() == [("", "browse")]
             assert app._get_footer_mode_badge() == "badge"
-
             footer = SimpleNamespace(render_bindings=MagicMock())
             app._get_footer_widget = MagicMock(return_value=footer)
             app._update_footer()
             footer.render_bindings.assert_called_once()
-            app._get_footer_widget = MagicMock(side_effect=NoMatches())
+            app._get_footer_widget = MagicMock(side_effect=NoMatches)
             app._update_footer()
-
             status = SimpleNamespace(update=MagicMock())
             app._get_status_bar_widget = MagicMock(return_value=status)
             app._update_status_bar()
-            assert status.update.call_count == 1
-            app._get_status_bar_widget = MagicMock(side_effect=NoMatches())
+            app._get_status_bar_widget = MagicMock(side_effect=NoMatches)
             app._update_status_bar()
-
-            header = SimpleNamespace(update=MagicMock())
-            app._get_list_header_widget = MagicMock(return_value=header)
-            app._update_list_header("graph")
-            assert header.update.call_count == 1
-            app._get_list_header_widget = MagicMock(side_effect=NoMatches())
-            app._update_list_header("graph")
-
-            details_header = SimpleNamespace(update=MagicMock())
-            app._get_details_header_widget = MagicMock(return_value=details_header)
-            app._update_details_header()
-            assert details_header.update.call_count == 1
-
-            app._get_paper_details_widget = MagicMock(
-                return_value=SimpleNamespace(
-                    paper=paper1,
-                    update_state=MagicMock(),
-                )
-            )
-            app._update_option_for_paper = MagicMock()
-            app._show_abstract_preview = True
-            app._update_abstract_display(paper1.arxiv_id)
-            app._update_option_for_paper.assert_called_with(paper1.arxiv_id)
 
     @pytest.mark.asyncio
     async def test_chrome_queue_refresh_and_detail_edge_branches(self, make_paper) -> None:

@@ -310,8 +310,8 @@ class TestExternalIoCoverage:
 
 
 class TestUiActionCoverage:
-    @pytest.mark.asyncio
-    async def test_toggle_and_fetch_state_branches(self, make_paper, tmp_path) -> None:
+    @staticmethod
+    def _build_ui_action_app(make_paper, tmp_path):
         app = _new_app_stub()
         object.__setattr__(app, "_id", "stub")
         paper = make_paper(arxiv_id="2401.60001")
@@ -373,7 +373,11 @@ class TestUiActionCoverage:
                 )
             )
         )
+        return app, paper, other, s2_paper
 
+    @pytest.mark.asyncio
+    async def test_ctrl_e_dispatch_and_toggle_s2_paths(self, make_paper, tmp_path) -> None:
+        app, _selected, _other, _s2_paper = self._build_ui_action_app(make_paper, tmp_path)
         app._in_arxiv_api_mode = True
         ui_actions.action_ctrl_e_dispatch(app)
         app.action_exit_arxiv_search_mode.assert_called_once()
@@ -404,6 +408,10 @@ class TestUiActionCoverage:
         assert app._s2_active is False
         assert "Semantic Scholar disabled" in app.notify.call_args[0][0]
 
+    @pytest.mark.asyncio
+    async def test_fetch_s2_guard_and_queue_paths(self, make_paper, tmp_path) -> None:
+        app, paper, _other, _s2_paper = self._build_ui_action_app(make_paper, tmp_path)
+
         app.notify.reset_mock()
         app._s2_active = False
         await ui_actions.action_fetch_s2(app)
@@ -433,6 +441,11 @@ class TestUiActionCoverage:
         assert paper.arxiv_id in app._s2_loading
         assert app._get_ui_refresh_coordinator.return_value.refresh_detail_pane.called
 
+    @pytest.mark.asyncio
+    async def test_fetch_s2_track_failure_cleans_loading_set(self, make_paper, tmp_path) -> None:
+        app, paper, _other, _s2_paper = self._build_ui_action_app(make_paper, tmp_path)
+        app._s2_active = True
+
         def _raise_oserror(coro):
             coro.close()
             raise OSError("boom")
@@ -442,6 +455,10 @@ class TestUiActionCoverage:
         with pytest.raises(OSError):
             await ui_actions.action_fetch_s2(app)
         assert paper.arxiv_id not in app._s2_loading
+
+    @pytest.mark.asyncio
+    async def test_fetch_s2_async_result_and_error_paths(self, make_paper, tmp_path) -> None:
+        app, paper, _other, s2_paper = self._build_ui_action_app(make_paper, tmp_path)
 
         app._s2_loading = {paper.arxiv_id}
         app._http_client = None
@@ -532,6 +549,12 @@ class TestUiActionCoverage:
         await ui_actions._fetch_s2_paper_async(app, paper.arxiv_id)
         assert app.notify.call_args.kwargs["severity"] == "error"
 
+    @pytest.mark.asyncio
+    async def test_toggle_hf_enable_disable_and_save_failure_paths(
+        self, make_paper, tmp_path
+    ) -> None:
+        app, _selected, _other, _s2_paper = self._build_ui_action_app(make_paper, tmp_path)
+
         app.notify.reset_mock()
         with patch("arxiv_browser.app.save_config", return_value=True):
             await ui_actions.action_toggle_hf(app)
@@ -553,15 +576,24 @@ class TestUiActionCoverage:
         assert app._hf_active is False
         assert "HuggingFace trending disabled" in app.notify.call_args[0][0]
 
-        app.notify.reset_mock()
+    @pytest.mark.asyncio
+    async def test_fetch_hf_daily_guard_and_schedule_paths(self, make_paper, tmp_path) -> None:
+        app, _selected, _other, _s2_paper = self._build_ui_action_app(make_paper, tmp_path)
+
         app._hf_loading = True
+        scheduled = app._track_dataset_task.call_count
         await ui_actions._fetch_hf_daily(app)
-        assert app._track_dataset_task.call_count >= 1
+        assert app._track_dataset_task.call_count == scheduled
 
         app._hf_loading = False
         app._track_dataset_task = MagicMock(side_effect=lambda coro: coro.close())
         await ui_actions._fetch_hf_daily(app)
         assert app._hf_loading is True
+        app._track_dataset_task.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_fetch_hf_daily_schedule_failure_sets_error(self, make_paper, tmp_path) -> None:
+        app, _selected, _other, _s2_paper = self._build_ui_action_app(make_paper, tmp_path)
 
         def _raise_hf(coro):
             coro.close()
@@ -572,6 +604,12 @@ class TestUiActionCoverage:
         await ui_actions._fetch_hf_daily(app)
         assert app._hf_loading is False
         assert "fetch HuggingFace trending data" in app.notify.call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_fetch_hf_daily_async_no_client_and_unavailable_paths(
+        self, make_paper, tmp_path
+    ) -> None:
+        app, _selected, _other, _s2_paper = self._build_ui_action_app(make_paper, tmp_path)
 
         app.notify.reset_mock()
         app._hf_loading = True
@@ -599,8 +637,15 @@ class TestUiActionCoverage:
         await ui_actions._fetch_hf_daily_async(app)
         assert app.notify.call_args.kwargs["severity"] == "error"
 
+    @pytest.mark.asyncio
+    async def test_fetch_hf_daily_async_empty_found_and_http_error_paths(
+        self, make_paper, tmp_path
+    ) -> None:
+        app, paper, other, _s2_paper = self._build_ui_action_app(make_paper, tmp_path)
+
         app.notify.reset_mock()
         app._hf_loading = True
+        app._http_client = object()
         app._get_services = MagicMock(
             return_value=SimpleNamespace(
                 enrichment=SimpleNamespace(

@@ -39,6 +39,8 @@ from tests.support.app_stubs import (
     _paper,
 )
 
+pytestmark = pytest.mark.filterwarnings("error::RuntimeWarning")
+
 
 class _FakeProcess:
     def __init__(self, returncode: int, stdout: bytes = b"", stderr: bytes = b"") -> None:
@@ -153,7 +155,8 @@ class TestLlmProvidersCoverage:
             result = await provider.execute("hello", timeout=5)
         assert "boom" in result.error
 
-        async def _raise_timeout(*_args, **_kwargs):
+        async def _raise_timeout(coro, *_args, **_kwargs):
+            coro.close()
             raise TimeoutError()
 
         with (
