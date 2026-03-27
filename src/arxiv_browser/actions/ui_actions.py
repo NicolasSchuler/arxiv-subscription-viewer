@@ -22,17 +22,11 @@ if TYPE_CHECKING:
     from arxiv_browser.app import ArxivBrowser
 
 
-def _sync_app_globals() -> None:
-    """Sync patched globals from arxiv_browser.app without importing it."""
-    sync_app_globals(globals())
-
-
 _RECOVERABLE_ACTION_ERRORS = (OSError, RuntimeError, ValueError, TypeError)
 
 
 def _log_action_failure(action: str, exc: Exception, *, unexpected: bool = False) -> None:
     """Log an action failure with consistent severity/context formatting."""
-    _sync_app_globals()
     qualifier = "Unexpected " if unexpected else ""
     message = f"{qualifier}{action} failed ({type(exc).__name__}): {exc}"
     logger.warning(message, exc_info=True)
@@ -52,7 +46,6 @@ def _notify_hf_matches(app: "ArxivBrowser", matched: int) -> None:
 
 def action_ctrl_e_dispatch(app: "ArxivBrowser") -> None:
     """Context-sensitive Ctrl+e: exit API mode if active, else toggle S2."""
-    _sync_app_globals()
     if app._in_arxiv_api_mode:
         app.action_exit_arxiv_search_mode()
     else:
@@ -61,7 +54,6 @@ def action_ctrl_e_dispatch(app: "ArxivBrowser") -> None:
 
 def action_toggle_s2(app: "ArxivBrowser") -> None:
     """Toggle Semantic Scholar enrichment and persist the setting."""
-    _sync_app_globals()
     prev_state = app._s2_active
     app._s2_active = not app._s2_active
     app._config.s2_enabled = app._s2_active
@@ -91,7 +83,6 @@ def action_toggle_s2(app: "ArxivBrowser") -> None:
 
 async def action_fetch_s2(app: "ArxivBrowser") -> None:
     """Fetch Semantic Scholar data for the currently highlighted paper."""
-    _sync_app_globals()
     if not app._s2_active:
         app.notify(
             build_actionable_warning(
@@ -128,7 +119,6 @@ async def action_fetch_s2(app: "ArxivBrowser") -> None:
 
 async def _fetch_s2_paper_async(app: "ArxivBrowser", arxiv_id: str) -> None:
     """Fetch S2 paper data and update UI on completion."""
-    _sync_app_globals()
     task_epoch = app._capture_dataset_epoch()
     try:
         client = app._http_client
@@ -211,7 +201,6 @@ async def _fetch_s2_paper_async(app: "ArxivBrowser", arxiv_id: str) -> None:
 
 async def action_toggle_hf(app: "ArxivBrowser") -> None:
     """Toggle HuggingFace trending on/off and persist the setting."""
-    _sync_app_globals()
     prev_state = app._hf_active
     app._hf_active = not app._hf_active
     app._config.hf_enabled = app._hf_active
@@ -243,7 +232,6 @@ async def action_toggle_hf(app: "ArxivBrowser") -> None:
 
 async def _fetch_hf_daily(app: "ArxivBrowser") -> None:
     """Fetch HF daily papers list and update caches."""
-    _sync_app_globals()
     if app._hf_loading:
         return
     app._hf_loading = True
@@ -283,7 +271,6 @@ async def _fetch_hf_daily_async(app: "ArxivBrowser") -> None:
     Args:
         app: The running ``ArxivBrowser`` application instance.
     """
-    _sync_app_globals()
     task_epoch = app._capture_dataset_epoch()
     try:
         client = app._http_client
@@ -375,7 +362,6 @@ async def action_check_versions(app: "ArxivBrowser") -> None:
     Args:
         app: The running ``ArxivBrowser`` application instance.
     """
-    _sync_app_globals()
     if app._version_checking:
         app.notify(
             build_actionable_warning(
@@ -419,7 +405,6 @@ def action_show_similar(app: "ArxivBrowser") -> None:
     Args:
         app: The running ``ArxivBrowser`` application instance.
     """
-    _sync_app_globals()
     paper = app._get_current_paper()
     if not paper:
         app.notify(
@@ -445,7 +430,6 @@ async def _fetch_s2_recommendations_async(
     app: "ArxivBrowser", arxiv_id: str
 ) -> list[SemanticScholarPaper]:
     """Fetch S2 recommendations with SQLite cache."""
-    _sync_app_globals()
     client = app._http_client
     if client is None:
         return []
@@ -461,7 +445,6 @@ async def _fetch_s2_recommendations_async(
 
 def action_citation_graph(app: "ArxivBrowser") -> None:
     """Open the citation graph modal for the current paper."""
-    _sync_app_globals()
     if not app._s2_active:
         app.notify(
             build_actionable_warning(
@@ -502,7 +485,6 @@ async def _fetch_citation_graph(
         A ``(references, citations)`` tuple.  Either list may be empty on
         API error or when the paper has no connections.
     """
-    _sync_app_globals()
     cache_hit = await asyncio.to_thread(
         has_s2_citation_graph_cache,
         app._s2_db_path,
@@ -573,7 +555,6 @@ async def _fetch_citation_graph(
 
 def action_cycle_theme(app: "ArxivBrowser") -> None:
     """Cycle through available color themes."""
-    _sync_app_globals()
     current = app._config.theme_name
     try:
         idx = THEME_NAMES.index(current)
@@ -596,7 +577,6 @@ def action_cycle_theme(app: "ArxivBrowser") -> None:
 
 def action_toggle_sections(app: "ArxivBrowser") -> None:
     """Open the section toggle modal to collapse/expand detail pane sections."""
-    _sync_app_globals()
 
     def _on_result(result: list[str] | None) -> None:
         if result is not None:
@@ -609,7 +589,6 @@ def action_toggle_sections(app: "ArxivBrowser") -> None:
 
 def action_show_help(app: "ArxivBrowser") -> None:
     """Show the help overlay with all keyboard shortcuts."""
-    _sync_app_globals()
     app.push_screen(
         HelpScreen(
             sections=app._build_help_sections(),
@@ -619,7 +598,6 @@ def action_show_help(app: "ArxivBrowser") -> None:
 
 def action_command_palette(app: "ArxivBrowser") -> None:
     """Open the fuzzy-searchable command palette."""
-    _sync_app_globals()
     commands = app._build_command_palette_commands()
     command_labels = {command.action: command.name for command in commands}
 
@@ -667,7 +645,6 @@ def action_command_palette(app: "ArxivBrowser") -> None:
 
 def action_collections(app: "ArxivBrowser") -> None:
     """Open the collections manager modal."""
-    _sync_app_globals()
     modal = CollectionsModal(app._config.collections, app._papers_by_id)
 
     def _save_collections(result: str | None) -> None:
@@ -686,7 +663,6 @@ def action_collections(app: "ArxivBrowser") -> None:
 
 def action_add_to_collection(app: "ArxivBrowser") -> None:
     """Add selected papers to a collection."""
-    _sync_app_globals()
     if not app._config.collections:
         app.notify(
             "No collections. Press Ctrl+k to create one.",

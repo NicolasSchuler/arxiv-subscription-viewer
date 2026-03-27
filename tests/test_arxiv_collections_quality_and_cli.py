@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from arxiv_browser.app import (
+from arxiv_browser.themes import THEME_NAMES, THEMES
+from tests.support.canonical_exports import (
     ARXIV_API_DEFAULT_MAX_RESULTS,
     ARXIV_DATE_FORMAT,
     DEFAULT_CATEGORY_COLOR,
@@ -59,7 +60,6 @@ from arxiv_browser.app import (
     to_rpn,
     tokenize_query,
 )
-from arxiv_browser.themes import THEME_NAMES, THEMES
 
 # ============================================================================
 # Tests for clean_latex function
@@ -70,7 +70,7 @@ class TestUpdatePaperParity:
     """Verify update_paper() produces correct output via section helpers."""
 
     def test_full_paper_all_sections(self, make_paper):
-        from arxiv_browser.app import PaperDetails
+        from tests.support.canonical_exports import PaperDetails
 
         details = PaperDetails()
         paper = make_paper(
@@ -93,14 +93,14 @@ class TestUpdatePaperParity:
         assert "▾ Tags" in output
 
     def test_none_paper(self):
-        from arxiv_browser.app import PaperDetails
+        from tests.support.canonical_exports import PaperDetails
 
         details = PaperDetails()
         details.update_paper(None)
         assert "Select a paper" in details.content
 
     def test_collapsed_sections(self, make_paper):
-        from arxiv_browser.app import PaperDetails
+        from tests.support.canonical_exports import PaperDetails
 
         details = PaperDetails()
         paper = make_paper(abstract="Test abstract")
@@ -111,7 +111,7 @@ class TestUpdatePaperParity:
         assert "Test abstract" not in output
 
     def test_scan_mode_truncates_long_sections(self, make_paper):
-        from arxiv_browser.app import PaperDetails
+        from tests.support.canonical_exports import PaperDetails
 
         details = PaperDetails()
         paper = make_paper(
@@ -157,7 +157,7 @@ class TestPaperCollectionSerialization:
     """Tests for PaperCollection config round-trip."""
 
     def test_roundtrip(self):
-        from arxiv_browser.app import _config_to_dict, _dict_to_config
+        from tests.support.canonical_exports import _config_to_dict, _dict_to_config
 
         config = UserConfig()
         config.collections = [
@@ -179,21 +179,21 @@ class TestPaperCollectionSerialization:
         assert len(restored.collections[1].paper_ids) == 2
 
     def test_max_collections_enforced(self):
-        from arxiv_browser.app import _dict_to_config
+        from tests.support.canonical_exports import _dict_to_config
 
         data = {"collections": [{"name": f"col-{i}", "paper_ids": []} for i in range(30)]}
         config = _dict_to_config(data)
         assert len(config.collections) <= MAX_COLLECTIONS
 
     def test_max_papers_per_collection_enforced(self):
-        from arxiv_browser.app import _dict_to_config
+        from tests.support.canonical_exports import _dict_to_config
 
         data = {"collections": [{"name": "big", "paper_ids": [f"id-{i}" for i in range(600)]}]}
         config = _dict_to_config(data)
         assert len(config.collections[0].paper_ids) <= MAX_PAPERS_PER_COLLECTION
 
     def test_invalid_entries_skipped(self):
-        from arxiv_browser.app import _dict_to_config
+        from tests.support.canonical_exports import _dict_to_config
 
         data = {"collections": ["not-a-dict", {"name": ""}, {"name": "valid", "paper_ids": []}]}
         config = _dict_to_config(data)
@@ -201,7 +201,7 @@ class TestPaperCollectionSerialization:
         assert config.collections[0].name == "valid"
 
     def test_non_string_paper_ids_filtered(self):
-        from arxiv_browser.app import _dict_to_config
+        from tests.support.canonical_exports import _dict_to_config
 
         data = {"collections": [{"name": "test", "paper_ids": ["ok", 123, None, "also-ok"]}]}
         config = _dict_to_config(data)
@@ -545,7 +545,7 @@ class TestCLIVersionAndSubcommands:
 
     def test_version_flag_exits_zero(self, monkeypatch, capsys):
         """``--version`` should print version info and exit 0."""
-        from arxiv_browser.app import main
+        from tests.support.canonical_exports import main
 
         monkeypatch.setattr("sys.argv", ["arxiv_browser", "--version"])
 
@@ -557,7 +557,7 @@ class TestCLIVersionAndSubcommands:
 
     def test_short_version_flag_exits_zero(self, monkeypatch, capsys):
         """``-V`` should behave the same as ``--version``."""
-        from arxiv_browser.app import main
+        from tests.support.canonical_exports import main
 
         monkeypatch.setattr("sys.argv", ["arxiv_browser", "-V"])
 
@@ -590,7 +590,7 @@ class TestCLIVersionAndSubcommands:
 
     def test_config_path_subcommand(self, monkeypatch, capsys):
         """``config-path`` should print the config path and exit 0."""
-        from arxiv_browser.app import main
+        from tests.support.canonical_exports import main
 
         monkeypatch.setattr("sys.argv", ["arxiv_browser", "config-path"])
 
@@ -608,15 +608,23 @@ class TestCLIVersionAndSubcommands:
         captured = capsys.readouterr()
         assert "config.json" in captured.out
 
-    def test_doctor_subcommand_no_history(self, monkeypatch, capsys):
+    def test_doctor_subcommand_no_history(self, tmp_path, monkeypatch, capsys):
         """``doctor`` should run diagnostics and return 0."""
-        from arxiv_browser.app import main
+        from arxiv_browser.cli import CliDependencies
+        from arxiv_browser.cli import main as cli_main
 
+        monkeypatch.chdir(tmp_path)
         monkeypatch.setattr("sys.argv", ["arxiv_browser", "doctor"])
-        monkeypatch.setattr("arxiv_browser.app.load_config", lambda: UserConfig())
-        monkeypatch.setattr("arxiv_browser.cli.discover_history_files", lambda _d: [])
-
-        result = main()
+        result = cli_main(
+            deps=CliDependencies(
+                load_config_fn=lambda: UserConfig(),
+                discover_history_files_fn=lambda _d: [],
+                resolve_papers_fn=lambda *_args, **_kwargs: ([], [], 0),
+                configure_logging_fn=lambda _debug: None,
+                configure_color_mode_fn=lambda _mode: None,
+                validate_interactive_tty_fn=lambda: True,
+            )
+        )
         assert result == 0
         captured = capsys.readouterr()
         assert "arxiv-viewer" in captured.out

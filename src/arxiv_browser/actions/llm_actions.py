@@ -18,11 +18,6 @@ if TYPE_CHECKING:
     from arxiv_browser.app import ArxivBrowser
 
 
-def _sync_app_globals() -> None:
-    """Sync patched globals from arxiv_browser.app without importing it."""
-    sync_app_globals(globals())
-
-
 _RECOVERABLE_ACTION_ERRORS = (OSError, RuntimeError, ValueError, TypeError)
 
 
@@ -41,7 +36,6 @@ class CommandTrustRequest:
 
 def _log_action_failure(action: str, exc: Exception, *, unexpected: bool = False) -> None:
     """Log an action failure with a consistent message shape."""
-    _sync_app_globals()
     qualifier = "Unexpected " if unexpected else ""
     message = f"{qualifier}{action} failed ({type(exc).__name__}): {exc}"
     logger.warning(message, exc_info=True)
@@ -49,7 +43,6 @@ def _log_action_failure(action: str, exc: Exception, *, unexpected: bool = False
 
 def _collect_all_tags(app: "ArxivBrowser") -> list[str]:
     """Collect all unique tags across all paper metadata."""
-    _sync_app_globals()
     return list(
         dict.fromkeys(tag for meta in app._config.paper_metadata.values() for tag in meta.tags)
     )
@@ -57,7 +50,6 @@ def _collect_all_tags(app: "ArxivBrowser") -> list[str]:
 
 def _trust_hash(command_template: str) -> str:
     """Return a stable short hash for trusted command templates."""
-    _sync_app_globals()
     return hashlib.sha256(command_template.encode("utf-8")).hexdigest()[:16]
 
 
@@ -86,7 +78,6 @@ def _remember_trusted_hash(
         Always ``True``.  The command is trusted in-memory even when the
         ``save_config`` call fails (e.g. read-only filesystem).
     """
-    _sync_app_globals()
     cmd_hash = app._trust_hash(command_template)
     if cmd_hash in trusted_hashes:
         return True
@@ -103,7 +94,6 @@ def _remember_trusted_hash(
 
 def _is_llm_command_trusted(app: "ArxivBrowser", command_template: str) -> bool:
     """Return whether an LLM command template is trusted."""
-    _sync_app_globals()
     config = app._config
     if not config.llm_command and not config.llm_preset:
         return True
@@ -114,7 +104,6 @@ def _is_llm_command_trusted(app: "ArxivBrowser", command_template: str) -> bool:
 
 def _is_pdf_viewer_trusted(app: "ArxivBrowser", viewer_cmd: str) -> bool:
     """Return whether a PDF viewer command is trusted."""
-    _sync_app_globals()
     config = app._config
     return app._trust_hash(viewer_cmd) in config.trusted_pdf_viewer_hashes
 
@@ -145,7 +134,6 @@ def _ensure_command_trusted(
         Always ``False`` — the action is deferred to the modal callback.
         The caller should not continue inline after this returns.
     """
-    _sync_app_globals()
     command_preview = truncate_text(request.command_template, 120)
 
     def _on_decision(confirmed: bool | None) -> None:
@@ -201,7 +189,6 @@ def _ensure_llm_command_trusted(
         ``True`` if the command is already trusted (caller may proceed).
         ``False`` if a trust prompt was pushed (caller must stop inline).
     """
-    _sync_app_globals()
     if app._is_llm_command_trusted(command_template):
         return True
     return app._ensure_command_trusted(
@@ -236,7 +223,6 @@ def _ensure_pdf_viewer_trusted(
         ``True`` if the command is already trusted (caller may proceed).
         ``False`` if a trust prompt was pushed (caller must stop inline).
     """
-    _sync_app_globals()
     if app._is_pdf_viewer_trusted(viewer_cmd):
         return True
     return app._ensure_command_trusted(
@@ -266,7 +252,6 @@ def _require_llm_command(app: "ArxivBrowser") -> str | None:
         checks), or ``None`` if no LLM command is configured or the command
         is blocked by the ``allow_llm_shell_fallback`` setting.
     """
-    _sync_app_globals()
     command_template = _resolve_llm_command(app._config)
     if not command_template:
         preset = app._config.llm_preset
@@ -291,7 +276,6 @@ def _require_llm_command(app: "ArxivBrowser") -> str | None:
 
 def action_generate_summary(app: "ArxivBrowser") -> None:
     """Generate an AI summary for the currently highlighted paper."""
-    _sync_app_globals()
     command_template = app._require_llm_command()
     if not command_template:
         return
@@ -305,7 +289,6 @@ def action_generate_summary(app: "ArxivBrowser") -> None:
 
 def _start_summary_flow(app: "ArxivBrowser", command_template: str) -> None:
     """Start the summary mode flow after command trust checks pass."""
-    _sync_app_globals()
 
     paper = app._get_current_paper()
     if not paper:
@@ -324,7 +307,6 @@ def _start_summary_flow(app: "ArxivBrowser", command_template: str) -> None:
 
 def _on_summary_mode_selected(app, mode: str | None, paper: Paper, command_template: str) -> None:
     """Handle the mode chosen from SummaryModeModal."""
-    _sync_app_globals()
     if not mode:
         return
     if mode not in SUMMARY_MODES:
@@ -384,7 +366,6 @@ async def _generate_summary_async(
     use_full_paper_content: bool = True,
 ) -> None:
     """Run the LLM CLI tool asynchronously and update the UI."""
-    _sync_app_globals()
     task_epoch = app._capture_dataset_epoch()
     arxiv_id = paper.arxiv_id
     generated_summary = False
@@ -451,7 +432,6 @@ async def _generate_summary_async(
 
 def action_chat_with_paper(app: "ArxivBrowser") -> None:
     """Open an interactive chat session about the current paper."""
-    _sync_app_globals()
     command_template = app._require_llm_command()
     if not command_template:
         return
@@ -465,7 +445,6 @@ def action_chat_with_paper(app: "ArxivBrowser") -> None:
 
 def _start_chat_with_paper(app: "ArxivBrowser") -> None:
     """Start the chat flow after command trust checks pass."""
-    _sync_app_globals()
     paper = app._get_current_paper()
     if not paper:
         app.notify("No paper selected", title="Chat", severity="warning")
@@ -479,7 +458,6 @@ def _start_chat_with_paper(app: "ArxivBrowser") -> None:
 
 async def _open_chat_screen(app: "ArxivBrowser", paper: Paper, provider: CLIProvider) -> None:
     """Fetch paper content and open the chat modal."""
-    _sync_app_globals()
     task_epoch = app._capture_dataset_epoch()
     paper_content = await app._fetch_paper_content_async(paper)
     if not app._is_current_dataset_epoch(task_epoch):
@@ -491,7 +469,6 @@ async def _open_chat_screen(app: "ArxivBrowser", paper: Paper, provider: CLIProv
 
 def action_score_relevance(app: "ArxivBrowser") -> None:
     """Score all loaded papers for relevance using the configured LLM."""
-    _sync_app_globals()
     command_template = app._require_llm_command()
     if not command_template:
         return
@@ -505,7 +482,6 @@ def action_score_relevance(app: "ArxivBrowser") -> None:
 
 def _start_score_relevance_flow(app: "ArxivBrowser", command_template: str) -> None:
     """Start relevance scoring after command trust checks pass."""
-    _sync_app_globals()
 
     if app._relevance_scoring_active:
         app.notify("Relevance scoring already in progress", title="Relevance")
@@ -526,7 +502,6 @@ def _on_interests_saved_then_score(
     app: "ArxivBrowser", interests: str | None, command_template: str
 ) -> None:
     """Callback after ResearchInterestsModal: save interests then start scoring."""
-    _sync_app_globals()
     if not interests:
         return
     if app._relevance_scoring_active:
@@ -540,7 +515,6 @@ def _on_interests_saved_then_score(
 
 def _start_relevance_scoring(app: "ArxivBrowser", command_template: str, interests: str) -> None:
     """Begin batch relevance scoring for all loaded papers."""
-    _sync_app_globals()
     if app._relevance_scoring_active:
         app.notify("Relevance scoring already in progress", title="Relevance")
         return
@@ -552,7 +526,6 @@ def _start_relevance_scoring(app: "ArxivBrowser", command_template: str, interes
 
 def action_edit_interests(app: "ArxivBrowser") -> None:
     """Edit research interests and clear relevance cache."""
-    _sync_app_globals()
     app.push_screen(
         ResearchInterestsModal(app._config.research_interests),
         app._on_interests_edited,
@@ -561,7 +534,6 @@ def action_edit_interests(app: "ArxivBrowser") -> None:
 
 def _on_interests_edited(app: "ArxivBrowser", interests: str | None) -> None:
     """Callback after editing interests: save and clear cache."""
-    _sync_app_globals()
     if not interests or interests == app._config.research_interests:
         return
     app._config.research_interests = interests
@@ -598,7 +570,6 @@ async def _score_relevance_batch_async(
         interests: The user's research-interests text used as the scoring
             prompt context.
     """
-    _sync_app_globals()
     task_epoch = app._capture_dataset_epoch()
     try:
         interests_hash = _compute_command_hash(command_template, interests)
@@ -747,7 +718,6 @@ async def _score_relevance_batch_async(
 
 def _update_relevance_badge(app: "ArxivBrowser", arxiv_id: str) -> None:
     """Update a single list item's relevance badge."""
-    _sync_app_globals()
     app._mark_badges_dirty("relevance")
     current = app._get_current_paper()
     if current is not None and current.arxiv_id == arxiv_id:
@@ -756,7 +726,6 @@ def _update_relevance_badge(app: "ArxivBrowser", arxiv_id: str) -> None:
 
 def action_auto_tag(app: "ArxivBrowser") -> None:
     """Auto-tag current or selected papers using the configured LLM."""
-    _sync_app_globals()
     command_template = app._require_llm_command()
     if not command_template:
         return
@@ -770,7 +739,6 @@ def action_auto_tag(app: "ArxivBrowser") -> None:
 
 def _start_auto_tag_flow(app: "ArxivBrowser") -> None:
     """Start auto-tagging after command trust checks pass."""
-    _sync_app_globals()
 
     if app._auto_tag_active:
         app.notify("Auto-tagging already in progress", title="Auto-Tag")
@@ -846,7 +814,6 @@ async def _auto_tag_single_async(
     current_tags: list[str],
 ) -> None:
     """Auto-tag a single paper: call LLM, show suggestion modal."""
-    _sync_app_globals()
     task_epoch = app._capture_dataset_epoch()
     try:
         suggested = await app._call_auto_tag_llm(paper, taxonomy)
@@ -885,7 +852,6 @@ async def _auto_tag_batch_async(
     taxonomy: list[str],
 ) -> None:
     """Batch auto-tag: call LLM for each paper, apply directly."""
-    _sync_app_globals()
     task_epoch = app._capture_dataset_epoch()
     try:
         total = len(papers)

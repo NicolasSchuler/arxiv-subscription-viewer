@@ -24,25 +24,23 @@ from platformdirs import user_config_dir
 
 from arxiv_browser.action_messages import build_actionable_error
 from arxiv_browser.config import CONFIG_APP_NAME, _coerce_arxiv_api_max_results, load_config
-from arxiv_browser.models import ARXIV_API_MAX_RESULTS_LIMIT, Paper, UserConfig
+from arxiv_browser.models import ARXIV_API_MAX_RESULTS_LIMIT, ArxivSearchRequest, Paper, UserConfig
 from arxiv_browser.parsing import (
     ARXIV_QUERY_FIELDS,
     HISTORY_DATE_FORMAT,
-    build_arxiv_search_query,
     discover_history_files,
-    parse_arxiv_api_feed,
-    parse_arxiv_date,
     parse_arxiv_file,
 )
+from arxiv_browser.services import arxiv_api_service as _arxiv_api_service
 
 logger = logging.getLogger(__name__)
 
 ResolvePapersResult = tuple[list[Paper], list[tuple[date, Path]], int] | int
 
-ARXIV_API_URL = "https://export.arxiv.org/api/query"
-ARXIV_API_TIMEOUT = 30
-ARXIV_API_USER_AGENT = "arxiv-subscription-viewer/1.0"
-ARXIV_API_MIN_INTERVAL_SECONDS = 3.0
+ARXIV_API_URL = _arxiv_api_service.ARXIV_API_URL
+ARXIV_API_TIMEOUT = _arxiv_api_service.ARXIV_API_TIMEOUT
+ARXIV_API_USER_AGENT = _arxiv_api_service.ARXIV_API_USER_AGENT
+ARXIV_API_MIN_INTERVAL_SECONDS = _arxiv_api_service.ARXIV_API_MIN_INTERVAL_SECONDS
 CLI_COMMANDS = ("browse", "search", "dates", "completions", "config-path", "doctor")
 CLI_ROOT_DESCRIPTION = "Browse and search arXiv papers from your terminal."
 CLI_ROOT_EPILOG = """Examples:
@@ -86,22 +84,13 @@ def _fetch_arxiv_api_papers(
     start: int = 0,
 ) -> list[Paper]:
     """Fetch one page of papers from the arXiv API."""
-    search_query = build_arxiv_search_query(query, field, category)
-    params = {
-        "search_query": search_query,
-        "sortBy": "submittedDate",
-        "sortOrder": "descending",
-        "start": max(0, start),
-        "max_results": max_results,
-    }
-    response = httpx.get(
-        ARXIV_API_URL,
-        params=params,
-        headers={"User-Agent": ARXIV_API_USER_AGENT},
-        timeout=ARXIV_API_TIMEOUT,
+    return _arxiv_api_service.fetch_page_sync(
+        request=ArxivSearchRequest(query=query, field=field, category=category),
+        start=start,
+        max_results=max_results,
+        timeout_seconds=ARXIV_API_TIMEOUT,
+        user_agent=ARXIV_API_USER_AGENT,
     )
-    response.raise_for_status()
-    return parse_arxiv_api_feed(response.text)
 
 
 def _fetch_latest_arxiv_digest(
@@ -118,44 +107,19 @@ def _fetch_latest_arxiv_digest(
     arXiv API with ``max_results``-sized pages, sleeping between requests
     to respect rate limits.
     """
-    start = 0
-    target_day: date | None = None
-    papers: list[Paper] = []
-    seen_ids: set[str] = set()
-
-    while True:
-        page = _fetch_arxiv_api_papers(
+    return _arxiv_api_service.fetch_latest_day_digest(
+        request=ArxivSearchRequest(query=query, field=field, category=category),
+        max_results=max_results,
+        fetch_page_fn=lambda **kwargs: _fetch_arxiv_api_papers(
             query=query,
             field=field,
             category=category,
-            max_results=max_results,
-            start=start,
-        )
-        if not page:
-            break
-
-        reached_older_day = False
-        for paper in page:
-            parsed_date = parse_arxiv_date(paper.date)
-            if parsed_date == datetime.min:
-                continue
-            day = parsed_date.date()
-            if target_day is None:
-                target_day = day
-            if day != target_day:
-                reached_older_day = True
-                break
-            if paper.arxiv_id not in seen_ids:
-                papers.append(paper)
-                seen_ids.add(paper.arxiv_id)
-
-        if reached_older_day or len(page) < max_results:
-            break
-
-        start += max_results
-        time.sleep(ARXIV_API_MIN_INTERVAL_SECONDS)
-
-    return papers
+            max_results=int(kwargs["max_results"]),
+            start=int(kwargs["start"]),
+        ),
+        sleep_fn=time.sleep,
+        min_interval_seconds=ARXIV_API_MIN_INTERVAL_SECONDS,
+    )
 
 
 def _api_mode_requested(args: argparse.Namespace) -> bool:

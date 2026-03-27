@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from textual.css.query import NoMatches
 
-import arxiv_browser.app as app_mod
 from arxiv_browser.actions import library_actions, llm_actions
 from arxiv_browser.browser import _runtime as browser_runtime
 from arxiv_browser.browser import discovery
@@ -18,7 +17,9 @@ from arxiv_browser.modals.search import CommandPaletteModal, _truncate_palette_t
 from arxiv_browser.models import PaperCollection, PaperMetadata, WatchListEntry
 from arxiv_browser.semantic_scholar import S2RecommendationsCacheSnapshot, SemanticScholarPaper
 from arxiv_browser.services import enrichment_service as enrich
+from tests.support import canonical_exports as app_mod
 from tests.support.app_stubs import _make_app_config, _new_app_stub, _paper
+from tests.support.patch_helpers import patch_save_config
 
 
 class TestLibraryActionBehavior:
@@ -89,7 +90,7 @@ class TestLibraryActionBehavior:
         app._apply_filter = MagicMock()
         app.push_screen = lambda _screen, callback: callback([new_entry])
 
-        with patch("arxiv_browser.app.save_config", return_value=False):
+        with patch_save_config(return_value=False):
             library_actions.action_manage_watch_list(app)
 
         assert app._config.watch_list == [old_entry]
@@ -108,7 +109,7 @@ class TestLibraryActionBehavior:
         app._apply_filter = MagicMock()
         app.push_screen = lambda _screen, callback: callback([new_entry])
 
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             library_actions.action_manage_watch_list(app)
 
         assert app._watch_filter_active is False
@@ -220,37 +221,9 @@ class TestBrowserRuntimeBehavior:
             history_mode=False,
         )
 
-    @pytest.mark.asyncio
-    async def test_sync_app_methods_wraps_instance_static_class_and_async(self) -> None:
-        calls: list[dict[str, object]] = []
-
-        def _sync(namespace: dict[str, object]) -> None:
-            calls.append(namespace)
-
-        class Demo:
-            def inc(self, value: int) -> int:
-                return value + 1
-
-            @staticmethod
-            def twice(value: int) -> int:
-                return value * 2
-
-            @classmethod
-            def plus_three(cls, value: int) -> int:
-                return value + 3
-
-            async def async_inc(self, value: int) -> int:
-                return value + 1
-
-        with patch("arxiv_browser.browser._runtime.sync_browser_globals", side_effect=_sync):
-            Demo = browser_runtime.sync_app_methods(Demo)
-            demo = Demo()
-            assert demo.inc(2) == 3
-            assert Demo.twice(3) == 6
-            assert Demo.plus_three(4) == 7
-            assert await demo.async_inc(5) == 6
-
-        assert len(calls) == 4
+    def test_legacy_sync_wrappers_are_removed(self) -> None:
+        assert not hasattr(browser_runtime, "sync_browser_globals")
+        assert not hasattr(browser_runtime, "sync_app_methods")
 
 
 class TestLlmActionBehavior:

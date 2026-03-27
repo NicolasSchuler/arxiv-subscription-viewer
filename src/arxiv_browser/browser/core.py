@@ -15,6 +15,9 @@ from arxiv_browser.actions import ui_actions as _ui_actions
 from arxiv_browser.browser._runtime import *
 from arxiv_browser.browser.browse import BrowseMixin
 from arxiv_browser.browser.chrome import ChromeMixin
+from arxiv_browser.browser.content import (
+    _fetch_paper_content_async,
+)
 from arxiv_browser.browser.discovery import DiscoveryMixin
 from arxiv_browser.cli import (
     CliDependencies,
@@ -26,57 +29,18 @@ from arxiv_browser.cli import (
 from arxiv_browser.cli import main as _cli_main
 
 logger = logging.getLogger(__name__)
-
 # ============================================================================
 # Constants
 # ============================================================================
-
 # UI Layout constants
 MIN_LIST_WIDTH = 50
 MAX_LIST_WIDTH = 100
 CLIPBOARD_SEPARATOR = "=" * 80
 
-# Context-sensitive footer keybinding hints (compatibility alias kept for tests/imports).
-FOOTER_CONTEXTS: dict[str, list[tuple[str, str]]] = {
-    "default": _widget_chrome.build_browse_footer_bindings(
-        s2_active=False,
-        has_starred=False,
-        llm_configured=False,
-        has_history_navigation=False,
-    ),
-    "selection": _widget_chrome.build_selection_footer_base_bindings(),
-    "search": _widget_chrome.build_search_footer_bindings(),
-    "api": _widget_chrome.build_api_footer_bindings(),
-}
-
-
-@dataclass(slots=True, frozen=True)
-class _PaletteAppState:
-    """Minimal app state snapshot for command-palette availability decisions."""
-
-    in_arxiv_api_mode: bool
-    hf_active: bool
-    watch_filter_active: bool
-    show_abstract_preview: bool
-    detail_mode: str
-    active_query: str
-    has_history_navigation: bool
-    watch_list: list[WatchListEntry]
-    has_marks: bool
-    has_starred: bool
-    llm_configured: bool
-    has_visible_papers: bool
-    has_selection: bool
-    has_current_paper: bool
-    has_target_papers: bool
-    s2_active: bool
-    s2_data_loaded: bool
-
 
 @dataclass(slots=True)
 class ArxivBrowserOptions:
     """Normalized constructor inputs for ``ArxivBrowser``.
-
     This is the forward-looking constructor shape. The browser still accepts a
     legacy positional/keyword argument form, and those calls are coerced into
     this dataclass before app initialization continues.
@@ -106,7 +70,6 @@ def _coerce_browser_options(
     legacy_kwargs: dict[str, Any],
 ) -> ArxivBrowserOptions:
     """Normalize new-style options plus the legacy constructor calling convention.
-
     The compatibility goal is that existing callers can continue passing the
     older positional/keyword shape while new code can pass one options object.
     This helper rejects ambiguous mixed usage and always returns a fresh
@@ -127,7 +90,6 @@ def _coerce_browser_options(
                 services=options.services,
             )
         legacy_args = (options, *legacy_args)
-
     if legacy_args:
         if len(legacy_args) > len(_LEGACY_BROWSER_OPTION_FIELDS):
             raise TypeError(
@@ -144,168 +106,32 @@ def _coerce_browser_options(
     return ArxivBrowserOptions(**legacy_kwargs)
 
 
-# Command palette registry: (name, description, key_hint, action_name)
-# action_name maps to ArxivBrowser.action_* methods (or "" for non-action commands)
-COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
-    # Navigation
-    ("Search Papers", "Filter papers by text, category, or tag", "/", "toggle_search"),
-    ("Search Syntax", "Open search examples and operators", "", "show_search_syntax"),
-    ("Search arXiv API", "Search all of arXiv online", "A", "arxiv_search"),
-    ("Previous Date", "Navigate to older date file", "[", "prev_date"),
-    ("Next Date", "Navigate to newer date file", "]", "next_date"),
-    # Paper actions
-    ("Open in Browser", "Open selected paper(s) in web browser", "o", "open_url"),
-    ("Open PDF", "Open selected paper(s) as PDF", "P", "open_pdf"),
-    ("Download PDF", "Download PDF(s) to local folder", "d", "download_pdf"),
-    ("Copy to Clipboard", "Copy paper info to clipboard", "c", "copy_selected"),
-    # Metadata
-    ("Toggle Read", "Mark paper(s) as read/unread", "r", "toggle_read"),
-    ("Toggle Star", "Star/unstar paper(s)", "x", "toggle_star"),
-    ("Edit Notes", "Add or edit notes for current paper", "n", "edit_notes"),
-    ("Edit Tags", "Add or edit tags (bulk when selected)", "t", "edit_tags"),
-    # Selection
-    ("Select All", "Select all visible papers", "a", "select_all"),
-    ("Clear Selection", "Deselect all papers", "u", "clear_selection"),
-    ("Toggle Selection", "Toggle selection on current paper", "Space", "toggle_select"),
-    # Sort & Filter
-    (
-        "Cycle Sort",
-        "Cycle sort: title/date/arxiv_id/citations/trending/relevance",
-        "s",
-        "cycle_sort",
-    ),
-    (
-        "Show Watched Papers",
-        "Filter the list to papers matching your watch list",
-        "w",
-        "toggle_watch_filter",
-    ),
-    ("Manage Watch List", "Add/remove watch list patterns", "W", "manage_watch_list"),
-    (
-        "Show Abstract Preview",
-        "Reveal abstract snippets in the paper list",
-        "p",
-        "toggle_preview",
-    ),
-    # Export
-    ("Export Menu", "Export as BibTeX, Markdown, RIS, or CSV", "E", "export_menu"),
-    ("Export Metadata", "Export all annotations to a JSON snapshot", "", "export_metadata"),
-    ("Import Metadata", "Import annotations from a chosen JSON snapshot", "", "import_metadata"),
-    # Enrichment
-    (
-        "Fetch S2 Data",
-        "Fetch Semantic Scholar data for the current paper (requires S2 enabled)",
-        "e",
-        "fetch_s2",
-    ),
-    (
-        "Toggle Semantic Scholar",
-        "Enable or disable Semantic Scholar enrichment",
-        "Ctrl+e",
-        "ctrl_e_dispatch",
-    ),
-    (
-        "Enable HuggingFace Trending",
-        "Show HuggingFace badges and detail-pane matches",
-        "Ctrl+h",
-        "toggle_hf",
-    ),
-    ("Check Versions", "Check starred papers for arXiv updates", "V", "check_versions"),
-    (
-        "Citation Graph",
-        "Explore the citation graph for the current paper (requires S2 data)",
-        "G",
-        "citation_graph",
-    ),
-    # AI features
-    (
-        "AI Summary",
-        "Generate an LLM-powered paper summary (requires LLM configuration)",
-        "Ctrl+s",
-        "generate_summary",
-    ),
-    (
-        "Chat with Paper",
-        "Interactive Q&A about the current paper (requires LLM configuration)",
-        "C",
-        "chat_with_paper",
-    ),
-    (
-        "Score Relevance",
-        "LLM-score loaded papers by research interests (requires LLM configuration)",
-        "L",
-        "score_relevance",
-    ),
-    ("Edit Interests", "Edit research interests for relevance scoring", "Ctrl+l", "edit_interests"),
-    (
-        "Auto-Tag",
-        "Suggest tags for current or selected papers (requires LLM configuration)",
-        "Ctrl+g",
-        "auto_tag",
-    ),
-    # Recommendations
-    (
-        "Similar Papers",
-        "Find similar papers locally or via Semantic Scholar when available",
-        "R",
-        "show_similar",
-    ),
-    # Bookmarks
-    ("Add Bookmark", "Save current search as bookmark", "Ctrl+b", "add_bookmark"),
-    # Collections
-    ("Collections", "Manage paper reading lists", "Ctrl+k", "collections"),
-    ("Add to Collection", "Add papers to a reading list", "", "add_to_collection"),
-    # UI
-    (
-        "Toggle Detail Density",
-        "Switch between scan and full detail views",
-        "v",
-        "toggle_detail_mode",
-    ),
-    ("Cycle Theme", "Switch between Monokai/Catppuccin/Solarized", "Ctrl+t", "cycle_theme"),
-    ("Toggle Sections", "Show/hide detail pane sections", "Ctrl+d", "toggle_sections"),
-    ("Help", "Show all keyboard shortcuts", "?", "show_help"),
-    # Vim marks
-    ("Set Mark", "Set a named mark (a-z) at current position", "m", "start_mark"),
-    ("Jump to Mark", "Jump to a named mark (a-z)", "'", "start_goto_mark"),
-]
-
 # Subprocess timeout in seconds
 SUBPROCESS_TIMEOUT = 5
-
 # Fuzzy search settings
 FUZZY_SCORE_CUTOFF = 60  # Minimum score (0-100) to include in results
 FUZZY_LIMIT = 100  # Maximum number of results to return
-
 # Paper similarity settings
-
 # UI truncation limits
 BOOKMARK_NAME_MAX_LEN = 15  # Max bookmark name display length
 MAX_ABSTRACT_LOADS = 32  # Maximum concurrent abstract loads
-
 # History file discovery cap retained for custom callers/tests.
 MAX_HISTORY_FILES = 365  # Compatibility constant for callers that want capped discovery.
-
 # arXiv API search settings
 ARXIV_API_URL = "https://export.arxiv.org/api/query"
 ARXIV_API_MIN_INTERVAL_SECONDS = 3.0  # arXiv guidance: max 1 request / 3 seconds
 ARXIV_API_TIMEOUT = 30  # Seconds to wait for arXiv API responses
-
 PDF_DOWNLOAD_TIMEOUT = 60  # Seconds per download
 MAX_CONCURRENT_DOWNLOADS = 3  # Limit parallel downloads
 BATCH_CONFIRM_THRESHOLD = (
     10  # Ask for confirmation when batch operating on more than this many papers
 )
-
 # LLM summary settings
 SUMMARY_DB_FILENAME = "summaries.db"
-MAX_PAPER_CONTENT_LENGTH = 60_000  # ~15k tokens; truncate fetched paper content
-ARXIV_HTML_TIMEOUT = 30  # Seconds to wait for arXiv HTML fetch
 SUMMARY_HTML_TIMEOUT = 10  # Faster timeout for summary generation path
 RELEVANCE_SCORE_TIMEOUT = 30  # Seconds to wait for relevance scoring LLM response
 RELEVANCE_DB_FILENAME = "relevance.db"
 AUTO_TAG_TIMEOUT = 30  # Seconds to wait for auto-tag LLM response
-
 # Search debounce delay in seconds
 SEARCH_DEBOUNCE_DELAY = 0.3
 # Detail pane update debounce delay in seconds (shorter — must feel responsive)
@@ -313,40 +139,6 @@ DETAIL_PANE_DEBOUNCE_DELAY = 0.1
 # Badge refresh coalesce delay — multiple badge sources within this window
 # are merged into a single list iteration (50ms is imperceptible)
 BADGE_COALESCE_DELAY = 0.05
-
-
-async def _fetch_paper_content_async(
-    paper: Paper,
-    client: httpx.AsyncClient | None = None,
-    timeout: int = ARXIV_HTML_TIMEOUT,
-) -> str:
-    """Fetch the full paper content from the arXiv HTML version.
-
-    Falls back to the abstract if the HTML version is not available.
-    If *client* is None, a temporary AsyncClient is created for this request.
-    """
-    html_url = f"https://arxiv.org/html/{paper.arxiv_id}"
-    try:
-        if client is not None:
-            response = await client.get(html_url, timeout=timeout, follow_redirects=True)
-        else:
-            async with httpx.AsyncClient() as tmp_client:
-                response = await tmp_client.get(html_url, timeout=timeout, follow_redirects=True)
-        if response.status_code == 200:
-            text = await asyncio.to_thread(extract_text_from_html, response.text)
-            if text:
-                return text[:MAX_PAPER_CONTENT_LENGTH]
-        else:
-            logger.warning(
-                "arXiv HTML fetch returned %d for %s",
-                response.status_code,
-                paper.arxiv_id,
-            )
-    except (httpx.HTTPError, OSError):
-        logger.warning("Failed to fetch HTML for %s", paper.arxiv_id, exc_info=True)
-    # Fallback to abstract
-    abstract = paper.abstract or paper.abstract_raw or ""
-    return f"Abstract:\n{abstract}" if abstract else ""
 
 
 def build_list_empty_message(
@@ -389,7 +181,6 @@ def build_list_empty_message(
     )
 
 
-@sync_app_methods
 class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
     """A TUI application to browse arXiv papers."""
 
@@ -397,7 +188,6 @@ class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
     CSS = APP_CSS
     BINDINGS = APP_BINDINGS
     VERSION_CHECK_BATCH_SIZE = 40
-
     action_toggle_search = _search_api_actions.action_toggle_search
     action_cancel_search = _search_api_actions.action_cancel_search
     action_ctrl_e_dispatch = _ui_actions.action_ctrl_e_dispatch
@@ -716,7 +506,6 @@ class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
         """Called when app is mounted. Restores session state if enabled."""
         # Create shared HTTP client for connection pooling
         self._http_client = httpx.AsyncClient()
-
         # Warn if config was corrupt and defaults were used
         if self._config.config_defaulted:
             self.notify(
@@ -724,25 +513,20 @@ class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
                 severity="warning",
                 timeout=8,
             )
-
         # Initialize S2 runtime state from config
         self._s2_active = self._config.s2_enabled
-
         # Initialize HF runtime state from config
         self._hf_active = self._config.hf_enabled
         if self._hf_active:
             self._track_dataset_task(self._fetch_hf_daily())
-
         # Initialize date navigator if in history mode
         if self._is_history_mode() and len(self._history_files) > 1:
             self.call_after_refresh(self._refresh_date_navigator)
-
         # Restore session state if enabled
         if self._restore_session and self._config.session:
             session = self._config.session
             self._sort_index = session.sort_index
             self.selected_ids = set(session.selected_ids)
-
             # Apply saved filter if any
             if session.current_filter:
                 search_input = self._get_search_input_widget()
@@ -750,7 +534,6 @@ class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
                 self._apply_filter(session.current_filter)  # calls _refresh_list_view
             else:
                 self._refresh_list_view()  # populate without filter
-
             # Restore scroll position
             option_list = self._get_paper_list_widget()
             if option_list.option_count > 0:
@@ -768,9 +551,7 @@ class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
         self._update_subtitle()
         self._update_details_header()
         self._track_task(self._update_bookmark_bar())
-
         self._notify_watch_list_matches()
-
         logger.debug(
             "App mounted: %d papers, history_mode=%s, s2=%s, hf=%s",
             len(self.all_papers),
@@ -778,9 +559,7 @@ class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
             self._s2_active,
             self._hf_active,
         )
-
         self._prime_ui_refs()
-
         # Focus the paper list so key bindings work
         try:
             self._get_paper_list_widget().focus()
@@ -789,11 +568,9 @@ class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
 
     async def on_unmount(self) -> None:
         """Called when app is unmounted. Saves session state and cleans up timers.
-
         Uses atomic swap pattern to avoid race conditions with timer callbacks.
         """
         self._shutting_down = True
-
         # Clean up timers
         timer = self._search_timer
         self._search_timer = None
@@ -811,11 +588,9 @@ class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
         self._sort_refresh_timer = None
         if sort_timer is not None:
             sort_timer.stop()
-
         # Save after timers are cancelled so a pending debounce cannot overwrite
         # the last applied filter during teardown.
         self._save_session_state()
-
         # Cancel tracked background tasks to avoid leaks during teardown.
         self._cancel_dataset_tasks()
         background_tasks = getattr(self, "_background_tasks", set())
@@ -829,7 +604,6 @@ class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
         if hasattr(self, "_background_tasks"):
             self._background_tasks.clear()
         self._tfidf_build_task = None
-
         # Close shared HTTP client
         client = self._http_client
         self._http_client = None
@@ -998,7 +772,6 @@ class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
         tracker = self._track_task
         if getattr(tracker, "__func__", None) is ArxivBrowser._track_task:
             return tracker(coro, dataset_bound=True)
-
         task = tracker(coro)
         if isinstance(task, asyncio.Task):
             dataset_tasks = getattr(self, "_dataset_tasks", None)
@@ -1075,7 +848,6 @@ class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
     @on(Input.Changed, "#search-input")
     def on_search_changed(self, event: Input.Changed) -> None:
         """Handle search input change with debouncing.
-
         Uses atomic swap pattern to avoid race conditions with timer callbacks.
         """
         self._pending_query = event.value
@@ -1120,7 +892,6 @@ class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
         """Handle key events for vim-style mark capture."""
         if self._pending_mark_action is None:
             return
-
         key = event.key
         # Only accept single lowercase letters
         if len(key) == 1 and key.isalpha() and key.islower():
@@ -1130,17 +901,14 @@ class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
                 self._goto_mark(key)
             event.prevent_default()
             event.stop()
-
         # Cancel mark mode on any other key
         self._pending_mark_action = None
 
     async def _fetch_paper_content_async(self, paper: Paper) -> str:
-        """Fetch canonical paper content for LLM workflows via the app shim."""
-        from arxiv_browser import app as app_module
-
-        return await app_module._fetch_paper_content_async(
+        """Fetch canonical paper content for LLM workflows."""
+        return await _fetch_paper_content_async(
             paper,
-            self._http_client,
+            client=self._http_client,
             timeout=SUMMARY_HTML_TIMEOUT,
         )
 
@@ -1167,6 +935,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
 if __name__ == "__main__":
     sys.exit(main())

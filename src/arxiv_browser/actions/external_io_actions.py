@@ -12,14 +12,8 @@ if TYPE_CHECKING:
     from arxiv_browser.app import ArxivBrowser
 
 
-def _sync_app_globals() -> None:
-    """Sync patched globals from arxiv_browser.app without importing it."""
-    sync_app_globals(globals())
-
-
 def action_copy_bibtex(app: "ArxivBrowser") -> None:
     """Copy selected papers as BibTeX entries to clipboard."""
-    _sync_app_globals()
     papers = app._get_target_papers()
     if not papers:
         app.notify("No paper selected", title="BibTeX", severity="warning")
@@ -40,7 +34,6 @@ def action_copy_bibtex(app: "ArxivBrowser") -> None:
 
 def action_export_bibtex_file(app: "ArxivBrowser") -> None:
     """Export selected papers to a BibTeX file for Zotero import."""
-    _sync_app_globals()
     papers = app._get_target_papers()
     if not papers:
         app.notify("No paper selected", title="Export", severity="warning")
@@ -53,7 +46,6 @@ def action_export_bibtex_file(app: "ArxivBrowser") -> None:
 
 def action_export_markdown(app: "ArxivBrowser") -> None:
     """Export selected papers as Markdown to clipboard."""
-    _sync_app_globals()
     papers = app._get_target_papers()
     if not papers:
         app.notify("No paper selected", title="Markdown", severity="warning")
@@ -75,7 +67,6 @@ def action_export_markdown(app: "ArxivBrowser") -> None:
 
 def action_export_menu(app: "ArxivBrowser") -> None:
     """Open the unified export menu modal."""
-    _sync_app_globals()
     papers = app._get_target_papers()
     if not papers:
         app.notify("No paper selected", title="Export", severity="warning")
@@ -88,7 +79,6 @@ def action_export_menu(app: "ArxivBrowser") -> None:
 
 def _do_export(app: "ArxivBrowser", fmt: str, papers: list[Paper]) -> None:
     """Dispatch export based on format string from ExportMenuModal."""
-    _sync_app_globals()
     dispatch: dict[str, Callable[..., None]] = {
         "clipboard-plain": lambda: app.action_copy_selected(),
         "clipboard-bibtex": lambda: app.action_copy_bibtex(),
@@ -107,7 +97,6 @@ def _do_export(app: "ArxivBrowser", fmt: str, papers: list[Paper]) -> None:
 
 def _get_export_dir(app: "ArxivBrowser") -> Path:
     """Return the configured export directory path."""
-    _sync_app_globals()
     return Path(
         app._config.bibtex_export_dir or Path.home() / DEFAULT_BIBTEX_EXPORT_DIR
     ).expanduser()
@@ -115,7 +104,6 @@ def _get_export_dir(app: "ArxivBrowser") -> Path:
 
 def _export_to_file(app: "ArxivBrowser", content: str, extension: str, format_name: str) -> None:
     """Write content to a timestamped file using atomic write."""
-    _sync_app_globals()
     export_dir = app._get_export_dir()
     try:
         filepath = write_timestamped_export_file(
@@ -138,7 +126,6 @@ def _export_to_file(app: "ArxivBrowser", content: str, extension: str, format_na
 
 def _export_clipboard_ris(app: "ArxivBrowser", papers: list[Paper]) -> None:
     """Copy selected papers as RIS entries to clipboard."""
-    _sync_app_globals()
     entries = []
     for paper in papers:
         abstract_text = app._get_abstract_text(paper, allow_async=False) or ""
@@ -156,7 +143,6 @@ def _export_clipboard_ris(app: "ArxivBrowser", papers: list[Paper]) -> None:
 
 def _export_clipboard_csv(app: "ArxivBrowser", papers: list[Paper]) -> None:
     """Copy selected papers as CSV to clipboard."""
-    _sync_app_globals()
     csv_text = format_papers_as_csv(papers, app._config.paper_metadata)
     if app._copy_to_clipboard(csv_text):
         count = len(papers)
@@ -170,7 +156,6 @@ def _export_clipboard_csv(app: "ArxivBrowser", papers: list[Paper]) -> None:
 
 def _export_clipboard_mdtable(app: "ArxivBrowser", papers: list[Paper]) -> None:
     """Copy selected papers as a Markdown table to clipboard."""
-    _sync_app_globals()
     table_text = format_papers_as_markdown_table(papers)
     if app._copy_to_clipboard(table_text):
         count = len(papers)
@@ -188,7 +173,6 @@ def _export_clipboard_mdtable(app: "ArxivBrowser", papers: list[Paper]) -> None:
 
 def _export_file_ris(app: "ArxivBrowser", papers: list[Paper]) -> None:
     """Export selected papers to an RIS file."""
-    _sync_app_globals()
     entries = []
     for paper in papers:
         abstract_text = app._get_abstract_text(paper, allow_async=False) or ""
@@ -199,14 +183,12 @@ def _export_file_ris(app: "ArxivBrowser", papers: list[Paper]) -> None:
 
 def _export_file_csv(app: "ArxivBrowser", papers: list[Paper]) -> None:
     """Export selected papers to a CSV file."""
-    _sync_app_globals()
     content = format_papers_as_csv(papers, app._config.paper_metadata)
     app._export_to_file(content, "csv", "CSV")
 
 
 def action_export_metadata(app: "ArxivBrowser") -> None:
     """Export all user metadata to a portable JSON file."""
-    _sync_app_globals()
     import json as _json
 
     data = export_metadata(app._config)
@@ -216,7 +198,6 @@ def action_export_metadata(app: "ArxivBrowser") -> None:
 
 def action_import_metadata(app: "ArxivBrowser") -> None:
     """Import metadata from a JSON file in the export directory."""
-    _sync_app_globals()
 
     export_dir = app._get_export_dir()
     json_files = _list_metadata_snapshots(export_dir)
@@ -239,7 +220,6 @@ def action_import_metadata(app: "ArxivBrowser") -> None:
 
 def _list_metadata_snapshots(export_dir: Path) -> list[Path]:
     """Return metadata snapshots newest-first by modified time."""
-    _sync_app_globals()
 
     def sort_key(path: Path) -> tuple[float, str]:
         try:
@@ -253,7 +233,6 @@ def _list_metadata_snapshots(export_dir: Path) -> list[Path]:
 
 def _import_metadata_file(app: "ArxivBrowser", filepath: Path) -> None:
     """Import metadata from a chosen JSON snapshot file."""
-    _sync_app_globals()
     import json as _json
 
     resolved_path = filepath.resolve()
@@ -291,7 +270,6 @@ def _import_metadata_file(app: "ArxivBrowser", filepath: Path) -> None:
 
 def _start_downloads(app: "ArxivBrowser") -> None:
     """Start download tasks up to the concurrency limit."""
-    _sync_app_globals()
     while app._download_queue and len(app._downloading) < MAX_CONCURRENT_DOWNLOADS:
         paper = app._download_queue.popleft()
         if paper.arxiv_id in app._downloading:
@@ -303,7 +281,6 @@ def _start_downloads(app: "ArxivBrowser") -> None:
 
 async def _process_single_download(app: "ArxivBrowser", paper: Paper) -> None:
     """Process a single download and update state."""
-    _sync_app_globals()
     try:
         success = await app._download_pdf_async(paper, app._http_client)
         app._download_results[paper.arxiv_id] = success
@@ -338,7 +315,6 @@ async def _process_single_download(app: "ArxivBrowser", paper: Paper) -> None:
 
 def _finish_download_batch(app: "ArxivBrowser") -> None:
     """Handle completion of a download batch."""
-    _sync_app_globals()
     if app._download_total <= 0:
         return
 
@@ -368,7 +344,6 @@ def _finish_download_batch(app: "ArxivBrowser") -> None:
 
 def action_open_url(app: "ArxivBrowser") -> None:
     """Open selected papers' URLs in the default browser."""
-    _sync_app_globals()
     papers = app._get_target_papers()
     if not papers:
         return
@@ -383,7 +358,6 @@ def action_open_url(app: "ArxivBrowser") -> None:
 
 def _do_open_urls(app: "ArxivBrowser", papers: list[Paper]) -> None:
     """Open the given papers' URLs in the browser."""
-    _sync_app_globals()
     for paper in papers:
         app._safe_browser_open(get_paper_url(paper, prefer_pdf=app._config.prefer_pdf_url))
     count = len(papers)
@@ -392,7 +366,6 @@ def _do_open_urls(app: "ArxivBrowser", papers: list[Paper]) -> None:
 
 def action_open_pdf(app: "ArxivBrowser") -> None:
     """Open selected papers' PDF URLs in the default browser."""
-    _sync_app_globals()
     papers = app._get_target_papers()
     if not papers:
         return
@@ -407,7 +380,6 @@ def action_open_pdf(app: "ArxivBrowser") -> None:
 
 def _do_open_pdfs(app: "ArxivBrowser", papers: list[Paper]) -> None:
     """Open the given papers' PDF URLs in the browser or configured viewer."""
-    _sync_app_globals()
     viewer = app._config.pdf_viewer.strip()
     if viewer and not app._ensure_pdf_viewer_trusted(
         viewer,
@@ -430,7 +402,6 @@ def _open_with_viewer(app: "ArxivBrowser", viewer_cmd: str, url_or_path: str) ->
     The command template can use {url} or {path} as placeholders.
     If no placeholder is found, the URL is appended as an argument.
     """
-    _sync_app_globals()
     try:
         args = build_viewer_args(viewer_cmd, url_or_path)
         # User-configured local viewer command execution is an explicit feature.
@@ -457,7 +428,6 @@ def _open_with_viewer(app: "ArxivBrowser", viewer_cmd: str, url_or_path: str) ->
 
 def action_download_pdf(app: "ArxivBrowser") -> None:
     """Download PDFs for selected papers (or current paper)."""
-    _sync_app_globals()
     if app._is_download_batch_active():
         app.notify("Download already in progress", title="Download", severity="warning")
         return
@@ -489,7 +459,6 @@ def action_download_pdf(app: "ArxivBrowser") -> None:
 
 def _do_start_downloads(app: "ArxivBrowser", to_download: list[Paper]) -> None:
     """Initialize and start batch PDF downloads."""
-    _sync_app_globals()
     if app._is_download_batch_active():
         app.notify("Download already in progress", title="Download", severity="warning")
         return
@@ -506,7 +475,6 @@ def _do_start_downloads(app: "ArxivBrowser", to_download: list[Paper]) -> None:
 
 def _format_paper_for_clipboard(app: "ArxivBrowser", paper: Paper) -> str:
     """Format a paper's metadata for clipboard export."""
-    _sync_app_globals()
     abstract_text = app._get_abstract_text(paper, allow_async=False) or ""
     return format_paper_for_clipboard(paper, abstract_text)
 
@@ -517,7 +485,6 @@ def _copy_to_clipboard(app: "ArxivBrowser", text: str) -> bool:
     Uses platform-specific clipboard tools with timeout protection.
     Logs failures at warning level for troubleshooting.
     """
-    _sync_app_globals()
     try:
         system = platform.system()
         plan = get_clipboard_command_plan(system)
@@ -552,7 +519,6 @@ def _copy_to_clipboard(app: "ArxivBrowser", text: str) -> bool:
 
 def action_copy_selected(app: "ArxivBrowser") -> None:
     """Copy selected papers' metadata to clipboard."""
-    _sync_app_globals()
     papers_to_copy = app._get_target_papers()
     if not papers_to_copy:
         app.notify("No papers to copy", title="Copy", severity="warning")

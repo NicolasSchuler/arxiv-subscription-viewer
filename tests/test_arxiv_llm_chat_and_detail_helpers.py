@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from arxiv_browser.app import (
+from arxiv_browser.themes import THEME_NAMES, THEMES
+from tests.support.canonical_exports import (
     ARXIV_API_DEFAULT_MAX_RESULTS,
     ARXIV_DATE_FORMAT,
     DEFAULT_CATEGORY_COLOR,
@@ -59,7 +60,6 @@ from arxiv_browser.app import (
     to_rpn,
     tokenize_query,
 )
-from arxiv_browser.themes import THEME_NAMES, THEMES
 
 # ============================================================================
 # Tests for clean_latex function
@@ -70,13 +70,13 @@ class TestChatSystemPrompt:
     """Tests for the CHAT_SYSTEM_PROMPT template and PaperChatScreen."""
 
     def test_chat_prompt_has_required_placeholders(self):
-        from arxiv_browser.app import CHAT_SYSTEM_PROMPT
+        from tests.support.canonical_exports import CHAT_SYSTEM_PROMPT
 
         for field in ("title", "authors", "categories", "paper_content"):
             assert f"{{{field}}}" in CHAT_SYSTEM_PROMPT
 
     def test_chat_prompt_formats_correctly(self, make_paper):
-        from arxiv_browser.app import CHAT_SYSTEM_PROMPT
+        from tests.support.canonical_exports import CHAT_SYSTEM_PROMPT
 
         paper = make_paper(
             title="Test Paper",
@@ -124,7 +124,7 @@ class TestChatSystemPrompt:
         assert screen._history[1] == ("assistant", "This paper discusses...")
 
     def test_chat_command_palette_entry(self):
-        from arxiv_browser.app import COMMAND_PALETTE_COMMANDS
+        from tests.support.canonical_exports import COMMAND_PALETTE_COMMANDS
 
         names = [cmd[0] for cmd in COMMAND_PALETTE_COMMANDS]
         assert "Chat with Paper" in names
@@ -134,7 +134,7 @@ class TestChatSystemPrompt:
         assert chat_entry[3] == "chat_with_paper"  # action
 
     def test_chat_context_builds_history(self, make_paper):
-        from arxiv_browser.app import CHAT_SYSTEM_PROMPT
+        from tests.support.canonical_exports import CHAT_SYSTEM_PROMPT
 
         paper = make_paper(title="Test", authors="A", categories="cs.AI", abstract="Abstract.")
         context = CHAT_SYSTEM_PROMPT.format(
@@ -305,7 +305,7 @@ class TestPaperDetailsRenderHelpers:
     """Tests for PaperDetails._render_* helper methods."""
 
     def _make_details(self):
-        from arxiv_browser.app import PaperDetails
+        from tests.support.canonical_exports import PaperDetails
 
         return PaperDetails()
 

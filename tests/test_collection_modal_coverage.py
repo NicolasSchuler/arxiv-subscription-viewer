@@ -15,7 +15,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-import arxiv_browser.app as app_mod
 import arxiv_browser.cli as cli
 import arxiv_browser.llm_providers as llm_providers
 import arxiv_browser.semantic_scholar as s2
@@ -28,6 +27,7 @@ from arxiv_browser.modals.collections import (
 )
 from arxiv_browser.models import MAX_COLLECTIONS, PaperCollection, UserConfig
 from arxiv_browser.services import enrichment_service as enrich
+from tests.support import canonical_exports as app_mod
 from tests.support.app_stubs import (
     _DummyInput,
     _DummyLabel,

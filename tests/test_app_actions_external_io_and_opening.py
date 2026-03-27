@@ -12,8 +12,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-import arxiv_browser.app as app_mod
-from arxiv_browser.app import (
+from arxiv_browser.huggingface import HuggingFacePaper
+from arxiv_browser.semantic_scholar import (
+    CitationEntry,
+    S2RecommendationsCacheSnapshot,
+    SemanticScholarPaper,
+)
+from tests.support import canonical_exports as app_mod
+from tests.support.app_stubs import (
+    _DummyOptionList,
+    _make_hf_paper,
+    _make_s2_paper,
+    _new_app,
+)
+from tests.support.canonical_exports import (
     ArxivBrowser,
     PaperCollection,
     PaperMetadata,
@@ -21,18 +33,6 @@ from arxiv_browser.app import (
     UserConfig,
     _resolve_legacy_fallback,
     _resolve_papers,
-)
-from arxiv_browser.huggingface import HuggingFacePaper
-from arxiv_browser.semantic_scholar import (
-    CitationEntry,
-    S2RecommendationsCacheSnapshot,
-    SemanticScholarPaper,
-)
-from tests.support.app_stubs import (
-    _DummyOptionList,
-    _make_hf_paper,
-    _make_s2_paper,
-    _new_app,
 )
 
 
@@ -387,7 +387,7 @@ class TestDownloadClipboardAndOpenCoverage:
         missing = tmp_path / "missing.pdf"
 
         with patch(
-            "arxiv_browser.app.get_pdf_download_path",
+            "arxiv_browser.actions.external_io_actions.get_pdf_download_path",
             side_effect=[existing, missing],
         ):
             app.action_download_pdf()
@@ -406,16 +406,22 @@ class TestDownloadClipboardAndOpenCoverage:
         app = _new_app()
 
         with (
-            patch("arxiv_browser.app.platform.system", return_value="Darwin"),
-            patch("arxiv_browser.app.subprocess.run", return_value=None) as run,
+            patch(
+                "arxiv_browser.actions.external_io_actions.platform.system", return_value="Darwin"
+            ),
+            patch(
+                "arxiv_browser.actions.external_io_actions.subprocess.run", return_value=None
+            ) as run,
         ):
             assert app._copy_to_clipboard("abc") is True
             assert run.call_count == 1
 
         with (
-            patch("arxiv_browser.app.platform.system", return_value="Linux"),
             patch(
-                "arxiv_browser.app.subprocess.run",
+                "arxiv_browser.actions.external_io_actions.platform.system", return_value="Linux"
+            ),
+            patch(
+                "arxiv_browser.actions.external_io_actions.subprocess.run",
                 side_effect=[FileNotFoundError(), None],
             ) as run,
         ):
@@ -423,8 +429,10 @@ class TestDownloadClipboardAndOpenCoverage:
             assert run.call_count == 2
 
         with (
-            patch("arxiv_browser.app.platform.system", return_value="Plan9"),
-            patch("arxiv_browser.app.subprocess.run", return_value=None),
+            patch(
+                "arxiv_browser.actions.external_io_actions.platform.system", return_value="Plan9"
+            ),
+            patch("arxiv_browser.actions.external_io_actions.subprocess.run", return_value=None),
         ):
             assert app._copy_to_clipboard("abc") is False
 
@@ -433,9 +441,11 @@ class TestDownloadClipboardAndOpenCoverage:
 
         app = _new_app()
         with (
-            patch("arxiv_browser.app.platform.system", return_value="Darwin"),
             patch(
-                "arxiv_browser.app.subprocess.run",
+                "arxiv_browser.actions.external_io_actions.platform.system", return_value="Darwin"
+            ),
+            patch(
+                "arxiv_browser.actions.external_io_actions.subprocess.run",
                 side_effect=subprocess.TimeoutExpired(cmd="pbcopy", timeout=1),
             ),
         ):
@@ -459,7 +469,10 @@ class TestDownloadClipboardAndOpenCoverage:
         app = _new_app()
         app.notify = MagicMock()
 
-        with patch("arxiv_browser.app.subprocess.Popen", side_effect=OSError("bad viewer")):
+        with patch(
+            "arxiv_browser.actions.external_io_actions.subprocess.Popen",
+            side_effect=OSError("bad viewer"),
+        ):
             ok = app._open_with_viewer("broken-viewer {url}", "https://arxiv.org/pdf/1")
 
         assert ok is False
@@ -484,7 +497,10 @@ class TestDownloadClipboardAndOpenCoverage:
         app = _new_app()
         app.notify = MagicMock()
 
-        with patch("arxiv_browser.app.webbrowser.open", side_effect=OSError("no browser")):
+        with patch(
+            "arxiv_browser.actions.external_io_actions.webbrowser.open",
+            side_effect=OSError("no browser"),
+        ):
             ok = app._safe_browser_open("https://arxiv.org/abs/2602.12345")
 
         assert ok is False
@@ -497,7 +513,7 @@ class TestDownloadClipboardAndOpenCoverage:
         app = _new_app()
         app.notify = MagicMock()
 
-        with patch("arxiv_browser.app.subprocess.Popen") as popen:
+        with patch("arxiv_browser.actions.external_io_actions.subprocess.Popen") as popen:
             ok = app._open_with_viewer("open -a Skim {path}", "/tmp/my paper.pdf")
 
         assert ok is True

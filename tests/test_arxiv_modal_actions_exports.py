@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from arxiv_browser.app import (
+from arxiv_browser.themes import THEME_NAMES, THEMES
+from tests.support.canonical_exports import (
     ARXIV_API_DEFAULT_MAX_RESULTS,
     ARXIV_DATE_FORMAT,
     DEFAULT_CATEGORY_COLOR,
@@ -59,7 +60,6 @@ from arxiv_browser.app import (
     to_rpn,
     tokenize_query,
 )
-from arxiv_browser.themes import THEME_NAMES, THEMES
 
 # ============================================================================
 # Tests for clean_latex function
@@ -601,7 +601,7 @@ class TestGetTargetPapers:
     def _make_mock_app(self, make_paper, papers=None, selected_ids=None):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._http_client = None
@@ -660,7 +660,7 @@ class TestGetTargetPapers:
     def test_no_selection_no_current_paper_returns_empty(self, make_paper):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._http_client = None
@@ -696,7 +696,7 @@ class TestToggleReadStar:
     def _make_mock_app(self, make_paper, papers=None):
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._http_client = None
@@ -810,7 +810,7 @@ class TestFormatPaperForClipboardExtended:
     """Extended tests for format_paper_for_clipboard output formatting."""
 
     def test_includes_all_metadata_fields(self, make_paper):
-        from arxiv_browser.app import format_paper_for_clipboard
+        from tests.support.canonical_exports import format_paper_for_clipboard
 
         paper = make_paper(
             arxiv_id="2401.12345",
@@ -831,14 +831,14 @@ class TestFormatPaperForClipboardExtended:
         assert "Abstract: The abstract text." in result
 
     def test_omits_comments_when_none(self, make_paper):
-        from arxiv_browser.app import format_paper_for_clipboard
+        from tests.support.canonical_exports import format_paper_for_clipboard
 
         paper = make_paper(comments=None)
         result = format_paper_for_clipboard(paper)
         assert "Comments:" not in result
 
     def test_empty_abstract_still_has_label(self, make_paper):
-        from arxiv_browser.app import format_paper_for_clipboard
+        from tests.support.canonical_exports import format_paper_for_clipboard
 
         paper = make_paper()
         result = format_paper_for_clipboard(paper, abstract_text="")
@@ -849,7 +849,7 @@ class TestFormatPaperAsMarkdownExtended:
     """Extended tests for format_paper_as_markdown output formatting."""
 
     def test_output_has_markdown_structure(self, make_paper):
-        from arxiv_browser.app import format_paper_as_markdown
+        from tests.support.canonical_exports import format_paper_as_markdown
 
         paper = make_paper(
             arxiv_id="2401.12345",
@@ -868,14 +868,14 @@ class TestFormatPaperAsMarkdownExtended:
         assert "We propose Transformer." in result
 
     def test_includes_comments_when_present(self, make_paper):
-        from arxiv_browser.app import format_paper_as_markdown
+        from tests.support.canonical_exports import format_paper_as_markdown
 
         paper = make_paper(comments="Accepted at NeurIPS 2024")
         result = format_paper_as_markdown(paper)
         assert "**Comments:** Accepted at NeurIPS 2024" in result
 
     def test_omits_comments_when_none(self, make_paper):
-        from arxiv_browser.app import format_paper_as_markdown
+        from tests.support.canonical_exports import format_paper_as_markdown
 
         paper = make_paper(comments=None)
         result = format_paper_as_markdown(paper)

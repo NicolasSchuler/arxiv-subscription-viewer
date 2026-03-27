@@ -17,28 +17,20 @@ if TYPE_CHECKING:
     from arxiv_browser.app import ArxivBrowser
 
 
-def _sync_app_globals() -> None:
-    """Sync patched globals from arxiv_browser.app without importing it."""
-    sync_app_globals(globals())
-
-
 def action_cursor_down(app: "ArxivBrowser") -> None:
     """Move cursor down (vim-style j key)."""
-    _sync_app_globals()
     list_view = app._get_paper_list_widget()
     list_view.action_cursor_down()
 
 
 def action_cursor_up(app: "ArxivBrowser") -> None:
     """Move cursor up (vim-style k key)."""
-    _sync_app_globals()
     list_view = app._get_paper_list_widget()
     list_view.action_cursor_up()
 
 
 def action_toggle_select(app: "ArxivBrowser") -> None:
     """Toggle selection of the currently highlighted paper."""
-    _sync_app_globals()
     paper = app._get_current_paper()
     if not paper:
         return
@@ -55,7 +47,6 @@ def action_toggle_select(app: "ArxivBrowser") -> None:
 
 def action_select_all(app: "ArxivBrowser") -> None:
     """Select all currently visible papers."""
-    _sync_app_globals()
     for paper in app.filtered_papers:
         app.selected_ids.add(paper.arxiv_id)
     for i in range(len(app.filtered_papers)):
@@ -65,7 +56,6 @@ def action_select_all(app: "ArxivBrowser") -> None:
 
 def action_clear_selection(app: "ArxivBrowser") -> None:
     """Clear all selections."""
-    _sync_app_globals()
     app.selected_ids.clear()
     for i in range(len(app.filtered_papers)):
         app._update_option_at_index(i)
@@ -74,7 +64,6 @@ def action_clear_selection(app: "ArxivBrowser") -> None:
 
 def action_cycle_sort(app: "ArxivBrowser") -> None:
     """Cycle through sort options (title → date → arxiv_id → citations → trending → relevance)."""
-    _sync_app_globals()
     app._sort_index = (app._sort_index + 1) % len(SORT_OPTIONS)
     sort_key = SORT_OPTIONS[app._sort_index]
     app.notify(f"Sorted by {sort_key}", title="Sort")
@@ -87,7 +76,6 @@ def action_cycle_sort(app: "ArxivBrowser") -> None:
 
 def action_toggle_read(app: "ArxivBrowser") -> None:
     """Toggle read status of highlighted paper, or bulk toggle for selected papers."""
-    _sync_app_globals()
     if app.selected_ids:
         app._bulk_toggle_bool("is_read", "marked read", "marked unread", "Read Status")
         return
@@ -106,7 +94,6 @@ def action_toggle_read(app: "ArxivBrowser") -> None:
 
 def action_toggle_star(app: "ArxivBrowser") -> None:
     """Toggle star status of highlighted paper, or bulk toggle for selected papers."""
-    _sync_app_globals()
     if app.selected_ids:
         app._bulk_toggle_bool("starred", "starred", "unstarred", "Star")
         return
@@ -125,7 +112,6 @@ def action_toggle_star(app: "ArxivBrowser") -> None:
 
 def action_edit_notes(app: "ArxivBrowser") -> None:
     """Open notes editor for the currently highlighted paper."""
-    _sync_app_globals()
     paper = app._get_current_paper()
     if not paper:
         return
@@ -153,7 +139,6 @@ def action_edit_notes(app: "ArxivBrowser") -> None:
 
 def action_edit_tags(app: "ArxivBrowser") -> None:
     """Open tags editor for the current paper, or bulk-tag selected papers."""
-    _sync_app_globals()
     if app.selected_ids:
         app._bulk_edit_tags()
         return
@@ -188,7 +173,6 @@ def action_edit_tags(app: "ArxivBrowser") -> None:
 
 def action_toggle_watch_filter(app: "ArxivBrowser") -> None:
     """Toggle filtering to show only watched papers."""
-    _sync_app_globals()
     app._watch_filter_active = not app._watch_filter_active
 
     if app._watch_filter_active:
@@ -207,7 +191,6 @@ def action_toggle_watch_filter(app: "ArxivBrowser") -> None:
 
 def action_manage_watch_list(app: "ArxivBrowser") -> None:
     """Open the watch list manager."""
-    _sync_app_globals()
 
     def on_watch_list_updated(entries: list[WatchListEntry] | None) -> None:
         if entries is None:

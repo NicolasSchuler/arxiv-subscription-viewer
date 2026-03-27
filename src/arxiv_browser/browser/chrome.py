@@ -7,11 +7,9 @@ from __future__ import annotations
 from arxiv_browser.browser._runtime import *
 
 
-@sync_app_methods
 class ChromeMixin:
     def _apply_category_overrides(self) -> None:
         """Apply category color overrides from config.
-
         Layers: default → per-theme → user overrides.
         """
         theme_runtime = build_theme_runtime(
@@ -24,7 +22,6 @@ class ChromeMixin:
 
     def _apply_theme_overrides(self) -> None:
         """Apply theme overrides from config to both Rich markup and CSS variables.
-
         Layers: named base theme → per-key overrides from config.
         Also refreshes app-owned runtime theme state for tag/category styling.
         """
@@ -256,7 +253,6 @@ class ChromeMixin:
 
     def _save_config_or_warn(self, context: str) -> bool:
         """Save config and notify the user on failure.
-
         Returns True on success, False on failure.
         """
         if not save_config(self._config):
@@ -266,16 +262,13 @@ class ChromeMixin:
 
     def _save_session_state(self) -> None:
         """Save current session state to config.
-
         Handles the case where DOM widgets may already be destroyed during unmount.
         """
         # API mode is intentionally session-ephemeral; persist the underlying local state.
         snapshot = self._local_browse_snapshot if self._in_arxiv_api_mode else None
-
         # Get current date for history mode
         current_date = self._get_current_date()
         current_date_str = current_date.strftime(HISTORY_DATE_FORMAT) if current_date else None
-
         if snapshot is not None:
             self._config.session = SessionState(
                 scroll_index=snapshot.list_index,
@@ -293,10 +286,8 @@ class ChromeMixin:
                     timeout=8,
                 )
             return
-
         try:
             list_view = self._get_paper_list_widget()
-
             self._config.session = SessionState(
                 scroll_index=list_view.highlighted if list_view.highlighted is not None else 0,
                 current_filter=self._get_active_query(),
@@ -313,7 +304,6 @@ class ChromeMixin:
                 selected_ids=list(self.selected_ids),
                 current_date=current_date_str,
             )
-
         if not save_config(self._config):
             logger.warning("Failed to save session state to config file")
             self.notify(
@@ -364,7 +354,6 @@ class ChromeMixin:
         immediate: bool = False,
     ) -> None:
         """Schedule a coalesced badge refresh for the given types.
-
         Use immediate=True for toggle-off cases where UX needs instant feedback.
         """
         self._badges_dirty.update(badge_types)
@@ -387,28 +376,22 @@ class ChromeMixin:
         """Return visible list indices requiring badge redraw for dirty badge types."""
         if not self.filtered_papers:
             return []
-
         refresh_all = False
         dirty_ids: set[str] = set()
-
         if "s2" in dirty:
             if self._s2_active:
                 dirty_ids.update(self._s2_cache.keys())
             else:
                 refresh_all = True
-
         if "hf" in dirty:
             if self._hf_active:
                 dirty_ids.update(self._hf_cache.keys())
             else:
                 refresh_all = True
-
         if "version" in dirty:
             dirty_ids.update(self._version_updates.keys())
-
         if "relevance" in dirty:
             dirty_ids.update(self._relevance_scores.keys())
-
         # Unknown badge type, or explicit full redraw request: fall back to full repaint.
         if (
             not dirty
@@ -416,10 +399,8 @@ class ChromeMixin:
             or any(kind not in {"s2", "hf", "version", "relevance"} for kind in dirty)
         ):
             return list(range(len(self.filtered_papers)))
-
         if not dirty_ids:
             return list(range(len(self.filtered_papers)))
-
         visible_index_by_id = self._get_visible_index_map()
         return sorted(
             visible_index_by_id[paper_id]
@@ -488,7 +469,6 @@ class ChromeMixin:
         self._sort_refresh_dirty.clear()
         if not dirty or not any(self._sort_sensitive_badge_kind(kind) for kind in dirty):
             return
-
         highlighted = self._get_current_paper()
         highlighted_id = highlighted.arxiv_id if highlighted is not None else None
         self._sort_papers()
@@ -594,7 +574,6 @@ class ChromeMixin:
             current_paper = None
         s2_cache = getattr(self, "_s2_cache", {})
         has_selection = bool(getattr(self, "selected_ids", set()))
-
         return _PaletteAppState(
             in_arxiv_api_mode=in_arxiv_api_mode,
             hf_active=bool(getattr(self, "_hf_active", False)),
@@ -765,12 +744,10 @@ class ChromeMixin:
         """Return command palette rows with labels adapted to current app state."""
         state = self._command_palette_state()
         suggested_actions = self._palette_suggested_actions(state)
-
         commands: list[PaletteCommand] = []
         for name, description, key_hint, action_name in COMMAND_PALETTE_COMMANDS:
             name, description = self._palette_entry_copy(name, description, action_name, state)
             enabled, blocked_reason = self._palette_action_availability(action_name, state)
-
             commands.append(
                 PaletteCommand(
                     name=name,
@@ -805,7 +782,6 @@ class ChromeMixin:
             status = self._get_status_bar_widget()
         except NoMatches:
             return
-
         status.update(_widget_chrome.build_status_bar_text(self._build_status_bar_state()))
         self._update_footer()
 
@@ -838,7 +814,6 @@ class ChromeMixin:
             return [("", f"Auto-tagging {bar} {current}/{total}"), ("?", "help")]
         if self._auto_tag_active:
             return [("", f"Auto-tagging{ellipsis}"), ("?", "help")]
-
         # Search mode — search container visible
         try:
             container = self._get_search_container_widget()
@@ -846,15 +821,12 @@ class ChromeMixin:
                 return _widget_chrome.build_search_footer_bindings()
         except NoMatches:
             pass
-
         # arXiv API search mode
         if self._in_arxiv_api_mode:
             return _widget_chrome.build_api_footer_bindings()
-
         # Selection mode — papers selected
         if self.selected_ids:
             return _widget_chrome.build_selection_footer_bindings(len(self.selected_ids))
-
         # Default browsing — dynamically show contextual hints
         has_starred = any(m.starred for m in self._config.paper_metadata.values())
         llm_configured = bool(_resolve_llm_command(self._config))

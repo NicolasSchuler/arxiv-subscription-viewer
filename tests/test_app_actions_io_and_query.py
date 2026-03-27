@@ -12,8 +12,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-import arxiv_browser.app as app_mod
-from arxiv_browser.app import (
+from arxiv_browser.huggingface import HuggingFacePaper
+from arxiv_browser.semantic_scholar import (
+    CitationEntry,
+    S2RecommendationsCacheSnapshot,
+    SemanticScholarPaper,
+)
+from tests.support import canonical_exports as app_mod
+from tests.support.app_stubs import (
+    _DummyOptionList,
+    _make_hf_paper,
+    _make_s2_paper,
+    _new_app,
+)
+from tests.support.canonical_exports import (
     ArxivBrowser,
     PaperCollection,
     PaperMetadata,
@@ -21,18 +33,6 @@ from arxiv_browser.app import (
     UserConfig,
     _resolve_legacy_fallback,
     _resolve_papers,
-)
-from arxiv_browser.huggingface import HuggingFacePaper
-from arxiv_browser.semantic_scholar import (
-    CitationEntry,
-    S2RecommendationsCacheSnapshot,
-    SemanticScholarPaper,
-)
-from tests.support.app_stubs import (
-    _DummyOptionList,
-    _make_hf_paper,
-    _make_s2_paper,
-    _new_app,
 )
 
 

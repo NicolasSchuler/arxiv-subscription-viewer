@@ -18,7 +18,6 @@ from unittest.mock import patch
 
 import pytest
 
-from arxiv_browser.app import ArxivBrowser, _configure_logging
 from arxiv_browser.export import (
     format_paper_as_bibtex,
     format_paper_as_ris,
@@ -26,6 +25,8 @@ from arxiv_browser.export import (
     format_papers_as_markdown_table,
 )
 from arxiv_browser.parsing import discover_history_files, parse_arxiv_file
+from tests.support.canonical_exports import ArxivBrowser, _configure_logging
+from tests.support.patch_helpers import patch_save_config
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 
@@ -198,7 +199,7 @@ class TestFullWorkflow:
         from textual.widgets import OptionList
 
         app = self._app_from_fixture(FIXTURE_JAN26)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test():
                 option_list = app.query_one("#paper-list", OptionList)
                 assert option_list.option_count == 10
@@ -209,7 +210,7 @@ class TestFullWorkflow:
         from textual.widgets import OptionList
 
         app = self._app_from_fixture(FIXTURE_JAN26)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 await pilot.press("slash")
                 # Type "DSGym" — unique title word from fixture
@@ -230,7 +231,7 @@ class TestFullWorkflow:
     async def test_star_paper(self):
         """Starring a paper should persist in metadata."""
         app = self._app_from_fixture(FIXTURE_JAN26)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 # Star the first paper
                 await pilot.press("x")
@@ -246,7 +247,7 @@ class TestFullWorkflow:
         from textual.widgets import OptionList
 
         app = self._app_from_fixture(FIXTURE_JAN26)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 option_list = app.query_one("#paper-list", OptionList)
                 initial_count = option_list.option_count
@@ -326,7 +327,7 @@ class TestResourceCleanup:
         """After app exit, _http_client should be None."""
         papers = parse_arxiv_file(FIXTURE_JAN23)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test():
                 # App is running, client may be created
                 pass
@@ -338,7 +339,7 @@ class TestResourceCleanup:
         """After app exit, _background_tasks set should be empty."""
         papers = parse_arxiv_file(FIXTURE_JAN23)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test():
                 pass
             assert len(app._background_tasks) == 0

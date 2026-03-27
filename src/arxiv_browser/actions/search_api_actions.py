@@ -13,14 +13,8 @@ if TYPE_CHECKING:
     from arxiv_browser.app import ArxivBrowser
 
 
-def _sync_app_globals() -> None:
-    """Sync patched globals from arxiv_browser.app without importing it."""
-    sync_app_globals(globals())
-
-
 def action_toggle_search(app: "ArxivBrowser") -> None:
     """Toggle search input visibility."""
-    _sync_app_globals()
     container = app._get_search_container_widget()
     if "visible" in container.classes:
         container.remove_class("visible")
@@ -36,7 +30,6 @@ def action_toggle_search(app: "ArxivBrowser") -> None:
 
 def action_cancel_search(app: "ArxivBrowser") -> None:
     """Cancel search and hide input."""
-    _sync_app_globals()
     container = app._get_search_container_widget()
     if "visible" in container.classes:
         container.remove_class("visible")
@@ -54,7 +47,6 @@ def action_cancel_search(app: "ArxivBrowser") -> None:
 
 def action_exit_arxiv_search_mode(app: "ArxivBrowser") -> None:
     """Exit API search mode and restore local papers."""
-    _sync_app_globals()
     if not app._in_arxiv_api_mode:
         return
 
@@ -74,7 +66,6 @@ def action_exit_arxiv_search_mode(app: "ArxivBrowser") -> None:
 
 def action_arxiv_search(app: "ArxivBrowser") -> None:
     """Open modal to search all arXiv."""
-    _sync_app_globals()
     default_query = ""
     default_field = "all"
     default_category = ""
@@ -100,13 +91,11 @@ def action_arxiv_search(app: "ArxivBrowser") -> None:
 
 def _format_arxiv_search_label(app: "ArxivBrowser", request: ArxivSearchRequest) -> str:
     """Build a human-readable query label for API mode UI."""
-    _sync_app_globals()
     return app._get_services().arxiv_api.format_query_label(request)
 
 
 async def _apply_arxiv_rate_limit(app: "ArxivBrowser") -> None:
     """Sleep as needed to respect arXiv API rate limits."""
-    _sync_app_globals()
     loop = asyncio.get_running_loop()
     new_last_request_at, wait_seconds = await app._get_services().arxiv_api.enforce_rate_limit(
         last_request_at=app._last_arxiv_api_request_at,
@@ -129,7 +118,6 @@ async def _fetch_arxiv_api_page(
     max_results: int,
 ) -> list[Paper]:
     """Fetch one page of results from arXiv API."""
-    _sync_app_globals()
     await app._apply_arxiv_rate_limit()
     return await app._get_services().arxiv_api.fetch_page(
         client=app._http_client,
@@ -149,7 +137,6 @@ def _apply_arxiv_search_results(
     papers: list[Paper],
 ) -> None:
     """Switch UI to API mode and render fetched papers."""
-    _sync_app_globals()
     was_in_api_mode = app._in_arxiv_api_mode
     if not was_in_api_mode and app._local_browse_snapshot is None:
         app._local_browse_snapshot = app._capture_local_browse_snapshot()
@@ -212,7 +199,6 @@ async def _run_arxiv_search(app: "ArxivBrowser", request: ArxivSearchRequest, st
         request: Encapsulates the query, field, and category to search.
         start: Zero-based result offset for pagination (0 for the first page).
     """
-    _sync_app_globals()
     if app._arxiv_api_fetch_inflight:
         app.notify("Search already in progress", title="arXiv Search")
         return
@@ -302,7 +288,6 @@ async def _run_arxiv_search(app: "ArxivBrowser", request: ArxivSearchRequest, st
 
 async def action_goto_bookmark(app: "ArxivBrowser", index: int) -> None:
     """Switch to a bookmarked search query."""
-    _sync_app_globals()
     if index < 0 or index >= len(app._config.bookmarks):
         return
 
@@ -321,7 +306,6 @@ async def action_goto_bookmark(app: "ArxivBrowser", index: int) -> None:
 
 async def action_add_bookmark(app: "ArxivBrowser") -> None:
     """Add current search query as a bookmark."""
-    _sync_app_globals()
     query = app._get_search_input_widget().value.strip()
 
     if not query:
@@ -371,7 +355,6 @@ async def action_add_bookmark(app: "ArxivBrowser") -> None:
 
 async def action_remove_bookmark(app: "ArxivBrowser") -> None:
     """Remove the currently active bookmark."""
-    _sync_app_globals()
     if app._active_bookmark_index < 0 or app._active_bookmark_index >= len(app._config.bookmarks):
         app.notify(
             build_actionable_warning(
@@ -404,7 +387,6 @@ async def action_remove_bookmark(app: "ArxivBrowser") -> None:
 
 def action_prev_date(app: "ArxivBrowser") -> None:
     """Navigate to previous (older) date file."""
-    _sync_app_globals()
     if app._in_arxiv_api_mode:
         app._track_task(app._change_arxiv_page(-1))
         return
@@ -426,7 +408,6 @@ def action_prev_date(app: "ArxivBrowser") -> None:
 
 def action_next_date(app: "ArxivBrowser") -> None:
     """Navigate to next (newer) date file."""
-    _sync_app_globals()
     if app._in_arxiv_api_mode:
         app._track_task(app._change_arxiv_page(1))
         return

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from arxiv_browser.app import (
+from tests.support.canonical_exports import (
     ArxivBrowser,
     Paper,
     UserConfig,

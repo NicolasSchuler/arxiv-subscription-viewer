@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from arxiv_browser.app import (
+from arxiv_browser.themes import THEME_NAMES, THEMES
+from tests.support.canonical_exports import (
     ARXIV_API_DEFAULT_MAX_RESULTS,
     ARXIV_DATE_FORMAT,
     DEFAULT_CATEGORY_COLOR,
@@ -59,7 +60,6 @@ from arxiv_browser.app import (
     to_rpn,
     tokenize_query,
 )
-from arxiv_browser.themes import THEME_NAMES, THEMES
 
 # ============================================================================
 # Tests for clean_latex function
@@ -107,33 +107,33 @@ class TestPaperSimilarity:
 
     def test_jaccard_similarity_identical_sets(self):
         """Identical sets should have similarity of 1.0."""
-        from arxiv_browser.app import _jaccard_similarity
+        from tests.support.canonical_exports import _jaccard_similarity
 
         s = {"a", "b", "c"}
         assert _jaccard_similarity(s, s) == 1.0
 
     def test_jaccard_similarity_disjoint_sets(self):
         """Disjoint sets should have similarity of 0.0."""
-        from arxiv_browser.app import _jaccard_similarity
+        from tests.support.canonical_exports import _jaccard_similarity
 
         assert _jaccard_similarity({"a", "b"}, {"c", "d"}) == 0.0
 
     def test_jaccard_similarity_partial_overlap(self):
         """Partial overlap should return correct similarity."""
-        from arxiv_browser.app import _jaccard_similarity
+        from tests.support.canonical_exports import _jaccard_similarity
 
         result = _jaccard_similarity({"a", "b"}, {"b", "c"})
         assert abs(result - 1 / 3) < 0.01
 
     def test_jaccard_similarity_empty_sets(self):
         """Empty sets should return 0.0."""
-        from arxiv_browser.app import _jaccard_similarity
+        from tests.support.canonical_exports import _jaccard_similarity
 
         assert _jaccard_similarity(set(), set()) == 0.0
 
     def test_extract_keywords_filters_stopwords(self):
         """Keywords extraction should filter stopwords."""
-        from arxiv_browser.app import _extract_keywords
+        from tests.support.canonical_exports import _extract_keywords
 
         keywords = _extract_keywords("the quick brown fox and the lazy dog")
         assert "the" not in keywords
@@ -143,7 +143,7 @@ class TestPaperSimilarity:
 
     def test_extract_keywords_min_length(self):
         """Keywords shorter than min_length should be excluded."""
-        from arxiv_browser.app import _extract_keywords
+        from tests.support.canonical_exports import _extract_keywords
 
         keywords = _extract_keywords("a big cat sat on the mat")
         assert "a" not in keywords
@@ -151,7 +151,7 @@ class TestPaperSimilarity:
 
     def test_extract_author_lastnames(self):
         """Author lastname extraction should work correctly."""
-        from arxiv_browser.app import _extract_author_lastnames
+        from tests.support.canonical_exports import _extract_author_lastnames
 
         lastnames = _extract_author_lastnames("John Smith, Jane Doe and Bob Wilson")
         assert "smith" in lastnames
@@ -160,7 +160,7 @@ class TestPaperSimilarity:
 
     def test_similar_papers_have_higher_score(self, sample_papers):
         """Similar papers should have higher similarity than dissimilar ones."""
-        from arxiv_browser.app import compute_paper_similarity
+        from tests.support.canonical_exports import compute_paper_similarity
 
         nlp_paper = sample_papers[0]
         text_paper = sample_papers[1]
@@ -173,7 +173,7 @@ class TestPaperSimilarity:
 
     def test_find_similar_papers_excludes_self(self, sample_papers):
         """find_similar_papers should not include the target paper."""
-        from arxiv_browser.app import find_similar_papers
+        from tests.support.canonical_exports import find_similar_papers
 
         target = sample_papers[0]
         similar = find_similar_papers(target, sample_papers)
@@ -183,7 +183,7 @@ class TestPaperSimilarity:
 
     def test_find_similar_papers_respects_top_n(self, sample_papers):
         """find_similar_papers should return at most top_n results."""
-        from arxiv_browser.app import find_similar_papers
+        from tests.support.canonical_exports import find_similar_papers
 
         target = sample_papers[0]
         similar = find_similar_papers(target, sample_papers, top_n=1)
@@ -513,31 +513,31 @@ class TestTruncateText:
 
     def test_short_text_unchanged(self):
         """Text shorter than max_len should be returned unchanged."""
-        from arxiv_browser.app import truncate_text
+        from tests.support.canonical_exports import truncate_text
 
         assert truncate_text("Hello", 10) == "Hello"
 
     def test_exact_length_unchanged(self):
         """Text exactly at max_len should be returned unchanged."""
-        from arxiv_browser.app import truncate_text
+        from tests.support.canonical_exports import truncate_text
 
         assert truncate_text("Hello", 5) == "Hello"
 
     def test_long_text_truncated(self):
         """Text longer than max_len should be truncated with suffix."""
-        from arxiv_browser.app import truncate_text
+        from tests.support.canonical_exports import truncate_text
 
         assert truncate_text("Hello World", 5) == "Hello..."
 
     def test_custom_suffix(self):
         """Custom suffix should be used when provided."""
-        from arxiv_browser.app import truncate_text
+        from tests.support.canonical_exports import truncate_text
 
         assert truncate_text("Hello World", 5, suffix=">>>") == "Hello>>>"
 
     def test_empty_string(self):
         """Empty string should be handled correctly."""
-        from arxiv_browser.app import truncate_text
+        from tests.support.canonical_exports import truncate_text
 
         assert truncate_text("", 10) == ""
 
@@ -547,35 +547,35 @@ class TestSafeGetAndTypeValidation:
 
     def test_safe_get_correct_type(self):
         """_safe_get should return value when type matches."""
-        from arxiv_browser.app import _safe_get
+        from tests.support.canonical_exports import _safe_get
 
         data = {"key": 42}
         assert _safe_get(data, "key", 0, int) == 42
 
     def test_safe_get_wrong_type(self):
         """_safe_get should return default when type doesn't match."""
-        from arxiv_browser.app import _safe_get
+        from tests.support.canonical_exports import _safe_get
 
         data = {"key": "not_an_int"}
         assert _safe_get(data, "key", 0, int) == 0
 
     def test_safe_get_rejects_bool_for_int(self):
         """_safe_get should reject bool values for integer fields."""
-        from arxiv_browser.app import _safe_get
+        from tests.support.canonical_exports import _safe_get
 
         data = {"key": True}
         assert _safe_get(data, "key", 50, int) == 50
 
     def test_safe_get_missing_key(self):
         """_safe_get should return default for missing key."""
-        from arxiv_browser.app import _safe_get
+        from tests.support.canonical_exports import _safe_get
 
         data = {}
         assert _safe_get(data, "key", "default", str) == "default"
 
     def test_dict_to_config_handles_invalid_types(self):
         """_dict_to_config should handle invalid types gracefully."""
-        from arxiv_browser.app import _dict_to_config
+        from tests.support.canonical_exports import _dict_to_config
 
         invalid_data = {
             "session": {
@@ -599,7 +599,7 @@ class TestSafeGetAndTypeValidation:
 
     def test_dict_to_config_rejects_bool_for_int_fields(self):
         """_dict_to_config should treat bool as invalid for integer configuration fields."""
-        from arxiv_browser.app import _dict_to_config
+        from tests.support.canonical_exports import _dict_to_config
 
         config = _dict_to_config({"arxiv_api_max_results": True})
         assert config.arxiv_api_max_results == ARXIV_API_DEFAULT_MAX_RESULTS
@@ -752,7 +752,7 @@ class TestHistoryFileDiscovery:
 
     def test_discover_history_files_empty_dir(self, tmp_path):
         """discover_history_files should return empty list for empty history dir."""
-        from arxiv_browser.app import discover_history_files
+        from tests.support.canonical_exports import discover_history_files
 
         history_dir = tmp_path / "history"
         history_dir.mkdir()
@@ -760,13 +760,13 @@ class TestHistoryFileDiscovery:
 
     def test_discover_history_files_no_history_dir(self, tmp_path):
         """discover_history_files should return empty list when history/ doesn't exist."""
-        from arxiv_browser.app import discover_history_files
+        from tests.support.canonical_exports import discover_history_files
 
         assert discover_history_files(tmp_path) == []
 
     def test_discover_history_files_respects_limit(self, tmp_path):
         """discover_history_files should respect the limit parameter."""
-        from arxiv_browser.app import discover_history_files
+        from tests.support.canonical_exports import discover_history_files
 
         history_dir = tmp_path / "history"
         history_dir.mkdir()
@@ -782,7 +782,7 @@ class TestHistoryFileDiscovery:
 
     def test_discover_history_files_default_is_unbounded(self, tmp_path):
         """discover_history_files should return all files when limit is omitted."""
-        from arxiv_browser.app import discover_history_files
+        from tests.support.canonical_exports import discover_history_files
 
         history_dir = tmp_path / "history"
         history_dir.mkdir()
@@ -795,13 +795,13 @@ class TestHistoryFileDiscovery:
 
     def test_max_history_files_constant_is_positive(self):
         """MAX_HISTORY_FILES constant should be positive."""
-        from arxiv_browser.app import MAX_HISTORY_FILES
+        from tests.support.canonical_exports import MAX_HISTORY_FILES
 
         assert MAX_HISTORY_FILES > 0
 
     def test_discover_history_files_skips_invalid_names(self, tmp_path):
         """discover_history_files should skip files that don't match YYYY-MM-DD pattern."""
-        from arxiv_browser.app import discover_history_files
+        from tests.support.canonical_exports import discover_history_files
 
         history_dir = tmp_path / "history"
         history_dir.mkdir()
@@ -819,7 +819,7 @@ class TestHistoryFileDiscovery:
         """discover_history_files should return [] when history directory can't be read."""
         import logging
 
-        from arxiv_browser.app import discover_history_files
+        from tests.support.canonical_exports import discover_history_files
 
         history_dir = tmp_path / "history"
         history_dir.mkdir()
@@ -901,7 +901,7 @@ class TestPdfDownloadConfig:
 
     def test_pdf_download_dir_serialization_roundtrip(self):
         """pdf_download_dir should survive config serialization."""
-        from arxiv_browser.app import _config_to_dict, _dict_to_config
+        from tests.support.canonical_exports import _config_to_dict, _dict_to_config
 
         config = UserConfig(pdf_download_dir="/custom/path")
         data = _config_to_dict(config)
@@ -910,7 +910,7 @@ class TestPdfDownloadConfig:
 
     def test_get_pdf_download_path_default(self, tmp_path, monkeypatch):
         """Default path should be ~/arxiv-pdfs/{arxiv_id}.pdf."""
-        from arxiv_browser.app import DEFAULT_PDF_DOWNLOAD_DIR
+        from tests.support.canonical_exports import DEFAULT_PDF_DOWNLOAD_DIR
 
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
 

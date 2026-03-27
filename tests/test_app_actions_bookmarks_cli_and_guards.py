@@ -12,8 +12,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-import arxiv_browser.app as app_mod
-from arxiv_browser.app import (
+from arxiv_browser.huggingface import HuggingFacePaper
+from arxiv_browser.semantic_scholar import (
+    CitationEntry,
+    S2RecommendationsCacheSnapshot,
+    SemanticScholarPaper,
+)
+from tests.support import canonical_exports as app_mod
+from tests.support.app_stubs import (
+    _DummyOptionList,
+    _make_hf_paper,
+    _make_s2_paper,
+    _new_app,
+)
+from tests.support.canonical_exports import (
     ArxivBrowser,
     PaperCollection,
     PaperMetadata,
@@ -22,18 +34,7 @@ from arxiv_browser.app import (
     _resolve_legacy_fallback,
     _resolve_papers,
 )
-from arxiv_browser.huggingface import HuggingFacePaper
-from arxiv_browser.semantic_scholar import (
-    CitationEntry,
-    S2RecommendationsCacheSnapshot,
-    SemanticScholarPaper,
-)
-from tests.support.app_stubs import (
-    _DummyOptionList,
-    _make_hf_paper,
-    _make_s2_paper,
-    _new_app,
-)
+from tests.support.patch_helpers import patch_save_config
 
 
 class TestBookmarkRelevanceAndCopyCoverage:
@@ -53,7 +54,7 @@ class TestBookmarkRelevanceAndCopyCoverage:
         assert "Bookmark requires an active search query." in app.notify.call_args[0][0]
 
         search_input.value = "graph transformers"
-        with patch("arxiv_browser.app.save_config", return_value=True) as save_mock:
+        with patch_save_config(return_value=True) as save_mock:
             await app.action_add_bookmark()
             assert len(app._config.bookmarks) == 1
             assert app._active_bookmark_index == 0
@@ -82,7 +83,7 @@ class TestBookmarkRelevanceAndCopyCoverage:
         app.notify = MagicMock()
         app.query_one = MagicMock(return_value=SimpleNamespace(value="graph transformers"))
 
-        with patch("arxiv_browser.app.save_config", return_value=False):
+        with patch_save_config(return_value=False):
             await app.action_add_bookmark()
 
         assert app._config.bookmarks == []
@@ -106,7 +107,7 @@ class TestBookmarkRelevanceAndCopyCoverage:
         app._update_bookmark_bar = AsyncMock()
         app.notify = MagicMock()
 
-        with patch("arxiv_browser.app.save_config", return_value=False):
+        with patch_save_config(return_value=False):
             await app.action_remove_bookmark()
 
         assert app._config.bookmarks == [bookmark]
@@ -188,7 +189,7 @@ class TestBookmarkRelevanceAndCopyCoverage:
         app._refresh_detail_pane = MagicMock()
         app.notify = MagicMock()
 
-        with patch("arxiv_browser.app.save_config", return_value=True) as save:
+        with patch_save_config(return_value=True) as save:
             app._on_interests_edited("new")
             app._on_interests_edited("new")
 
@@ -249,7 +250,7 @@ class TestAutoTagAndPdfOpenCoverage:
             return app._config.paper_metadata.setdefault(arxiv_id, PaperMetadata(arxiv_id=arxiv_id))
 
         app._get_or_create_metadata = get_meta
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             app._on_auto_tag_accepted(None, paper.arxiv_id)
             app._on_auto_tag_accepted(["topic:ml"], paper.arxiv_id)
         assert app._config.paper_metadata[paper.arxiv_id].tags == ["topic:ml"]
@@ -361,7 +362,7 @@ class TestSaveConfigOrWarn:
         app = _new_app()
         app._config = UserConfig()
         app.notify = MagicMock()
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             result = app._save_config_or_warn("test context")
         assert result is True
         app.notify.assert_not_called()
@@ -370,7 +371,7 @@ class TestSaveConfigOrWarn:
         app = _new_app()
         app._config = UserConfig()
         app.notify = MagicMock()
-        with patch("arxiv_browser.app.save_config", return_value=False):
+        with patch_save_config(return_value=False):
             result = app._save_config_or_warn("theme preference")
         assert result is False
         app.notify.assert_called_once()
@@ -455,7 +456,9 @@ class TestLlmProviderGuards:
         generate_summary = AsyncMock(return_value=("service summary", None))
         app._services = SimpleNamespace(llm=SimpleNamespace(generate_summary=generate_summary))
 
-        with patch("arxiv_browser.app.asyncio.to_thread", new=AsyncMock(return_value=None)):
+        with patch(
+            "arxiv_browser.actions.llm_actions.asyncio.to_thread", new=AsyncMock(return_value=None)
+        ):
             await app._generate_summary_async(
                 paper,
                 "prompt_template",
@@ -503,3 +506,147 @@ class TestBestEffortS2CacheWrite:
 
         assert len(result) == 1
         assert result[0].arxiv_id == "2401.99999"
+
+
+class TestSearchActionCoverage:
+    def test_toggle_cancel_and_date_navigation_edges(self):
+        class _Container:
+            def __init__(self) -> None:
+                self.classes: set[str] = set()
+
+            def add_class(self, class_name: str) -> None:
+                self.classes.add(class_name)
+
+            def remove_class(self, class_name: str) -> None:
+                self.classes.discard(class_name)
+
+        app = _new_app()
+        container = _Container()
+        search_input = SimpleNamespace(value="graph transformers", focused=False)
+
+        def _focus() -> None:
+            search_input.focused = True
+
+        search_input.focus = _focus
+        app._get_search_container_widget = MagicMock(return_value=container)
+        app._get_search_input_widget = MagicMock(return_value=search_input)
+        app._update_footer = MagicMock()
+        app._apply_filter = MagicMock()
+        app.notify = MagicMock()
+        app._in_arxiv_api_mode = True
+        app.action_exit_arxiv_search_mode = MagicMock()
+        app._relevance_scoring_active = True
+        app._auto_tag_progress = None
+        app._cancel_batch_requested = False
+        app._track_task = MagicMock(side_effect=lambda coro: coro.close())
+        app._change_arxiv_page = AsyncMock(return_value=None)
+
+        app.action_toggle_search()
+        assert "visible" in container.classes
+        assert search_input.focused is True
+        assert "Search mode" in app.notify.call_args.args[0]
+
+        app.notify.reset_mock()
+        app.action_toggle_search()
+        assert "visible" not in container.classes
+        app.notify.assert_not_called()
+
+        container.add_class("visible")
+        app.action_cancel_search()
+        assert search_input.value == ""
+        app._apply_filter.assert_called_once_with("")
+        app.action_exit_arxiv_search_mode.assert_called_once()
+        assert app._cancel_batch_requested is True
+        assert "Cancelling batch operation" in app.notify.call_args.args[0]
+
+        app.notify.reset_mock()
+        app._in_arxiv_api_mode = True
+        app.action_prev_date()
+        app.action_next_date()
+        assert app._track_task.call_count == 2
+
+        app._in_arxiv_api_mode = False
+        app._is_history_mode = MagicMock(return_value=False)
+        app.notify.reset_mock()
+        app.action_prev_date()
+        assert "Not in history mode" in app.notify.call_args.args[0]
+        app.notify.reset_mock()
+        app.action_next_date()
+        assert "Not in history mode" in app.notify.call_args.args[0]
+
+        app._is_history_mode = MagicMock(return_value=True)
+        app._history_files = [object(), object()]
+        app._current_date_index = 1
+        app.notify.reset_mock()
+        app.action_prev_date()
+        assert "Already at oldest" in app.notify.call_args.args[0]
+
+        app._current_date_index = 0
+        app.notify.reset_mock()
+        app.action_next_date()
+        assert "Already at newest" in app.notify.call_args.args[0]
+
+        app._set_history_index = MagicMock(return_value=True)
+        app._get_current_date = MagicMock(return_value=date(2026, 2, 13))
+        app._current_date_index = 0
+        app.notify.reset_mock()
+        app.action_prev_date()
+        assert "Loaded 2026-02-13" in app.notify.call_args.args[0]
+
+        app._current_date_index = 1
+        app.notify.reset_mock()
+        app.action_next_date()
+        assert "Loaded 2026-02-13" in app.notify.call_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_run_arxiv_search_status_and_stale_response_matrix(self, make_paper):
+        def _status_error(status_code: int) -> httpx.HTTPStatusError:
+            request = httpx.Request("GET", "https://arxiv.org/api")
+            response = httpx.Response(status_code, request=request)
+            return httpx.HTTPStatusError("boom", request=request, response=response)
+
+        app = _new_app()
+        app._config = UserConfig()
+        app._arxiv_api_request_token = 0
+        app._arxiv_api_fetch_inflight = False
+        app._arxiv_api_loading = False
+        app._update_status_bar = MagicMock()
+        app._apply_arxiv_search_results = MagicMock()
+        app.notify = MagicMock()
+        request = app_mod.ArxivSearchRequest(query="graph")
+
+        app._fetch_arxiv_api_page = AsyncMock(side_effect=_status_error(429))
+        await app._run_arxiv_search(request, start=0)
+        assert "HTTP 429" in app.notify.call_args.args[0]
+        assert app._arxiv_api_fetch_inflight is False
+        assert app._arxiv_api_loading is False
+
+        app.notify.reset_mock()
+        app._fetch_arxiv_api_page = AsyncMock(side_effect=_status_error(503))
+        await app._run_arxiv_search(request, start=0)
+        assert "unavailable right now" in app.notify.call_args.args[0]
+
+        app.notify.reset_mock()
+        app._fetch_arxiv_api_page = AsyncMock(side_effect=_status_error(404))
+        await app._run_arxiv_search(request, start=0)
+        assert "rejected the request" in app.notify.call_args.args[0]
+
+        app.notify.reset_mock()
+        app._fetch_arxiv_api_page = AsyncMock(side_effect=OSError("boom"))
+        await app._run_arxiv_search(request, start=0)
+        assert "network or I/O error" in app.notify.call_args.args[0]
+
+        async def _stale_fetch(*_args, **_kwargs):
+            app._arxiv_api_request_token += 1
+            return [make_paper(arxiv_id="2401.92001")]
+
+        app.notify.reset_mock()
+        app._apply_arxiv_search_results.reset_mock()
+        app._arxiv_api_fetch_inflight = False
+        app._arxiv_api_loading = False
+        app._fetch_arxiv_api_page = AsyncMock(side_effect=_stale_fetch)
+        await app._run_arxiv_search(request, start=0)
+        app.notify.assert_not_called()
+        app._apply_arxiv_search_results.assert_not_called()
+        assert app._arxiv_api_fetch_inflight is True
+        assert app._arxiv_api_loading is True

@@ -12,7 +12,8 @@ import pytest
 from textual.events import Click
 from textual.widgets import Checkbox, Input, Label, ListView, Select, Static
 
-from arxiv_browser.app import (
+from arxiv_browser.widgets.listing import PaperListItem
+from tests.support.canonical_exports import (
     MAX_COLLECTIONS,
     AddToCollectionModal,
     ArxivBrowser,
@@ -32,7 +33,7 @@ from arxiv_browser.app import (
     WatchListModal,
     tokenize_query,
 )
-from arxiv_browser.widgets.listing import PaperListItem
+from tests.support.patch_helpers import patch_save_config
 
 
 async def _open_modal(app: ArxivBrowser, pilot, modal) -> None:
@@ -80,7 +81,7 @@ async def test_collections_modal_create_rename_delete_flow(make_paper):
     base = PaperCollection(name="Reading", description="base", paper_ids=[papers[0].arxiv_id])
     modal = CollectionsModal([base], papers_by_id={papers[0].arxiv_id: papers[0]})
 
-    with patch("arxiv_browser.app.save_config", return_value=True):
+    with patch_save_config(return_value=True):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
             name_input = modal.query_one("#col-name", Input)
@@ -111,7 +112,7 @@ async def test_collections_modal_validates_create_inputs(make_paper):
     base = PaperCollection(name="Reading", description="", paper_ids=[])
     modal = CollectionsModal([base])
 
-    with patch("arxiv_browser.app.save_config", return_value=True):
+    with patch_save_config(return_value=True):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
             name_input = modal.query_one("#col-name", Input)
@@ -137,7 +138,7 @@ async def test_collections_modal_enforces_max_collection_count(make_paper):
     ]
     modal = CollectionsModal(collections)
 
-    with patch("arxiv_browser.app.save_config", return_value=True):
+    with patch_save_config(return_value=True):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
             modal.notify = MagicMock()
@@ -161,7 +162,7 @@ async def test_collection_view_modal_remove_and_done(make_paper):
     app = ArxivBrowser(papers, restore_session=False)
     modal = CollectionViewModal(collection, papers_by_id={p.arxiv_id: p for p in papers})
 
-    with patch("arxiv_browser.app.save_config", return_value=True):
+    with patch_save_config(return_value=True):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
             modal.on_remove_pressed()
@@ -179,7 +180,7 @@ async def test_collection_view_modal_requires_selection_for_remove(make_paper):
     app = ArxivBrowser(papers, restore_session=False)
     modal = CollectionViewModal(collection, papers_by_id={papers[0].arxiv_id: papers[0]})
 
-    with patch("arxiv_browser.app.save_config", return_value=True):
+    with patch_save_config(return_value=True):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
             modal.notify = MagicMock()
@@ -197,7 +198,7 @@ async def test_add_to_collection_modal_select_and_cancel(make_paper):
     ]
     modal = AddToCollectionModal(collections)
 
-    with patch("arxiv_browser.app.save_config", return_value=True):
+    with patch_save_config(return_value=True):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
             list_view = modal.query_one("#addcol-list", ListView)
@@ -231,7 +232,7 @@ async def test_recommendations_screen_select_cursor_and_cancel(make_paper):
     app = ArxivBrowser([target, p2, p3], restore_session=False)
     modal = RecommendationsScreen(target, [(p2, 0.92), (p3, 0.70)])
 
-    with patch("arxiv_browser.app.save_config", return_value=True):
+    with patch_save_config(return_value=True):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
             list_view = modal.query_one("#recommendations-list", ListView)
@@ -261,7 +262,7 @@ async def test_recommendations_screen_select_empty_returns_none(make_paper):
     app = ArxivBrowser([target], restore_session=False)
     modal = RecommendationsScreen(target, [])
 
-    with patch("arxiv_browser.app.save_config", return_value=True):
+    with patch_save_config(return_value=True):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
             modal.dismiss = MagicMock()
@@ -303,7 +304,7 @@ async def test_citation_graph_switch_open_url_and_local_jump(make_paper):
     )
 
     with (
-        patch("arxiv_browser.app.save_config", return_value=True),
+        patch_save_config(return_value=True),
         patch("arxiv_browser.modals.citations.webbrowser.open") as browser_open,
     ):
         async with app.run_test() as pilot:
@@ -350,7 +351,7 @@ async def test_citation_graph_drill_down_success_and_back(make_paper):
         local_arxiv_ids=frozenset({"2401.00002", "2401.00003"}),
     )
 
-    with patch("arxiv_browser.app.save_config", return_value=True):
+    with patch_save_config(return_value=True):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
             await modal.action_drill_down()
@@ -386,7 +387,7 @@ async def test_citation_graph_drill_down_failure_restores_state(make_paper):
         local_arxiv_ids=frozenset({"2401.00002"}),
     )
 
-    with patch("arxiv_browser.app.save_config", return_value=True):
+    with patch_save_config(return_value=True):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
             app.notify = MagicMock()
@@ -421,7 +422,7 @@ async def test_citation_graph_button_handlers_use_track_task(make_paper):
         local_arxiv_ids=frozenset({"2401.00002"}),
     )
 
-    with patch("arxiv_browser.app.save_config", return_value=True):
+    with patch_save_config(return_value=True):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
             captured = []
@@ -445,7 +446,7 @@ async def test_arxiv_search_modal_validation_and_submit(make_paper):
     app = ArxivBrowser([make_paper()], restore_session=False)
     modal = ArxivSearchModal(initial_query="seed", initial_field="bad-field", initial_category="")
 
-    with patch("arxiv_browser.app.save_config", return_value=True):
+    with patch_save_config(return_value=True):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
             field_select = modal.query_one("#arxiv-search-field", Select)
@@ -484,7 +485,7 @@ async def test_command_palette_modal_filters_and_executes(make_paper):
     app = ArxivBrowser([make_paper()], restore_session=False)
     modal = CommandPaletteModal(commands)
 
-    with patch("arxiv_browser.app.save_config", return_value=True):
+    with patch_save_config(return_value=True):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
             results = modal.query_one("#palette-results")
@@ -584,7 +585,7 @@ async def test_help_screen_has_filter_input_and_filters(make_paper):
     app = ArxivBrowser([make_paper()], restore_session=False)
     modal = HelpScreen()
 
-    with patch("arxiv_browser.app.save_config", return_value=True):
+    with patch_save_config(return_value=True):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
 
@@ -669,7 +670,7 @@ async def test_watch_list_modal_add_update_delete_and_save(make_paper):
         [WatchListEntry(pattern="Smith", match_type="author", case_sensitive=False)]
     )
 
-    with patch("arxiv_browser.app.save_config", return_value=True):
+    with patch_save_config(return_value=True):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
             pattern = modal.query_one("#watch-pattern", Input)
@@ -713,7 +714,7 @@ async def test_watch_list_modal_update_delete_require_selection(make_paper):
     app = ArxivBrowser([make_paper()], restore_session=False)
     modal = WatchListModal([])
 
-    with patch("arxiv_browser.app.save_config", return_value=True):
+    with patch_save_config(return_value=True):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
             empty_hint = modal.query_one("#watch-empty", Static)
@@ -744,7 +745,7 @@ async def test_date_navigator_updates_in_place_when_window_unchanged(make_paper,
     ]
 
     app = ArxivBrowser([make_paper()], restore_session=False, history_files=history_files)
-    with patch("arxiv_browser.app.save_config", return_value=True):
+    with patch_save_config(return_value=True):
         async with app.run_test() as pilot:
             await pilot.pause(0.1)
             nav = app.query_one(DateNavigator)

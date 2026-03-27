@@ -12,8 +12,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-import arxiv_browser.app as app_mod
-from arxiv_browser.app import (
+from arxiv_browser.huggingface import HuggingFacePaper
+from arxiv_browser.semantic_scholar import (
+    CitationEntry,
+    S2RecommendationsCacheSnapshot,
+    SemanticScholarPaper,
+)
+from tests.support import canonical_exports as app_mod
+from tests.support.app_stubs import (
+    _DummyOptionList,
+    _make_hf_paper,
+    _make_s2_paper,
+    _new_app,
+)
+from tests.support.canonical_exports import (
     ArxivBrowser,
     PaperCollection,
     PaperMetadata,
@@ -22,18 +34,7 @@ from arxiv_browser.app import (
     _resolve_legacy_fallback,
     _resolve_papers,
 )
-from arxiv_browser.huggingface import HuggingFacePaper
-from arxiv_browser.semantic_scholar import (
-    CitationEntry,
-    S2RecommendationsCacheSnapshot,
-    SemanticScholarPaper,
-)
-from tests.support.app_stubs import (
-    _DummyOptionList,
-    _make_hf_paper,
-    _make_s2_paper,
-    _new_app,
-)
+from tests.support.patch_helpers import patch_save_config
 
 
 class TestRelevanceBatchCoverage:
@@ -56,7 +57,10 @@ class TestRelevanceBatchCoverage:
             "2401.00001": (9, "cached 1"),
             "2401.00002": (7, "cached 2"),
         }
-        with patch("arxiv_browser.app._load_all_relevance_scores", return_value=cached_scores):
+        with patch(
+            "arxiv_browser.actions.llm_actions._load_all_relevance_scores",
+            return_value=cached_scores,
+        ):
             await app._score_relevance_batch_async(papers, "cmd {prompt}", "relevance interests")
 
         assert app._relevance_scores == cached_scores
@@ -95,8 +99,8 @@ class TestRelevanceBatchCoverage:
         )
 
         with (
-            patch("arxiv_browser.app._load_all_relevance_scores", return_value={}),
-            patch("arxiv_browser.app._save_relevance_score", return_value=None),
+            patch("arxiv_browser.actions.llm_actions._load_all_relevance_scores", return_value={}),
+            patch("arxiv_browser.actions.llm_actions._save_relevance_score", return_value=None),
         ):
             await app._score_relevance_batch_async(papers, "cmd {prompt}", "relevance interests")
 
@@ -158,13 +162,13 @@ class TestVersionCheckCoverage:
 
         with (
             patch(
-                "arxiv_browser.app.parse_arxiv_version_map",
+                "arxiv_browser.browser.discovery.parse_arxiv_version_map",
                 side_effect=[
                     {"2401.00001": 3, "2401.00002": 1},
                     {"2401.00003": 9},
                 ],
             ),
-            patch("arxiv_browser.app.save_config", return_value=True),
+            patch_save_config(return_value=True),
         ):
             await app._check_versions_async({"2401.00001", "2401.00002", "2401.00003"})
 
@@ -211,10 +215,10 @@ class TestVersionCheckCoverage:
 
         with (
             patch(
-                "arxiv_browser.app.parse_arxiv_version_map",
+                "arxiv_browser.browser.discovery.parse_arxiv_version_map",
                 side_effect=[{"2401.10001": 4}],
             ),
-            patch("arxiv_browser.app.save_config", return_value=True),
+            patch_save_config(return_value=True),
         ):
             await app._check_versions_async({"2401.10001", "2401.10002"})
 
@@ -273,7 +277,7 @@ class TestAutoTagCoverage:
             make_paper(arxiv_id="2401.20003"),
         ]
 
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             await app._auto_tag_batch_async(papers, taxonomy=["existing"])
 
         assert "topic:nlp" in app._config.paper_metadata["2401.20001"].tags
@@ -304,7 +308,7 @@ class TestAutoTagCoverage:
 
         papers = [make_paper(arxiv_id="2401.21001"), make_paper(arxiv_id="2401.21002")]
 
-        with patch("arxiv_browser.app.save_config", return_value=True) as save:
+        with patch_save_config(return_value=True) as save:
             await app._auto_tag_batch_async(papers, taxonomy=[])
 
         save.assert_called_once()

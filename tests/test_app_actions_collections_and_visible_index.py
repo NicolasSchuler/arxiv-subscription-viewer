@@ -12,8 +12,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-import arxiv_browser.app as app_mod
-from arxiv_browser.app import (
+from arxiv_browser.huggingface import HuggingFacePaper
+from arxiv_browser.semantic_scholar import (
+    CitationEntry,
+    S2RecommendationsCacheSnapshot,
+    SemanticScholarPaper,
+)
+from tests.support import canonical_exports as app_mod
+from tests.support.app_stubs import (
+    _DummyOptionList,
+    _make_hf_paper,
+    _make_s2_paper,
+    _new_app,
+)
+from tests.support.canonical_exports import (
     ArxivBrowser,
     PaperCollection,
     PaperMetadata,
@@ -22,18 +34,7 @@ from arxiv_browser.app import (
     _resolve_legacy_fallback,
     _resolve_papers,
 )
-from arxiv_browser.huggingface import HuggingFacePaper
-from arxiv_browser.semantic_scholar import (
-    CitationEntry,
-    S2RecommendationsCacheSnapshot,
-    SemanticScholarPaper,
-)
-from tests.support.app_stubs import (
-    _DummyOptionList,
-    _make_hf_paper,
-    _make_s2_paper,
-    _new_app,
-)
+from tests.support.patch_helpers import patch_save_config
 
 
 class TestImportCollectionAndTagsCoverage:
@@ -59,8 +60,11 @@ class TestImportCollectionAndTagsCoverage:
         export_file.write_text("{}", encoding="utf-8")
 
         with (
-            patch("arxiv_browser.app.import_metadata", return_value=(2, 1, 1, 1)),
-            patch("arxiv_browser.app.save_config", return_value=False),
+            patch(
+                "arxiv_browser.actions.external_io_actions.import_metadata",
+                return_value=(2, 1, 1, 1),
+            ),
+            patch_save_config(return_value=False),
         ):
             app.action_import_metadata()
 
@@ -96,15 +100,20 @@ class TestImportCollectionAndTagsCoverage:
         captured = {}
         app.push_screen = lambda modal, callback: captured.update(modal=modal, callback=callback)
 
-        with patch("arxiv_browser.app.import_metadata", return_value=(1, 0, 0, 0)):
+        with patch(
+            "arxiv_browser.actions.external_io_actions.import_metadata", return_value=(1, 0, 0, 0)
+        ):
             app.action_import_metadata()
 
         assert isinstance(captured["modal"], MetadataSnapshotPickerModal)
         assert captured["modal"]._snapshots == [newer, older]
 
         with (
-            patch("arxiv_browser.app.import_metadata", return_value=(1, 0, 0, 0)),
-            patch("arxiv_browser.app.save_config", return_value=True),
+            patch(
+                "arxiv_browser.actions.external_io_actions.import_metadata",
+                return_value=(1, 0, 0, 0),
+            ),
+            patch_save_config(return_value=True),
         ):
             captured["callback"](older)
 
@@ -121,7 +130,7 @@ class TestImportCollectionAndTagsCoverage:
         captured = {}
         app.push_screen = lambda modal, callback: captured.update(modal=modal, callback=callback)
 
-        with patch("arxiv_browser.app.import_metadata") as import_mock:
+        with patch("arxiv_browser.actions.external_io_actions.import_metadata") as import_mock:
             app.action_import_metadata()
             captured["callback"](None)
 
@@ -133,7 +142,10 @@ class TestImportCollectionAndTagsCoverage:
         app = self._make_import_app(tmp_path)
         export_file = tmp_path / "arxiv-2026-02-13.csv"
 
-        with patch("arxiv_browser.app.write_timestamped_export_file", return_value=export_file):
+        with patch(
+            "arxiv_browser.actions.external_io_actions.write_timestamped_export_file",
+            return_value=export_file,
+        ):
             app._export_to_file("id,title\n", "csv", "CSV")
 
         assert str(export_file.resolve()) in app.notify.call_args[0][0]
@@ -149,7 +161,7 @@ class TestImportCollectionAndTagsCoverage:
         captured = {}
         app.push_screen = lambda _modal, cb: captured.setdefault("callback", cb)
 
-        with patch("arxiv_browser.app.save_config", return_value=True) as save:
+        with patch_save_config(return_value=True) as save:
             app.action_add_to_collection()
             captured["callback"]("Reading")
 

@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from arxiv_browser.app import (
+from arxiv_browser.themes import THEME_NAMES, THEMES
+from tests.support.canonical_exports import (
     ARXIV_API_DEFAULT_MAX_RESULTS,
     ARXIV_DATE_FORMAT,
     DEFAULT_CATEGORY_COLOR,
@@ -59,7 +60,7 @@ from arxiv_browser.app import (
     to_rpn,
     tokenize_query,
 )
-from arxiv_browser.themes import THEME_NAMES, THEMES
+from tests.support.patch_helpers import patch_save_config
 
 # ============================================================================
 # Tests for clean_latex function
@@ -106,11 +107,11 @@ class TestTextualIntegration:
 
         from textual.widgets import OptionList
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=5)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test():
                 option_list = app.query_one("#paper-list", OptionList)
                 assert option_list.option_count == 5
@@ -121,7 +122,7 @@ class TestTextualIntegration:
 
         from textual.widgets import OptionList
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=3)
         # Make one paper with a unique title for easy filtering
@@ -133,7 +134,7 @@ class TestTextualIntegration:
             abstract="Quantum abstract.",
         )
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 # Open search
                 await pilot.press("slash")
@@ -148,11 +149,11 @@ class TestTextualIntegration:
 
         from textual.widgets import OptionList
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=3)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 # Open search and type an advanced query that matches nothing
                 # Use "cat:" prefix to trigger exact (non-fuzzy) matching
@@ -171,11 +172,11 @@ class TestTextualIntegration:
         """Filtering to an empty list must not allow stale debounced detail updates."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser, PaperDetails
+        from tests.support.canonical_exports import ArxivBrowser, PaperDetails
 
         papers = self._make_papers(make_paper, count=2)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test():
                 details = app.query_one(PaperDetails)
                 app._pending_detail_paper = papers[0]
@@ -190,11 +191,11 @@ class TestTextualIntegration:
         """Pressing 's' should cycle through sort options."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=3)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 assert app._sort_index == 0
                 await pilot.press("s")
@@ -215,11 +216,11 @@ class TestTextualIntegration:
         """Pressing 'r' should toggle read status of the current paper."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser, PaperListItem
+        from tests.support.canonical_exports import ArxivBrowser, PaperListItem
 
         papers = self._make_papers(make_paper, count=2)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 # First paper should be highlighted by default
                 await pilot.press("r")
@@ -236,11 +237,11 @@ class TestTextualIntegration:
         """Pressing 'x' should toggle star status of the current paper."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=2)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 await pilot.press("x")
                 first_id = papers[0].arxiv_id
@@ -254,12 +255,12 @@ class TestTextualIntegration:
         """Pressing '?' should open help, 'escape' should close it."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
         from arxiv_browser.modals import HelpScreen
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 # Initially no help screen
                 assert len(app.screen_stack) == 1
@@ -281,11 +282,11 @@ class TestTextualIntegration:
 
         from textual.widgets import OptionList
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=5)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 option_list = app.query_one("#paper-list", OptionList)
                 # Should start at index 0
@@ -310,7 +311,7 @@ class TestArxivApiModeIntegration:
         """A single Escape should exit API mode even if search input is open."""
         from unittest.mock import AsyncMock, patch
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         local_papers = [make_paper(arxiv_id="2401.00001", title="Local paper")]
         api_paper = make_paper(
@@ -322,7 +323,7 @@ class TestArxivApiModeIntegration:
 
         app = ArxivBrowser(local_papers, restore_session=False)
         with (
-            patch("arxiv_browser.app.save_config", return_value=True),
+            patch_save_config(return_value=True),
             patch.object(
                 ArxivBrowser,
                 "_fetch_arxiv_api_page",
@@ -357,7 +358,7 @@ class TestArxivApiModeIntegration:
 
         from textual.widgets import OptionList
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         local_papers = [make_paper(arxiv_id="2401.00001", title="Local paper")]
         api_page_1 = [
@@ -377,7 +378,7 @@ class TestArxivApiModeIntegration:
         config = UserConfig(watch_list=[WatchListEntry(pattern="watch", match_type="title")])
         app = ArxivBrowser(local_papers, config=config, restore_session=False)
         with (
-            patch("arxiv_browser.app.save_config", return_value=True),
+            patch_save_config(return_value=True),
             patch.object(ArxivBrowser, "_fetch_arxiv_api_page", new=fetch_page),
             patch.object(
                 ArxivBrowser,
@@ -411,10 +412,14 @@ class TestArxivApiModeIntegration:
         """[`/`] should call API page change only when API mode is active."""
         from unittest.mock import AsyncMock, patch
 
-        from arxiv_browser.app import ArxivBrowser, ArxivSearchModeState, ArxivSearchRequest
+        from tests.support.canonical_exports import (
+            ArxivBrowser,
+            ArxivSearchModeState,
+            ArxivSearchRequest,
+        )
 
         app = ArxivBrowser([make_paper(arxiv_id="2401.00001")], restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 change_mock = AsyncMock()
                 app._change_arxiv_page = change_mock
@@ -443,7 +448,7 @@ class TestArxivApiModeIntegration:
         import asyncio
         from unittest.mock import AsyncMock, patch
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         local_papers = [make_paper(arxiv_id="2401.00001", title="Local")]
         api_page_1 = [make_paper(arxiv_id="2602.00001", title="API page one")]
@@ -461,7 +466,7 @@ class TestArxivApiModeIntegration:
 
         app = ArxivBrowser(local_papers, restore_session=False)
         with (
-            patch("arxiv_browser.app.save_config", return_value=True),
+            patch_save_config(return_value=True),
             patch.object(ArxivBrowser, "_fetch_arxiv_api_page", new=fetch_page),
             patch.object(
                 ArxivBrowser,
@@ -496,15 +501,15 @@ class TestArxivApiModeIntegration:
 
         from textual.widgets import Input, OptionList
 
-        from arxiv_browser.app import ArxivBrowser
         from arxiv_browser.models import LocalBrowseSnapshot
+        from tests.support.canonical_exports import ArxivBrowser
 
         local_papers = [
             make_paper(arxiv_id="2401.00001", title="Transformer Architecture"),
             make_paper(arxiv_id="2401.00002", title="Other Paper"),
         ]
         app = ArxivBrowser(local_papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test():
                 app._local_browse_snapshot = LocalBrowseSnapshot(
                     all_papers=local_papers,
@@ -539,7 +544,7 @@ class TestArxivApiErrorHandling:
     def _make_minimal_app():
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._config = UserConfig()
@@ -556,7 +561,7 @@ class TestArxivApiErrorHandling:
     async def test_apply_arxiv_rate_limit_waits_when_too_soon(self):
         from unittest.mock import AsyncMock, MagicMock, patch
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         app = self._make_minimal_app()
         app.notify = MagicMock()
@@ -574,8 +579,13 @@ class TestArxivApiErrorHandling:
 
         fake_loop = FakeLoop()
         with (
-            patch("arxiv_browser.app.asyncio.get_running_loop", return_value=fake_loop),
-            patch("arxiv_browser.app.asyncio.sleep", new_callable=AsyncMock) as sleep_mock,
+            patch(
+                "arxiv_browser.actions.search_api_actions.asyncio.get_running_loop",
+                return_value=fake_loop,
+            ),
+            patch(
+                "arxiv_browser.actions.search_api_actions.asyncio.sleep", new_callable=AsyncMock
+            ) as sleep_mock,
         ):
             await ArxivBrowser._apply_arxiv_rate_limit(app)
 
@@ -588,7 +598,7 @@ class TestArxivApiErrorHandling:
     async def test_run_arxiv_search_value_error_cleans_loading_state(self):
         from unittest.mock import AsyncMock
 
-        from arxiv_browser.app import ArxivBrowser, ArxivSearchRequest
+        from tests.support.canonical_exports import ArxivBrowser, ArxivSearchRequest
 
         app = self._make_minimal_app()
         app._fetch_arxiv_api_page = AsyncMock(side_effect=ValueError("bad query"))
@@ -607,7 +617,7 @@ class TestArxivApiErrorHandling:
 
         import httpx
 
-        from arxiv_browser.app import ArxivBrowser, ArxivSearchRequest
+        from tests.support.canonical_exports import ArxivBrowser, ArxivSearchRequest
 
         app = self._make_minimal_app()
         request = httpx.Request("GET", "https://export.arxiv.org/api/query")
@@ -632,7 +642,7 @@ class TestArxivApiErrorHandling:
 
         import httpx
 
-        from arxiv_browser.app import ArxivBrowser, ArxivSearchRequest
+        from tests.support.canonical_exports import ArxivBrowser, ArxivSearchRequest
 
         app = self._make_minimal_app()
         request = httpx.Request("GET", "https://export.arxiv.org/api/query")
@@ -662,7 +672,7 @@ class TestStatusFilterIntegration:
 
     @staticmethod
     def _make_app(make_paper):
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = [
             make_paper(
@@ -682,7 +692,7 @@ class TestStatusFilterIntegration:
         from textual.widgets import Input, Label
 
         app = self._make_app(make_paper)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 # Open search and inject Rich markup directly into input
                 # (bracket keys are intercepted by app bindings, so set value directly)
@@ -703,7 +713,7 @@ class TestStatusFilterIntegration:
         from textual.widgets import Label
 
         app = self._make_app(make_paper)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 # Open search and type a query that won't match our paper
                 await pilot.press("slash")
@@ -724,7 +734,7 @@ class TestStatusFilterIntegration:
         from textual.widgets import Input, OptionList
 
         app = self._make_app(make_paper)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 # Search for something
                 await pilot.press("slash")

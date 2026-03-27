@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 
 import arxiv_browser.config as config_mod
-from arxiv_browser.app import (
+from tests.support.canonical_exports import (
     PaperCollection,
     PaperMetadata,
     SearchBookmark,

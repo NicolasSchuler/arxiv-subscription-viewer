@@ -16,12 +16,10 @@ import platform
 import shutil
 import sqlite3
 import subprocess
-import sys
 import webbrowser
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
-from typing import Any
 
 import httpx
 from rapidfuzz import fuzz
@@ -33,6 +31,7 @@ from textual.css.query import NoMatches
 # back into ``arxiv_browser.app``. That makes the action layer's dependency
 # surface explicit while still supporting the temporary compatibility bridge.
 from arxiv_browser.action_messages import *
+from arxiv_browser.browser.content import _fetch_paper_content_async
 from arxiv_browser.cli import ARXIV_API_MIN_INTERVAL_SECONDS
 from arxiv_browser.config import *
 from arxiv_browser.config import _coerce_arxiv_api_max_results
@@ -73,24 +72,4 @@ BOOKMARK_NAME_MAX_LEN = 15
 ARXIV_API_TIMEOUT = 30
 MAX_CONCURRENT_DOWNLOADS = 3
 CLIPBOARD_SEPARATOR = "=" * 80
-
-
-def sync_app_globals(_namespace: dict[str, Any]) -> None:
-    """Compatibility bridge for legacy app-module monkeypatching.
-
-    Action modules now import their dependencies statically through this module.
-    During the transition away from ``arxiv_browser.app`` as a patch point, keep
-    any same-named symbols in sync with the app module so existing compatibility
-    tests and one-release shims continue to work.
-    """
-    app_module = sys.modules.get("arxiv_browser.app")
-    if app_module is None:
-        return
-    for name in list(_namespace):
-        if name.startswith("__"):
-            continue
-        if hasattr(app_module, name):
-            _namespace[name] = getattr(app_module, name)
-
-
 __all__ = [name for name in globals() if not name.startswith("__")]  # pyright: ignore[reportUnsupportedDunderAll]

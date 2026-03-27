@@ -15,7 +15,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-import arxiv_browser.app as app_mod
 import arxiv_browser.cli as cli
 import arxiv_browser.llm as llm_mod
 import arxiv_browser.llm_providers as llm_providers
@@ -29,6 +28,7 @@ from arxiv_browser.modals.collections import (
 )
 from arxiv_browser.models import MAX_COLLECTIONS, PaperCollection, UserConfig
 from arxiv_browser.services import enrichment_service as enrich
+from tests.support import canonical_exports as app_mod
 from tests.support.app_stubs import (
     _DummyInput,
     _DummyLabel,
@@ -581,8 +581,8 @@ class TestCliCoverage:
             app_factory=None,
             factory_supports_options=True,
         )
-        with patch("arxiv_browser.app.ArxivBrowser", patched_factory):
-            assert cli.main(["search"], deps=search_deps) == 0
+        search_deps.app_factory = patched_factory
+        assert cli.main(["search"], deps=search_deps) == 0
         patched_factory.assert_called_once()
         assert "options" in patched_factory.call_args.kwargs
         run_mock.assert_called_once()
@@ -600,8 +600,8 @@ class TestCliCoverage:
             app_factory=None,
             factory_supports_options=False,
         )
-        with patch("arxiv_browser.app.ArxivBrowser", legacy_factory):
-            assert cli.main(["browse", "--no-restore"], deps=legacy_deps) == 0
+        legacy_deps.app_factory = legacy_factory
+        assert cli.main(["browse", "--no-restore"], deps=legacy_deps) == 0
         legacy_factory.assert_called_once()
         assert "config" in legacy_factory.call_args.kwargs
         legacy_run.assert_called_once()

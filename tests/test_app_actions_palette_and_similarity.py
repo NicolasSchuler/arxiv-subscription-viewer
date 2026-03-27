@@ -12,8 +12,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-import arxiv_browser.app as app_mod
-from arxiv_browser.app import (
+from arxiv_browser.huggingface import HuggingFacePaper
+from arxiv_browser.semantic_scholar import (
+    CitationEntry,
+    S2RecommendationsCacheSnapshot,
+    SemanticScholarPaper,
+)
+from tests.support import canonical_exports as app_mod
+from tests.support.app_stubs import (
+    _DummyOptionList,
+    _make_hf_paper,
+    _make_s2_paper,
+    _new_app,
+)
+from tests.support.canonical_exports import (
     ArxivBrowser,
     PaperCollection,
     PaperMetadata,
@@ -21,18 +33,6 @@ from arxiv_browser.app import (
     UserConfig,
     _resolve_legacy_fallback,
     _resolve_papers,
-)
-from arxiv_browser.huggingface import HuggingFacePaper
-from arxiv_browser.semantic_scholar import (
-    CitationEntry,
-    S2RecommendationsCacheSnapshot,
-    SemanticScholarPaper,
-)
-from tests.support.app_stubs import (
-    _DummyOptionList,
-    _make_hf_paper,
-    _make_s2_paper,
-    _new_app,
 )
 
 
@@ -189,7 +189,7 @@ class TestStatusCommandPaletteAndChatCoverage:
         app.action_demo = action_demo
         app.action_boom = action_boom
 
-        with patch.object(app_mod, "logger") as logger_mock:
+        with patch("arxiv_browser.actions.ui_actions.logger") as logger_mock:
             app.action_command_palette()
             callback = captured["callback"]
             callback("demo")
@@ -234,14 +234,19 @@ class TestStatusCommandPaletteAndChatCoverage:
         app.action_generate_summary()
         app.push_screen.assert_called_once()
 
-        with patch("arxiv_browser.app._load_summary", return_value="cached summary"):
+        with patch(
+            "arxiv_browser.actions.llm_actions._load_summary", return_value="cached summary"
+        ):
             app._on_summary_mode_selected("default", paper, "cmd {prompt}")
         assert app._paper_summaries[paper.arxiv_id] == "cached summary"
 
         app.action_chat_with_paper()
         app._track_task.assert_called()
 
-        with patch("arxiv_browser.app._fetch_paper_content_async", return_value="full text"):
+        with patch(
+            "arxiv_browser.browser.core.ArxivBrowser._fetch_paper_content_async",
+            return_value="full text",
+        ):
             await app._open_chat_screen(paper, app._llm_provider)
         assert app.push_screen.call_count >= 2
 
@@ -336,7 +341,7 @@ class TestArxivApiAndSimilarityCoverage:
         app._track_task.assert_called_once()
 
     def test_show_local_recommendations_empty_and_success(self, make_paper):
-        from arxiv_browser.app import build_similarity_corpus_key
+        from tests.support.canonical_exports import build_similarity_corpus_key
 
         app = _new_app()
         app.notify = MagicMock()
@@ -349,13 +354,13 @@ class TestArxivApiAndSimilarityCoverage:
         app.all_papers = [paper, make_paper(arxiv_id="2401.70004")]
         app._tfidf_corpus_key = build_similarity_corpus_key(app.all_papers)
 
-        with patch("arxiv_browser.app.find_similar_papers", return_value=[]):
+        with patch("arxiv_browser.browser.discovery.find_similar_papers", return_value=[]):
             app._show_local_recommendations(paper)
         assert "No similar papers were found." in app.notify.call_args[0][0]
 
         app.notify.reset_mock()
         with patch(
-            "arxiv_browser.app.find_similar_papers",
+            "arxiv_browser.browser.discovery.find_similar_papers",
             return_value=[(make_paper(arxiv_id="2401.70005"), 0.9)],
         ):
             app._show_local_recommendations(paper)

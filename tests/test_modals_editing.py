@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from textual.widgets import Button
 
-from arxiv_browser.app import ArxivBrowser, AutoTagSuggestModal, NotesModal, TagsModal
+from tests.support.canonical_exports import ArxivBrowser, AutoTagSuggestModal, NotesModal, TagsModal
 
 
 @pytest.mark.asyncio

@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from arxiv_browser.app import (
+from arxiv_browser.themes import THEME_NAMES, THEMES
+from tests.support.canonical_exports import (
     ARXIV_API_DEFAULT_MAX_RESULTS,
     ARXIV_DATE_FORMAT,
     DEFAULT_CATEGORY_COLOR,
@@ -59,7 +60,7 @@ from arxiv_browser.app import (
     to_rpn,
     tokenize_query,
 )
-from arxiv_browser.themes import THEME_NAMES, THEMES
+from tests.support.patch_helpers import patch_save_config
 
 # ============================================================================
 # Tests for clean_latex function
@@ -73,7 +74,7 @@ class TestWatchListActions:
     def _make_mock_app():
         from unittest.mock import MagicMock
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._config = UserConfig(watch_list=[WatchListEntry(pattern="old", match_type="title")])
@@ -95,7 +96,7 @@ class TestWatchListActions:
             callback(new_entries)
 
         app.push_screen = fake_push_screen
-        with patch("arxiv_browser.app.save_config", return_value=True) as save_mock:
+        with patch_save_config(return_value=True) as save_mock:
             app.action_manage_watch_list()
 
         assert app._config.watch_list == new_entries
@@ -114,7 +115,7 @@ class TestWatchListActions:
             callback(new_entries)
 
         app.push_screen = fake_push_screen
-        with patch("arxiv_browser.app.save_config", return_value=False):
+        with patch_save_config(return_value=False):
             app.action_manage_watch_list()
 
         assert app._config.watch_list == old_entries
@@ -144,11 +145,11 @@ class TestWatchFilterIntegration:
         """Pressing 'w' with empty watch list should remain inactive."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=3)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 assert app._watch_filter_active is False
                 await pilot.press("w")
@@ -160,12 +161,12 @@ class TestWatchFilterIntegration:
         """Pressing 'w' with watch entries should toggle filter on/off."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser, WatchListEntry
+        from tests.support.canonical_exports import ArxivBrowser, WatchListEntry
 
         papers = self._make_papers(make_paper, count=3)
         config = UserConfig(watch_list=[WatchListEntry(pattern="Author A", match_type="author")])
         app = ArxivBrowser(papers, config=config, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 assert app._watch_filter_active is False
                 # Ensure some papers are watched
@@ -186,13 +187,13 @@ class TestWatchFilterIntegration:
 
         from textual.widgets import OptionList
 
-        from arxiv_browser.app import ArxivBrowser, WatchListEntry
+        from tests.support.canonical_exports import ArxivBrowser, WatchListEntry
 
         papers = self._make_papers(make_paper, count=3)
         # Only watch Author A — should match papers[0] only
         config = UserConfig(watch_list=[WatchListEntry(pattern="Author A", match_type="author")])
         app = ArxivBrowser(papers, config=config, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 option_list = app.query_one("#paper-list", OptionList)
                 assert option_list.option_count == 3
@@ -225,12 +226,12 @@ class TestThemeCyclingIntegration:
         """Pressing Ctrl+T should cycle to the next theme."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import THEME_NAMES as APP_THEME_NAMES
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import THEME_NAMES as APP_THEME_NAMES
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 initial_theme = app._config.theme_name
                 assert initial_theme == "monokai"
@@ -244,12 +245,12 @@ class TestThemeCyclingIntegration:
         """Pressing Ctrl+T len(THEME_NAMES) times should return to the first theme."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import THEME_NAMES as APP_THEME_NAMES
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import THEME_NAMES as APP_THEME_NAMES
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 initial_theme = app._config.theme_name
                 for _ in range(len(APP_THEME_NAMES)):
@@ -263,11 +264,11 @@ class TestThemeCyclingIntegration:
 
         from textual.widgets import OptionList
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=3)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 option_list = app.query_one("#paper-list", OptionList)
                 assert option_list.option_count == 3
@@ -280,11 +281,11 @@ class TestThemeCyclingIntegration:
         """Theme cycling should invalidate detail cache and re-render markup colors."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser, PaperDetails
+        from tests.support.canonical_exports import ArxivBrowser, PaperDetails
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 details = app.query_one(PaperDetails)
                 app._refresh_detail_pane()
@@ -324,7 +325,7 @@ class TestHistoryNavigationIntegration:
         from datetime import date as dt_date
         from unittest.mock import AsyncMock, patch
 
-        from arxiv_browser.app import ArxivBrowser, DateNavigator
+        from tests.support.canonical_exports import ArxivBrowser, DateNavigator
 
         # Create history files
         f1 = self._make_history_file(tmp_path, "2024-01-17", "2401.00003")
@@ -346,7 +347,7 @@ class TestHistoryNavigationIntegration:
             current_date_index=0,
         )
         with (
-            patch("arxiv_browser.app.save_config", return_value=True),
+            patch_save_config(return_value=True),
             patch.object(DateNavigator, "update_dates", new_callable=AsyncMock),
         ):
             async with app.run_test() as pilot:
@@ -361,7 +362,7 @@ class TestHistoryNavigationIntegration:
         from datetime import date as dt_date
         from unittest.mock import AsyncMock, patch
 
-        from arxiv_browser.app import ArxivBrowser, DateNavigator
+        from tests.support.canonical_exports import ArxivBrowser, DateNavigator
 
         f1 = self._make_history_file(tmp_path, "2024-01-17", "2401.00003")
         f2 = self._make_history_file(tmp_path, "2024-01-16", "2401.00002")
@@ -381,7 +382,7 @@ class TestHistoryNavigationIntegration:
             current_date_index=1,
         )
         with (
-            patch("arxiv_browser.app.save_config", return_value=True),
+            patch_save_config(return_value=True),
             patch.object(DateNavigator, "update_dates", new_callable=AsyncMock),
         ):
             async with app.run_test() as pilot:
@@ -396,7 +397,7 @@ class TestHistoryNavigationIntegration:
         from datetime import date as dt_date
         from unittest.mock import AsyncMock, patch
 
-        from arxiv_browser.app import ArxivBrowser, DateNavigator
+        from tests.support.canonical_exports import ArxivBrowser, DateNavigator
 
         f1 = self._make_history_file(tmp_path, "2024-01-17", "2401.00003")
         f2 = self._make_history_file(tmp_path, "2024-01-15", "2401.00001")
@@ -414,7 +415,7 @@ class TestHistoryNavigationIntegration:
             current_date_index=1,  # Already at oldest
         )
         with (
-            patch("arxiv_browser.app.save_config", return_value=True),
+            patch_save_config(return_value=True),
             patch.object(DateNavigator, "update_dates", new_callable=AsyncMock),
         ):
             async with app.run_test() as pilot:
@@ -430,7 +431,7 @@ class TestHistoryNavigationIntegration:
         from datetime import date as dt_date
         from unittest.mock import AsyncMock, patch
 
-        from arxiv_browser.app import ArxivBrowser, DateNavigator
+        from tests.support.canonical_exports import ArxivBrowser, DateNavigator
 
         f1 = self._make_history_file(tmp_path, "2024-01-17", "2401.00003")
         f2 = self._make_history_file(tmp_path, "2024-01-15", "2401.00001")
@@ -448,7 +449,7 @@ class TestHistoryNavigationIntegration:
             current_date_index=0,  # Already at newest
         )
         with (
-            patch("arxiv_browser.app.save_config", return_value=True),
+            patch_save_config(return_value=True),
             patch.object(DateNavigator, "update_dates", new_callable=AsyncMock),
         ):
             async with app.run_test() as pilot:
@@ -464,7 +465,7 @@ class TestHistoryNavigationIntegration:
         from datetime import date as dt_date
         from unittest.mock import AsyncMock, patch
 
-        from arxiv_browser.app import ArxivBrowser, DateNavigator
+        from tests.support.canonical_exports import ArxivBrowser, DateNavigator
 
         f1 = self._make_history_file(tmp_path, "2024-01-17", "2401.00003")
         f2 = self._make_history_file(tmp_path, "2024-01-16", "2401.00002")
@@ -482,7 +483,7 @@ class TestHistoryNavigationIntegration:
             current_date_index=0,
         )
         with (
-            patch("arxiv_browser.app.save_config", return_value=True),
+            patch_save_config(return_value=True),
             patch.object(DateNavigator, "update_dates", new_callable=AsyncMock),
         ):
             async with app.run_test() as pilot:
@@ -498,11 +499,11 @@ class TestHistoryNavigationIntegration:
         """Without history files, '[' and ']' should not crash or change state."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = [make_paper()]
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 assert not app._is_history_mode()
                 assert app._current_date_index == 0
@@ -520,7 +521,7 @@ class TestHistoryNavigationIntegration:
         from datetime import date as dt_date
         from unittest.mock import AsyncMock, patch
 
-        from arxiv_browser.app import ArxivBrowser, DateNavigator
+        from tests.support.canonical_exports import ArxivBrowser, DateNavigator
 
         f1 = self._make_history_file(tmp_path, "2024-01-17", "2401.00003")
         f2 = self._make_history_file(tmp_path, "2024-01-16", "2401.00002")
@@ -538,7 +539,7 @@ class TestHistoryNavigationIntegration:
             current_date_index=0,
         )
         with (
-            patch("arxiv_browser.app.save_config", return_value=True),
+            patch_save_config(return_value=True),
             patch.object(DateNavigator, "update_dates", new_callable=AsyncMock),
         ):
             async with app.run_test() as pilot:
@@ -558,7 +559,7 @@ class TestHistoryNavigationIntegration:
         from datetime import date as dt_date
         from unittest.mock import AsyncMock, patch
 
-        from arxiv_browser.app import ArxivBrowser, DateNavigator
+        from tests.support.canonical_exports import ArxivBrowser, DateNavigator
 
         f1 = self._make_history_file(tmp_path, "2024-01-17", "2401.00003")
         f2 = self._make_history_file(tmp_path, "2024-01-16", "2401.00002")
@@ -583,9 +584,9 @@ class TestHistoryNavigationIntegration:
             return [make_paper(arxiv_id="2401.00003", title="Paper for 2024-01-17")]
 
         with (
-            patch("arxiv_browser.app.save_config", return_value=True),
+            patch_save_config(return_value=True),
             patch.object(DateNavigator, "update_dates", new_callable=AsyncMock),
-            patch("arxiv_browser.app.parse_arxiv_file", side_effect=parse_with_error),
+            patch("arxiv_browser.browser.browse.parse_arxiv_file", side_effect=parse_with_error),
         ):
             async with app.run_test() as pilot:
                 assert app._current_date_index == 0

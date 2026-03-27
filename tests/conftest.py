@@ -9,7 +9,10 @@ import pytest
 
 import arxiv_browser.browser._runtime as browser_runtime
 import arxiv_browser.browser.core as browser_core
-from arxiv_browser.app import (
+from arxiv_browser.widgets.chrome import set_ascii_glyphs as set_chrome_ascii_glyphs
+from arxiv_browser.widgets.details import set_ascii_glyphs as set_detail_ascii_glyphs
+from arxiv_browser.widgets.listing import set_ascii_icons
+from tests.support.canonical_exports import (
     _HIGHLIGHT_PATTERN_CACHE,
     Paper,
     PaperMetadata,
@@ -19,9 +22,6 @@ from arxiv_browser.app import (
     WatchListEntry,
     format_categories,
 )
-from arxiv_browser.widgets.chrome import set_ascii_glyphs as set_chrome_ascii_glyphs
-from arxiv_browser.widgets.details import set_ascii_glyphs as set_detail_ascii_glyphs
-from arxiv_browser.widgets.listing import set_ascii_icons
 
 # ── Cache isolation ──────────────────────────────────────────────────────────
 

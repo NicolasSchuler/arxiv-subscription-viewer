@@ -156,6 +156,8 @@ __all__ = list(_PUBLIC_EXPORTS)  # pyright: ignore[reportUnsupportedDunderAll]
 
 _EXPORT_MODULES = (
     "arxiv_browser.browser.core",
+    "arxiv_browser.browser.content",
+    "arxiv_browser.browser.contracts",
     "arxiv_browser.action_messages",
     "arxiv_browser.cli",
     "arxiv_browser.config",

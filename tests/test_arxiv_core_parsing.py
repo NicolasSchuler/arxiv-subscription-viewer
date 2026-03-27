@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from arxiv_browser.app import (
+from arxiv_browser.themes import THEME_NAMES, THEMES
+from tests.support.canonical_exports import (
     ARXIV_API_DEFAULT_MAX_RESULTS,
     ARXIV_DATE_FORMAT,
     DEFAULT_CATEGORY_COLOR,
@@ -59,7 +60,6 @@ from arxiv_browser.app import (
     to_rpn,
     tokenize_query,
 )
-from arxiv_browser.themes import THEME_NAMES, THEMES
 
 # ============================================================================
 # Tests for clean_latex function
@@ -508,13 +508,13 @@ class TestConstants:
 
     def test_fuzzy_score_cutoff_valid_range(self):
         """FUZZY_SCORE_CUTOFF should be in 0-100 range."""
-        from arxiv_browser.app import FUZZY_SCORE_CUTOFF
+        from tests.support.canonical_exports import FUZZY_SCORE_CUTOFF
 
         assert 0 <= FUZZY_SCORE_CUTOFF <= 100
 
     def test_stopwords_contains_common_words(self):
         """STOPWORDS should contain common English stopwords."""
-        from arxiv_browser.app import STOPWORDS
+        from tests.support.canonical_exports import STOPWORDS
 
         assert "the" in STOPWORDS
         assert "and" in STOPWORDS
@@ -551,7 +551,7 @@ class TestNewDataclasses:
 
     def test_session_state_defaults(self):
         """SessionState should have correct defaults."""
-        from arxiv_browser.app import SessionState
+        from tests.support.canonical_exports import SessionState
 
         session = SessionState()
         assert session.scroll_index == 0
@@ -576,7 +576,7 @@ class TestConfigPersistence:
 
     def test_config_to_dict_roundtrip(self):
         """Config should serialize and deserialize correctly."""
-        from arxiv_browser.app import (
+        from tests.support.canonical_exports import (
             SessionState,
             _config_to_dict,
             _dict_to_config,
@@ -619,7 +619,7 @@ class TestConfigPersistence:
 
     def test_dict_to_config_handles_empty(self):
         """Loading empty dict should return default config."""
-        from arxiv_browser.app import _dict_to_config
+        from tests.support.canonical_exports import _dict_to_config
 
         config = _dict_to_config({})
         default = UserConfig()
@@ -628,7 +628,7 @@ class TestConfigPersistence:
 
     def test_arxiv_api_max_results_is_clamped(self):
         """arxiv_api_max_results should be clamped to configured limits."""
-        from arxiv_browser.app import ARXIV_API_MAX_RESULTS_LIMIT, _dict_to_config
+        from tests.support.canonical_exports import ARXIV_API_MAX_RESULTS_LIMIT, _dict_to_config
 
         config = _dict_to_config({"arxiv_api_max_results": 9999})
         assert config.arxiv_api_max_results == ARXIV_API_MAX_RESULTS_LIMIT

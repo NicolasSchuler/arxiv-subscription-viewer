@@ -12,7 +12,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from textual.widgets import Input, Label, OptionList, Static
 
-from arxiv_browser.app import (
+from arxiv_browser.modals.editing import AutoTagSuggestModal, NotesModal, TagsModal
+from tests.support.canonical_exports import (
     ArxivBrowser,
     FilterPillBar,
     Paper,
@@ -20,7 +21,7 @@ from arxiv_browser.app import (
     UserConfig,
     tokenize_query,
 )
-from arxiv_browser.modals.editing import AutoTagSuggestModal, NotesModal, TagsModal
+from tests.support.patch_helpers import patch_save_config
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -66,7 +67,7 @@ class TestMouseInteractions:
         papers = _papers(make_paper)
         app = ArxivBrowser(papers, restore_session=False)
 
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause(0.1)
                 option_list = app.query_one("#paper-list", OptionList)
@@ -84,7 +85,7 @@ class TestMouseInteractions:
         papers = _papers(make_paper)
         app = ArxivBrowser(papers, restore_session=False)
 
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause(0.1)
                 option_list = app.query_one("#paper-list", OptionList)
@@ -111,7 +112,7 @@ class TestMouseInteractions:
         papers = _papers(make_paper)
         app = ArxivBrowser(papers, restore_session=False)
 
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause(0.1)
 
@@ -143,7 +144,7 @@ class TestKeyboardFocus:
         papers = _papers(make_paper)
         app = ArxivBrowser(papers, restore_session=False)
 
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause(0.1)
                 option_list = app.query_one("#paper-list", OptionList)
@@ -155,7 +156,7 @@ class TestKeyboardFocus:
         papers = _papers(make_paper)
         app = ArxivBrowser(papers, restore_session=False)
 
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause(0.1)
 
@@ -180,7 +181,7 @@ class TestKeyboardFocus:
         papers = _papers(make_paper)
         app = ArxivBrowser(papers, restore_session=False)
 
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause(0.1)
 
@@ -205,7 +206,7 @@ class TestKeyboardFocus:
         app = ArxivBrowser(papers, restore_session=False)
         modal = NotesModal("2401.00001", "test notes")
 
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause(0.1)
 
@@ -246,7 +247,7 @@ class TestModalValidation:
             all_tags=["topic:ml", "topic:nlp", "status:todo"],
         )
 
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
                 app.push_screen(modal)
                 await pilot.pause(0.1)
@@ -272,7 +273,7 @@ class TestModalValidation:
         app = ArxivBrowser(papers, restore_session=False)
         modal = TagsModal("2401.00001")
 
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
                 app.push_screen(modal)
                 await pilot.pause(0.1)
@@ -291,7 +292,7 @@ class TestModalValidation:
         app = ArxivBrowser(papers, restore_session=False)
         modal = TagsModal("2401.00001")
 
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
                 app.push_screen(modal)
                 await pilot.pause(0.1)
@@ -310,7 +311,7 @@ class TestModalValidation:
         app = ArxivBrowser(papers, restore_session=False)
         modal = NotesModal("2401.00001", "initial notes")
 
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
                 app.push_screen(modal)
                 await pilot.pause(0.1)
@@ -329,7 +330,7 @@ class TestModalValidation:
         app = ArxivBrowser(papers, restore_session=False)
         modal = NotesModal("2401.00001", "do not lose me")
 
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
                 app.push_screen(modal)
                 await pilot.pause(0.1)
@@ -348,7 +349,7 @@ class TestModalValidation:
             current_tags=["topic:ml"],
         )
 
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
                 app.push_screen(modal)
                 await pilot.pause(0.1)
@@ -368,7 +369,7 @@ class TestModalValidation:
             current_tags=["status:todo"],
         )
 
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
                 app.push_screen(modal)
                 await pilot.pause(0.1)
@@ -396,7 +397,7 @@ class TestModalValidation:
             suggested_tags=["topic:ml"],
         )
 
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
                 app.push_screen(modal)
                 await pilot.pause(0.1)
@@ -416,7 +417,7 @@ class TestModalValidation:
             all_tags=["topic:ml", "topic:nlp", "status:todo"],
         )
 
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
                 app.push_screen(modal)
                 await pilot.pause(0.1)
@@ -432,7 +433,7 @@ class TestModalValidation:
         app = ArxivBrowser(papers, restore_session=False)
         modal = TagsModal("2401.00001", current_tags=["topic:ml"])
 
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
                 app.push_screen(modal)
                 await pilot.pause(0.1)
@@ -456,7 +457,7 @@ class TestFilterPills:
         papers = _papers(make_paper)
         app = ArxivBrowser(papers, restore_session=False)
 
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause(0.1)
 
@@ -480,7 +481,7 @@ class TestFilterPills:
         papers = _papers(make_paper)
         app = ArxivBrowser(papers, restore_session=False)
 
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause(0.1)
 
@@ -507,7 +508,7 @@ class TestFilterPills:
         papers = _papers(make_paper)
         app = ArxivBrowser(papers, restore_session=False)
 
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause(0.1)
 

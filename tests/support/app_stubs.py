@@ -6,11 +6,11 @@ from collections import deque
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import arxiv_browser.app as app_mod
-from arxiv_browser.app import ArxivBrowser
 from arxiv_browser.huggingface import HuggingFacePaper
 from arxiv_browser.models import UserConfig
 from arxiv_browser.semantic_scholar import SemanticScholarPaper
+from tests.support import canonical_exports as app_mod
+from tests.support.canonical_exports import ArxivBrowser
 
 
 def _new_app() -> ArxivBrowser:
@@ -62,6 +62,44 @@ class _DummyOptionList:
         self.option_count += 1
 
 
+class _OptionListStub:
+    def __init__(self, highlighted: int | None = None, option_count: int = 0) -> None:
+        self.highlighted = highlighted
+        self.highlighted_child = None
+        self.option_count = option_count
+        self.focused = False
+        self.options: list[object] = []
+        self.replaced: list[tuple[int, str]] = []
+        self.classes: set[str] = set()
+
+    def clear_options(self) -> None:
+        self.options.clear()
+        self.option_count = 0
+
+    def add_options(self, options: list[object]) -> None:
+        self.options.extend(options)
+        self.option_count = len(self.options)
+
+    def add_option(self, option: object) -> None:
+        self.options.append(option)
+        self.option_count = len(self.options)
+
+    def replace_option_prompt_at_index(self, index: int, markup: str) -> None:
+        self.replaced.append((index, markup))
+
+    def focus(self) -> None:
+        self.focused = True
+
+    def remove_class(self, class_name: str) -> None:
+        self.classes.discard(class_name)
+
+    def add_class(self, class_name: str) -> None:
+        self.classes.add(class_name)
+
+    def has_class(self, class_name: str) -> bool:
+        return class_name in self.classes
+
+
 class _DummyInput:
     def __init__(self, value: str = "") -> None:
         self.value = value
@@ -105,7 +143,7 @@ class _DummyTimer:
 
 
 def _paper(arxiv_id: str = "2401.12345", **kwargs):
-    from arxiv_browser.app import Paper
+    from tests.support.canonical_exports import Paper
 
     defaults = {
         "arxiv_id": arxiv_id,

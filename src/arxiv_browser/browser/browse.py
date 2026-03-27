@@ -7,13 +7,11 @@ from __future__ import annotations
 from arxiv_browser.browser._runtime import *
 
 
-@sync_app_methods
 class BrowseMixin:
     """Dataset and filter state transitions shared by the main browser app."""
 
     def _capture_local_browse_snapshot(self) -> LocalBrowseSnapshot | None:
         """Capture the local-library view before switching into API search mode.
-
         The snapshot intentionally preserves everything needed to restore the
         user-visible browsing state later: current dataset, sort/filter state,
         selection, highlight terms, visible-list position, and subtitle text.
@@ -22,7 +20,6 @@ class BrowseMixin:
             list_view = self._get_paper_list_widget()
         except NoMatches:
             return None
-
         return LocalBrowseSnapshot(
             all_papers=self.all_papers,
             papers_by_id=self._papers_by_id,
@@ -41,7 +38,6 @@ class BrowseMixin:
 
     def _restore_local_browse_snapshot(self) -> None:
         """Restore the local-library view saved before API search mode.
-
         Restoring advances the dataset epoch first so stale background work from
         the temporary API dataset will not publish into the restored local
         dataset. After the core state is restored, this method recomputes watch
@@ -51,7 +47,6 @@ class BrowseMixin:
         snapshot = self._local_browse_snapshot
         if snapshot is None:
             return
-
         self._advance_dataset_epoch()
         self.all_papers = snapshot.all_papers
         self._papers_by_id = snapshot.papers_by_id
@@ -68,17 +63,13 @@ class BrowseMixin:
         }
         self._match_scores = dict(snapshot.match_scores)
         self.sub_title = snapshot.sub_title
-
         # Recompute watch matches for the restored local dataset
         self._compute_watched_papers()
-
         try:
             self._get_search_input_widget().value = snapshot.search_query
         except NoMatches:
             pass
-
         self._apply_filter(snapshot.search_query)
-
         try:
             option_list = self._get_paper_list_widget()
             if option_list.option_count > 0:
@@ -87,7 +78,6 @@ class BrowseMixin:
                 option_list.focus()
         except NoMatches:
             pass
-
         if self._config.bookmarks:
             self._track_task(self._update_bookmark_bar())
 
@@ -133,32 +123,26 @@ class BrowseMixin:
 
     def _fuzzy_search(self, query: str, papers: list[Paper] | None = None) -> list[Paper]:
         """Perform fuzzy search on title and authors.
-
         Populates self._match_scores with relevance scores.
         """
         query_lower = query.lower()
         scored_papers = []
         search_space = papers if papers is not None else self.all_papers
-
         for paper in search_space:
             # Combine title and authors for matching
             text = f"{paper.title} {paper.authors}"
             score = fuzz.WRatio(query_lower, text.lower())
             if score >= FUZZY_SCORE_CUTOFF:
                 scored_papers.append((paper, score))
-
         # Sort by score descending
         scored_papers.sort(key=lambda x: x[1], reverse=True)
         top_papers = scored_papers[:FUZZY_LIMIT]
-
         # Store scores for display (optional enhancement)
         self._match_scores = {p.arxiv_id: s for p, s in top_papers}
-
         return [p for p, _ in top_papers]
 
     def _apply_filter(self, query: str) -> None:
         """Apply the current query and refresh all dependent dataset UI state.
-
         Query execution runs through the shared query engine, then intersects
         with the optional watch filter, reapplies the active sort order, and
         refreshes list/detail/bookmark UI surfaces. Keeping the whole sequence
@@ -171,29 +155,24 @@ class BrowseMixin:
         # Keep status/empty-state context synchronized with the applied filter.
         self._pending_query = query
         self._applied_query = query
-
         # Clear match scores by default (only fuzzy search populates them)
         self._match_scores.clear()
         _HIGHLIGHT_PATTERN_CACHE.clear()
-
         self.filtered_papers, self._highlight_terms = execute_query_filter(
             query,
             self.all_papers,
             fuzzy_search=self._fuzzy_search,
             advanced_match=self._matches_advanced_query,
         )
-
         # Apply watch filter if active (intersects with other filters)
         self.filtered_papers = apply_watch_filter(
             self.filtered_papers, self._watched_paper_ids, self._watch_filter_active
         )
-
         # Apply current sort order and refresh UI
         self._sort_papers()
         self._get_ui_refresh_coordinator().apply_filter_refresh(query)
         self._update_subtitle()
         self._track_task(self._update_bookmark_bar())
-
         logger.debug(
             "Filter applied: query=%r, matched=%d/%d papers",
             query,
@@ -268,7 +247,6 @@ class BrowseMixin:
         cached_index = self._get_visible_index(arxiv_id)
         if cached_index is not None:
             return cached_index
-
         visible_index_by_id = self._get_visible_index_map()
         for index, paper in enumerate(self.filtered_papers):
             if paper.arxiv_id == arxiv_id:
@@ -285,7 +263,6 @@ class BrowseMixin:
 
     def _refresh_list_view(self) -> None:
         """Refresh the list view with current filtered papers.
-
         Uses OptionList for virtual rendering — only visible lines are drawn.
         """
         highlighted_id = None
@@ -296,7 +273,6 @@ class BrowseMixin:
         self._rebuild_visible_index()
         option_list = self._get_paper_list_widget()
         option_list.clear_options()
-
         if self.filtered_papers:
             options = [
                 Option(self._render_option(paper), id=paper.arxiv_id)
@@ -371,7 +347,6 @@ class BrowseMixin:
         target_ids: set[str] | None = None,
     ) -> None:
         """Apply fn(arxiv_id) to all selected papers, refreshing visible list items.
-
         Uses target_ids if provided, otherwise self.selected_ids.
         """
         ids = target_ids if target_ids is not None else self.selected_ids
@@ -392,7 +367,6 @@ class BrowseMixin:
         title: str,
     ) -> None:
         """Toggle a boolean metadata attribute for all selected papers.
-
         If any selected paper has the attribute False, sets all to True;
         otherwise sets all to False.
         """
@@ -435,12 +409,10 @@ class BrowseMixin:
             old_common = set(common_tags)
             added = new_tag_set - old_common
             removed = old_common - new_tag_set
-
             self._apply_to_selected(
                 lambda aid: self._apply_tag_diff(aid, added, removed),
                 target_ids=target_ids,
             )
-
             parts = []
             if added:
                 parts.append(f"Added {', '.join(sorted(added))}")
@@ -456,15 +428,12 @@ class BrowseMixin:
 
     def _compute_watched_papers(self) -> None:
         """Pre-compute which papers match watch list patterns.
-
         This runs once at startup and when watch list is modified,
         enabling O(1) lookup during display.
         """
         self._watched_paper_ids.clear()
-
         if not self._config.watch_list:
             return
-
         for paper in self.all_papers:
             for entry in self._config.watch_list:
                 if paper_matches_watch_entry(paper, entry):
@@ -509,10 +478,8 @@ class BrowseMixin:
         """Toggle abstract preview in list items."""
         self._show_abstract_preview = not self._show_abstract_preview
         self._config.show_abstract_preview = self._show_abstract_preview
-
         status = "on" if self._show_abstract_preview else "off"
         self.notify(f"Abstract preview {status}", title="Preview")
-
         # Refresh list to show/hide previews
         self._refresh_list_view()
         self._update_status_bar()
@@ -542,7 +509,6 @@ class BrowseMixin:
         if not paper:
             self.notify("No paper selected", title="Mark", severity="warning")
             return
-
         self._config.marks[letter] = paper.arxiv_id
         self.notify(f"Mark '{letter}' set on {paper.arxiv_id}", title="Mark")
 
@@ -551,13 +517,11 @@ class BrowseMixin:
         if letter not in self._config.marks:
             self.notify(f"Mark '{letter}' not set", title="Mark", severity="warning")
             return
-
         arxiv_id = self._config.marks[letter]
         paper = self._get_paper_by_id(arxiv_id)
         if not paper:
             self.notify(f"Paper {arxiv_id} not found", title="Mark", severity="warning")
             return
-
         # Find and scroll to the paper in the current list
         option_list = self._get_paper_list_widget()
         visible_index = self._resolve_visible_index(arxiv_id)
@@ -565,7 +529,6 @@ class BrowseMixin:
             option_list.highlighted = visible_index
             self.notify(f"Jumped to mark '{letter}'", title="Mark")
             return
-
         # Paper not in current filtered list
         self.notify(
             "Paper not in current view (try clearing filter)",
@@ -590,19 +553,16 @@ class BrowseMixin:
     def _reset_dataset_view_state(self) -> None:
         """Clear view-scoped caches and progress for a dataset swap."""
         self._cancel_pending_detail_update()
-
         badge_timer = self._badge_timer
         self._badge_timer = None
         if badge_timer is not None:
             badge_timer.stop()
         self._badges_dirty.clear()
-
         sort_timer = self._sort_refresh_timer
         self._sort_refresh_timer = None
         if sort_timer is not None:
             sort_timer.stop()
         self._sort_refresh_dirty.clear()
-
         self._abstract_cache.clear()
         self._abstract_loading.clear()
         self._abstract_queue.clear()
@@ -611,32 +571,25 @@ class BrowseMixin:
             self._get_paper_details_widget().clear_cache()
         except NoMatches:
             pass
-
         self._paper_summaries.clear()
         self._summary_loading.clear()
         self._summary_mode_label.clear()
         self._summary_command_hash.clear()
-
         self._s2_cache.clear()
         self._s2_loading.clear()
         self._s2_api_error = False
-
         self._hf_cache.clear()
         self._hf_loading = False
         self._hf_api_error = False
-
         self._version_updates.clear()
         self._version_checking = False
         self._version_progress = None
-
         self._relevance_scores.clear()
         self._relevance_scoring_active = False
         self._scoring_progress = None
-
         self._auto_tag_active = False
         self._auto_tag_progress = None
         self._cancel_batch_requested = False
-
         self._tfidf_index = None
         self._tfidf_corpus_key = None
         self._pending_similarity_paper_id = None
@@ -658,7 +611,6 @@ class BrowseMixin:
         """Load papers from the current date file and refresh UI."""
         if not self._is_history_mode():
             return False
-
         _current_date, path = self._history_files[self._current_date_index]
         try:
             papers = parse_arxiv_file(path)
@@ -669,33 +621,25 @@ class BrowseMixin:
                 severity="error",
             )
             return False
-
         self._advance_dataset_epoch()
         self.all_papers = papers
         self._papers_by_id = {p.arxiv_id: p for p in self.all_papers}
         self.filtered_papers = self.all_papers.copy()
         self._reset_dataset_view_state()
-
         # Clear selection when switching dates
         self.selected_ids.clear()
-
         # Recompute watched papers for new paper set
         self._compute_watched_papers()
-
         self._notify_watch_list_matches()
         self._show_daily_digest()
-
         # Apply current filter and sort
         query = self._get_live_query()
         self._apply_filter(query)
-
         # Re-fetch HF data if active (since HF data is date-specific)
         if self._hf_active:
             self._track_dataset_task(self._fetch_hf_daily())
-
         # Update subtitle
         self._update_subtitle()
-
         # Update date navigator
         self.call_after_refresh(self._refresh_date_navigator)
         return True
@@ -721,11 +665,9 @@ class BrowseMixin:
         self, paper: Paper, client: httpx.AsyncClient | None = None
     ) -> bool:
         """Download a single PDF asynchronously.
-
         Args:
             paper: The paper to download.
             client: Shared HTTP client required for the download.
-
         Returns:
             True if download succeeded, False otherwise.
         """

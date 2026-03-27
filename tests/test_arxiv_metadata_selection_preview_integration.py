@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from arxiv_browser.app import (
+from arxiv_browser.themes import THEME_NAMES, THEMES
+from tests.support.canonical_exports import (
     ARXIV_API_DEFAULT_MAX_RESULTS,
     ARXIV_DATE_FORMAT,
     DEFAULT_CATEGORY_COLOR,
@@ -59,7 +60,7 @@ from arxiv_browser.app import (
     to_rpn,
     tokenize_query,
 )
-from arxiv_browser.themes import THEME_NAMES, THEMES
+from tests.support.patch_helpers import patch_save_config
 
 # ============================================================================
 # Tests for clean_latex function
@@ -87,11 +88,11 @@ class TestMetadataActionsIntegration:
         """Pressing 'r' should create metadata and set is_read True."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=2)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 first_id = papers[0].arxiv_id
                 assert first_id not in app._config.paper_metadata
@@ -105,11 +106,11 @@ class TestMetadataActionsIntegration:
         """Pressing 'r' twice should toggle is_read back to False."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=2)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 first_id = papers[0].arxiv_id
                 await pilot.press("r")
@@ -124,11 +125,11 @@ class TestMetadataActionsIntegration:
         """Navigate to second paper with 'j', then toggle read."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=3)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 await pilot.press("j")
                 await pilot.pause(0.1)
@@ -144,11 +145,11 @@ class TestMetadataActionsIntegration:
         """Pressing 'x' should create metadata and set starred True."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=2)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 first_id = papers[0].arxiv_id
                 assert first_id not in app._config.paper_metadata
@@ -162,11 +163,11 @@ class TestMetadataActionsIntegration:
         """Pressing 'x' twice should toggle starred back to False."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=2)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 first_id = papers[0].arxiv_id
                 await pilot.press("x")
@@ -181,11 +182,11 @@ class TestMetadataActionsIntegration:
         """Read and star should be independent metadata flags."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 first_id = papers[0].arxiv_id
                 await pilot.press("r")
@@ -200,12 +201,12 @@ class TestMetadataActionsIntegration:
         """Pressing 'n' should open the NotesModal."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
         from arxiv_browser.modals import NotesModal
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 assert len(app.screen_stack) == 1
                 await pilot.press("n")
@@ -219,12 +220,12 @@ class TestMetadataActionsIntegration:
 
         from textual.widgets import TextArea
 
-        from arxiv_browser.app import ArxivBrowser
         from arxiv_browser.modals import NotesModal
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 first_id = papers[0].arxiv_id
                 await pilot.press("n")
@@ -250,11 +251,11 @@ class TestMetadataActionsIntegration:
         """Pressing Escape on NotesModal should not save new notes."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 first_id = papers[0].arxiv_id
                 await pilot.press("n")
@@ -275,7 +276,7 @@ class TestMetadataActionsIntegration:
 
         from textual.widgets import TextArea
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
@@ -284,7 +285,7 @@ class TestMetadataActionsIntegration:
             arxiv_id=first_id, notes="Keep this note"
         )
 
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 await pilot.press("n")
                 await pilot.pause(0.2)
@@ -300,12 +301,12 @@ class TestMetadataActionsIntegration:
         """Pressing 't' should open the TagsModal."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
         from arxiv_browser.modals import TagsModal
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 assert len(app.screen_stack) == 1
                 await pilot.press("t")
@@ -319,7 +320,7 @@ class TestMetadataActionsIntegration:
 
         from textual.widgets import Input
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
@@ -329,7 +330,7 @@ class TestMetadataActionsIntegration:
             tags=["topic:ml", "status:reading"],
         )
 
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 await pilot.press("t")
                 await pilot.pause(0.2)
@@ -363,11 +364,11 @@ class TestSortCyclingIntegration:
         """Pressing 's' should cycle through all SORT_OPTIONS and wrap around."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=5)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 assert app._sort_index == 0
                 num_options = len(SORT_OPTIONS)
@@ -384,11 +385,11 @@ class TestSortCyclingIntegration:
 
         from textual.widgets import OptionList
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=5)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 option_list = app.query_one("#paper-list", OptionList)
                 initial_count = option_list.option_count
@@ -406,11 +407,11 @@ class TestSortCyclingIntegration:
         """Sorting should actually reorder the filtered_papers list."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=5)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 # Initial order is as-given (reverse alpha: Z, Y, X, W, V)
                 initial_ids = [p.arxiv_id for p in app.filtered_papers]
@@ -450,11 +451,11 @@ class TestSelectionIntegration:
         """Pressing space should toggle selection of the current paper."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=3)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 first_id = papers[0].arxiv_id
                 assert len(app.selected_ids) == 0
@@ -474,11 +475,11 @@ class TestSelectionIntegration:
         """Select multiple papers by navigating and pressing space."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=3)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 # Select first paper
                 await pilot.press("space")
@@ -496,11 +497,11 @@ class TestSelectionIntegration:
         """Pressing 'a' should select all visible papers."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=5)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 assert len(app.selected_ids) == 0
 
@@ -514,11 +515,11 @@ class TestSelectionIntegration:
         """Pressing 'u' should clear all selections."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=5)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 # Select all first
                 await pilot.press("a")
@@ -534,11 +535,11 @@ class TestSelectionIntegration:
         """Select all, then deselect one with space."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=3)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 await pilot.press("a")
                 await pilot.pause(0.1)
@@ -556,11 +557,11 @@ class TestSelectionIntegration:
 
         from textual.widgets import Label
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=3)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 # No selection initially — "selected" should not appear
                 status = app.query_one("#status-bar", Label)
@@ -594,12 +595,12 @@ class TestExportMenuIntegration:
         """Pressing 'E' with selected papers should open the ExportMenuModal."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
         from arxiv_browser.modals import ExportMenuModal
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=2)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 # Select a paper first so _get_target_papers returns non-empty
                 await pilot.press("space")
@@ -614,12 +615,12 @@ class TestExportMenuIntegration:
         """Pressing Escape should close the ExportMenuModal."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
         from arxiv_browser.modals import ExportMenuModal
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=2)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 await pilot.press("space")
                 await pilot.pause(0.1)
@@ -635,12 +636,12 @@ class TestExportMenuIntegration:
         """Export menu should open when detail pane has a paper (no explicit selection)."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
         from arxiv_browser.modals import ExportMenuModal
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=2)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 # Wait for the detail pane to load the highlighted paper
                 await pilot.pause(0.5)
@@ -673,11 +674,11 @@ class TestAbstractPreviewIntegration:
         """Pressing 'p' should toggle _show_abstract_preview."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=3)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 initial = app._show_abstract_preview
                 await pilot.press("p")
@@ -695,11 +696,11 @@ class TestAbstractPreviewIntegration:
 
         from textual.widgets import OptionList
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=3)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 option_list = app.query_one("#paper-list", OptionList)
                 assert option_list.option_count == 3
@@ -712,11 +713,11 @@ class TestAbstractPreviewIntegration:
         """Preview toggle should sync to config for persistence."""
         from unittest.mock import patch
 
-        from arxiv_browser.app import ArxivBrowser
+        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
-        with patch("arxiv_browser.app.save_config", return_value=True):
+        with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 initial = app._config.show_abstract_preview
                 await pilot.press("p")

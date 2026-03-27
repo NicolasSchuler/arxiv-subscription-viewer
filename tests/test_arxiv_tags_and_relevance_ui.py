@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from arxiv_browser.app import (
+from arxiv_browser.themes import THEME_NAMES, THEMES
+from tests.support.canonical_exports import (
     ARXIV_API_DEFAULT_MAX_RESULTS,
     ARXIV_DATE_FORMAT,
     DEFAULT_CATEGORY_COLOR,
@@ -59,7 +60,6 @@ from arxiv_browser.app import (
     to_rpn,
     tokenize_query,
 )
-from arxiv_browser.themes import THEME_NAMES, THEMES
 
 # ============================================================================
 # Tests for clean_latex function
@@ -150,7 +150,7 @@ class TestTagNamespaceDisplay:
     """Tests for namespace-colored tag display."""
 
     def test_tags_section_in_detail_pane(self, make_paper):
-        from arxiv_browser.app import PaperDetails
+        from tests.support.canonical_exports import PaperDetails
 
         details = PaperDetails()
         paper = make_paper()
@@ -166,7 +166,7 @@ class TestTagNamespaceDisplay:
         assert "important" in content
 
     def test_no_tags_section_when_empty(self, make_paper):
-        from arxiv_browser.app import PaperDetails
+        from tests.support.canonical_exports import PaperDetails
 
         details = PaperDetails()
         paper = make_paper()
@@ -176,7 +176,7 @@ class TestTagNamespaceDisplay:
         assert "Tags[/]" not in content
 
     def test_tags_section_groups_by_namespace(self, make_paper):
-        from arxiv_browser.app import PaperDetails
+        from tests.support.canonical_exports import PaperDetails
 
         details = PaperDetails()
         paper = make_paper()
@@ -251,13 +251,13 @@ class TestRelevancePrompt:
     """Tests for RELEVANCE_PROMPT_TEMPLATE and build_relevance_prompt()."""
 
     def test_template_has_required_placeholders(self):
-        from arxiv_browser.app import RELEVANCE_PROMPT_TEMPLATE
+        from tests.support.canonical_exports import RELEVANCE_PROMPT_TEMPLATE
 
         for field in ("title", "authors", "categories", "abstract", "interests"):
             assert f"{{{field}}}" in RELEVANCE_PROMPT_TEMPLATE
 
     def test_build_relevance_prompt_substitution(self, make_paper):
-        from arxiv_browser.app import build_relevance_prompt
+        from tests.support.canonical_exports import build_relevance_prompt
 
         paper = make_paper(
             title="Efficient LLM Inference",
@@ -273,7 +273,7 @@ class TestRelevancePrompt:
         assert "quantization and distillation" in result
 
     def test_build_relevance_prompt_missing_abstract(self):
-        from arxiv_browser.app import build_relevance_prompt
+        from tests.support.canonical_exports import build_relevance_prompt
 
         paper = Paper(
             arxiv_id="2401.12345",
@@ -290,7 +290,7 @@ class TestRelevancePrompt:
         assert "(no abstract)" in result
 
     def test_template_requests_json_output(self):
-        from arxiv_browser.app import RELEVANCE_PROMPT_TEMPLATE
+        from tests.support.canonical_exports import RELEVANCE_PROMPT_TEMPLATE
 
         assert "JSON" in RELEVANCE_PROMPT_TEMPLATE
         assert '"score"' in RELEVANCE_PROMPT_TEMPLATE
@@ -301,27 +301,27 @@ class TestParseRelevanceResponse:
     """Tests for _parse_relevance_response()."""
 
     def test_valid_json(self):
-        from arxiv_browser.app import _parse_relevance_response
+        from tests.support.canonical_exports import _parse_relevance_response
 
         result = _parse_relevance_response('{"score": 8, "reason": "Highly relevant"}')
         assert result == (8, "Highly relevant")
 
     def test_markdown_wrapped_json(self):
-        from arxiv_browser.app import _parse_relevance_response
+        from tests.support.canonical_exports import _parse_relevance_response
 
         text = '```json\n{"score": 7, "reason": "Good match"}\n```'
         result = _parse_relevance_response(text)
         assert result == (7, "Good match")
 
     def test_markdown_fence_without_json_label(self):
-        from arxiv_browser.app import _parse_relevance_response
+        from tests.support.canonical_exports import _parse_relevance_response
 
         text = '```\n{"score": 5, "reason": "Moderate"}\n```'
         result = _parse_relevance_response(text)
         assert result == (5, "Moderate")
 
     def test_regex_fallback(self):
-        from arxiv_browser.app import _parse_relevance_response
+        from tests.support.canonical_exports import _parse_relevance_response
 
         text = 'Here is the result: "score": 9, "reason": "Very relevant paper"'
         result = _parse_relevance_response(text)
@@ -330,7 +330,7 @@ class TestParseRelevanceResponse:
         assert result[1] == "Very relevant paper"
 
     def test_regex_fallback_score_only(self):
-        from arxiv_browser.app import _parse_relevance_response
+        from tests.support.canonical_exports import _parse_relevance_response
 
         text = 'The "score": 6 for this paper'
         result = _parse_relevance_response(text)
@@ -339,39 +339,39 @@ class TestParseRelevanceResponse:
         assert result[1] == ""
 
     def test_invalid_input_returns_none(self):
-        from arxiv_browser.app import _parse_relevance_response
+        from tests.support.canonical_exports import _parse_relevance_response
 
         assert _parse_relevance_response("not valid at all") is None
         assert _parse_relevance_response("") is None
         assert _parse_relevance_response("just some text") is None
 
     def test_score_clamped_high(self):
-        from arxiv_browser.app import _parse_relevance_response
+        from tests.support.canonical_exports import _parse_relevance_response
 
         result = _parse_relevance_response('{"score": 15, "reason": "Off scale"}')
         assert result == (10, "Off scale")
 
     def test_score_clamped_low(self):
-        from arxiv_browser.app import _parse_relevance_response
+        from tests.support.canonical_exports import _parse_relevance_response
 
         result = _parse_relevance_response('{"score": 0, "reason": "Below range"}')
         assert result == (1, "Below range")
 
     def test_score_clamped_negative(self):
-        from arxiv_browser.app import _parse_relevance_response
+        from tests.support.canonical_exports import _parse_relevance_response
 
         result = _parse_relevance_response('{"score": -3, "reason": "Negative"}')
         assert result == (1, "Negative")
 
     def test_json_with_extra_whitespace(self):
-        from arxiv_browser.app import _parse_relevance_response
+        from tests.support.canonical_exports import _parse_relevance_response
 
         text = '  \n  {"score": 4, "reason": "Some reason"}  \n  '
         result = _parse_relevance_response(text)
         assert result == (4, "Some reason")
 
     def test_missing_reason_in_json(self):
-        from arxiv_browser.app import _parse_relevance_response
+        from tests.support.canonical_exports import _parse_relevance_response
 
         result = _parse_relevance_response('{"score": 5}')
         assert result == (5, "")
@@ -383,7 +383,7 @@ class TestRelevanceDb:
     def test_init_creates_table(self, tmp_path):
         import sqlite3
 
-        from arxiv_browser.app import _init_relevance_db
+        from tests.support.canonical_exports import _init_relevance_db
 
         db_path = tmp_path / "relevance.db"
         _init_relevance_db(db_path)
@@ -395,7 +395,7 @@ class TestRelevanceDb:
             assert "PRIMARY KEY (arxiv_id, interests_hash)" in row[0]
 
     def test_save_and_load_score(self, tmp_path):
-        from arxiv_browser.app import (
+        from tests.support.canonical_exports import (
             _init_relevance_db,
             _load_relevance_score,
             _save_relevance_score,
@@ -408,7 +408,7 @@ class TestRelevanceDb:
         assert result == (8, "Good match")
 
     def test_load_missing_returns_none(self, tmp_path):
-        from arxiv_browser.app import _init_relevance_db, _load_relevance_score
+        from tests.support.canonical_exports import _init_relevance_db, _load_relevance_score
 
         db_path = tmp_path / "relevance.db"
         _init_relevance_db(db_path)
@@ -416,14 +416,14 @@ class TestRelevanceDb:
         assert result is None
 
     def test_load_from_nonexistent_db(self, tmp_path):
-        from arxiv_browser.app import _load_relevance_score
+        from tests.support.canonical_exports import _load_relevance_score
 
         db_path = tmp_path / "does_not_exist.db"
         result = _load_relevance_score(db_path, "2401.12345", "hash123")
         assert result is None
 
     def test_bulk_load(self, tmp_path):
-        from arxiv_browser.app import (
+        from tests.support.canonical_exports import (
             _init_relevance_db,
             _load_all_relevance_scores,
             _save_relevance_score,
@@ -442,7 +442,7 @@ class TestRelevanceDb:
         assert "2401.00003" not in result
 
     def test_composite_pk_different_interests(self, tmp_path):
-        from arxiv_browser.app import (
+        from tests.support.canonical_exports import (
             _init_relevance_db,
             _load_relevance_score,
             _save_relevance_score,
@@ -456,7 +456,7 @@ class TestRelevanceDb:
         assert _load_relevance_score(db_path, "2401.12345", "hash_y") == (2, "Not relevant")
 
     def test_save_replaces_existing(self, tmp_path):
-        from arxiv_browser.app import (
+        from tests.support.canonical_exports import (
             _init_relevance_db,
             _load_relevance_score,
             _save_relevance_score,
@@ -470,7 +470,7 @@ class TestRelevanceDb:
         assert result == (8, "New reason")
 
     def test_bulk_load_nonexistent_db(self, tmp_path):
-        from arxiv_browser.app import _load_all_relevance_scores
+        from tests.support.canonical_exports import _load_all_relevance_scores
 
         db_path = tmp_path / "does_not_exist.db"
         result = _load_all_relevance_scores(db_path, "any_hash")
@@ -514,7 +514,7 @@ class TestRelevanceSortPapers:
     """Tests for 'relevance' sort key in sort_papers()."""
 
     def test_sort_by_relevance(self, make_paper):
-        from arxiv_browser.app import sort_papers
+        from tests.support.canonical_exports import sort_papers
 
         papers = [
             make_paper(arxiv_id="low", title="Low"),
@@ -530,7 +530,7 @@ class TestRelevanceSortPapers:
         assert [p.arxiv_id for p in result] == ["high", "mid", "low"]
 
     def test_sort_relevance_unscored_last(self, make_paper):
-        from arxiv_browser.app import sort_papers
+        from tests.support.canonical_exports import sort_papers
 
         papers = [
             make_paper(arxiv_id="unscored", title="Unscored"),
@@ -542,14 +542,14 @@ class TestRelevanceSortPapers:
         assert result[1].arxiv_id == "unscored"
 
     def test_sort_relevance_empty_cache(self, make_paper):
-        from arxiv_browser.app import sort_papers
+        from tests.support.canonical_exports import sort_papers
 
         papers = [make_paper(arxiv_id="a"), make_paper(arxiv_id="b")]
         result = sort_papers(papers, "relevance", relevance_cache={})
         assert len(result) == 2
 
     def test_sort_relevance_none_cache(self, make_paper):
-        from arxiv_browser.app import sort_papers
+        from tests.support.canonical_exports import sort_papers
 
         papers = [make_paper(arxiv_id="a"), make_paper(arxiv_id="b")]
         result = sort_papers(papers, "relevance", relevance_cache=None)
@@ -573,7 +573,7 @@ class TestRelevanceDetailPane:
         )
 
     def test_relevance_section_shown_with_score(self):
-        from arxiv_browser.app import PaperDetails
+        from tests.support.canonical_exports import PaperDetails
 
         details = PaperDetails()
         paper = self._make_paper()
@@ -584,7 +584,7 @@ class TestRelevanceDetailPane:
         assert "Highly relevant paper" in content
 
     def test_relevance_section_hidden_without_score(self):
-        from arxiv_browser.app import PaperDetails
+        from tests.support.canonical_exports import PaperDetails
 
         details = PaperDetails()
         paper = self._make_paper()
@@ -593,7 +593,7 @@ class TestRelevanceDetailPane:
         assert "Relevance" not in content
 
     def test_relevance_section_absent_by_default(self):
-        from arxiv_browser.app import PaperDetails
+        from tests.support.canonical_exports import PaperDetails
 
         details = PaperDetails()
         paper = self._make_paper()
@@ -602,7 +602,7 @@ class TestRelevanceDetailPane:
         assert "Relevance" not in content
 
     def test_relevance_low_score_shown(self):
-        from arxiv_browser.app import PaperDetails
+        from tests.support.canonical_exports import PaperDetails
 
         details = PaperDetails()
         paper = self._make_paper()
@@ -612,7 +612,7 @@ class TestRelevanceDetailPane:
         assert "Not very relevant" in content
 
     def test_relevance_empty_reason(self):
-        from arxiv_browser.app import PaperDetails
+        from tests.support.canonical_exports import PaperDetails
 
         details = PaperDetails()
         paper = self._make_paper()
@@ -638,7 +638,7 @@ class TestRelevanceListBadge:
         )
 
     def test_badge_appears_with_high_score(self):
-        from arxiv_browser.app import THEME_COLORS, PaperListItem
+        from tests.support.canonical_exports import THEME_COLORS, PaperListItem
 
         item = PaperListItem(self._make_paper())
         item._relevance_score = (9, "Great match")
@@ -647,7 +647,7 @@ class TestRelevanceListBadge:
         assert THEME_COLORS["green"] in meta_text
 
     def test_badge_appears_with_mid_score(self):
-        from arxiv_browser.app import THEME_COLORS, PaperListItem
+        from tests.support.canonical_exports import THEME_COLORS, PaperListItem
 
         item = PaperListItem(self._make_paper())
         item._relevance_score = (6, "Moderate")
@@ -656,7 +656,7 @@ class TestRelevanceListBadge:
         assert THEME_COLORS["yellow"] in meta_text
 
     def test_badge_appears_with_low_score(self):
-        from arxiv_browser.app import THEME_COLORS, PaperListItem
+        from tests.support.canonical_exports import THEME_COLORS, PaperListItem
 
         item = PaperListItem(self._make_paper())
         item._relevance_score = (2, "Low relevance")
@@ -665,14 +665,14 @@ class TestRelevanceListBadge:
         assert THEME_COLORS["muted"] in meta_text
 
     def test_badge_absent_without_score(self):
-        from arxiv_browser.app import PaperListItem
+        from tests.support.canonical_exports import PaperListItem
 
         item = PaperListItem(self._make_paper())
         meta_text = item._get_meta_text()
         assert "/10" not in meta_text
 
     def test_update_relevance_data_sets_score(self):
-        from arxiv_browser.app import PaperListItem
+        from tests.support.canonical_exports import PaperListItem
 
         item = PaperListItem(self._make_paper())
         assert item._relevance_score is None
@@ -707,14 +707,14 @@ class TestRelevanceDbPath:
     """Tests for get_relevance_db_path()."""
 
     def test_returns_path_object(self):
-        from arxiv_browser.app import get_relevance_db_path
+        from tests.support.canonical_exports import get_relevance_db_path
 
         result = get_relevance_db_path()
         assert isinstance(result, Path)
         assert result.name == "relevance.db"
 
     def test_in_config_dir(self):
-        from arxiv_browser.app import get_relevance_db_path
+        from tests.support.canonical_exports import get_relevance_db_path
 
         rel_path = get_relevance_db_path()
         sum_path = get_summary_db_path()

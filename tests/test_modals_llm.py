@@ -7,13 +7,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from arxiv_browser.app import (
+from arxiv_browser.llm_providers import LLMResult
+from tests.support.canonical_exports import (
     ArxivBrowser,
     PaperChatScreen,
     ResearchInterestsModal,
     SummaryModeModal,
 )
-from arxiv_browser.llm_providers import LLMResult
 
 
 @pytest.mark.asyncio
