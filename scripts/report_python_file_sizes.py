@@ -8,8 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-SOFT_CAP_LINES = 1250
-NEAR_CAP_LINES = 1000
+SOFT_CAP_LINES = 1000
+NEAR_CAP_LINES = 900
 IGNORED_PATH_PARTS = {
     "__pycache__",
     ".mypy_cache",
@@ -37,6 +37,11 @@ def parse_args() -> argparse.Namespace:
         help="Threshold for near-cap reporting.",
     )
     parser.add_argument(
+        "--path-prefix",
+        default="",
+        help="Restrict scan to tracked files under this path prefix.",
+    )
+    parser.add_argument(
         "--github-actions",
         action="store_true",
         help="Emit GitHub Actions warning annotations for near-cap and over-cap files.",
@@ -49,7 +54,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def tracked_python_files(repo_root: Path) -> list[Path]:
+def tracked_python_files(repo_root: Path, path_prefix: Path) -> list[Path]:
     result = subprocess.run(
         ["git", "ls-files", "--", "*.py"],
         cwd=repo_root,
@@ -61,6 +66,8 @@ def tracked_python_files(repo_root: Path) -> list[Path]:
     for line in result.stdout.splitlines():
         path = repo_root / line
         if any(part in IGNORED_PATH_PARTS for part in path.parts):
+            continue
+        if path_prefix and not path.is_relative_to(path_prefix):
             continue
         files.append(path)
     return sorted(files)
@@ -94,16 +101,18 @@ def main() -> int:
     args = parse_args()
     repo_root = Path(__file__).resolve().parent.parent
 
-    files = tracked_python_files(repo_root)
+    path_prefix = (repo_root / args.path_prefix).resolve() if args.path_prefix else repo_root
+    files = tracked_python_files(repo_root, path_prefix)
     missing_files = [path for path in files if not path.exists()]
     counts = [(path, count_lines(path)) for path in files if path.exists()]
 
     over_cap = [(path, lines) for path, lines in counts if lines > args.soft_cap]
     near_cap = [(path, lines) for path, lines in counts if args.near_cap < lines <= args.soft_cap]
 
+    scope = args.path_prefix or "tracked files"
     print(
         "Python file-size report "
-        f"(soft cap: {args.soft_cap} lines, near-cap threshold: {args.near_cap} lines)"
+        f"(scope={scope}, soft cap: {args.soft_cap} lines, near-cap threshold: {args.near_cap} lines)"
     )
     print(f"Tracked Python files scanned: {len(counts)}")
     if missing_files:

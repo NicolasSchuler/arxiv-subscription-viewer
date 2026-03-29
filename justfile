@@ -118,7 +118,7 @@ report:
     echo ""
 
     echo "── Python File Sizes ──────────────────────────────────────────"
-    python3 scripts/report_python_file_sizes.py
+    python3 scripts/report_python_file_sizes.py --path-prefix src/arxiv_browser --soft-cap 1000 --near-cap 900
     echo ""
 
     echo "── Tests ──────────────────────────────────────────────────────"

@@ -768,7 +768,9 @@ class TestLlmActionCoverage:
         summary_app._is_current_dataset_epoch = MagicMock(return_value=True)
         summary_app._get_services = MagicMock(
             return_value=SimpleNamespace(
-                llm=SimpleNamespace(generate_summary=AsyncMock(side_effect=asyncio.CancelledError()))
+                llm=SimpleNamespace(
+                    generate_summary=AsyncMock(side_effect=asyncio.CancelledError())
+                )
             )
         )
 

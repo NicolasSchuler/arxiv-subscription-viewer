@@ -555,15 +555,6 @@ class TestDiscoveryMixinCoverage:
         app = _new_app_stub()
         paper = make_paper(arxiv_id="2401.80031", abstract="Paper abstract")
         other = make_paper(arxiv_id="2401.80032", abstract="Other abstract")
-        citation_entry = s2.CitationEntry(
-            s2_paper_id="s2:80033",
-            arxiv_id="2401.80033",
-            title="Citation",
-            authors="A. Author",
-            year=2024,
-            citation_count=0,
-            url="https://example.com/cite",
-        )
         app.all_papers = [paper, other]
         app.filtered_papers = [paper, other]
         app._papers_by_id = {paper.arxiv_id: paper, other.arxiv_id: other}
@@ -586,7 +577,9 @@ class TestDiscoveryMixinCoverage:
             "arxiv_browser.browser.discovery.asyncio.to_thread",
             new=AsyncMock(side_effect=Exception("boom")),
         ):
-            await app._build_tfidf_index_async(discovery.build_similarity_corpus_key(app.all_papers))
+            await app._build_tfidf_index_async(
+                discovery.build_similarity_corpus_key(app.all_papers)
+            )
         assert app.notify.call_args.kwargs["severity"] == "error"
 
         app.notify.reset_mock()
