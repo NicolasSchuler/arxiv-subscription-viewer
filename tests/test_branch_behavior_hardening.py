@@ -117,6 +117,127 @@ class TestLibraryActionBehavior:
         app._apply_filter.assert_called_once_with("graph")
         assert "Watch list updated" in app.notify.call_args.args[0]
 
+    def test_toggle_select_no_paper_and_idx_none(self) -> None:
+        """Line 36 (return when no paper) and 43->45 (idx None skips update_option)."""
+        app = _new_app_stub()
+
+        # Line 36: action_toggle_select returns early when paper is None
+        app._get_current_paper = MagicMock(return_value=None)
+        library_actions.action_toggle_select(app)
+        app._update_header.assert_not_called()
+
+        # 43->45: idx is None → _update_option_at_index skipped, _update_header still called
+        paper = _paper("2401.99001")
+        app._get_current_paper = MagicMock(return_value=paper)
+        app._update_option_at_index = MagicMock()
+        app._get_current_index = MagicMock(return_value=None)
+        library_actions.action_toggle_select(app)
+        app._update_option_at_index.assert_not_called()
+        app._update_header.assert_called()
+
+    def test_toggle_read_and_star_with_selection(self) -> None:
+        """Lines 80-81 and 98-99: bulk-toggle when selected_ids is non-empty."""
+        app = _new_app_stub()
+        paper = _paper("2401.99002")
+        app.selected_ids = {paper.arxiv_id}
+        app._bulk_toggle_bool = MagicMock()
+
+        # Lines 80-81: action_toggle_read with selected_ids → bulk path
+        library_actions.action_toggle_read(app)
+        app._bulk_toggle_bool.assert_called_once_with(
+            "is_read", "marked read", "marked unread", "Read Status"
+        )
+
+        # Lines 98-99: action_toggle_star with selected_ids → bulk path
+        app._bulk_toggle_bool.reset_mock()
+        library_actions.action_toggle_star(app)
+        app._bulk_toggle_bool.assert_called_once_with("starred", "starred", "unstarred", "Star")
+
+    def test_edit_notes_guard_and_callback_branches(self) -> None:
+        """Line 117, 131->135, 133->135: edit_notes guard and callback edge paths."""
+        app = _new_app_stub()
+
+        # Line 117: action_edit_notes returns early when paper is None
+        app._get_current_paper = MagicMock(return_value=None)
+        app.push_screen = MagicMock()
+        library_actions.action_edit_notes(app)
+        app.push_screen.assert_not_called()
+
+        # Set up paper with existing notes in paper_metadata
+        paper = _paper("2401.99003")
+        metadata = PaperMetadata(arxiv_id=paper.arxiv_id, notes="old note")
+        app._config = _make_app_config(paper_metadata={paper.arxiv_id: metadata})
+        app._get_current_paper = MagicMock(return_value=paper)
+        app._get_or_create_metadata = MagicMock(return_value=metadata)
+        app._update_option_at_index = MagicMock()
+        app.push_screen = MagicMock()
+        library_actions.action_edit_notes(app)
+        callback = app.push_screen.call_args.args[1]
+
+        # 131->135: cur is None → update_option_at_index NOT called, notify still fires
+        app._get_current_paper = MagicMock(return_value=None)
+        callback("saved note")
+        app._update_option_at_index.assert_not_called()
+        assert "Notes saved" in app.notify.call_args.args[0]
+
+        # 133->135: same paper but idx is None → update_option_at_index NOT called
+        app._get_current_paper = MagicMock(return_value=paper)
+        app._get_current_index = MagicMock(return_value=None)
+        app.notify.reset_mock()
+        callback("another note")
+        app._update_option_at_index.assert_not_called()
+        assert "Notes saved" in app.notify.call_args.args[0]
+
+    def test_edit_tags_guard_bulk_and_no_paper(self) -> None:
+        """Lines 143-144 (bulk path), 148 (no paper guard), 167->169 (cur mismatch)."""
+        app = _new_app_stub()
+        paper = _paper("2401.99004")
+
+        # Lines 143-144: action_edit_tags with selected_ids → bulk path and early return
+        app.selected_ids = {paper.arxiv_id}
+        app._bulk_edit_tags = MagicMock()
+        library_actions.action_edit_tags(app)
+        app._bulk_edit_tags.assert_called_once()
+
+        # Line 148: action_edit_tags returns early when paper is None (no selection)
+        app.selected_ids = set()
+        app._get_current_paper = MagicMock(return_value=None)
+        app._bulk_edit_tags.reset_mock()
+        app.push_screen = MagicMock()
+        library_actions.action_edit_tags(app)
+        app.push_screen.assert_not_called()
+
+        # 167->169: cur is None when tags callback fires → update_option_at_index skipped
+        metadata = PaperMetadata(arxiv_id=paper.arxiv_id, tags=["existing-tag"])
+        app._config = _make_app_config(paper_metadata={paper.arxiv_id: metadata})
+        app._get_current_paper = MagicMock(return_value=paper)
+        app._collect_all_tags = MagicMock(return_value=["existing-tag"])
+        app._get_or_create_metadata = MagicMock(return_value=metadata)
+        app._update_option_at_index = MagicMock()
+        app.push_screen = MagicMock()
+        library_actions.action_edit_tags(app)
+        callback = app.push_screen.call_args.args[1]
+
+        app._get_current_paper = MagicMock(return_value=None)
+        callback(["new-tag"])
+        app._update_option_at_index.assert_not_called()
+        assert "Tags: new-tag" in app.notify.call_args.args[0]
+
+    def test_manage_watch_list_callback_none_is_noop(self) -> None:
+        """Line 197: on_watch_list_updated with None entries returns immediately."""
+        app = _new_app_stub()
+        app._config = _make_app_config(watch_list=[])
+        app._compute_watched_papers = MagicMock()
+        app._apply_filter = MagicMock()
+        app.push_screen = MagicMock()
+        library_actions.action_manage_watch_list(app)
+        callback = app.push_screen.call_args.args[1]
+
+        # Passing None should hit line 197 (return) and do nothing else
+        callback(None)
+        app._compute_watched_papers.assert_not_called()
+        app._apply_filter.assert_not_called()
+
 
 class _FakeOptionList:
     def __init__(self, options: list[SimpleNamespace], highlighted: int | None = 0) -> None:

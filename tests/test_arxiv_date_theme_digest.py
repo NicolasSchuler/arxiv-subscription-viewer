@@ -317,6 +317,313 @@ class TestDateNavigator:
         assert nav._paper_counts == {keep: 1}
 
 
+class TestChromeWidgetBranches:
+    """Extra branch coverage for chrome.py widget helpers."""
+
+    # ── _compute_responsive_date_plan edge paths ─────────────────────────────
+
+    def test_responsive_plan_empty_history_returns_zero_range(self):
+        """Line 136: total=0 returns (0, 0, WITH_COUNTS) immediately."""
+        from datetime import date as dt_date
+
+        from arxiv_browser.widgets.chrome import (
+            DATE_NAV_LABEL_WITH_COUNTS,
+            _compute_responsive_date_plan,
+        )
+
+        start, end, mode = _compute_responsive_date_plan([], 0, width=90, get_count=lambda _: 0)
+        assert (start, end) == (0, 0)
+        assert mode == DATE_NAV_LABEL_WITH_COUNTS
+
+    def test_responsive_plan_very_narrow_width_falls_back_to_numeric(self):
+        """Lines 158-159: no window/mode fits → fallback single-window NUMERIC."""
+        from datetime import date as dt_date
+
+        from arxiv_browser.widgets.chrome import (
+            DATE_NAV_LABEL_NUMERIC,
+            _compute_responsive_date_plan,
+        )
+
+        files = [(dt_date(2026, 1, 1), Path("/tmp/f.txt"))]
+        # width=1 is > 0 (avoids line 138-140) but too small for any label
+        start, end, mode = _compute_responsive_date_plan(files, 0, width=1, get_count=lambda _: 0)
+        assert mode == DATE_NAV_LABEL_NUMERIC
+        assert end - start == 1
+
+    # ── DateNavigator unit helpers ────────────────────────────────────────────
+
+    def test_compute_window_method_delegates(self):
+        """Line 260: _compute_window calls _compute_window_bounds correctly."""
+        from datetime import date as dt_date
+
+        from tests.support.canonical_exports import DateNavigator
+
+        files = [(dt_date(2026, 1, i + 1), Path(f"/tmp/{i}.txt")) for i in range(10)]
+        nav = DateNavigator(files, current_index=5)
+        result = nav._compute_window(10, 5)
+        assert result == (3, 8)
+
+    def test_patch_items_in_place_skips_missing_child(self):
+        """Line 312: continue when desired item_id not found in existing_by_id."""
+        from datetime import date as dt_date
+        from unittest.mock import MagicMock
+
+        from tests.support.canonical_exports import DateNavigator
+
+        nav = DateNavigator([])
+        existing_label = MagicMock()
+        existing_label.id = "date-nav-0"
+        # desired has an ID absent from existing_by_id → child is None → continue
+        nav._patch_items_in_place([existing_label], [("date-nav-99", "text", True)])
+        # existing_label.update should NOT have been called (child was None, continue hit)
+        existing_label.update.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_rebuild_items_removes_existing_before_mounting(self):
+        """Line 326: await child.remove() called for each existing item."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from tests.support.canonical_exports import DateNavigator
+
+        nav = DateNavigator([])
+        mock_label = MagicMock()
+        mock_label.remove = AsyncMock()
+        nav.query_one = MagicMock(return_value=MagicMock())
+        nav.mount = MagicMock()
+        await nav._rebuild_items([mock_label], [("date-nav-1", "Jan 02", True)])
+        mock_label.remove.assert_awaited_once()
+        nav.mount.assert_called_once()
+
+    # ── DateNavigator.on_click edge paths ────────────────────────────────────
+
+    def test_on_click_non_click_event_returns_early(self):
+        """Line 378: on_click with a non-Click event does nothing."""
+        from unittest.mock import MagicMock
+
+        from tests.support.canonical_exports import DateNavigator
+
+        nav = DateNavigator([])
+        nav.post_message = MagicMock()
+        nav.on_click("not-a-click-event")
+        nav.post_message.assert_not_called()
+
+    def test_on_click_none_widget_returns_early(self):
+        """Line 381: on_click with Click(widget=None) does nothing."""
+        from unittest.mock import MagicMock
+
+        from textual.events import Click
+
+        from tests.support.canonical_exports import DateNavigator
+
+        nav = DateNavigator([])
+        nav.post_message = MagicMock()
+        click = Click(
+            widget=None,
+            x=0,
+            y=0,
+            delta_x=0,
+            delta_y=0,
+            button=1,
+            shift=False,
+            meta=False,
+            ctrl=False,
+        )
+        nav.on_click(click)
+        nav.post_message.assert_not_called()
+
+    def test_on_click_unrecognized_widget_id_is_noop(self):
+        """387->exit: widget_id matches none of the known IDs → silent no-op."""
+        from unittest.mock import MagicMock
+
+        from textual.events import Click
+        from textual.widgets import Label
+
+        from tests.support.canonical_exports import DateNavigator
+
+        nav = DateNavigator([])
+        nav.post_message = MagicMock()
+        widget = Label("x", id="some-unrelated-button")
+        nav.on_click(
+            Click(
+                widget=widget,
+                x=0,
+                y=0,
+                delta_x=0,
+                delta_y=0,
+                button=1,
+                shift=False,
+                meta=False,
+                ctrl=False,
+            )
+        )
+        nav.post_message.assert_not_called()
+
+    def test_on_click_invalid_date_nav_id_raises_value_error(self):
+        """Lines 391-392: int('abc') raises ValueError → except pass, no message."""
+        from unittest.mock import MagicMock
+
+        from textual.events import Click
+        from textual.widgets import Label
+
+        from tests.support.canonical_exports import DateNavigator
+
+        nav = DateNavigator([])
+        nav.post_message = MagicMock()
+        widget = Label("x", id="date-nav-abc")  # removeprefix → 'abc', int() raises
+        nav.on_click(
+            Click(
+                widget=widget,
+                x=0,
+                y=0,
+                delta_x=0,
+                delta_y=0,
+                button=1,
+                shift=False,
+                meta=False,
+                ctrl=False,
+            )
+        )
+        nav.post_message.assert_not_called()
+
+    # ── BookmarkTabBar branches ───────────────────────────────────────────────
+
+    def test_bookmark_tab_bar_init_adds_visible_class(self):
+        """Line 459: __init__ calls add_class('visible') when bookmarks present."""
+        from tests.support.canonical_exports import BookmarkTabBar
+
+        bm = SearchBookmark(name="Test", query="test")
+        bar = BookmarkTabBar(bookmarks=[bm], active_index=0)
+        assert "visible" in bar.classes
+
+        bar2 = BookmarkTabBar(bookmarks=[], active_search=True)
+        assert "visible" in bar2.classes
+
+    def test_bookmark_tab_bar_compose_renders_tabs(self):
+        """Lines 465-468: compose yields tab labels when bookmarks non-empty."""
+        from tests.support.canonical_exports import BookmarkTabBar
+
+        bm = SearchBookmark(name="MLPapers", query="cat:cs.LG")
+        bar = BookmarkTabBar(bookmarks=[bm], active_index=0)
+        children = list(bar.compose())
+        ids = [getattr(c, "id", None) for c in children]
+        assert "bookmark-0" in ids
+        assert "bookmark-add" in ids
+
+    def test_bookmark_tab_bar_compose_active_search_hint(self):
+        """Line 470: compose yields save-hint label when active_search with no bookmarks."""
+        from tests.support.canonical_exports import BookmarkTabBar
+
+        bar = BookmarkTabBar(bookmarks=[], active_search=True)
+        children = list(bar.compose())
+        ids = [getattr(c, "id", None) for c in children]
+        assert "bookmark-hint" in ids
+
+    @pytest.mark.asyncio
+    async def test_bookmark_tab_bar_update_bookmarks_mounts_tabs(self):
+        """Lines 490-493: update_bookmarks mounts tab labels when bookmarks given."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from tests.support.canonical_exports import BookmarkTabBar
+
+        bar = BookmarkTabBar(bookmarks=[])
+        bar.remove_children = AsyncMock()
+        bar.mount = MagicMock()
+        bar.add_class = MagicMock()
+        bar.remove_class = MagicMock()
+
+        bm = SearchBookmark(name="Saved", query="graph")
+        await bar.update_bookmarks(bookmarks=[bm], active_index=0)
+        # At least 3 mounts: "Saved searches" label + tab label + "Ctrl+b save" label
+        assert bar.mount.call_count >= 3
+
+    # ── ContextFooter.render_bindings branch ─────────────────────────────────
+
+    def test_context_footer_render_bindings_label_only_entry(self):
+        """Line 83: elif label: path hit when key is empty but label is non-empty."""
+        from unittest.mock import MagicMock, patch
+
+        from arxiv_browser.widgets.chrome import ContextFooter
+
+        with patch(
+            "arxiv_browser.widgets.chrome.theme_colors_for",
+            return_value={"accent": "blue", "muted": "gray"},
+        ):
+            footer = ContextFooter()
+            footer.update = MagicMock()
+            # ("", "progress text") → key empty, label non-empty → line 83
+            footer.render_bindings([("", "progress: 50%")])
+            footer.update.assert_called_once()
+            rendered = footer.update.call_args[0][0]
+            assert "progress: 50%" in rendered
+
+    # ── FilterPillBar.on_click edge paths ─────────────────────────────────────
+
+    def test_filter_pill_bar_on_click_non_click_returns_early(self):
+        """Line 609: non-Click event → return immediately."""
+        from unittest.mock import MagicMock
+
+        from arxiv_browser.widgets.chrome import FilterPillBar
+
+        bar = FilterPillBar()
+        bar.post_message = MagicMock()
+        bar.on_click("not-a-click-event")
+        bar.post_message.assert_not_called()
+
+    def test_filter_pill_bar_on_click_non_label_widget_returns_early(self):
+        """Line 612: Click with non-Label widget → return immediately."""
+        from unittest.mock import MagicMock
+
+        from textual.events import Click
+        from textual.widgets import Static
+
+        from arxiv_browser.widgets.chrome import FilterPillBar
+
+        bar = FilterPillBar()
+        bar.post_message = MagicMock()
+        non_label = Static("hello", id="some-id")
+        bar.on_click(
+            Click(
+                widget=non_label,
+                x=0,
+                y=0,
+                delta_x=0,
+                delta_y=0,
+                button=1,
+                shift=False,
+                meta=False,
+                ctrl=False,
+            )
+        )
+        bar.post_message.assert_not_called()
+
+    def test_filter_pill_bar_on_click_unrecognized_id_is_noop(self):
+        """616->exit: widget_id neither 'pill-watch' nor starts with 'pill-' → no-op."""
+        from unittest.mock import MagicMock
+
+        from textual.events import Click
+        from textual.widgets import Label
+
+        from arxiv_browser.widgets.chrome import FilterPillBar
+
+        bar = FilterPillBar()
+        bar.post_message = MagicMock()
+        unrelated = Label("other", id="bookmark-0")
+        bar.on_click(
+            Click(
+                widget=unrelated,
+                x=0,
+                y=0,
+                delta_x=0,
+                delta_y=0,
+                button=1,
+                shift=False,
+                meta=False,
+                ctrl=False,
+            )
+        )
+        bar.post_message.assert_not_called()
+
+
 class TestThemeSwitcher:
     """Tests for U7: Color theme switcher."""
 

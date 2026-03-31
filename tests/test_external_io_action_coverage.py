@@ -308,3 +308,150 @@ class TestExternalIoCoverage:
         app._update_status_bar = MagicMock()
         io_actions._finish_download_batch(app)
         assert app._download_total == 0
+
+    def test_additional_coverage_branches(self, make_paper, tmp_path) -> None:
+        """Cover remaining uncovered lines in external_io_actions."""
+        app = _new_app_stub()
+        paper = make_paper(arxiv_id="2401.50001")
+        paper2 = make_paper(arxiv_id="2401.50002")
+        app._config = UserConfig()
+        app._config.paper_metadata = {}
+        app.notify = MagicMock()
+
+        # Line 32: action_copy_bibtex clipboard failure
+        app._get_target_papers = MagicMock(return_value=[paper])
+        app._copy_to_clipboard = MagicMock(return_value=False)
+        io_actions.action_copy_bibtex(app)
+        assert "Failed to copy to clipboard" in app.notify.call_args[0][0]
+
+        # Lines 51-52: action_export_markdown no paper selected
+        app._get_target_papers = MagicMock(return_value=[])
+        app.notify.reset_mock()
+        io_actions.action_export_markdown(app)
+        assert "No paper selected" in app.notify.call_args[0][0]
+
+        # Lines 72-73: action_export_menu no paper selected
+        app.notify.reset_mock()
+        io_actions.action_export_menu(app)
+        assert "No paper selected" in app.notify.call_args[0][0]
+
+        # 94->exit: _do_export with unknown format key (handler None → no-op)
+        sentinel = MagicMock()
+        io_actions._do_export(app, "unknown-format-xyz", [paper])
+        sentinel.assert_not_called()  # nothing should have been called for unknown key
+
+        # Lines 135-136: _export_clipboard_ris success notification
+        app._copy_to_clipboard = MagicMock(return_value=True)
+        app._get_abstract_text = MagicMock(return_value="abstract text")
+        app.notify.reset_mock()
+        io_actions._export_clipboard_ris(app, [paper])
+        assert "Copied 1 RIS entry" in app.notify.call_args[0][0]
+
+        # Lines 161-162: _export_clipboard_csv success notification
+        app.notify.reset_mock()
+        io_actions._export_clipboard_csv(app, [paper])
+        assert "Copied 1 paper as CSV" in app.notify.call_args[0][0]
+
+        # Lines 176-181: _export_file_ris (loop body with two papers)
+        app._export_to_file = MagicMock()
+        app._get_abstract_text = MagicMock(return_value="abstract text")
+        io_actions._export_file_ris(app, [paper, paper2])
+        app._export_to_file.assert_called_once()
+
+        # 259->261: _import_metadata_file with papers_n=0 so "papers" part is skipped
+        json_file = tmp_path / "arxiv-meta.json"
+        json_file.write_text("{}", encoding="utf-8")
+        app._compute_watched_papers = MagicMock()
+        app._refresh_list_view = MagicMock()
+        app.notify.reset_mock()
+        with (
+            patch(
+                "arxiv_browser.actions.external_io_actions.import_metadata",
+                return_value=(0, 2, 0, 0),
+            ),
+            patch("arxiv_browser.actions.external_io_actions.save_config", return_value=True),
+        ):
+            io_actions._import_metadata_file(app, json_file)
+        notify_msg = app.notify.call_args[0][0]
+        assert "2 watch entries" in notify_msg
+        assert "0 papers" not in notify_msg
+
+        # 302->exit: _process_single_download when _shutting_down=True
+        app._shutting_down = True
+        app._download_pdf_async = AsyncMock(return_value=True)
+        app._downloading = {paper.arxiv_id}
+        app._download_results = {}
+        app._download_total = 1
+        app._update_download_progress = MagicMock()
+        app._finish_download_batch = MagicMock()
+        app._start_downloads = MagicMock()
+        asyncio.run(io_actions._process_single_download(app, paper))
+        app._update_download_progress.assert_not_called()
+
+        # Lines 448-449: action_download_pdf when all PDFs already downloaded
+        app._shutting_down = False
+        app._is_download_batch_active = MagicMock(return_value=False)
+        app._get_target_papers = MagicMock(return_value=[paper])
+        app.notify.reset_mock()
+        with patch(
+            "arxiv_browser.actions.external_io_actions.filter_papers_needing_download",
+            return_value=([], [paper.arxiv_id]),
+        ):
+            io_actions.action_download_pdf(app)
+        assert "All PDFs already downloaded" in app.notify.call_args[0][0]
+
+        # Line 452: action_download_pdf batch confirmation (> BATCH_CONFIRM_THRESHOLD=10)
+        papers_large = [make_paper(arxiv_id=f"2401.6{i:04d}") for i in range(11)]
+        app._get_target_papers = MagicMock(return_value=papers_large)
+        app.push_screen = MagicMock()
+        with patch(
+            "arxiv_browser.actions.external_io_actions.filter_papers_needing_download",
+            return_value=(papers_large, []),
+        ):
+            io_actions.action_download_pdf(app)
+        app.push_screen.assert_called_once()
+
+        # Lines 467-473: _do_start_downloads happy path initialises queue and notifies
+        app._is_download_batch_active = MagicMock(return_value=False)
+        app._download_queue = deque()
+        app._download_results = {}
+        app._download_total = 0
+        app._start_downloads = MagicMock()
+        app.notify.reset_mock()
+        io_actions._do_start_downloads(app, [paper])
+        assert app._download_total == 1
+        app._start_downloads.assert_called_once()
+        assert app.notify.call_args[1]["title"] == "Download"
+
+        # Lines 478-479: _format_paper_for_clipboard delegates correctly
+        app._get_abstract_text = MagicMock(return_value="abstract body")
+        with patch(
+            "arxiv_browser.actions.external_io_actions.format_paper_for_clipboard",
+            return_value="formatted-text",
+        ):
+            result = io_actions._format_paper_for_clipboard(app, paper)
+        assert result == "formatted-text"
+
+        # 496->509: _copy_to_clipboard subprocess.run succeeds → return True
+        with (
+            patch(
+                "arxiv_browser.actions.external_io_actions.get_clipboard_command_plan",
+                return_value=([["pbcopy"]], "utf-8"),
+            ),
+            patch("arxiv_browser.actions.external_io_actions.subprocess.run", return_value=None),
+        ):
+            assert io_actions._copy_to_clipboard(app, "test text") is True
+
+        # Line 508: _copy_to_clipboard single command raises FileNotFoundError → re-raise →
+        # outer except catches it → return False
+        with (
+            patch(
+                "arxiv_browser.actions.external_io_actions.get_clipboard_command_plan",
+                return_value=([["xclip"]], "utf-8"),
+            ),
+            patch(
+                "arxiv_browser.actions.external_io_actions.subprocess.run",
+                side_effect=FileNotFoundError("not found"),
+            ),
+        ):
+            assert io_actions._copy_to_clipboard(app, "test text") is False
