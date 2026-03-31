@@ -347,10 +347,10 @@ class TestExternalIoCoverage:
         io_actions._export_clipboard_ris(app, [paper])
         assert "Copied 1 RIS entry" in app.notify.call_args[0][0]
 
-        # Lines 161-162: _export_clipboard_csv success notification
+        # Lines 161-162: _export_clipboard_mdtable success notification
         app.notify.reset_mock()
-        io_actions._export_clipboard_csv(app, [paper])
-        assert "Copied 1 paper as CSV" in app.notify.call_args[0][0]
+        io_actions._export_clipboard_mdtable(app, [paper])
+        assert "Copied 1 paper as Markdown table" in app.notify.call_args[0][0]
 
         # Lines 176-181: _export_file_ris (loop body with two papers)
         app._export_to_file = MagicMock()
