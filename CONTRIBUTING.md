@@ -2,6 +2,8 @@
 
 This repository keeps contributor guidance lightweight: prefer small, task-focused changes over adding new planning or process documents.
 
+Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before contributing. To report a security issue, see [SECURITY.md](SECURITY.md).
+
 ## Docs map
 
 - `README.md` — top-level install, usage, and quick-start material

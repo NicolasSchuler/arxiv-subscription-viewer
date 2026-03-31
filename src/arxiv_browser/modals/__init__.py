@@ -24,11 +24,8 @@ from arxiv_browser.modals.collections import (
 from arxiv_browser.modals.common import (
     ConfirmModal,
     ExportMenuModal,
-    HelpScreen,
     MetadataSnapshotPickerModal,
     SectionToggleModal,
-    WatchListItem,
-    WatchListModal,
 )
 
 # editing.py — notes, tags, auto-tag suggestions
@@ -37,6 +34,9 @@ from arxiv_browser.modals.editing import (
     NotesModal,
     TagsModal,
 )
+
+# help.py — full-screen keyboard shortcut overlay
+from arxiv_browser.modals.help import HelpScreen
 
 # llm.py — LLM-powered modals (summaries, relevance, chat)
 from arxiv_browser.modals.llm import (
@@ -51,6 +51,9 @@ from arxiv_browser.modals.search import (
     CommandPaletteModal,
     PaletteCommand,
 )
+
+# watchlist.py — watch list management modals
+from arxiv_browser.modals.watchlist import WatchListItem, WatchListModal
 
 __all__ = [
     "AddToCollectionModal",

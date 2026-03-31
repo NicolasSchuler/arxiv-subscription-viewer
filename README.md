@@ -13,6 +13,21 @@
   <img src="docs/screenshot.svg" alt="Screenshot" width="800">
 </p>
 
+<p align="center">
+  <a href="https://github.com/NicolasSchuler/arxiv-subscription-viewer/actions/workflows/ci-cd.yml">
+    <img src="https://github.com/NicolasSchuler/arxiv-subscription-viewer/actions/workflows/ci-cd.yml/badge.svg" alt="CI/CD">
+  </a>
+  <a href="https://pypi.org/project/arxiv-subscription-viewer/">
+    <img src="https://img.shields.io/pypi/v/arxiv-subscription-viewer" alt="PyPI version">
+  </a>
+  <a href="https://pypi.org/project/arxiv-subscription-viewer/">
+    <img src="https://img.shields.io/pypi/pyversions/arxiv-subscription-viewer" alt="Python versions">
+  </a>
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License: MIT">
+  </a>
+</p>
+
 ## 🚀 Getting Started
 
 Use whichever entry path matches how you already follow papers:

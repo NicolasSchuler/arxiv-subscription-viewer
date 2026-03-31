@@ -236,7 +236,9 @@ async def load_or_fetch_s2_paper_cached(
     client: httpx.AsyncClient | None,
     api_key: str,
     include_status: Literal[False] = ...,
-) -> SemanticScholarPaper | None: ...
+) -> SemanticScholarPaper | None:
+    """Overload — returns the paper only when include_status is False."""
+    ...
 
 
 @overload
@@ -248,7 +250,9 @@ async def load_or_fetch_s2_paper_cached(
     client: httpx.AsyncClient | None,
     api_key: str,
     include_status: Literal[True],
-) -> tuple[SemanticScholarPaper | None, bool]: ...
+) -> tuple[SemanticScholarPaper | None, bool]:
+    """Overload — returns a (paper, complete) tuple when include_status is True."""
+    ...
 
 
 async def load_or_fetch_s2_paper_cached(
@@ -313,7 +317,9 @@ async def load_or_fetch_hf_daily_cached(
     cache_ttl_hours: int,
     client: httpx.AsyncClient | None,
     include_status: Literal[False] = ...,
-) -> list[HuggingFacePaper]: ...
+) -> list[HuggingFacePaper]:
+    """Overload — returns the papers list only when include_status is False."""
+    ...
 
 
 @overload
@@ -323,7 +329,9 @@ async def load_or_fetch_hf_daily_cached(
     cache_ttl_hours: int,
     client: httpx.AsyncClient | None,
     include_status: Literal[True],
-) -> tuple[list[HuggingFacePaper], bool]: ...
+) -> tuple[list[HuggingFacePaper], bool]:
+    """Overload — returns a (papers, complete) tuple when include_status is True."""
+    ...
 
 
 async def load_or_fetch_hf_daily_cached(
@@ -385,7 +393,9 @@ async def load_or_fetch_s2_recommendations_cached(
     client: httpx.AsyncClient | None,
     api_key: str,
     include_status: Literal[False] = ...,
-) -> list[SemanticScholarPaper]: ...
+) -> list[SemanticScholarPaper]:
+    """Overload — returns recommended papers only when include_status is False."""
+    ...
 
 
 @overload
@@ -397,7 +407,9 @@ async def load_or_fetch_s2_recommendations_cached(
     client: httpx.AsyncClient | None,
     api_key: str,
     include_status: Literal[True],
-) -> tuple[list[SemanticScholarPaper], bool]: ...
+) -> tuple[list[SemanticScholarPaper], bool]:
+    """Overload — returns a (papers, complete) tuple when include_status is True."""
+    ...
 
 
 async def load_or_fetch_s2_recommendations_cached(

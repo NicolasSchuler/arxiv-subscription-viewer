@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
+from typing import Any, Protocol
 
 from arxiv_browser.models import WatchListEntry
 from arxiv_browser.widgets import chrome as _widget_chrome
+
+
+class TaskTrackingApp(Protocol):
+    """Protocol for the subset of ArxivBrowser used by modal screens."""
+
+    def _track_task(self, coro: Any, *, dataset_bound: bool = False) -> asyncio.Task[None]: ...
+
 
 # Context-sensitive footer keybinding hints (compatibility alias kept for tests/imports).
 FOOTER_CONTEXTS: dict[str, list[tuple[str, str]]] = {
@@ -153,4 +162,4 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
 ]
 
 
-__all__ = ["COMMAND_PALETTE_COMMANDS", "FOOTER_CONTEXTS", "_PaletteAppState"]
+__all__ = ["COMMAND_PALETTE_COMMANDS", "FOOTER_CONTEXTS", "TaskTrackingApp", "_PaletteAppState"]

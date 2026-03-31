@@ -8,6 +8,12 @@ from arxiv_browser.browser._runtime import *
 
 
 class ChromeMixin:
+    """Mixin providing detail-pane, status bar, footer, and command-palette behaviour.
+
+    Intended to be composed into the main ArxivBrowser app class alongside other
+    mixins.  All methods are private helpers; the mixin exposes no public API of
+    its own.
+    """
     def _apply_category_overrides(self) -> None:
         """Apply category color overrides from config.
         Layers: default → per-theme → user overrides.

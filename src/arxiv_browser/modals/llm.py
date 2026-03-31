@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import cast
 
 from textual import on
 from textual.app import ComposeResult
@@ -12,6 +13,7 @@ from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Static, TextArea
 
+from arxiv_browser.browser.contracts import TaskTrackingApp
 from arxiv_browser.llm import CHAT_SYSTEM_PROMPT, LLM_COMMAND_TIMEOUT
 from arxiv_browser.llm_providers import CLIProvider
 from arxiv_browser.models import Paper
@@ -332,7 +334,7 @@ class PaperChatScreen(ModalScreen[None]):
         self._add_message("user", question)
         self._waiting = True
         self.query_one("#chat-status", Static).update("[dim]Thinking...[/]")
-        self.app._track_task(self._ask_llm(question))  # type: ignore[attr-defined]
+        cast(TaskTrackingApp, self.app)._track_task(self._ask_llm(question))
 
     def _add_message(self, role: str, text: str, *, markup: bool = False) -> None:
         """Append a message to the conversation history and render it in the chat scroll area."""

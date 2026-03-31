@@ -186,7 +186,9 @@ async def fetch_s2_paper(
     api_key: str = ...,
     timeout: int = ...,
     include_status: Literal[False] = ...,
-) -> SemanticScholarPaper | None: ...
+) -> SemanticScholarPaper | None:
+    """Overload — returns the paper only when include_status is False."""
+    ...
 
 
 @overload
@@ -196,7 +198,9 @@ async def fetch_s2_paper(
     api_key: str = ...,
     timeout: int = ...,
     include_status: Literal[True] = ...,
-) -> tuple[SemanticScholarPaper | None, bool]: ...
+) -> tuple[SemanticScholarPaper | None, bool]:
+    """Overload — returns a (paper, complete) tuple when include_status is True."""
+    ...
 
 
 async def fetch_s2_paper(
@@ -278,7 +282,9 @@ async def fetch_s2_recommendations_with_status(
     api_key: str = "",
     timeout: int = S2_REQUEST_TIMEOUT,
     include_status: Literal[False] = ...,
-) -> list[SemanticScholarPaper]: ...
+) -> list[SemanticScholarPaper]:
+    """Overload — returns recommended papers only when include_status is False."""
+    ...
 
 
 @overload
@@ -289,7 +295,9 @@ async def fetch_s2_recommendations_with_status(
     api_key: str = "",
     timeout: int = S2_REQUEST_TIMEOUT,
     include_status: Literal[True] = ...,
-) -> tuple[list[SemanticScholarPaper], bool]: ...
+) -> tuple[list[SemanticScholarPaper], bool]:
+    """Overload — returns a (papers, complete) tuple when include_status is True."""
+    ...
 
 
 async def fetch_s2_recommendations_with_status(
@@ -338,7 +346,9 @@ async def fetch_s2_references(
     api_key: str = ...,
     timeout: int = ...,
     include_status: Literal[False] = ...,
-) -> list[CitationEntry]: ...
+) -> list[CitationEntry]:
+    """Overload — returns reference entries only when include_status is False."""
+    ...
 
 
 @overload
@@ -349,7 +359,9 @@ async def fetch_s2_references(
     api_key: str = ...,
     timeout: int = ...,
     include_status: Literal[True] = ...,
-) -> tuple[list[CitationEntry], bool]: ...
+) -> tuple[list[CitationEntry], bool]:
+    """Overload — returns a (entries, complete) tuple when include_status is True."""
+    ...
 
 
 async def fetch_s2_references(
@@ -405,7 +417,9 @@ async def fetch_s2_citations(
     api_key: str = ...,
     timeout: int = ...,
     include_status: Literal[False] = ...,
-) -> list[CitationEntry]: ...
+) -> list[CitationEntry]:
+    """Overload — returns citation entries only when include_status is False."""
+    ...
 
 
 @overload
@@ -416,7 +430,9 @@ async def fetch_s2_citations(
     api_key: str = ...,
     timeout: int = ...,
     include_status: Literal[True] = ...,
-) -> tuple[list[CitationEntry], bool]: ...
+) -> tuple[list[CitationEntry], bool]:
+    """Overload — returns a (entries, complete) tuple when include_status is True."""
+    ...
 
 
 async def fetch_s2_citations(

@@ -65,9 +65,9 @@ dead-code:
 deps:
     uv run deptry .
 
-# Dependency CVE audit (non-blocking in CI by default)
+# Dependency CVE audit (strict — fails on any known vulnerability)
 deps-audit:
-    UV_CACHE_DIR=.uv-cache uv run pip-audit
+    uv run pip-audit --strict
 
 # ── Composite targets ────────────────────────────────────────────────
 
@@ -96,8 +96,8 @@ ci:
     @echo "=== Dependency Check ==="
     @uv run deptry .
     @echo ""
-    @echo "=== Dependency CVE Audit (non-blocking) ==="
-    @uv run pip-audit || true
+    @echo "=== Dependency CVE Audit ==="
+    @uv run pip-audit --strict
     @echo ""
     @echo "=== Dead Code ==="
     @uv run vulture {{ src }} vulture_whitelist.py --min-confidence 80

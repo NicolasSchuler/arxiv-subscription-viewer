@@ -6,6 +6,7 @@ import logging
 import sqlite3
 import webbrowser
 from collections.abc import Callable
+from typing import cast
 
 import httpx
 from textual import on
@@ -16,6 +17,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Label, ListItem, ListView, Static
 
 from arxiv_browser.action_messages import build_actionable_error
+from arxiv_browser.browser.contracts import TaskTrackingApp
 from arxiv_browser.models import Paper
 from arxiv_browser.query import escape_rich_text, truncate_text
 from arxiv_browser.semantic_scholar import CitationEntry
@@ -651,4 +653,4 @@ class CitationGraphScreen(ModalScreen[str | None]):
     def on_drill_pressed(self) -> None:
         """Handle the drill-down button press by invoking the async drill-down action."""
         # Button click needs to invoke the async action; use app's tracked task
-        self.app._track_task(self.action_drill_down())  # type: ignore[attr-defined]
+        cast(TaskTrackingApp, self.app)._track_task(self.action_drill_down())

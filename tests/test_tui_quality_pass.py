@@ -541,7 +541,7 @@ def test_read_only_modals_support_q_close_binding():
 
 
 def test_help_screen_default_sections_reflect_simplified_shortcuts():
-    from arxiv_browser.modals.common import HelpScreen
+    from arxiv_browser.modals.help import HelpScreen
 
     entries = {(key, desc) for _, pairs in HelpScreen._DEFAULT_SECTIONS for key, desc in pairs}
     assert ("Ctrl+p", "Open commands") in entries
@@ -551,7 +551,7 @@ def test_help_screen_default_sections_reflect_simplified_shortcuts():
 
 
 def test_help_screen_default_footer_copy():
-    from arxiv_browser.modals.common import HelpScreen
+    from arxiv_browser.modals.help import HelpScreen
 
     modal = HelpScreen()
     assert modal._footer_note == "Close: ? / Esc / q"
@@ -559,7 +559,7 @@ def test_help_screen_default_footer_copy():
 
 def test_help_screen_filter_sections():
     """_filter_sections returns only entries matching the query."""
-    from arxiv_browser.modals.common import HelpScreen
+    from arxiv_browser.modals.help import HelpScreen
 
     modal = HelpScreen()
 
@@ -580,7 +580,7 @@ def test_help_screen_filter_sections():
 @pytest.mark.asyncio
 async def test_help_screen_has_filter_input_and_filters(make_paper):
     """HelpScreen contains a filter Input and dynamically filters sections."""
-    from arxiv_browser.modals.common import HelpScreen
+    from arxiv_browser.modals.help import HelpScreen
 
     app = ArxivBrowser([make_paper()], restore_session=False)
     modal = HelpScreen()
@@ -907,12 +907,12 @@ async def test_modal_tail_branches_cover_common_search_and_citation_edges(make_p
     from arxiv_browser.modals.citations import CitationGraphScreen, RecommendationSourceModal
     from arxiv_browser.modals.common import (
         ConfirmModal,
-        HelpScreen,
         MetadataSnapshotPickerModal,
         SectionToggleModal,
-        WatchListModal,
     )
+    from arxiv_browser.modals.help import HelpScreen
     from arxiv_browser.modals.search import ArxivSearchModal, CommandPaletteModal
+    from arxiv_browser.modals.watchlist import WatchListModal
 
     class _PaletteListStub:
         def __init__(self) -> None:
