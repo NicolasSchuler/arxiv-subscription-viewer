@@ -1,12 +1,56 @@
-# ruff: noqa: F403, F405, UP037
+# ruff: noqa: UP037
 # pyright: reportUndefinedVariable=false, reportAttributeAccessIssue=false
 """Extracted ArxivBrowser action handlers."""
 
 from __future__ import annotations
 
+import asyncio
+import platform
+import subprocess
+import webbrowser as _webbrowser
+from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from arxiv_browser.actions._runtime import *
+from arxiv_browser.action_messages import build_actionable_error
+from arxiv_browser.actions._runtime import (
+    BATCH_CONFIRM_THRESHOLD,
+    CLIPBOARD_SEPARATOR,
+    DEFAULT_BIBTEX_EXPORT_DIR,
+    DEFAULT_PDF_DOWNLOAD_DIR,
+    MAX_CONCURRENT_DOWNLOADS,
+    SUBPROCESS_TIMEOUT,
+    build_clipboard_payload,
+    build_download_pdfs_confirmation_prompt,
+    build_download_start_notification,
+    build_markdown_export_document,
+    build_open_papers_confirmation_prompt,
+    build_open_papers_notification,
+    build_open_pdfs_confirmation_prompt,
+    build_open_pdfs_notification,
+    build_viewer_args,
+    export_metadata,
+    filter_papers_needing_download,
+    format_paper_as_bibtex,
+    format_paper_as_ris,
+    format_paper_for_clipboard,
+    format_papers_as_csv,
+    format_papers_as_markdown_table,
+    get_clipboard_command_plan,
+    get_paper_url,
+    get_pdf_download_path,
+    get_pdf_url,
+    import_metadata,
+    logger,
+    requires_batch_confirmation,
+    save_config,
+    write_timestamped_export_file,
+)
+from arxiv_browser.modals import ConfirmModal, ExportMenuModal, MetadataSnapshotPickerModal
+from arxiv_browser.models import Paper
+
+# Compatibility patch surface for tests and callers that monkeypatch browser opening.
+webbrowser = _webbrowser
 
 if TYPE_CHECKING:
     from arxiv_browser.app import ArxivBrowser

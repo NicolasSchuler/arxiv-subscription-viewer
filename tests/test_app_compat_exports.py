@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -17,11 +19,62 @@ class TestAppCompatibilityExports:
         for name in __all__:
             assert hasattr(app_module, name), f"{name} not found in arxiv_browser.app"
 
-    def test_root_package_compatibility_exports_remain_importable(self) -> None:
-        from arxiv_browser import DEFAULT_THEME, highlight_text
+    @pytest.mark.parametrize(
+        ("name", "module_name", "attr_name"),
+        [
+            ("Paper", "arxiv_browser.models", "Paper"),
+            ("UserConfig", "arxiv_browser.models", "UserConfig"),
+            ("ArxivBrowser", "arxiv_browser.browser.core", "ArxivBrowser"),
+            ("highlight_text", "arxiv_browser.query", "highlight_text"),
+            ("tokenize_query", "arxiv_browser.query", "tokenize_query"),
+            ("parse_arxiv_file", "arxiv_browser.parsing", "parse_arxiv_file"),
+            ("load_config", "arxiv_browser.config", "load_config"),
+        ],
+    )
+    def test_app_exports_resolve_to_canonical_symbols(
+        self,
+        name: str,
+        module_name: str,
+        attr_name: str,
+    ) -> None:
+        import arxiv_browser.app as app_module
 
-        assert DEFAULT_THEME["accent"]
+        canonical = getattr(importlib.import_module(module_name), attr_name)
+
+        resolved = app_module.__getattr__(name)
+
+        assert resolved is canonical
+        assert getattr(app_module, name) is canonical
+
+    def test_root_package_compatibility_exports_remain_importable(self) -> None:
+        package = cast(Any, importlib.import_module("arxiv_browser"))
+
+        default_theme = cast(dict[str, Any], package.DEFAULT_THEME)
+        highlight_text = package.highlight_text
+
+        assert default_theme["accent"]
         assert callable(highlight_text)
+
+    @pytest.mark.parametrize(
+        ("name", "module_name", "attr_name"),
+        [
+            ("Paper", "arxiv_browser.models", "Paper"),
+            ("UserConfig", "arxiv_browser.models", "UserConfig"),
+            ("ArxivBrowser", "arxiv_browser.browser.core", "ArxivBrowser"),
+            ("highlight_text", "arxiv_browser.query", "highlight_text"),
+        ],
+    )
+    def test_root_package_exports_resolve_to_canonical_symbols(
+        self,
+        name: str,
+        module_name: str,
+        attr_name: str,
+    ) -> None:
+        import arxiv_browser
+
+        canonical = getattr(importlib.import_module(module_name), attr_name)
+
+        assert getattr(arxiv_browser, name) is canonical
 
     def test_app_fetch_paper_content_async_uses_compat_patch_surface(self, monkeypatch) -> None:
         import arxiv_browser.app as app_module
@@ -60,10 +113,11 @@ class TestAppCompatibilityExports:
         )
 
         client = _Client(_Response(200, "<p>x</p>"))
+        fetch_paper_content = cast(Any, app_module._fetch_paper_content_async)
         monkeypatch.setattr(
             app_module, "extract_text_from_html", lambda _html: "abcdef", raising=False
         )
-        text = asyncio.run(app_module._fetch_paper_content_async(paper, client=client, timeout=4))
+        text = asyncio.run(fetch_paper_content(paper, client=client, timeout=4))
         assert text == "abcdef"
         assert client.calls == [("https://arxiv.org/html/2401.99991", 4, True)]
 
@@ -72,7 +126,7 @@ class TestAppCompatibilityExports:
             "arxiv_browser.app.httpx.AsyncClient",
             return_value=_TempClient(_Response(404, "")),
         ):
-            text = asyncio.run(app_module._fetch_paper_content_async(paper))
+            text = asyncio.run(fetch_paper_content(paper))
         assert text == "Abstract:\nFallback abstract."
 
     def test_app_getattr_dir_and_missing_attr(self) -> None:

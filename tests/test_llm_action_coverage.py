@@ -347,15 +347,15 @@ class TestLlmActionCoverage:
 
         app.notify.reset_mock()
         app._services.llm.generate_summary = AsyncMock(side_effect=Exception("boom"))
-        await llm_actions._generate_summary_async(
-            app,
-            paper,
-            "prompt",
-            "cmd-hash",
-            mode_label="Q",
-            use_full_paper_content=False,
-        )
-        assert "Summary failed" in app.notify.call_args[0][0]
+        with pytest.raises(Exception, match="boom"):
+            await llm_actions._generate_summary_async(
+                app,
+                paper,
+                "prompt",
+                "cmd-hash",
+                mode_label="Q",
+                use_full_paper_content=False,
+            )
 
     @pytest.mark.asyncio
     async def test_relevance_and_auto_tag_branches(self, make_paper, tmp_path) -> None:
@@ -550,6 +550,22 @@ class TestLlmActionCoverage:
                 "interest",
             )
 
+        app.notify.reset_mock()
+        with (
+            patch(
+                "arxiv_browser.actions.llm_actions.asyncio.to_thread",
+                new=AsyncMock(side_effect=Exception("boom")),
+            ),
+            pytest.raises(Exception, match="boom"),
+        ):
+            await llm_actions._score_relevance_batch_async(
+                app,
+                [paper],
+                "echo {prompt}",
+                "interest",
+            )
+        app.notify.assert_not_called()
+
         app._get_or_create_metadata = MagicMock(
             return_value=SimpleNamespace(tags=["existing", "topic:new"])
         )
@@ -619,7 +635,8 @@ class TestLlmActionCoverage:
         app._call_auto_tag_llm = AsyncMock(side_effect=RuntimeError("boom"))
         await llm_actions._auto_tag_single_async(app, paper, ["existing"], ["existing"])
         app._call_auto_tag_llm = AsyncMock(side_effect=Exception("boom"))
-        await llm_actions._auto_tag_single_async(app, paper, ["existing"], ["existing"])
+        with pytest.raises(Exception, match="boom"):
+            await llm_actions._auto_tag_single_async(app, paper, ["existing"], ["existing"])
 
         app._cancel_batch_requested = False
         app._call_auto_tag_llm = AsyncMock(side_effect=[["topic:a"], None])
@@ -853,6 +870,40 @@ class TestLlmActionCoverage:
         assert stale_relevance_app._cancel_batch_requested is True
         stale_relevance_app._update_footer.assert_not_called()
 
+        unexpected_relevance_app = _new_app_stub()
+        unexpected_relevance_app._config = UserConfig(llm_timeout=8)
+        unexpected_relevance_app._llm_provider = object()
+        unexpected_relevance_app._relevance_db_path = tmp_path / "unexpected-relevance.db"
+        unexpected_relevance_app._relevance_scores = {}
+        unexpected_relevance_app._relevance_scoring_active = True
+        unexpected_relevance_app._scoring_progress = (1, 1)
+        unexpected_relevance_app._cancel_batch_requested = True
+        unexpected_relevance_app.notify = MagicMock()
+        unexpected_relevance_app._update_footer = MagicMock()
+        unexpected_relevance_app._mark_badges_dirty = MagicMock()
+        unexpected_relevance_app._refresh_detail_pane = MagicMock()
+        unexpected_relevance_app._capture_dataset_epoch = MagicMock(return_value=1)
+        unexpected_relevance_app._is_current_dataset_epoch = MagicMock(return_value=True)
+
+        with (
+            patch(
+                "arxiv_browser.actions.llm_actions.asyncio.to_thread",
+                new=AsyncMock(side_effect=Exception("boom")),
+            ),
+            pytest.raises(Exception, match="boom"),
+        ):
+            await llm_actions._score_relevance_batch_async(
+                unexpected_relevance_app,
+                [paper],
+                "echo {prompt}",
+                "interest",
+            )
+
+        unexpected_relevance_app.notify.assert_not_called()
+        assert unexpected_relevance_app._relevance_scoring_active is False
+        assert unexpected_relevance_app._scoring_progress is None
+        assert unexpected_relevance_app._cancel_batch_requested is False
+
         stale_single_app = _new_app_stub()
         stale_single_app._auto_tag_active = True
         stale_single_app.notify = MagicMock()
@@ -917,10 +968,11 @@ class TestLlmActionCoverage:
         zero_batch_app._is_current_dataset_epoch = MagicMock(return_value=True)
         zero_batch_app._call_auto_tag_llm = AsyncMock(side_effect=Exception("boom"))
 
-        await llm_actions._auto_tag_batch_async(zero_batch_app, [paper], ["existing"])
+        with pytest.raises(Exception, match="boom"):
+            await llm_actions._auto_tag_batch_async(zero_batch_app, [paper], ["existing"])
 
         zero_batch_app._save_config_or_warn.assert_not_called()
-        assert zero_batch_app.notify.call_args.kwargs["severity"] == "error"
+        zero_batch_app.notify.assert_not_called()
 
         cancelled_batch_app = _new_app_stub()
         cancelled_batch_app._auto_tag_active = True

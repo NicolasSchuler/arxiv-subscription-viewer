@@ -1,4 +1,4 @@
-# ruff: noqa: F403, F405, UP037
+# ruff: noqa: UP037
 # pyright: reportUndefinedVariable=false, reportAttributeAccessIssue=false
 """LLM, Semantic Scholar, and command-trust action handlers for ArxivBrowser.
 
@@ -9,16 +9,49 @@ fetching, and the security trust-gate for LLM and PDF-viewer commands.
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from arxiv_browser.actions._runtime import *
+from textual.app import ScreenStackError
+
+from arxiv_browser.actions._runtime import logger
+from arxiv_browser.config import get_config_path, save_config
+from arxiv_browser.llm import (
+    LLM_PRESETS,
+    SUMMARY_MODES,
+    _compute_command_hash,
+    _load_all_relevance_scores,
+    _load_summary,
+    _resolve_llm_command,
+    _save_relevance_score,
+    _save_summary,
+)
+from arxiv_browser.llm_providers import CLIProvider, llm_command_requires_shell, resolve_provider
+from arxiv_browser.modals import (
+    AutoTagSuggestModal,
+    ConfirmModal,
+    PaperChatScreen,
+    ResearchInterestsModal,
+    SummaryModeModal,
+)
+from arxiv_browser.models import Paper
+from arxiv_browser.query import truncate_text
 
 if TYPE_CHECKING:
     from arxiv_browser.app import ArxivBrowser
 
 
 _RECOVERABLE_ACTION_ERRORS = (OSError, RuntimeError, ValueError, TypeError)
+_TRUST_HASH_LENGTH = 16
+_COMMAND_PREVIEW_MAX_LEN = 120
+_NOTIFY_TIMEOUT_DEFAULT = 8
+_NOTIFY_TIMEOUT_LONG = 10
+_NOTIFY_MAX_LENGTH = 200
+_RELEVANCE_SCORING_CONCURRENCY = 3
+_RELEVANCE_PROGRESS_NOTIFY_INTERVAL = 5
 
 
 @dataclass(slots=True)
@@ -50,7 +83,7 @@ def _collect_all_tags(app: "ArxivBrowser") -> list[str]:
 
 def _trust_hash(command_template: str) -> str:
     """Return a stable short hash for trusted command templates."""
-    return hashlib.sha256(command_template.encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha256(command_template.encode("utf-8")).hexdigest()[:_TRUST_HASH_LENGTH]
 
 
 def _remember_trusted_hash(
@@ -134,7 +167,7 @@ def _ensure_command_trusted(
         Always ``False`` — the action is deferred to the modal callback.
         The caller should not continue inline after this returns.
     """
-    command_preview = truncate_text(request.command_template, 120)
+    command_preview = truncate_text(request.command_template, _COMMAND_PREVIEW_MAX_LEN)
 
     def _on_decision(confirmed: bool | None) -> None:
         if not confirmed:
@@ -260,14 +293,16 @@ def _require_llm_command(app: "ArxivBrowser") -> str | None:
             msg = f"Unknown preset '{preset}'. Valid: {valid}"
         else:
             msg = f"Set llm_command or llm_preset in config.json ({get_config_path()})"
-        app.notify(msg, title="LLM not configured", severity="warning", timeout=8)
+        app.notify(
+            msg, title="LLM not configured", severity="warning", timeout=_NOTIFY_TIMEOUT_DEFAULT
+        )
         return None
     if not app._config.allow_llm_shell_fallback and llm_command_requires_shell(command_template):
         app.notify(
             "LLM command uses shell syntax, but allow_llm_shell_fallback is disabled in config.json",
             title="LLM command blocked",
             severity="warning",
-            timeout=10,
+            timeout=_NOTIFY_TIMEOUT_LONG,
         )
         return None
     app._llm_provider = resolve_provider(app._config)
@@ -388,10 +423,10 @@ async def _generate_summary_async(
             return
         if summary is None:
             app.notify(
-                (error or "LLM command failed")[:200],
+                (error or "LLM command failed")[:_NOTIFY_MAX_LENGTH],
                 title="AI Summary",
                 severity="error",
-                timeout=8,
+                timeout=_NOTIFY_TIMEOUT_DEFAULT,
             )
             return
 
@@ -410,16 +445,11 @@ async def _generate_summary_async(
             return
         # Config/template errors — show the descriptive message directly
         logger.warning("Summary config error for %s: %s", arxiv_id, e)
-        app.notify(str(e), title="AI Summary", severity="error", timeout=10)
+        app.notify(str(e), title="AI Summary", severity="error", timeout=_NOTIFY_TIMEOUT_LONG)
     except _RECOVERABLE_ACTION_ERRORS as exc:
         if not app._is_current_dataset_epoch(task_epoch):
             return
         _log_action_failure(f"summary generation for {arxiv_id}", exc)
-        app.notify("Summary failed", title="AI Summary", severity="error")
-    except Exception as exc:
-        if not app._is_current_dataset_epoch(task_epoch):
-            return
-        _log_action_failure(f"summary generation for {arxiv_id}", exc, unexpected=True)
         app.notify("Summary failed", title="AI Summary", severity="error")
     finally:
         if app._is_current_dataset_epoch(task_epoch):
@@ -572,12 +602,22 @@ async def _score_relevance_batch_async(
     """
     task_epoch = app._capture_dataset_epoch()
     try:
+        provider = getattr(app, "_llm_provider", None)
+        if provider is None and not hasattr(app, "_relevance_db_path"):
+            logger.warning("LLM provider unexpectedly None in _score_relevance_batch")
+            return
+
         interests_hash = _compute_command_hash(command_template, interests)
 
-        # Bulk-load existing scores from SQLite
-        cached_scores = await asyncio.to_thread(
-            _load_all_relevance_scores, app._relevance_db_path, interests_hash
-        )
+        db_path = getattr(app, "_relevance_db_path", None)
+
+        # Lightweight stubs may not define a DB path; treat that as no cache.
+        if db_path is None:
+            cached_scores: dict[str, tuple[int, str]] = {}
+        else:
+            cached_scores = await asyncio.to_thread(
+                _load_all_relevance_scores, db_path, interests_hash
+            )
         if not app._is_current_dataset_epoch(task_epoch):
             return
 
@@ -599,17 +639,17 @@ async def _score_relevance_batch_async(
             )
             return
 
+        if provider is None:
+            logger.warning("LLM provider unexpectedly None in _score_relevance_batch")
+            return
+
         total = len(uncached)
         scored = 0
         failed = 0
         done = 0
         cancelled = False
 
-        if app._llm_provider is None:
-            logger.warning("LLM provider unexpectedly None in _score_relevance_batch")
-            return
-
-        sem = asyncio.Semaphore(3)
+        sem = asyncio.Semaphore(_RELEVANCE_SCORING_CONCURRENCY)
 
         async def score_one(paper: Paper) -> None:
             nonlocal scored, failed, done, cancelled
@@ -623,7 +663,7 @@ async def _score_relevance_batch_async(
                     parsed = await app._get_services().llm.score_relevance_once(
                         paper=paper,
                         interests=interests,
-                        provider=app._llm_provider,
+                        provider=provider,
                         timeout_seconds=app._config.llm_timeout,
                     )
                     if not app._is_current_dataset_epoch(task_epoch):
@@ -636,14 +676,15 @@ async def _score_relevance_batch_async(
                     app._relevance_scores[paper.arxiv_id] = (score, reason)
 
                     # Persist to SQLite
-                    await asyncio.to_thread(
-                        _save_relevance_score,
-                        app._relevance_db_path,
-                        paper.arxiv_id,
-                        interests_hash,
-                        score,
-                        reason,
-                    )
+                    if db_path is not None:
+                        await asyncio.to_thread(
+                            _save_relevance_score,
+                            db_path,
+                            paper.arxiv_id,
+                            interests_hash,
+                            score,
+                            reason,
+                        )
 
                     # Update list item badge
                     app._update_relevance_badge(paper.arxiv_id)
@@ -666,7 +707,7 @@ async def _score_relevance_batch_async(
                         app._update_footer()
 
                         # Progress notification every 5 papers
-                        if done % 5 == 0:
+                        if done % _RELEVANCE_PROGRESS_NOTIFY_INTERVAL == 0:
                             app.notify(
                                 f"Scoring relevance {done}/{total}...",
                                 title="Relevance",
@@ -702,11 +743,6 @@ async def _score_relevance_batch_async(
         if not app._is_current_dataset_epoch(task_epoch):
             return
         _log_action_failure("relevance batch scoring", exc)
-        app.notify("Relevance scoring failed", title="Relevance", severity="error")
-    except Exception as exc:
-        if not app._is_current_dataset_epoch(task_epoch):
-            return
-        _log_action_failure("relevance batch scoring", exc, unexpected=True)
         app.notify("Relevance scoring failed", title="Relevance", severity="error")
     finally:
         if app._is_current_dataset_epoch(task_epoch):
@@ -835,11 +871,6 @@ async def _auto_tag_single_async(
             return
         _log_action_failure(f"auto-tag single for {paper.arxiv_id}", exc)
         app.notify("Auto-tagging failed", title="Auto-Tag", severity="error")
-    except Exception as exc:
-        if not app._is_current_dataset_epoch(task_epoch):
-            return
-        _log_action_failure(f"auto-tag single for {paper.arxiv_id}", exc, unexpected=True)
-        app.notify("Auto-tagging failed", title="Auto-Tag", severity="error")
     finally:
         if app._is_current_dataset_epoch(task_epoch):
             app._auto_tag_active = False
@@ -898,17 +929,6 @@ async def _auto_tag_batch_async(
         if not app._is_current_dataset_epoch(task_epoch):
             return
         _log_action_failure("auto-tag batch", exc)
-        if tagged > 0:
-            app._save_config_or_warn("partial auto-tag results")
-        app.notify(
-            _auto_tag_failure_message(tagged),
-            title="Auto-Tag",
-            severity="error",
-        )
-    except Exception as exc:
-        if not app._is_current_dataset_epoch(task_epoch):
-            return
-        _log_action_failure("auto-tag batch", exc, unexpected=True)
         if tagged > 0:
             app._save_config_or_warn("partial auto-tag results")
         app.notify(

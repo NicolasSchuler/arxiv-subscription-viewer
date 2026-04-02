@@ -62,6 +62,11 @@ Exit codes:
 
 _PACKAGE_NAME = "arxiv-subscription-viewer"
 _POSIX_ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
+_LOG_MAX_BYTES = 5 * 1024 * 1024
+_LOG_BACKUP_COUNT = 3
+_DOCTOR_OK_MARKER = "  ok   "
+_DOCTOR_WARN_MARKER = "  WARN "
+_DOCTOR_INFO_MARKER = "  info "
 
 
 def _get_version() -> str:
@@ -344,8 +349,8 @@ def _configure_logging(debug: bool) -> None:
 
     handler = logging.handlers.RotatingFileHandler(
         log_file,
-        maxBytes=5 * 1024 * 1024,
-        backupCount=3,
+        maxBytes=_LOG_MAX_BYTES,
+        backupCount=_LOG_BACKUP_COUNT,
         encoding="utf-8",
     )
     handler.setFormatter(
@@ -544,9 +549,9 @@ def _run_doctor(config: UserConfig, history_files: list[tuple[date, Path]]) -> i
     """Run diagnostic checks and print a summary report."""
     from arxiv_browser.config import get_config_path
 
-    ok_marker = "  ok   "
-    warn_marker = "  WARN "
-    info_marker = "  info "
+    ok_marker = _DOCTOR_OK_MARKER
+    warn_marker = _DOCTOR_WARN_MARKER
+    info_marker = _DOCTOR_INFO_MARKER
 
     _print_doctor_header()
 

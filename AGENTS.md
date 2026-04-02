@@ -21,7 +21,7 @@ Quick-reference for AI agents. See `CLAUDE.md` for full architecture, patterns, 
 
 - `just lint` — zero ruff errors, formatting matches
 - `just typecheck` — zero pyright errors (basic mode)
-- `just test` — all tests pass, overall coverage >= 95% (from `pyproject.toml`), `app.py` coverage >= 80%, and the signature-count structural guard passes
+- `just test` — all tests pass, overall coverage >= 95% (from `pyproject.toml`), combined coverage for `actions/`, `browser/`, and `cli.py` >= 85%, and the signature-count structural guard passes
 - `uv run xenon src/arxiv_browser/ --max-absolute C --max-modules C --max-average B`
 - `just dead-code` / `just security` / `just deps` — zero findings each
 - Repo-tracked Python file-size soft-cap report: warning-only at > 1000 lines, near-cap reporting at > 900 lines

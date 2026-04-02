@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitHub Pages documentation site at <https://nicolasschuler.github.io/arxiv-subscription-viewer/>
 
 ### Changed
-- Added `app.py` coverage guardrail (≥80%) to CI
+- Added an interactive-modules coverage guardrail (≥85%) to CI for `actions/`, `browser/`, and `cli.py`
 - Quality job now enforces xenon complexity gates (C/C/B), bandit, vulture, and deptry
 - Improved TUI style guide and help/footer UX copy
 - CLI extraction into `cli.py`; async similarity indexing

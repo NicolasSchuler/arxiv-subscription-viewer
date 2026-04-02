@@ -142,12 +142,14 @@ class TestDiscoveryMixinCoverage:
 
         app.notify.reset_mock()
         app._http_client = SimpleNamespace(get=AsyncMock(return_value=response))
-        with patch(
-            "arxiv_browser.browser.discovery.apply_version_updates",
-            side_effect=Exception("boom"),
+        with (
+            patch(
+                "arxiv_browser.browser.discovery.apply_version_updates",
+                side_effect=Exception("boom"),
+            ),
+            pytest.raises(Exception, match="boom"),
         ):
             await app._check_versions_async({paper.arxiv_id})
-        assert app.notify.call_args.kwargs["severity"] == "error"
 
         app._in_arxiv_api_mode = False
         await app._change_arxiv_page(1)
@@ -528,7 +530,8 @@ class TestDiscoveryMixinCoverage:
                 )
             )
         )
-        assert await discovery.DiscoveryMixin._call_auto_tag_llm(app, paper, ["existing"]) is None
+        with pytest.raises(Exception, match="boom"):
+            await discovery.DiscoveryMixin._call_auto_tag_llm(app, paper, ["existing"])
 
         app._resolve_visible_index = MagicMock(return_value=None)
         app.notify.reset_mock()
@@ -573,35 +576,39 @@ class TestDiscoveryMixinCoverage:
         app._show_local_recommendations.assert_not_called()
 
         app.notify.reset_mock()
-        with patch(
-            "arxiv_browser.browser.discovery.asyncio.to_thread",
-            new=AsyncMock(side_effect=Exception("boom")),
+        with (
+            patch(
+                "arxiv_browser.browser.discovery.asyncio.to_thread",
+                new=AsyncMock(side_effect=Exception("boom")),
+            ),
+            pytest.raises(Exception, match="boom"),
         ):
             await app._build_tfidf_index_async(
                 discovery.build_similarity_corpus_key(app.all_papers)
             )
-        assert app.notify.call_args.kwargs["severity"] == "error"
 
         app.notify.reset_mock()
         app._fetch_s2_recommendations_async = AsyncMock(side_effect=Exception("boom"))
-        await app._show_s2_recommendations(paper)
-        assert app.notify.call_args.kwargs["severity"] == "error"
+        with pytest.raises(Exception, match="boom"):
+            await app._show_s2_recommendations(paper)
 
         app.notify.reset_mock()
         app._is_current_dataset_epoch = MagicMock(return_value=False)
         app._fetch_s2_recommendations_async = AsyncMock(side_effect=Exception("boom"))
-        await app._show_s2_recommendations(paper)
+        with pytest.raises(Exception, match="boom"):
+            await app._show_s2_recommendations(paper)
         assert app.notify.call_count == 1
         assert app.notify.call_args.args[0] == "Fetching S2 recommendations..."
 
         app.notify.reset_mock()
         app._is_current_dataset_epoch = MagicMock(return_value=True)
         app._fetch_citation_graph = AsyncMock(side_effect=Exception("boom"))
-        await app._show_citation_graph(paper.arxiv_id, paper.title)
-        assert app.notify.call_args.kwargs["severity"] == "error"
+        with pytest.raises(Exception, match="boom"):
+            await app._show_citation_graph(paper.arxiv_id, paper.title)
 
         app.notify.reset_mock()
         app._is_current_dataset_epoch = MagicMock(return_value=False)
         app._fetch_citation_graph = AsyncMock(side_effect=Exception("boom"))
-        await app._show_citation_graph(paper.arxiv_id, paper.title)
+        with pytest.raises(Exception, match="boom"):
+            await app._show_citation_graph(paper.arxiv_id, paper.title)
         app.notify.assert_not_called()

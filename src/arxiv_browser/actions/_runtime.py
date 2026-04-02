@@ -61,6 +61,7 @@ from arxiv_browser.models import *
 from arxiv_browser.parsing import *
 from arxiv_browser.query import *
 from arxiv_browser.semantic_scholar import *
+from arxiv_browser.services.arxiv_api_service import ARXIV_API_TIMEOUT
 from arxiv_browser.services.llm_service import LLMExecutionError as _LLMExecutionError
 from arxiv_browser.similarity import *
 from arxiv_browser.themes import *
@@ -69,7 +70,6 @@ logger = logging.getLogger("arxiv_browser.actions")
 SUBPROCESS_TIMEOUT = 5
 BATCH_CONFIRM_THRESHOLD = 10
 BOOKMARK_NAME_MAX_LEN = 15
-ARXIV_API_TIMEOUT = 30
 MAX_CONCURRENT_DOWNLOADS = 3
 CLIPBOARD_SEPARATOR = "=" * 80
 __all__ = [name for name in globals() if not name.startswith("__")]  # pyright: ignore[reportUnsupportedDunderAll]

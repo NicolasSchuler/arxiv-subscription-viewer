@@ -11,7 +11,7 @@ import shlex
 import sqlite3
 import subprocess
 from contextlib import closing
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -239,7 +239,7 @@ def _save_summary(db_path: Path, arxiv_id: str, summary: str, command_hash: str)
             conn.execute(
                 "INSERT OR REPLACE INTO summaries (arxiv_id, summary, command_hash, created_at) "
                 "VALUES (?, ?, ?, ?)",
-                (arxiv_id, summary, command_hash, datetime.now().isoformat()),
+                (arxiv_id, summary, command_hash, datetime.now(UTC).isoformat()),
             )
     except sqlite3.Error:
         logger.warning("Failed to save summary for %s", arxiv_id, exc_info=True)
@@ -356,7 +356,7 @@ def _save_relevance_score(
                 "INSERT OR REPLACE INTO relevance_scores "
                 "(arxiv_id, interests_hash, score, reason, created_at) "
                 "VALUES (?, ?, ?, ?, ?)",
-                (arxiv_id, interests_hash, score, reason, datetime.now().isoformat()),
+                (arxiv_id, interests_hash, score, reason, datetime.now(UTC).isoformat()),
             )
     except sqlite3.Error:
         logger.warning("Failed to save relevance score for %s", arxiv_id, exc_info=True)

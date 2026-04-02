@@ -25,6 +25,7 @@ from arxiv_browser.query import (
     get_query_tokens,
     remove_query_token,
 )
+from arxiv_browser.services.arxiv_api_service import ARXIV_API_URL
 from arxiv_browser.services.interfaces import AppServices, build_default_app_services
 from arxiv_browser.ui_constants import APP_BINDINGS, APP_CSS
 from arxiv_browser.ui_runtime import UiRefreshCoordinator, UiRefs
@@ -53,7 +54,6 @@ logger = logging.getLogger("arxiv_browser.browser")
 # Shared browser-package constants used by extracted mixins and class helpers.
 FUZZY_SCORE_CUTOFF = 60
 FUZZY_LIMIT = 100
-ARXIV_API_URL = "https://export.arxiv.org/api/query"
 MAX_ABSTRACT_LOADS = 32
 BADGE_COALESCE_DELAY = 0.05
 PDF_DOWNLOAD_TIMEOUT = 60
@@ -76,8 +76,9 @@ def build_list_empty_message(
     if in_arxiv_api_mode:
         return (
             "[dim italic]No API results on this page.[/]\n"
-            "[dim]Try: adjust the query or press [bold][[/bold]/[bold]][/bold] to change pages.[/]\n"
-            "[dim]Next: press [bold]Esc[/bold] to return to your local library.[/]"
+            "[dim]Try: [bold]][/bold] next page, [bold][[/bold] previous page, "
+            "or [bold]A[/bold] for a new query.[/]\n"
+            "[dim]Next: press [bold]Esc[/bold] or [bold]Ctrl+e[/bold] to exit API mode.[/]"
         )
     if watch_filter_active:
         return (

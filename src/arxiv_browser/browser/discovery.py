@@ -1,10 +1,26 @@
-# ruff: noqa: F403, F405
 # pyright: reportAttributeAccessIssue=false, reportUndefinedVariable=false
 """Discovery, recommendation, and version-tracking mixin for ArxivBrowser."""
 
 from __future__ import annotations
 
-from arxiv_browser.browser._runtime import *
+import asyncio
+
+import httpx
+
+from arxiv_browser.action_messages import build_actionable_error, build_actionable_warning
+from arxiv_browser.browser._runtime import ARXIV_API_URL, logger
+from arxiv_browser.enrichment import apply_version_updates
+from arxiv_browser.modals.citations import CitationGraphScreen, RecommendationsScreen
+from arxiv_browser.models import Paper
+from arxiv_browser.parsing import clean_latex, parse_arxiv_version_map
+from arxiv_browser.semantic_scholar import SemanticScholarPaper
+from arxiv_browser.services.arxiv_api_service import ARXIV_API_TIMEOUT
+from arxiv_browser.services.llm_service import LLMExecutionError as _LLMExecutionError
+from arxiv_browser.similarity import (
+    TfidfIndex,
+    build_similarity_corpus_key,
+    find_similar_papers,
+)
 
 
 class DiscoveryMixin:
@@ -81,22 +97,6 @@ class DiscoveryMixin:
         except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
             logger.warning(
                 "Version check failed (%s): %s",
-                type(exc).__name__,
-                exc,
-                exc_info=True,
-            )
-            self.notify(
-                build_actionable_error(
-                    "check paper versions",
-                    why="an API or network error occurred",
-                    next_step="retry with V after a short delay",
-                ),
-                title="Versions",
-                severity="error",
-            )
-        except Exception as exc:
-            logger.warning(
-                "Unexpected version check failure (%s): %s",
                 type(exc).__name__,
                 exc,
                 exc_info=True,
@@ -234,25 +234,6 @@ class DiscoveryMixin:
                 severity="error",
             )
             return
-        except Exception as exc:
-            if not self._is_current_dataset_epoch(task_epoch):
-                return
-            logger.warning(
-                "Unexpected similarity index build failure (%s): %s",
-                type(exc).__name__,
-                exc,
-                exc_info=True,
-            )
-            self.notify(
-                build_actionable_error(
-                    "build the similarity index",
-                    why="an indexing error occurred",
-                    next_step="retry with R after changing paper or filter scope",
-                ),
-                title="Similar",
-                severity="error",
-            )
-            return
         finally:
             if self._is_current_dataset_epoch(task_epoch):
                 self._tfidf_build_task = None
@@ -304,25 +285,6 @@ class DiscoveryMixin:
                 return
             logger.warning(
                 "Failed to show S2 recommendations for %s (%s): %s",
-                paper.arxiv_id,
-                type(exc).__name__,
-                exc,
-                exc_info=True,
-            )
-            self.notify(
-                build_actionable_error(
-                    "fetch Semantic Scholar recommendations",
-                    why="an API or network error occurred",
-                    next_step="retry with R, or switch to local recommendations",
-                ),
-                title="S2",
-                severity="error",
-            )
-        except Exception as exc:
-            if not self._is_current_dataset_epoch(task_epoch):
-                return
-            logger.warning(
-                "Unexpected S2 recommendation failure for %s (%s): %s",
                 paper.arxiv_id,
                 type(exc).__name__,
                 exc,
@@ -429,25 +391,6 @@ class DiscoveryMixin:
                 title="Citations",
                 severity="error",
             )
-        except Exception as exc:
-            if not self._is_current_dataset_epoch(task_epoch):
-                return
-            logger.warning(
-                "Unexpected citation graph failure for %s (%s): %s",
-                paper_id,
-                type(exc).__name__,
-                exc,
-                exc_info=True,
-            )
-            self.notify(
-                build_actionable_error(
-                    "load the citation graph",
-                    why="an API or network error occurred",
-                    next_step="retry with G after a moment",
-                ),
-                title="Citations",
-                severity="error",
-            )
 
     def _on_citation_graph_selected(self, arxiv_id: str | None) -> None:
         """Handle selection from the citation graph modal (jump to local paper)."""
@@ -471,11 +414,6 @@ class DiscoveryMixin:
         except (OSError, RuntimeError, ValueError) as exc:
             logger.warning(
                 "Auto-tag runtime failure for %s: %s", paper.arxiv_id, exc, exc_info=True
-            )
-            return None
-        except Exception as exc:
-            logger.warning(
-                "Unexpected auto-tag failure for %s: %s", paper.arxiv_id, exc, exc_info=True
             )
             return None
         if tags is None:

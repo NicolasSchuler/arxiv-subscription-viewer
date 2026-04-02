@@ -1,18 +1,51 @@
-# ruff: noqa: F403, F405
 # pyright: reportAssignmentType=false, reportUndefinedVariable=false
 """Core ArxivBrowser implementation and compatibility helpers."""
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import sys
+import time
+from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
+from pathlib import Path
 from typing import Any
+
+import httpx
+from textual import on
+from textual.app import App, ComposeResult
+from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.css.query import NoMatches
+from textual.events import Key
+from textual.timer import Timer
+from textual.widgets import Header, Input, Label, OptionList, Static
 
 from arxiv_browser.actions import external_io_actions as _external_io_actions
 from arxiv_browser.actions import library_actions as _library_actions
 from arxiv_browser.actions import llm_actions as _llm_actions
 from arxiv_browser.actions import search_api_actions as _search_api_actions
 from arxiv_browser.actions import ui_actions as _ui_actions
-from arxiv_browser.browser._runtime import *
+from arxiv_browser.browser import _runtime as browser_runtime
+from arxiv_browser.browser._runtime import (
+    APP_BINDINGS,
+    APP_CSS,
+    AppServices,
+    BookmarkTabBar,
+    ContextFooter,
+    DateNavigator,
+    FilterPillBar,
+    LocalBrowseSnapshot,
+    PaperDetails,
+    UiRefreshCoordinator,
+    UiRefs,
+    _widget_chrome,
+    _widget_details,
+    _widget_listing,
+    build_default_app_services,
+)
 from arxiv_browser.browser.browse import BrowseMixin
 from arxiv_browser.browser.chrome import ChromeMixin
 from arxiv_browser.browser.content import (
@@ -27,8 +60,25 @@ from arxiv_browser.cli import (
     _validate_interactive_tty,
 )
 from arxiv_browser.cli import main as _cli_main
+from arxiv_browser.config import _coerce_arxiv_api_max_results, load_config
+from arxiv_browser.huggingface import HuggingFacePaper, get_hf_db_path
+from arxiv_browser.llm import get_relevance_db_path, get_summary_db_path
+from arxiv_browser.llm_providers import resolve_provider
+from arxiv_browser.modals.help import HelpScreen
+from arxiv_browser.models import DETAIL_MODES, ArxivSearchModeState, Paper, UserConfig
+from arxiv_browser.parsing import discover_history_files
+from arxiv_browser.query import remove_query_token
+from arxiv_browser.semantic_scholar import SemanticScholarPaper
+from arxiv_browser.semantic_scholar_cache import get_s2_db_path
+from arxiv_browser.similarity import TfidfIndex
+from arxiv_browser.themes import TEXTUAL_THEMES, ThemeRuntime, build_theme_runtime
 
 logger = logging.getLogger(__name__)
+BADGE_COALESCE_DELAY = browser_runtime.BADGE_COALESCE_DELAY
+FUZZY_LIMIT = browser_runtime.FUZZY_LIMIT
+FUZZY_SCORE_CUTOFF = browser_runtime.FUZZY_SCORE_CUTOFF
+MAX_ABSTRACT_LOADS = browser_runtime.MAX_ABSTRACT_LOADS
+build_list_empty_message = browser_runtime.build_list_empty_message
 # ============================================================================
 # Constants
 # ============================================================================
@@ -108,20 +158,10 @@ def _coerce_browser_options(
 
 # Subprocess timeout in seconds
 SUBPROCESS_TIMEOUT = 5
-# Fuzzy search settings
-FUZZY_SCORE_CUTOFF = 60  # Minimum score (0-100) to include in results
-FUZZY_LIMIT = 100  # Maximum number of results to return
-# Paper similarity settings
 # UI truncation limits
 BOOKMARK_NAME_MAX_LEN = 15  # Max bookmark name display length
-MAX_ABSTRACT_LOADS = 32  # Maximum concurrent abstract loads
 # History file discovery cap retained for custom callers/tests.
 MAX_HISTORY_FILES = 365  # Compatibility constant for callers that want capped discovery.
-# arXiv API search settings
-ARXIV_API_URL = "https://export.arxiv.org/api/query"
-ARXIV_API_MIN_INTERVAL_SECONDS = 3.0  # arXiv guidance: max 1 request / 3 seconds
-ARXIV_API_TIMEOUT = 30  # Seconds to wait for arXiv API responses
-PDF_DOWNLOAD_TIMEOUT = 60  # Seconds per download
 MAX_CONCURRENT_DOWNLOADS = 3  # Limit parallel downloads
 BATCH_CONFIRM_THRESHOLD = (
     10  # Ask for confirmation when batch operating on more than this many papers
@@ -136,49 +176,6 @@ AUTO_TAG_TIMEOUT = 30  # Seconds to wait for auto-tag LLM response
 SEARCH_DEBOUNCE_DELAY = 0.3
 # Detail pane update debounce delay in seconds (shorter — must feel responsive)
 DETAIL_PANE_DEBOUNCE_DELAY = 0.1
-# Badge refresh coalesce delay — multiple badge sources within this window
-# are merged into a single list iteration (50ms is imperceptible)
-BADGE_COALESCE_DELAY = 0.05
-
-
-def build_list_empty_message(
-    *,
-    query: str,
-    in_arxiv_api_mode: bool,
-    watch_filter_active: bool,
-    history_mode: bool,
-) -> str:
-    """Build actionable empty-state copy for the paper list."""
-    if query:
-        return (
-            "[dim italic]No papers match your search.[/]\n"
-            "[dim]Try: edit the query or press [bold]Esc[/bold] to clear search.[/]\n"
-            "[dim]Next: press [bold]?[/bold] for shortcuts or [bold]Ctrl+p[/bold] for commands.[/]"
-        )
-    if in_arxiv_api_mode:
-        return (
-            "[dim italic]No API results on this page.[/]\n"
-            "[dim]Try: [bold]][/bold] next page, [bold][[/bold] previous page, "
-            "or [bold]A[/bold] for a new query.[/]\n"
-            "[dim]Next: press [bold]Esc[/bold] or [bold]Ctrl+e[/bold] to exit API mode.[/]"
-        )
-    if watch_filter_active:
-        return (
-            "[dim italic]No watched papers found.[/]\n"
-            "[dim]Try: press [bold]w[/bold] to show all papers.[/]\n"
-            "[dim]Next: press [bold]W[/bold] to manage watch list patterns.[/]"
-        )
-    if history_mode:
-        return (
-            "[dim italic]No papers available for this date.[/]\n"
-            "[dim]Try: press [bold][[/bold] or [bold]][/bold] to change dates.[/]\n"
-            "[dim]Next: press [bold]A[/bold] to search arXiv.[/]"
-        )
-    return (
-        "[dim italic]No papers available.[/]\n"
-        "[dim]Try: press [bold]A[/bold] to search arXiv.[/]\n"
-        "[dim]Next: load a history file or run with [bold]-i[/bold] <file>.[/]"
-    )
 
 
 class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
@@ -933,7 +930,5 @@ def main() -> int:
     )
 
 
-if __name__ == "__main__":
-    sys.exit(main())
 if __name__ == "__main__":
     sys.exit(main())

@@ -365,7 +365,7 @@ Detailed setup and usage for each feature is in `docs/`:
 ## CI/CD
 
 GitHub Actions workflow (`.github/workflows/ci-cd.yml`):
-- **CI job**: Runs on push to `main` and PRs — lint, format check, type check, tests with coverage
+- **CI job**: Runs on push to `main` and PRs — lint, format check, type check, tests with coverage plus an interactive-modules coverage guard on `actions/`, `browser/`, and `cli.py`
 - **Quality job**: Runs after CI passes — xenon complexity (C/C/B), bandit security, vulture dead-code (80% confidence), deptry deps, a warning-only repo-wide Python file-size report (>1250 lines, near-cap >1000), and the hard `app.py` line-count guard (≤5000)
 - **Publish job**: Runs on `v*` tags after CI passes — builds and publishes to PyPI via Trusted Publishers (OIDC)
 

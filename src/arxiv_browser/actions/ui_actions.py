@@ -1,4 +1,4 @@
-# ruff: noqa: F403, F405, UP037
+# ruff: noqa: UP037
 # pyright: reportUndefinedVariable=false, reportAttributeAccessIssue=false
 """UI, enrichment, and navigation action handlers for ArxivBrowser.
 
@@ -9,14 +9,39 @@ help overlay, command palette, and paper-collections management.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
+
+import httpx
+from textual.css.query import NoMatches
 
 from arxiv_browser.action_messages import (
     build_actionable_error,
     build_actionable_success,
     build_actionable_warning,
 )
-from arxiv_browser.actions._runtime import *
+from arxiv_browser.actions._runtime import (
+    MAX_PAPERS_PER_COLLECTION,
+    S2_CITATION_GRAPH_CACHE_TTL_DAYS,
+    S2_REC_CACHE_TTL_DAYS,
+    CommandPaletteModal,
+    RecommendationSourceModal,
+    SectionToggleModal,
+    SemanticScholarPaper,
+    count_hf_matches,
+    fetch_s2_citations,
+    fetch_s2_references,
+    get_starred_paper_ids_for_version_check,
+    has_s2_citation_graph_cache,
+    load_s2_citation_graph,
+    logger,
+    save_config,
+    save_s2_citation_graph,
+)
+from arxiv_browser.modals.collections import AddToCollectionModal, CollectionsModal
+from arxiv_browser.modals.help import HelpScreen
+from arxiv_browser.semantic_scholar_models import CitationEntry
+from arxiv_browser.themes import THEME_NAMES
 
 if TYPE_CHECKING:
     from arxiv_browser.app import ArxivBrowser

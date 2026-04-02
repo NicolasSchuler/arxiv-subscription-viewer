@@ -1,13 +1,31 @@
-# ruff: noqa: F403, F405, UP037
+# ruff: noqa: UP037
 # pyright: reportUndefinedVariable=false, reportAttributeAccessIssue=false
 """Extracted ArxivBrowser action handlers."""
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
+import httpx
+
 from arxiv_browser.action_messages import build_actionable_error, build_actionable_warning
-from arxiv_browser.actions._runtime import *
+from arxiv_browser.actions._runtime import (
+    ARXIV_API_MIN_INTERVAL_SECONDS,
+    ARXIV_API_TIMEOUT,
+    BOOKMARK_NAME_MAX_LEN,
+    HISTORY_DATE_FORMAT,
+    ArxivSearchModal,
+    ArxivSearchRequest,
+    NoMatches,
+    Paper,
+    SearchBookmark,
+    _coerce_arxiv_api_max_results,
+    logger,
+    save_config,
+    truncate_text,
+)
+from arxiv_browser.models import ArxivSearchModeState
 
 if TYPE_CHECKING:
     from arxiv_browser.app import ArxivBrowser
@@ -298,9 +316,6 @@ async def action_goto_bookmark(app: "ArxivBrowser", index: int) -> None:
     search_input = app._get_search_input_widget()
     search_input.value = bookmark.query
     app._apply_filter(bookmark.query)
-
-    # Update bookmark bar to show active tab
-    await app._update_bookmark_bar()
     app.notify(f"Bookmark: {bookmark.name}", title="Search")
 
 

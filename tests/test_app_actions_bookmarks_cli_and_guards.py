@@ -73,6 +73,26 @@ class TestBookmarkRelevanceAndCopyCoverage:
             assert save_mock.call_count == 2
 
     @pytest.mark.asyncio
+    async def test_goto_bookmark_relies_on_filter_refresh_for_bookmark_bar(self):
+        app = _new_app()
+        bookmark = SearchBookmark(name="graph transforme", query="graph transformers")
+        app._config = UserConfig(bookmarks=[bookmark])
+        app._active_bookmark_index = -1
+        app.notify = MagicMock()
+
+        search_input = SimpleNamespace(value="")
+        app._get_search_input_widget = MagicMock(return_value=search_input)
+        app._apply_filter = MagicMock()
+        app._update_bookmark_bar = AsyncMock()
+
+        await app.action_goto_bookmark(0)
+
+        assert search_input.value == "graph transformers"
+        app._apply_filter.assert_called_once_with("graph transformers")
+        app._update_bookmark_bar.assert_not_awaited()
+        assert app._active_bookmark_index == 0
+
+    @pytest.mark.asyncio
     async def test_bookmark_add_rolls_back_on_save_failure(self):
         app = _new_app()
         app._config = UserConfig()

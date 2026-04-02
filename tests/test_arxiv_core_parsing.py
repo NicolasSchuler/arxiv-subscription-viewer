@@ -506,11 +506,12 @@ class TestConstants:
         parsed = datetime.strptime(sample_date, ARXIV_DATE_FORMAT)
         assert parsed.year == 2024
 
-    def test_fuzzy_score_cutoff_valid_range(self):
-        """FUZZY_SCORE_CUTOFF should be in 0-100 range."""
-        from tests.support.canonical_exports import FUZZY_SCORE_CUTOFF
+    def test_fuzzy_search_constants_have_valid_ranges(self):
+        """Fuzzy-search compatibility constants should remain importable and sane."""
+        from tests.support.canonical_exports import FUZZY_LIMIT, FUZZY_SCORE_CUTOFF
 
         assert 0 <= FUZZY_SCORE_CUTOFF <= 100
+        assert FUZZY_LIMIT > 0
 
     def test_stopwords_contains_common_words(self):
         """STOPWORDS should contain common English stopwords."""
