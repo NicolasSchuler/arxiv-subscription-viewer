@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Onboarding flag (`onboarding_seen`) to track first-run state
 
 ### Changed
+- Tightened import boundaries: the root package now exposes only its explicit `__all__`, `arxiv_browser.app` is a narrow compatibility shim, and tests import canonical modules directly instead of using a repo-local export bundle
 - Refactored browser mixins into `browser/browse.py`, `browser/chrome.py`, and `browser/discovery.py` for maintainability
 - Split `semantic_scholar.py` cache helpers into `semantic_scholar_cache.py`
 - Extracted `chrome_status.py` widget for status-bar rendering

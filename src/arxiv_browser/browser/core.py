@@ -1,11 +1,10 @@
-# pyright: reportAssignmentType=false, reportUndefinedVariable=false
+# pyright: reportAssignmentType=false
 """Core ArxivBrowser implementation and compatibility helpers."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import sys
 import time
 from collections import deque
 from collections.abc import Callable
@@ -23,69 +22,64 @@ from textual.events import Key
 from textual.timer import Timer
 from textual.widgets import Header, Input, Label, OptionList, Static
 
+from arxiv_browser.actions import constants as _action_constants
 from arxiv_browser.actions import external_io_actions as _external_io_actions
 from arxiv_browser.actions import library_actions as _library_actions
 from arxiv_browser.actions import llm_actions as _llm_actions
 from arxiv_browser.actions import search_api_actions as _search_api_actions
 from arxiv_browser.actions import ui_actions as _ui_actions
-from arxiv_browser.browser import _runtime as browser_runtime
-from arxiv_browser.browser._runtime import (
-    APP_BINDINGS,
-    APP_CSS,
-    AppServices,
-    BookmarkTabBar,
-    ContextFooter,
-    DateNavigator,
-    FilterPillBar,
-    LocalBrowseSnapshot,
-    PaperDetails,
-    UiRefreshCoordinator,
-    UiRefs,
-    _widget_chrome,
-    _widget_details,
-    _widget_listing,
-    build_default_app_services,
-)
+from arxiv_browser.browser import constants as _browser_constants
+from arxiv_browser.browser import empty_state as _empty_state
 from arxiv_browser.browser.browse import BrowseMixin
 from arxiv_browser.browser.chrome import ChromeMixin
 from arxiv_browser.browser.content import (
     _fetch_paper_content_async,
 )
 from arxiv_browser.browser.discovery import DiscoveryMixin
-from arxiv_browser.cli import (
-    CliDependencies,
-    _configure_color_mode,
-    _configure_logging,
-    _resolve_papers,
-    _validate_interactive_tty,
-)
-from arxiv_browser.cli import main as _cli_main
-from arxiv_browser.config import _coerce_arxiv_api_max_results, load_config
+from arxiv_browser.config import _coerce_arxiv_api_max_results
 from arxiv_browser.huggingface import HuggingFacePaper, get_hf_db_path
 from arxiv_browser.llm import get_relevance_db_path, get_summary_db_path
 from arxiv_browser.llm_providers import resolve_provider
 from arxiv_browser.modals.help import HelpScreen
-from arxiv_browser.models import DETAIL_MODES, ArxivSearchModeState, Paper, UserConfig
-from arxiv_browser.parsing import discover_history_files
+from arxiv_browser.models import (
+    DETAIL_MODES,
+    ArxivSearchModeState,
+    LocalBrowseSnapshot,
+    Paper,
+    UserConfig,
+)
 from arxiv_browser.query import remove_query_token
 from arxiv_browser.semantic_scholar import SemanticScholarPaper
 from arxiv_browser.semantic_scholar_cache import get_s2_db_path
+from arxiv_browser.services.interfaces import AppServices, build_default_app_services
 from arxiv_browser.similarity import TfidfIndex
 from arxiv_browser.themes import TEXTUAL_THEMES, ThemeRuntime, build_theme_runtime
+from arxiv_browser.ui_constants import APP_BINDINGS, APP_CSS
+from arxiv_browser.ui_runtime import UiRefreshCoordinator, UiRefs
+from arxiv_browser.widgets import (
+    BookmarkTabBar,
+    ContextFooter,
+    DateNavigator,
+    FilterPillBar,
+    PaperDetails,
+)
+from arxiv_browser.widgets import chrome as _widget_chrome
+from arxiv_browser.widgets import details as _widget_details
+from arxiv_browser.widgets import listing as _widget_listing
 
 logger = logging.getLogger(__name__)
-BADGE_COALESCE_DELAY = browser_runtime.BADGE_COALESCE_DELAY
-FUZZY_LIMIT = browser_runtime.FUZZY_LIMIT
-FUZZY_SCORE_CUTOFF = browser_runtime.FUZZY_SCORE_CUTOFF
-MAX_ABSTRACT_LOADS = browser_runtime.MAX_ABSTRACT_LOADS
-build_list_empty_message = browser_runtime.build_list_empty_message
+BADGE_COALESCE_DELAY = _browser_constants.BADGE_COALESCE_DELAY
+FUZZY_LIMIT = _browser_constants.FUZZY_LIMIT
+FUZZY_SCORE_CUTOFF = _browser_constants.FUZZY_SCORE_CUTOFF
+MAX_ABSTRACT_LOADS = _browser_constants.MAX_ABSTRACT_LOADS
+build_list_empty_message = _empty_state.build_list_empty_message
 # ============================================================================
 # Constants
 # ============================================================================
 # UI Layout constants
 MIN_LIST_WIDTH = 50
 MAX_LIST_WIDTH = 100
-CLIPBOARD_SEPARATOR = "=" * 80
+CLIPBOARD_SEPARATOR = _action_constants.CLIPBOARD_SEPARATOR
 
 
 @dataclass(slots=True)
@@ -156,16 +150,12 @@ def _coerce_browser_options(
     return ArxivBrowserOptions(**legacy_kwargs)
 
 
-# Subprocess timeout in seconds
-SUBPROCESS_TIMEOUT = 5
-# UI truncation limits
-BOOKMARK_NAME_MAX_LEN = 15  # Max bookmark name display length
 # History file discovery cap retained for custom callers/tests.
 MAX_HISTORY_FILES = 365  # Compatibility constant for callers that want capped discovery.
-MAX_CONCURRENT_DOWNLOADS = 3  # Limit parallel downloads
-BATCH_CONFIRM_THRESHOLD = (
-    10  # Ask for confirmation when batch operating on more than this many papers
-)
+SUBPROCESS_TIMEOUT = _action_constants.SUBPROCESS_TIMEOUT
+BOOKMARK_NAME_MAX_LEN = _action_constants.BOOKMARK_NAME_MAX_LEN
+MAX_CONCURRENT_DOWNLOADS = _action_constants.MAX_CONCURRENT_DOWNLOADS
+BATCH_CONFIRM_THRESHOLD = _action_constants.BATCH_CONFIRM_THRESHOLD
 # LLM summary settings
 SUMMARY_DB_FILENAME = "summaries.db"
 SUMMARY_HTML_TIMEOUT = 10  # Faster timeout for summary generation path
@@ -912,23 +902,3 @@ class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
     def action_show_search_syntax(self) -> None:
         """Open the help overlay with search syntax prioritized."""
         self.push_screen(HelpScreen(sections=self._build_help_sections(search_first=True)))
-
-
-def main() -> int:
-    """Main entry point wrapper for CLI/bootstrap logic."""
-    return _cli_main(
-        deps=CliDependencies(
-            load_config_fn=load_config,
-            discover_history_files_fn=discover_history_files,
-            resolve_papers_fn=_resolve_papers,
-            configure_logging_fn=_configure_logging,
-            configure_color_mode_fn=_configure_color_mode,
-            validate_interactive_tty_fn=_validate_interactive_tty,
-            app_factory=ArxivBrowser,
-            app_factory_supports_options=True,
-        )
-    )
-
-
-if __name__ == "__main__":
-    sys.exit(main())

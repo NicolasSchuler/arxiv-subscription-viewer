@@ -22,14 +22,14 @@ import arxiv_browser.llm_providers as llm_providers
 import arxiv_browser.semantic_scholar as s2
 from arxiv_browser.actions import external_io_actions as io_actions
 from arxiv_browser.actions import llm_actions as llm_actions
+from arxiv_browser.browser.core import ArxivBrowser
 from arxiv_browser.modals.collections import (
     AddToCollectionModal,
     CollectionsModal,
     CollectionViewModal,
 )
-from arxiv_browser.models import MAX_COLLECTIONS, PaperCollection, UserConfig
+from arxiv_browser.models import MAX_COLLECTIONS, PaperCollection, PaperMetadata, UserConfig
 from arxiv_browser.services import enrichment_service as enrich
-from tests.support import canonical_exports as app_mod
 from tests.support.app_stubs import (
     _DummyInput,
     _DummyLabel,
@@ -247,9 +247,7 @@ class TestLlmActionCoverage:
         llm_actions.action_chat_with_paper(app)
         app._start_chat_with_paper.assert_called_once()
 
-        app._start_chat_with_paper = llm_actions._start_chat_with_paper.__get__(
-            app, app_mod.ArxivBrowser
-        )
+        app._start_chat_with_paper = llm_actions._start_chat_with_paper.__get__(app, ArxivBrowser)
         app._get_current_paper = MagicMock(return_value=None)
         llm_actions._start_chat_with_paper(app)
         assert "No paper selected" in app.notify.call_args[0][0]
@@ -645,7 +643,7 @@ class TestLlmActionCoverage:
         assert "failed" in app.notify.call_args[0][0].lower()
 
         app._llm_provider = None
-        assert await app_mod.ArxivBrowser._call_auto_tag_llm(app, paper, ["existing"]) is None
+        assert await ArxivBrowser._call_auto_tag_llm(app, paper, ["existing"]) is None
 
         app._llm_provider = object()
         app.notify.reset_mock()
@@ -656,7 +654,7 @@ class TestLlmActionCoverage:
                 )
             )
         )
-        assert await app_mod.ArxivBrowser._call_auto_tag_llm(app, paper, ["existing"]) is None
+        assert await ArxivBrowser._call_auto_tag_llm(app, paper, ["existing"]) is None
         assert "Could not parse LLM response" in app.notify.call_args[0][0]
 
     @pytest.mark.asyncio
@@ -738,7 +736,7 @@ class TestLlmActionCoverage:
         app._config.paper_metadata = {}
         app._get_or_create_metadata = MagicMock(
             side_effect=lambda aid: app._config.paper_metadata.setdefault(
-                aid, app_mod.PaperMetadata(arxiv_id=aid, tags=["existing"])
+                aid, PaperMetadata(arxiv_id=aid, tags=["existing"])
             )
         )
         app._call_auto_tag_llm = AsyncMock(side_effect=[["topic:new"], None, ["topic:extra"]])
@@ -935,7 +933,7 @@ class TestLlmActionCoverage:
         partial_batch_app._get_or_create_metadata = MagicMock(
             side_effect=lambda aid: partial_batch_app._config.paper_metadata.setdefault(
                 aid,
-                app_mod.PaperMetadata(arxiv_id=aid, tags=[]),
+                PaperMetadata(arxiv_id=aid, tags=[]),
             )
         )
         partial_batch_app._call_auto_tag_llm = AsyncMock(

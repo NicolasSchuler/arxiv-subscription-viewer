@@ -7,19 +7,36 @@ from pathlib import Path
 
 import pytest
 
-from arxiv_browser.themes import THEME_NAMES, THEMES
-from tests.support.canonical_exports import (
-    ARXIV_API_DEFAULT_MAX_RESULTS,
-    ARXIV_DATE_FORMAT,
-    DEFAULT_CATEGORY_COLOR,
+from arxiv_browser.browser.core import SUBPROCESS_TIMEOUT
+from arxiv_browser.config import (
+    export_metadata,
+    import_metadata,
+    load_config,
+    save_config,
+)
+from arxiv_browser.export import (
+    escape_bibtex,
+    extract_year,
+    format_collection_as_markdown,
+    format_paper_as_bibtex,
+    format_paper_as_ris,
+    format_papers_as_csv,
+    format_papers_as_markdown_table,
+    generate_citation_key,
+    get_pdf_download_path,
+)
+from arxiv_browser.llm import (
     DEFAULT_LLM_PROMPT,
     LLM_PRESETS,
+    SUMMARY_MODES,
+    build_llm_prompt,
+    get_summary_db_path,
+)
+from arxiv_browser.models import (
+    ARXIV_API_DEFAULT_MAX_RESULTS,
     MAX_COLLECTIONS,
     MAX_PAPERS_PER_COLLECTION,
     SORT_OPTIONS,
-    SUBPROCESS_TIMEOUT,
-    SUMMARY_MODES,
-    TAG_NAMESPACE_COLORS,
     Paper,
     PaperCollection,
     PaperMetadata,
@@ -27,38 +44,34 @@ from tests.support.canonical_exports import (
     SearchBookmark,
     UserConfig,
     WatchListEntry,
+)
+from arxiv_browser.parsing import (
+    ARXIV_DATE_FORMAT,
     build_arxiv_search_query,
-    build_llm_prompt,
     clean_latex,
-    escape_bibtex,
-    export_metadata,
     extract_text_from_html,
-    extract_year,
-    format_categories,
-    format_collection_as_markdown,
-    format_paper_as_bibtex,
-    format_paper_as_ris,
-    format_papers_as_csv,
-    format_papers_as_markdown_table,
-    format_summary_as_rich,
-    generate_citation_key,
-    get_pdf_download_path,
-    get_summary_db_path,
-    get_tag_color,
-    import_metadata,
-    insert_implicit_and,
-    load_config,
     normalize_arxiv_id,
     parse_arxiv_api_feed,
     parse_arxiv_date,
     parse_arxiv_file,
     parse_arxiv_version_map,
-    parse_tag_namespace,
+)
+from arxiv_browser.query import (
+    format_categories,
+    format_summary_as_rich,
+    insert_implicit_and,
     pill_label_for_token,
     reconstruct_query,
-    save_config,
     to_rpn,
     tokenize_query,
+)
+from arxiv_browser.themes import (
+    DEFAULT_CATEGORY_COLOR,
+    TAG_NAMESPACE_COLORS,
+    THEME_NAMES,
+    THEMES,
+    get_tag_color,
+    parse_tag_namespace,
 )
 from tests.support.patch_helpers import patch_save_config
 
@@ -71,7 +84,8 @@ class TestMatchTypeValidation:
     """Verify WatchListEntry.match_type is validated during deserialization."""
 
     def test_valid_match_types_preserved(self):
-        from tests.support.canonical_exports import WATCH_MATCH_TYPES, _dict_to_config
+        from arxiv_browser.config import _dict_to_config
+        from arxiv_browser.models import WATCH_MATCH_TYPES
 
         for mt in WATCH_MATCH_TYPES:
             data = {"watch_list": [{"pattern": "test", "match_type": mt}]}
@@ -81,7 +95,7 @@ class TestMatchTypeValidation:
     def test_invalid_match_type_defaults_to_author(self, caplog):
         import logging
 
-        from tests.support.canonical_exports import _dict_to_config
+        from arxiv_browser.config import _dict_to_config
 
         data = {"watch_list": [{"pattern": "test", "match_type": "category"}]}
         with caplog.at_level(logging.WARNING, logger="arxiv_browser"):
@@ -97,7 +111,7 @@ class TestAtomicBibtexExport:
         """BibTeX export should produce a valid file with no leftover temp files."""
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         paper = make_paper(
             arxiv_id="2401.12345",
@@ -106,7 +120,7 @@ class TestAtomicBibtexExport:
             authors="John Smith",
             categories="cs.AI",
         )
-        from tests.support.canonical_exports import UserConfig
+        from arxiv_browser.models import UserConfig
 
         config = UserConfig(bibtex_export_dir=str(tmp_path / "exports"))
         app = ArxivBrowser([paper], config=config, restore_session=False)
@@ -143,8 +157,8 @@ class TestDetailStateBuilder:
     def test_build_detail_state_returns_expected_fields(self, make_paper):
         from unittest.mock import MagicMock
 
+        from arxiv_browser.browser.core import ArxivBrowser
         from arxiv_browser.themes import build_theme_runtime
-        from tests.support.canonical_exports import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._http_client = None
@@ -201,7 +215,7 @@ class TestArxivBrowserConstructorCompatibility:
     def test_legacy_positional_constructor_arguments_still_work(self, make_paper):
         from datetime import date as dt_date
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         config = UserConfig(show_abstract_preview=True)
         history_files = [(dt_date(2026, 3, 22), Path("history/2026-03-22.txt"))]
@@ -229,7 +243,8 @@ class TestDetailPaneHighlighting:
     """Verify search terms are highlighted in the detail pane abstract."""
 
     def test_highlight_terms_applied(self, make_paper):
-        from tests.support.canonical_exports import THEME_COLORS, PaperDetails
+        from arxiv_browser.themes import THEME_COLORS
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper(abstract="Deep learning is transforming AI research.")
@@ -244,7 +259,7 @@ class TestDetailPaneHighlighting:
         assert f"[bold {THEME_COLORS['accent']}]learning[/]" in rendered
 
     def test_no_highlight_without_terms(self, make_paper):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper(abstract="Deep learning is transforming AI research.")
@@ -263,14 +278,20 @@ class TestHighlightPatternCache:
     """Verify highlight_text caches compiled regex patterns."""
 
     def test_cache_populated(self):
-        from tests.support.canonical_exports import _HIGHLIGHT_PATTERN_CACHE, highlight_text
+        from arxiv_browser.query import (
+            _HIGHLIGHT_PATTERN_CACHE,
+            highlight_text,
+        )
 
         _HIGHLIGHT_PATTERN_CACHE.clear()
         highlight_text("Hello world", ["world"], "#ff0000")
         assert ("world",) in _HIGHLIGHT_PATTERN_CACHE
 
     def test_cache_reused(self):
-        from tests.support.canonical_exports import _HIGHLIGHT_PATTERN_CACHE, highlight_text
+        from arxiv_browser.query import (
+            _HIGHLIGHT_PATTERN_CACHE,
+            highlight_text,
+        )
 
         _HIGHLIGHT_PATTERN_CACHE.clear()
         highlight_text("Hello world", ["world"], "#ff0000")
@@ -280,7 +301,10 @@ class TestHighlightPatternCache:
         assert pattern1 is pattern2
 
     def test_cache_different_terms(self):
-        from tests.support.canonical_exports import _HIGHLIGHT_PATTERN_CACHE, highlight_text
+        from arxiv_browser.query import (
+            _HIGHLIGHT_PATTERN_CACHE,
+            highlight_text,
+        )
 
         _HIGHLIGHT_PATTERN_CACHE.clear()
         highlight_text("Hello world", ["world"], "#ff0000")
@@ -288,8 +312,11 @@ class TestHighlightPatternCache:
         assert len(_HIGHLIGHT_PATTERN_CACHE) == 2
 
     def test_cache_has_bounded_size(self):
-        from arxiv_browser.query import _HIGHLIGHT_PATTERN_CACHE_MAX
-        from tests.support.canonical_exports import _HIGHLIGHT_PATTERN_CACHE, highlight_text
+        from arxiv_browser.query import (
+            _HIGHLIGHT_PATTERN_CACHE,
+            _HIGHLIGHT_PATTERN_CACHE_MAX,
+            highlight_text,
+        )
 
         _HIGHLIGHT_PATTERN_CACHE.clear()
         for i in range(_HIGHLIGHT_PATTERN_CACHE_MAX + 20):
@@ -304,7 +331,7 @@ class TestBatchConfirmationThreshold:
     """Verify batch confirmation modal behavior."""
 
     def test_threshold_constant_exists(self):
-        from tests.support.canonical_exports import BATCH_CONFIRM_THRESHOLD
+        from arxiv_browser.browser.core import BATCH_CONFIRM_THRESHOLD
 
         assert BATCH_CONFIRM_THRESHOLD == 10
 
@@ -333,7 +360,10 @@ class TestBatchConfirmationIntegration:
         """Opening few papers should not show confirmation modal."""
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import BATCH_CONFIRM_THRESHOLD, ArxivBrowser
+        from arxiv_browser.browser.core import (
+            BATCH_CONFIRM_THRESHOLD,
+            ArxivBrowser,
+        )
 
         papers = [make_paper(arxiv_id=f"2401.{i:05d}") for i in range(BATCH_CONFIRM_THRESHOLD)]
         app = ArxivBrowser(papers, restore_session=False)
@@ -356,8 +386,11 @@ class TestBatchConfirmationIntegration:
         """Opening many papers should show confirmation modal."""
         from unittest.mock import patch
 
+        from arxiv_browser.browser.core import (
+            BATCH_CONFIRM_THRESHOLD,
+            ArxivBrowser,
+        )
         from arxiv_browser.modals import ConfirmModal
-        from tests.support.canonical_exports import BATCH_CONFIRM_THRESHOLD, ArxivBrowser
 
         papers = [make_paper(arxiv_id=f"2401.{i:05d}") for i in range(BATCH_CONFIRM_THRESHOLD + 1)]
         app = ArxivBrowser(papers, restore_session=False)
@@ -386,7 +419,7 @@ class TestS2ConfigSerialization:
     """Tests for S2 config fields round-trip."""
 
     def test_s2_fields_default(self):
-        from tests.support.canonical_exports import UserConfig
+        from arxiv_browser.models import UserConfig
 
         config = UserConfig()
         assert config.s2_enabled is False
@@ -394,7 +427,11 @@ class TestS2ConfigSerialization:
         assert config.s2_cache_ttl_days == 7
 
     def test_s2_fields_serialize_roundtrip(self):
-        from tests.support.canonical_exports import UserConfig, _config_to_dict, _dict_to_config
+        from arxiv_browser.config import (
+            _config_to_dict,
+            _dict_to_config,
+        )
+        from arxiv_browser.models import UserConfig
 
         config = UserConfig(s2_enabled=True, s2_api_key="test-key", s2_cache_ttl_days=14)
         data = _config_to_dict(config)
@@ -408,7 +445,7 @@ class TestS2ConfigSerialization:
         assert restored.s2_cache_ttl_days == 14
 
     def test_s2_fields_missing_in_data(self):
-        from tests.support.canonical_exports import _dict_to_config
+        from arxiv_browser.config import _dict_to_config
 
         data = {"version": 1}
         config = _dict_to_config(data)
@@ -417,7 +454,7 @@ class TestS2ConfigSerialization:
         assert config.s2_cache_ttl_days == 7
 
     def test_s2_fields_wrong_type(self):
-        from tests.support.canonical_exports import _dict_to_config
+        from arxiv_browser.config import _dict_to_config
 
         data = {
             "s2_enabled": "not-a-bool",
@@ -434,8 +471,8 @@ class TestS2SortPapers:
     """Tests for citation sort."""
 
     def test_citation_sort_orders_by_count(self, make_paper):
+        from arxiv_browser.query import sort_papers
         from arxiv_browser.semantic_scholar import SemanticScholarPaper
-        from tests.support.canonical_exports import sort_papers
 
         papers = [
             make_paper(arxiv_id="a", title="A"),
@@ -478,8 +515,8 @@ class TestS2SortPapers:
         assert [p.arxiv_id for p in result] == ["b", "c", "a"]
 
     def test_citation_sort_papers_without_s2_last(self, make_paper):
+        from arxiv_browser.query import sort_papers
         from arxiv_browser.semantic_scholar import SemanticScholarPaper
-        from tests.support.canonical_exports import sort_papers
 
         papers = [
             make_paper(arxiv_id="a", title="A"),
@@ -502,7 +539,7 @@ class TestS2SortPapers:
         assert result[1].arxiv_id == "b"
 
     def test_citation_sort_no_cache(self, make_paper):
-        from tests.support.canonical_exports import sort_papers
+        from arxiv_browser.query import sort_papers
 
         papers = [
             make_paper(arxiv_id="a", title="A"),
@@ -518,7 +555,7 @@ class TestS2DetailPane:
 
     def test_s2_section_rendered(self, make_paper):
         from arxiv_browser.semantic_scholar import SemanticScholarPaper
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper()
@@ -541,7 +578,7 @@ class TestS2DetailPane:
         assert "Computer Science" in content
 
     def test_s2_loading_indicator(self, make_paper):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper()
@@ -551,7 +588,7 @@ class TestS2DetailPane:
         assert "Fetching data" in content
 
     def test_s2_section_hidden_when_no_data(self, make_paper):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper()
@@ -561,7 +598,7 @@ class TestS2DetailPane:
 
     def test_s2_section_with_empty_tldr(self, make_paper):
         from arxiv_browser.semantic_scholar import SemanticScholarPaper
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper()
@@ -582,7 +619,7 @@ class TestS2DetailPane:
 
     def test_s2_section_with_empty_fields(self, make_paper):
         from arxiv_browser.semantic_scholar import SemanticScholarPaper
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper()
@@ -606,7 +643,7 @@ class TestS2PaperListItem:
 
     def test_citation_badge_shown(self, make_paper):
         from arxiv_browser.semantic_scholar import SemanticScholarPaper
-        from tests.support.canonical_exports import PaperListItem
+        from arxiv_browser.widgets.listing import PaperListItem
 
         paper = make_paper()
         item = PaperListItem(paper)
@@ -625,7 +662,7 @@ class TestS2PaperListItem:
         assert "C42" in meta
 
     def test_no_badge_without_s2(self, make_paper):
-        from tests.support.canonical_exports import PaperListItem
+        from arxiv_browser.widgets.listing import PaperListItem
 
         paper = make_paper()
         item = PaperListItem(paper)
@@ -637,8 +674,8 @@ class TestS2RecsConversion:
     """Tests for _s2_recs_to_paper_tuples static method."""
 
     def test_converts_recs_to_paper_tuples(self):
+        from arxiv_browser.browser.core import ArxivBrowser
         from arxiv_browser.semantic_scholar import SemanticScholarPaper
-        from tests.support.canonical_exports import ArxivBrowser
 
         recs = [
             SemanticScholarPaper(
@@ -678,8 +715,8 @@ class TestS2RecsConversion:
         assert tuples[0][0].source == "s2"
 
     def test_zero_citations_handled(self):
+        from arxiv_browser.browser.core import ArxivBrowser
         from arxiv_browser.semantic_scholar import SemanticScholarPaper
-        from tests.support.canonical_exports import ArxivBrowser
 
         recs = [
             SemanticScholarPaper(
@@ -702,8 +739,8 @@ class TestS2RecsConversion:
 
     def test_url_fallback_with_empty_arxiv_id_and_url(self):
         """When both arxiv_id and url are empty, URL should be empty string."""
+        from arxiv_browser.browser.core import ArxivBrowser
         from arxiv_browser.semantic_scholar import SemanticScholarPaper
-        from tests.support.canonical_exports import ArxivBrowser
 
         recs = [
             SemanticScholarPaper(
@@ -728,8 +765,8 @@ class TestS2RecsConversion:
 
     def test_url_uses_arxiv_id_when_url_empty(self):
         """When url is empty but arxiv_id is present, URL should be constructed."""
+        from arxiv_browser.browser.core import ArxivBrowser
         from arxiv_browser.semantic_scholar import SemanticScholarPaper
-        from tests.support.canonical_exports import ArxivBrowser
 
         recs = [
             SemanticScholarPaper(
@@ -753,7 +790,7 @@ class TestS2AppActions:
     """Tests for S2 app action methods using mock self."""
 
     def _make_mock_app(self):
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._http_client = None
@@ -823,7 +860,7 @@ class TestS2AppActions:
         import asyncio
         from unittest.mock import AsyncMock, MagicMock, patch
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         paper = make_paper(arxiv_id="2401.42424")
         app = ArxivBrowser([paper], restore_session=False)
@@ -879,7 +916,7 @@ class TestDownloadBatchGuards:
         from collections import deque
         from unittest.mock import MagicMock
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._download_queue = deque([object()])
@@ -898,7 +935,7 @@ class TestDownloadBatchGuards:
         from collections import deque
         from unittest.mock import MagicMock
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._download_queue = deque()
@@ -920,7 +957,7 @@ class TestDownloadBatchGuards:
 
         from textual.css.query import NoMatches
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         download_item = object()
         app = ArxivBrowser.__new__(ArxivBrowser)
@@ -976,7 +1013,7 @@ class TestRelevanceScoringGuards:
     def test_start_relevance_sets_flag_before_task(self):
         from unittest.mock import MagicMock
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._relevance_scoring_active = False
@@ -997,7 +1034,7 @@ class TestRelevanceScoringGuards:
     def test_start_relevance_rejects_when_already_active(self):
         from unittest.mock import MagicMock
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._relevance_scoring_active = True
@@ -1013,7 +1050,7 @@ class TestRelevanceScoringGuards:
     def test_modal_callback_rejects_when_active(self):
         from unittest.mock import MagicMock, patch
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._relevance_scoring_active = True
@@ -1037,7 +1074,7 @@ class TestCitationGraphCaching:
     async def test_fetch_uses_cache_marker_even_for_empty_results(self, tmp_path):
         from unittest.mock import AsyncMock, patch
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._s2_db_path = tmp_path / "s2.db"
@@ -1070,7 +1107,7 @@ class TestCitationGraphCaching:
     async def test_fetch_does_not_cache_when_fetch_incomplete(self, tmp_path):
         from unittest.mock import AsyncMock, patch
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._s2_db_path = tmp_path / "s2.db"

@@ -7,19 +7,36 @@ from pathlib import Path
 
 import pytest
 
-from arxiv_browser.themes import THEME_NAMES, THEMES
-from tests.support.canonical_exports import (
-    ARXIV_API_DEFAULT_MAX_RESULTS,
-    ARXIV_DATE_FORMAT,
-    DEFAULT_CATEGORY_COLOR,
+from arxiv_browser.browser.core import SUBPROCESS_TIMEOUT
+from arxiv_browser.config import (
+    export_metadata,
+    import_metadata,
+    load_config,
+    save_config,
+)
+from arxiv_browser.export import (
+    escape_bibtex,
+    extract_year,
+    format_collection_as_markdown,
+    format_paper_as_bibtex,
+    format_paper_as_ris,
+    format_papers_as_csv,
+    format_papers_as_markdown_table,
+    generate_citation_key,
+    get_pdf_download_path,
+)
+from arxiv_browser.llm import (
     DEFAULT_LLM_PROMPT,
     LLM_PRESETS,
+    SUMMARY_MODES,
+    build_llm_prompt,
+    get_summary_db_path,
+)
+from arxiv_browser.models import (
+    ARXIV_API_DEFAULT_MAX_RESULTS,
     MAX_COLLECTIONS,
     MAX_PAPERS_PER_COLLECTION,
     SORT_OPTIONS,
-    SUBPROCESS_TIMEOUT,
-    SUMMARY_MODES,
-    TAG_NAMESPACE_COLORS,
     Paper,
     PaperCollection,
     PaperMetadata,
@@ -27,38 +44,34 @@ from tests.support.canonical_exports import (
     SearchBookmark,
     UserConfig,
     WatchListEntry,
+)
+from arxiv_browser.parsing import (
+    ARXIV_DATE_FORMAT,
     build_arxiv_search_query,
-    build_llm_prompt,
     clean_latex,
-    escape_bibtex,
-    export_metadata,
     extract_text_from_html,
-    extract_year,
-    format_categories,
-    format_collection_as_markdown,
-    format_paper_as_bibtex,
-    format_paper_as_ris,
-    format_papers_as_csv,
-    format_papers_as_markdown_table,
-    format_summary_as_rich,
-    generate_citation_key,
-    get_pdf_download_path,
-    get_summary_db_path,
-    get_tag_color,
-    import_metadata,
-    insert_implicit_and,
-    load_config,
     normalize_arxiv_id,
     parse_arxiv_api_feed,
     parse_arxiv_date,
     parse_arxiv_file,
     parse_arxiv_version_map,
-    parse_tag_namespace,
+)
+from arxiv_browser.query import (
+    format_categories,
+    format_summary_as_rich,
+    insert_implicit_and,
     pill_label_for_token,
     reconstruct_query,
-    save_config,
     to_rpn,
     tokenize_query,
+)
+from arxiv_browser.themes import (
+    DEFAULT_CATEGORY_COLOR,
+    TAG_NAMESPACE_COLORS,
+    THEME_NAMES,
+    THEMES,
+    get_tag_color,
+    parse_tag_namespace,
 )
 
 # ============================================================================
@@ -508,14 +521,17 @@ class TestConstants:
 
     def test_fuzzy_search_constants_have_valid_ranges(self):
         """Fuzzy-search compatibility constants should remain importable and sane."""
-        from tests.support.canonical_exports import FUZZY_LIMIT, FUZZY_SCORE_CUTOFF
+        from arxiv_browser.browser.core import (
+            FUZZY_LIMIT,
+            FUZZY_SCORE_CUTOFF,
+        )
 
         assert 0 <= FUZZY_SCORE_CUTOFF <= 100
         assert FUZZY_LIMIT > 0
 
     def test_stopwords_contains_common_words(self):
         """STOPWORDS should contain common English stopwords."""
-        from tests.support.canonical_exports import STOPWORDS
+        from arxiv_browser.models import STOPWORDS
 
         assert "the" in STOPWORDS
         assert "and" in STOPWORDS
@@ -552,7 +568,7 @@ class TestNewDataclasses:
 
     def test_session_state_defaults(self):
         """SessionState should have correct defaults."""
-        from tests.support.canonical_exports import SessionState
+        from arxiv_browser.models import SessionState
 
         session = SessionState()
         assert session.scroll_index == 0
@@ -577,11 +593,11 @@ class TestConfigPersistence:
 
     def test_config_to_dict_roundtrip(self):
         """Config should serialize and deserialize correctly."""
-        from tests.support.canonical_exports import (
-            SessionState,
+        from arxiv_browser.config import (
             _config_to_dict,
             _dict_to_config,
         )
+        from arxiv_browser.models import SessionState
 
         original = UserConfig(
             paper_metadata={
@@ -620,7 +636,7 @@ class TestConfigPersistence:
 
     def test_dict_to_config_handles_empty(self):
         """Loading empty dict should return default config."""
-        from tests.support.canonical_exports import _dict_to_config
+        from arxiv_browser.config import _dict_to_config
 
         config = _dict_to_config({})
         default = UserConfig()
@@ -629,7 +645,8 @@ class TestConfigPersistence:
 
     def test_arxiv_api_max_results_is_clamped(self):
         """arxiv_api_max_results should be clamped to configured limits."""
-        from tests.support.canonical_exports import ARXIV_API_MAX_RESULTS_LIMIT, _dict_to_config
+        from arxiv_browser.config import _dict_to_config
+        from arxiv_browser.models import ARXIV_API_MAX_RESULTS_LIMIT
 
         config = _dict_to_config({"arxiv_api_max_results": 9999})
         assert config.arxiv_api_max_results == ARXIV_API_MAX_RESULTS_LIMIT

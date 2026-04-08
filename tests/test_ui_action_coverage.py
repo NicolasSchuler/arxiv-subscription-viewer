@@ -27,9 +27,8 @@ from arxiv_browser.modals.collections import (
     CollectionsModal,
     CollectionViewModal,
 )
-from arxiv_browser.models import MAX_COLLECTIONS, PaperCollection, UserConfig
+from arxiv_browser.models import MAX_COLLECTIONS, PaperCollection, PaperMetadata, UserConfig
 from arxiv_browser.services import enrichment_service as enrich
-from tests.support import canonical_exports as app_mod
 from tests.support.app_stubs import (
     _DummyInput,
     _DummyLabel,
@@ -436,8 +435,8 @@ class TestUiActionCoverage:
         other = make_paper(arxiv_id="2401.60012")
         app._config = _make_app_config(
             paper_metadata={
-                paper.arxiv_id: app_mod.PaperMetadata(arxiv_id=paper.arxiv_id, starred=True),
-                other.arxiv_id: app_mod.PaperMetadata(arxiv_id=other.arxiv_id, starred=False),
+                paper.arxiv_id: PaperMetadata(arxiv_id=paper.arxiv_id, starred=True),
+                other.arxiv_id: PaperMetadata(arxiv_id=other.arxiv_id, starred=False),
             }
         )
         app._papers_by_id = {paper.arxiv_id: paper, other.arxiv_id: other}
@@ -537,7 +536,7 @@ class TestUiActionCoverage:
 
         app.notify.reset_mock()
         app._config.paper_metadata = {
-            paper.arxiv_id: app_mod.PaperMetadata(arxiv_id=paper.arxiv_id, starred=True)
+            paper.arxiv_id: PaperMetadata(arxiv_id=paper.arxiv_id, starred=True)
         }
         app._track_dataset_task = MagicMock(side_effect=lambda coro: coro.close())
         await ui_actions.action_check_versions(app)

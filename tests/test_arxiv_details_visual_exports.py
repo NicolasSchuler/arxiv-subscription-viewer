@@ -7,19 +7,36 @@ from pathlib import Path
 
 import pytest
 
-from arxiv_browser.themes import THEME_NAMES, THEMES
-from tests.support.canonical_exports import (
-    ARXIV_API_DEFAULT_MAX_RESULTS,
-    ARXIV_DATE_FORMAT,
-    DEFAULT_CATEGORY_COLOR,
+from arxiv_browser.browser.core import SUBPROCESS_TIMEOUT
+from arxiv_browser.config import (
+    export_metadata,
+    import_metadata,
+    load_config,
+    save_config,
+)
+from arxiv_browser.export import (
+    escape_bibtex,
+    extract_year,
+    format_collection_as_markdown,
+    format_paper_as_bibtex,
+    format_paper_as_ris,
+    format_papers_as_csv,
+    format_papers_as_markdown_table,
+    generate_citation_key,
+    get_pdf_download_path,
+)
+from arxiv_browser.llm import (
     DEFAULT_LLM_PROMPT,
     LLM_PRESETS,
+    SUMMARY_MODES,
+    build_llm_prompt,
+    get_summary_db_path,
+)
+from arxiv_browser.models import (
+    ARXIV_API_DEFAULT_MAX_RESULTS,
     MAX_COLLECTIONS,
     MAX_PAPERS_PER_COLLECTION,
     SORT_OPTIONS,
-    SUBPROCESS_TIMEOUT,
-    SUMMARY_MODES,
-    TAG_NAMESPACE_COLORS,
     Paper,
     PaperCollection,
     PaperMetadata,
@@ -27,38 +44,34 @@ from tests.support.canonical_exports import (
     SearchBookmark,
     UserConfig,
     WatchListEntry,
+)
+from arxiv_browser.parsing import (
+    ARXIV_DATE_FORMAT,
     build_arxiv_search_query,
-    build_llm_prompt,
     clean_latex,
-    escape_bibtex,
-    export_metadata,
     extract_text_from_html,
-    extract_year,
-    format_categories,
-    format_collection_as_markdown,
-    format_paper_as_bibtex,
-    format_paper_as_ris,
-    format_papers_as_csv,
-    format_papers_as_markdown_table,
-    format_summary_as_rich,
-    generate_citation_key,
-    get_pdf_download_path,
-    get_summary_db_path,
-    get_tag_color,
-    import_metadata,
-    insert_implicit_and,
-    load_config,
     normalize_arxiv_id,
     parse_arxiv_api_feed,
     parse_arxiv_date,
     parse_arxiv_file,
     parse_arxiv_version_map,
-    parse_tag_namespace,
+)
+from arxiv_browser.query import (
+    format_categories,
+    format_summary_as_rich,
+    insert_implicit_and,
     pill_label_for_token,
     reconstruct_query,
-    save_config,
     to_rpn,
     tokenize_query,
+)
+from arxiv_browser.themes import (
+    DEFAULT_CATEGORY_COLOR,
+    TAG_NAMESPACE_COLORS,
+    THEME_NAMES,
+    THEMES,
+    get_tag_color,
+    parse_tag_namespace,
 )
 
 # ============================================================================
@@ -70,7 +83,7 @@ class TestPaperDetailsCacheIntegration:
     """Tests for PaperDetails.update_paper cache behavior."""
 
     def test_cache_hit_returns_same_markup(self, make_paper):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper(arxiv_id="2401.00001", title="Cache Test")
@@ -87,7 +100,7 @@ class TestPaperDetailsCacheIntegration:
         assert cache_size_after_first == cache_size_after_second == 1
 
     def test_cache_miss_on_different_abstract(self, make_paper):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper(arxiv_id="2401.00001")
@@ -98,7 +111,7 @@ class TestPaperDetailsCacheIntegration:
         assert len(details._detail_cache) == 2
 
     def test_cache_miss_on_different_tags(self, make_paper):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper(arxiv_id="2401.00001")
@@ -109,7 +122,7 @@ class TestPaperDetailsCacheIntegration:
         assert len(details._detail_cache) == 2
 
     def test_cache_miss_on_summary_loading_change(self, make_paper):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper(arxiv_id="2401.00001")
@@ -120,7 +133,7 @@ class TestPaperDetailsCacheIntegration:
         assert len(details._detail_cache) == 2
 
     def test_cache_miss_on_collapsed_sections_change(self, make_paper):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper(arxiv_id="2401.00001")
@@ -131,7 +144,7 @@ class TestPaperDetailsCacheIntegration:
         assert len(details._detail_cache) == 2
 
     def test_cache_stores_in_order_list(self, make_paper):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
 
@@ -143,7 +156,7 @@ class TestPaperDetailsCacheIntegration:
         assert len(details._detail_cache) == 3
 
     def test_none_paper_does_not_cache(self, make_paper):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         details.update_paper(None)
@@ -152,7 +165,10 @@ class TestPaperDetailsCacheIntegration:
         assert details.paper is None
 
     def test_cache_eviction_removes_oldest(self, make_paper):
-        from tests.support.canonical_exports import DETAIL_CACHE_MAX, PaperDetails
+        from arxiv_browser.widgets.details import (
+            DETAIL_CACHE_MAX,
+            PaperDetails,
+        )
 
         details = PaperDetails()
 
@@ -172,7 +188,7 @@ class TestPaperDetailsCacheIntegration:
 
     def test_cache_hit_does_not_reorder(self, make_paper):
         """A cache hit should not change the order list."""
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
 
@@ -190,7 +206,7 @@ class TestPaperDetailsCacheIntegration:
         assert order_before == order_after
 
     def test_cache_with_relevance_data(self, make_paper):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper(arxiv_id="2401.00001")
@@ -201,7 +217,7 @@ class TestPaperDetailsCacheIntegration:
         assert len(details._detail_cache) == 2
 
     def test_cache_with_version_update(self, make_paper):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper(arxiv_id="2401.00001")
@@ -216,7 +232,10 @@ class TestTextualThemes:
     """Tests for the Textual theme system with custom CSS variables."""
 
     def test_build_textual_theme_maps_all_keys(self):
-        from tests.support.canonical_exports import DEFAULT_THEME, _build_textual_theme
+        from arxiv_browser.themes import (
+            DEFAULT_THEME,
+            _build_textual_theme,
+        )
 
         theme = _build_textual_theme("test", DEFAULT_THEME)
         assert theme.name == "test"
@@ -241,7 +260,7 @@ class TestTextualThemes:
         assert set(theme.variables.keys()) == expected_vars
 
     def test_textual_themes_key_parity(self):
-        from tests.support.canonical_exports import TEXTUAL_THEMES
+        from arxiv_browser.themes import TEXTUAL_THEMES
 
         theme_names = list(TEXTUAL_THEMES.keys())
         assert len(theme_names) == 4
@@ -250,7 +269,7 @@ class TestTextualThemes:
             assert set(TEXTUAL_THEMES[name].variables.keys()) == keys_0
 
     def test_textual_theme_values_are_hex_colors(self):
-        from tests.support.canonical_exports import TEXTUAL_THEMES
+        from arxiv_browser.themes import TEXTUAL_THEMES
 
         for name, theme in TEXTUAL_THEMES.items():
             for var_name, value in theme.variables.items():
@@ -263,7 +282,8 @@ class TestFooterContrast:
     """Tests for footer rendering with accent-colored keys."""
 
     def test_footer_contrast_uses_accent_for_keys(self):
-        from tests.support.canonical_exports import THEME_COLORS, ContextFooter
+        from arxiv_browser.themes import THEME_COLORS
+        from arxiv_browser.widgets.chrome import ContextFooter
 
         footer = ContextFooter()
         footer.render_bindings([("o", "open"), ("s", "sort")])
@@ -271,7 +291,8 @@ class TestFooterContrast:
         assert THEME_COLORS["accent"] in rendered
 
     def test_footer_mode_badge_renders(self):
-        from tests.support.canonical_exports import THEME_COLORS, ContextFooter
+        from arxiv_browser.themes import THEME_COLORS
+        from arxiv_browser.widgets.chrome import ContextFooter
 
         footer = ContextFooter()
         badge = f"[bold {THEME_COLORS['accent']}] SEARCH [/]"
@@ -285,7 +306,7 @@ class TestFooterContrast:
 
         from textual.css.query import NoMatches
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._http_client = None
@@ -304,7 +325,7 @@ class TestFooterContrast:
 
         from textual.css.query import NoMatches
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._http_client = None
@@ -322,7 +343,7 @@ class TestFooterContrast:
 
         from textual.css.query import NoMatches
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._http_client = None
@@ -340,7 +361,7 @@ class TestDetailPaneOrdering:
     """Tests for the abstract-before-authors ordering in the detail pane."""
 
     def test_abstract_before_authors_in_detail(self, make_paper):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper(authors="Alice, Bob, Charlie")
@@ -353,7 +374,10 @@ class TestDetailPaneOrdering:
 
     def test_url_always_visible_without_collapse_option(self):
         """URL should not appear in DETAIL_SECTION_KEYS (not collapsible)."""
-        from tests.support.canonical_exports import DETAIL_SECTION_KEYS, DETAIL_SECTION_NAMES
+        from arxiv_browser.models import (
+            DETAIL_SECTION_KEYS,
+            DETAIL_SECTION_NAMES,
+        )
 
         assert "url" not in DETAIL_SECTION_KEYS
         assert "url" not in DETAIL_SECTION_NAMES
@@ -369,7 +393,7 @@ class TestFooterDiscoverability:
 
         from textual.css.query import NoMatches
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._http_client = None
@@ -393,7 +417,7 @@ class TestFooterDiscoverability:
         return app
 
     def test_footer_shows_default_browse_order(self):
-        from tests.support.canonical_exports import UserConfig
+        from arxiv_browser.models import UserConfig
 
         config = UserConfig()
         app = self._make_footer_app(config)
@@ -411,7 +435,7 @@ class TestFooterDiscoverability:
         ]
 
     def test_footer_shows_export_hint(self):
-        from tests.support.canonical_exports import UserConfig
+        from arxiv_browser.models import UserConfig
 
         config = UserConfig()
         app = self._make_footer_app(config)
@@ -421,7 +445,7 @@ class TestFooterDiscoverability:
         assert "Space" in keys
 
     def test_footer_is_capped_and_keeps_help_palette(self):
-        from tests.support.canonical_exports import UserConfig
+        from arxiv_browser.models import UserConfig
 
         config = UserConfig(llm_preset="claude")
         app = self._make_footer_app(config)
@@ -432,7 +456,7 @@ class TestFooterDiscoverability:
         assert "?" in keys
 
     def test_footer_keeps_core_actions_when_s2_active(self):
-        from tests.support.canonical_exports import UserConfig
+        from arxiv_browser.models import UserConfig
 
         config = UserConfig()
         app = self._make_footer_app(config)
@@ -453,7 +477,7 @@ class TestFooterDiscoverability:
     def test_footer_uses_palette_and_history_labels(self):
         from datetime import date as dt_date
 
-        from tests.support.canonical_exports import UserConfig
+        from arxiv_browser.models import UserConfig
 
         config = UserConfig()
         app = self._make_footer_app(config)
@@ -468,7 +492,7 @@ class TestFooterDiscoverability:
         assert ("x", "star") not in bindings
 
     def test_search_and_api_footer_copy(self):
-        from tests.support.canonical_exports import FOOTER_CONTEXTS
+        from arxiv_browser.browser.contracts import FOOTER_CONTEXTS
 
         assert ("type to search", "") in FOOTER_CONTEXTS["search"]
         assert ("Enter", "apply") in FOOTER_CONTEXTS["search"]
@@ -479,13 +503,13 @@ class TestFooterDiscoverability:
         assert ("A", "new query") in FOOTER_CONTEXTS["api"]
 
     def test_footer_context_alias_matches_chrome_builders(self):
+        from arxiv_browser.browser.contracts import FOOTER_CONTEXTS
         from arxiv_browser.widgets.chrome import (
             build_api_footer_bindings,
             build_browse_footer_bindings,
             build_search_footer_bindings,
             build_selection_footer_base_bindings,
         )
-        from tests.support.canonical_exports import FOOTER_CONTEXTS
 
         assert FOOTER_CONTEXTS["default"] == build_browse_footer_bindings(
             s2_active=False,

@@ -7,19 +7,36 @@ from pathlib import Path
 
 import pytest
 
-from arxiv_browser.themes import THEME_NAMES, THEMES
-from tests.support.canonical_exports import (
-    ARXIV_API_DEFAULT_MAX_RESULTS,
-    ARXIV_DATE_FORMAT,
-    DEFAULT_CATEGORY_COLOR,
+from arxiv_browser.browser.core import SUBPROCESS_TIMEOUT
+from arxiv_browser.config import (
+    export_metadata,
+    import_metadata,
+    load_config,
+    save_config,
+)
+from arxiv_browser.export import (
+    escape_bibtex,
+    extract_year,
+    format_collection_as_markdown,
+    format_paper_as_bibtex,
+    format_paper_as_ris,
+    format_papers_as_csv,
+    format_papers_as_markdown_table,
+    generate_citation_key,
+    get_pdf_download_path,
+)
+from arxiv_browser.llm import (
     DEFAULT_LLM_PROMPT,
     LLM_PRESETS,
+    SUMMARY_MODES,
+    build_llm_prompt,
+    get_summary_db_path,
+)
+from arxiv_browser.models import (
+    ARXIV_API_DEFAULT_MAX_RESULTS,
     MAX_COLLECTIONS,
     MAX_PAPERS_PER_COLLECTION,
     SORT_OPTIONS,
-    SUBPROCESS_TIMEOUT,
-    SUMMARY_MODES,
-    TAG_NAMESPACE_COLORS,
     Paper,
     PaperCollection,
     PaperMetadata,
@@ -27,38 +44,34 @@ from tests.support.canonical_exports import (
     SearchBookmark,
     UserConfig,
     WatchListEntry,
+)
+from arxiv_browser.parsing import (
+    ARXIV_DATE_FORMAT,
     build_arxiv_search_query,
-    build_llm_prompt,
     clean_latex,
-    escape_bibtex,
-    export_metadata,
     extract_text_from_html,
-    extract_year,
-    format_categories,
-    format_collection_as_markdown,
-    format_paper_as_bibtex,
-    format_paper_as_ris,
-    format_papers_as_csv,
-    format_papers_as_markdown_table,
-    format_summary_as_rich,
-    generate_citation_key,
-    get_pdf_download_path,
-    get_summary_db_path,
-    get_tag_color,
-    import_metadata,
-    insert_implicit_and,
-    load_config,
     normalize_arxiv_id,
     parse_arxiv_api_feed,
     parse_arxiv_date,
     parse_arxiv_file,
     parse_arxiv_version_map,
-    parse_tag_namespace,
+)
+from arxiv_browser.query import (
+    format_categories,
+    format_summary_as_rich,
+    insert_implicit_and,
     pill_label_for_token,
     reconstruct_query,
-    save_config,
     to_rpn,
     tokenize_query,
+)
+from arxiv_browser.themes import (
+    DEFAULT_CATEGORY_COLOR,
+    TAG_NAMESPACE_COLORS,
+    THEME_NAMES,
+    THEMES,
+    get_tag_color,
+    parse_tag_namespace,
 )
 from tests.support.patch_helpers import patch_save_config
 
@@ -88,7 +101,7 @@ class TestMetadataActionsIntegration:
         """Pressing 'r' should create metadata and set is_read True."""
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=2)
         app = ArxivBrowser(papers, restore_session=False)
@@ -106,7 +119,7 @@ class TestMetadataActionsIntegration:
         """Pressing 'r' twice should toggle is_read back to False."""
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=2)
         app = ArxivBrowser(papers, restore_session=False)
@@ -125,7 +138,7 @@ class TestMetadataActionsIntegration:
         """Navigate to second paper with 'j', then toggle read."""
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=3)
         app = ArxivBrowser(papers, restore_session=False)
@@ -145,7 +158,7 @@ class TestMetadataActionsIntegration:
         """Pressing 'x' should create metadata and set starred True."""
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=2)
         app = ArxivBrowser(papers, restore_session=False)
@@ -163,7 +176,7 @@ class TestMetadataActionsIntegration:
         """Pressing 'x' twice should toggle starred back to False."""
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=2)
         app = ArxivBrowser(papers, restore_session=False)
@@ -182,7 +195,7 @@ class TestMetadataActionsIntegration:
         """Read and star should be independent metadata flags."""
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
@@ -201,8 +214,8 @@ class TestMetadataActionsIntegration:
         """Pressing 'n' should open the NotesModal."""
         from unittest.mock import patch
 
+        from arxiv_browser.browser.core import ArxivBrowser
         from arxiv_browser.modals import NotesModal
-        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
@@ -220,8 +233,8 @@ class TestMetadataActionsIntegration:
 
         from textual.widgets import TextArea
 
+        from arxiv_browser.browser.core import ArxivBrowser
         from arxiv_browser.modals import NotesModal
-        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
@@ -251,7 +264,7 @@ class TestMetadataActionsIntegration:
         """Pressing Escape on NotesModal should not save new notes."""
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
@@ -276,7 +289,7 @@ class TestMetadataActionsIntegration:
 
         from textual.widgets import TextArea
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
@@ -301,8 +314,8 @@ class TestMetadataActionsIntegration:
         """Pressing 't' should open the TagsModal."""
         from unittest.mock import patch
 
+        from arxiv_browser.browser.core import ArxivBrowser
         from arxiv_browser.modals import TagsModal
-        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
@@ -320,7 +333,7 @@ class TestMetadataActionsIntegration:
 
         from textual.widgets import Input
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
@@ -364,7 +377,7 @@ class TestSortCyclingIntegration:
         """Pressing 's' should cycle through all SORT_OPTIONS and wrap around."""
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=5)
         app = ArxivBrowser(papers, restore_session=False)
@@ -385,7 +398,7 @@ class TestSortCyclingIntegration:
 
         from textual.widgets import OptionList
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=5)
         app = ArxivBrowser(papers, restore_session=False)
@@ -407,7 +420,7 @@ class TestSortCyclingIntegration:
         """Sorting should actually reorder the filtered_papers list."""
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=5)
         app = ArxivBrowser(papers, restore_session=False)
@@ -451,7 +464,7 @@ class TestSelectionIntegration:
         """Pressing space should toggle selection of the current paper."""
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=3)
         app = ArxivBrowser(papers, restore_session=False)
@@ -475,7 +488,7 @@ class TestSelectionIntegration:
         """Select multiple papers by navigating and pressing space."""
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=3)
         app = ArxivBrowser(papers, restore_session=False)
@@ -497,7 +510,7 @@ class TestSelectionIntegration:
         """Pressing 'a' should select all visible papers."""
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=5)
         app = ArxivBrowser(papers, restore_session=False)
@@ -515,7 +528,7 @@ class TestSelectionIntegration:
         """Pressing 'u' should clear all selections."""
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=5)
         app = ArxivBrowser(papers, restore_session=False)
@@ -535,7 +548,7 @@ class TestSelectionIntegration:
         """Select all, then deselect one with space."""
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=3)
         app = ArxivBrowser(papers, restore_session=False)
@@ -557,7 +570,7 @@ class TestSelectionIntegration:
 
         from textual.widgets import Label
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=3)
         app = ArxivBrowser(papers, restore_session=False)
@@ -595,8 +608,8 @@ class TestExportMenuIntegration:
         """Pressing 'E' with selected papers should open the ExportMenuModal."""
         from unittest.mock import patch
 
+        from arxiv_browser.browser.core import ArxivBrowser
         from arxiv_browser.modals import ExportMenuModal
-        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=2)
         app = ArxivBrowser(papers, restore_session=False)
@@ -615,8 +628,8 @@ class TestExportMenuIntegration:
         """Pressing Escape should close the ExportMenuModal."""
         from unittest.mock import patch
 
+        from arxiv_browser.browser.core import ArxivBrowser
         from arxiv_browser.modals import ExportMenuModal
-        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=2)
         app = ArxivBrowser(papers, restore_session=False)
@@ -636,8 +649,8 @@ class TestExportMenuIntegration:
         """Export menu should open when detail pane has a paper (no explicit selection)."""
         from unittest.mock import patch
 
+        from arxiv_browser.browser.core import ArxivBrowser
         from arxiv_browser.modals import ExportMenuModal
-        from tests.support.canonical_exports import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=2)
         app = ArxivBrowser(papers, restore_session=False)
@@ -674,7 +687,7 @@ class TestAbstractPreviewIntegration:
         """Pressing 'p' should toggle _show_abstract_preview."""
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=3)
         app = ArxivBrowser(papers, restore_session=False)
@@ -696,7 +709,7 @@ class TestAbstractPreviewIntegration:
 
         from textual.widgets import OptionList
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=3)
         app = ArxivBrowser(papers, restore_session=False)
@@ -713,7 +726,7 @@ class TestAbstractPreviewIntegration:
         """Preview toggle should sync to config for persistence."""
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)

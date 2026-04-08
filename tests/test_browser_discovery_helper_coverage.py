@@ -31,9 +31,8 @@ from arxiv_browser.modals.collections import (
     CollectionsModal,
     CollectionViewModal,
 )
-from arxiv_browser.models import MAX_COLLECTIONS, PaperCollection, UserConfig
+from arxiv_browser.models import MAX_COLLECTIONS, PaperCollection, PaperMetadata, UserConfig
 from arxiv_browser.services import enrichment_service as enrich
-from tests.support import canonical_exports as app_mod
 from tests.support.app_stubs import (
     _DummyInput,
     _DummyLabel,
@@ -54,7 +53,7 @@ class TestDiscoveryMixinCoverage:
         paper = make_paper(arxiv_id="2401.70001")
         app._config = _make_app_config(
             paper_metadata={
-                paper.arxiv_id: app_mod.PaperMetadata(
+                paper.arxiv_id: PaperMetadata(
                     arxiv_id=paper.arxiv_id,
                     starred=True,
                     last_checked_version=1,

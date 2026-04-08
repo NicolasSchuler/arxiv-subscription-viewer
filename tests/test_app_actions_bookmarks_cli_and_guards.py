@@ -12,27 +12,30 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
+from arxiv_browser.browser.core import ArxivBrowser
+from arxiv_browser.cli import (
+    _resolve_legacy_fallback,
+    _resolve_papers,
+)
 from arxiv_browser.huggingface import HuggingFacePaper
+from arxiv_browser.models import (
+    ArxivSearchRequest,
+    PaperCollection,
+    PaperMetadata,
+    SearchBookmark,
+    UserConfig,
+)
 from arxiv_browser.semantic_scholar import (
     CitationEntry,
     S2RecommendationsCacheSnapshot,
     SemanticScholarPaper,
 )
-from tests.support import canonical_exports as app_mod
+from arxiv_browser.services.llm_service import LLMExecutionError
 from tests.support.app_stubs import (
     _DummyOptionList,
     _make_hf_paper,
     _make_s2_paper,
     _new_app,
-)
-from tests.support.canonical_exports import (
-    ArxivBrowser,
-    PaperCollection,
-    PaperMetadata,
-    SearchBookmark,
-    UserConfig,
-    _resolve_legacy_fallback,
-    _resolve_papers,
 )
 from tests.support.patch_helpers import patch_save_config
 
@@ -244,7 +247,7 @@ class TestAutoTagAndPdfOpenCoverage:
         app.notify = MagicMock()
         app._llm_provider = object()
         paper = make_paper(arxiv_id="2401.90001")
-        suggest_tags = AsyncMock(side_effect=app_mod._LLMExecutionError("bad command"))
+        suggest_tags = AsyncMock(side_effect=LLMExecutionError("bad command"))
         app._services = SimpleNamespace(llm=SimpleNamespace(suggest_tags_once=suggest_tags))
 
         result = await app._call_auto_tag_llm(paper, ["topic:ml"])
@@ -633,7 +636,7 @@ class TestSearchActionCoverage:
         app._update_status_bar = MagicMock()
         app._apply_arxiv_search_results = MagicMock()
         app.notify = MagicMock()
-        request = app_mod.ArxivSearchRequest(query="graph")
+        request = ArxivSearchRequest(query="graph")
 
         app._fetch_arxiv_api_page = AsyncMock(side_effect=_status_error(429))
         await app._run_arxiv_search(request, start=0)

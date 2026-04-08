@@ -26,14 +26,21 @@ import arxiv_browser.llm_providers as llm_providers
 import arxiv_browser.semantic_scholar as s2
 from arxiv_browser.actions import external_io_actions as io_actions
 from arxiv_browser.actions import llm_actions as llm_actions
+from arxiv_browser.browser.core import ArxivBrowser
 from arxiv_browser.modals.collections import (
     AddToCollectionModal,
     CollectionsModal,
     CollectionViewModal,
 )
-from arxiv_browser.models import MAX_COLLECTIONS, PaperCollection, UserConfig
+from arxiv_browser.models import (
+    MAX_COLLECTIONS,
+    SORT_OPTIONS,
+    PaperCollection,
+    PaperMetadata,
+    SearchBookmark,
+    UserConfig,
+)
 from arxiv_browser.services import enrichment_service as enrich
-from tests.support import canonical_exports as app_mod
 from tests.support.app_stubs import (
     _DummyInput,
     _DummyLabel,
@@ -69,14 +76,14 @@ class TestBrowserHelperCoverage:
                 SimpleNamespace(pattern="graph", match_type="keyword", case_sensitive=False)
             ],
             paper_metadata={
-                paper1.arxiv_id: app_mod.PaperMetadata(
+                paper1.arxiv_id: PaperMetadata(
                     arxiv_id=paper1.arxiv_id, tags=["shared"], starred=True
                 ),
-                paper2.arxiv_id: app_mod.PaperMetadata(
+                paper2.arxiv_id: PaperMetadata(
                     arxiv_id=paper2.arxiv_id, tags=["shared"], starred=False
                 ),
             },
-            bookmarks=[app_mod.SearchBookmark(name="Saved", query="graph")],
+            bookmarks=[SearchBookmark(name="Saved", query="graph")],
         )
         app.all_papers = [paper1, paper2]
         app.filtered_papers = [paper1, paper2]
@@ -93,7 +100,7 @@ class TestBrowserHelperCoverage:
         app._applied_query = "graph"
         app._watch_filter_active = True
         app._active_bookmark_index = 1
-        app._sort_index = app_mod.SORT_OPTIONS.index("title")
+        app._sort_index = SORT_OPTIONS.index("title")
 
         app._get_search_input_widget = MagicMock(return_value=SimpleNamespace(value="  graph  "))
         option_list = _OptionListStub(highlighted=1, option_count=2)
@@ -200,9 +207,7 @@ class TestBrowserHelperCoverage:
         )
         assert calls == [f"target:{paper2.arxiv_id}"]
 
-        app._apply_to_selected = app_mod.ArxivBrowser._apply_to_selected.__get__(
-            app, app_mod.ArxivBrowser
-        )
+        app._apply_to_selected = ArxivBrowser._apply_to_selected.__get__(app, ArxivBrowser)
         app._update_option_at_index = MagicMock()
         app.selected_ids = {paper1.arxiv_id, paper2.arxiv_id}
         app._config.paper_metadata[paper1.arxiv_id].is_read = False
@@ -220,8 +225,8 @@ class TestBrowserHelperCoverage:
 
         app._watched_paper_ids.clear()
         app._config.watch_list = []
-        app._compute_watched_papers = app_mod.ArxivBrowser._compute_watched_papers.__get__(
-            app, app_mod.ArxivBrowser
+        app._compute_watched_papers = ArxivBrowser._compute_watched_papers.__get__(
+            app, ArxivBrowser
         )
         app._compute_watched_papers()
         assert app._watched_paper_ids == set()
@@ -399,17 +404,17 @@ class TestBrowserHelperCoverage:
         other = make_paper(arxiv_id="2401.20012")
         app._config = _make_app_config(
             paper_metadata={
-                paper.arxiv_id: app_mod.PaperMetadata(
+                paper.arxiv_id: PaperMetadata(
                     arxiv_id=paper.arxiv_id,
                     tags=["alpha"],
                 ),
-                other.arxiv_id: app_mod.PaperMetadata(
+                other.arxiv_id: PaperMetadata(
                     arxiv_id=other.arxiv_id,
                     tags=["alpha", "beta"],
                 ),
             },
             marks={},
-            bookmarks=[app_mod.SearchBookmark(name="Saved", query="graph")],
+            bookmarks=[SearchBookmark(name="Saved", query="graph")],
         )
         app.all_papers = [paper, other]
         app.filtered_papers = [paper, other]
@@ -426,26 +431,16 @@ class TestBrowserHelperCoverage:
         app._get_paper_details_widget = MagicMock(return_value=details)
         app._is_history_mode = MagicMock(return_value=False)
         app._save_config_or_warn = MagicMock(return_value=True)
-        app._refresh_list_view = app_mod.ArxivBrowser._refresh_list_view.__get__(
-            app, app_mod.ArxivBrowser
-        )
+        app._refresh_list_view = ArxivBrowser._refresh_list_view.__get__(app, ArxivBrowser)
         app._resolve_visible_index = MagicMock(return_value=1)
-        app._goto_mark = app_mod.ArxivBrowser._goto_mark.__get__(app, app_mod.ArxivBrowser)
-        app._bulk_edit_tags = app_mod.ArxivBrowser._bulk_edit_tags.__get__(
-            app, app_mod.ArxivBrowser
+        app._goto_mark = ArxivBrowser._goto_mark.__get__(app, ArxivBrowser)
+        app._bulk_edit_tags = ArxivBrowser._bulk_edit_tags.__get__(app, ArxivBrowser)
+        app.action_toggle_preview = ArxivBrowser.action_toggle_preview.__get__(app, ArxivBrowser)
+        app.action_toggle_detail_mode = ArxivBrowser.action_toggle_detail_mode.__get__(
+            app, ArxivBrowser
         )
-        app.action_toggle_preview = app_mod.ArxivBrowser.action_toggle_preview.__get__(
-            app, app_mod.ArxivBrowser
-        )
-        app.action_toggle_detail_mode = app_mod.ArxivBrowser.action_toggle_detail_mode.__get__(
-            app, app_mod.ArxivBrowser
-        )
-        app.action_start_mark = app_mod.ArxivBrowser.action_start_mark.__get__(
-            app, app_mod.ArxivBrowser
-        )
-        app.action_start_goto_mark = app_mod.ArxivBrowser.action_start_goto_mark.__get__(
-            app, app_mod.ArxivBrowser
-        )
+        app.action_start_mark = ArxivBrowser.action_start_mark.__get__(app, ArxivBrowser)
+        app.action_start_goto_mark = ArxivBrowser.action_start_goto_mark.__get__(app, ArxivBrowser)
         app._update_details_header = MagicMock()
         app._refresh_detail_pane = MagicMock()
         app._update_status_bar = MagicMock()
@@ -562,7 +557,7 @@ class TestBrowserHelperCoverage:
         app._resolve_visible_index = MagicMock(return_value=1)
         app.set_timer = MagicMock(return_value=SimpleNamespace(stop=MagicMock()))
 
-        app._sort_index = app_mod.SORT_OPTIONS.index("date")
+        app._sort_index = SORT_OPTIONS.index("date")
         assert app._badge_refresh_indices(set()) == [0, 1]
         assert app._badge_refresh_indices({"unknown"}) == [0, 1]
         assert app._badge_refresh_indices({"s2"}) == [0, 1]
@@ -574,7 +569,7 @@ class TestBrowserHelperCoverage:
         assert app._badge_refresh_indices({"version"}) == [0]
         assert app._badge_refresh_indices({"relevance"}) == [1]
         app._sort_refresh_dirty = set()
-        app._sort_index = app_mod.SORT_OPTIONS.index("citations")
+        app._sort_index = SORT_OPTIONS.index("citations")
         app._schedule_sort_sensitive_refresh("s2")
         assert app._sort_refresh_dirty == {"s2"}
         assert app.set_timer.called
@@ -599,7 +594,7 @@ class TestBrowserHelperCoverage:
         assert app._refresh_list_view.called
         assert app._refresh_detail_pane.called
 
-        app._sort_index = app_mod.SORT_OPTIONS.index("trending")
+        app._sort_index = SORT_OPTIONS.index("trending")
         app._sort_refresh_dirty = set()
         app._schedule_sort_sensitive_refresh("hf")
         assert app._sort_refresh_dirty == {"hf"}
@@ -621,18 +616,16 @@ class TestBrowserHelperCoverage:
             category_colors={"cs.AI": "#f00"},
             collapsed_sections=["tags", "summary"],
             paper_metadata={
-                paper1.arxiv_id: app_mod.PaperMetadata(
+                paper1.arxiv_id: PaperMetadata(
                     arxiv_id=paper1.arxiv_id, tags=["alpha"], starred=True
                 ),
-                paper2.arxiv_id: app_mod.PaperMetadata(
-                    arxiv_id=paper2.arxiv_id, tags=[], starred=False
-                ),
+                paper2.arxiv_id: PaperMetadata(arxiv_id=paper2.arxiv_id, tags=[], starred=False),
             },
             watch_list=[
                 SimpleNamespace(pattern="graph", match_type="keyword", case_sensitive=False)
             ],
             marks={"a": paper1.arxiv_id},
-            bookmarks=[app_mod.SearchBookmark(name="Saved", query="graph")],
+            bookmarks=[SearchBookmark(name="Saved", query="graph")],
             show_abstract_preview=True,
             llm_command="echo {prompt}",
         )
@@ -670,7 +663,7 @@ class TestBrowserHelperCoverage:
         app._downloading = {paper1.arxiv_id}
         app._download_results = {paper1.arxiv_id: True}
         app._download_total = 1
-        app._sort_index = app_mod.SORT_OPTIONS.index("title")
+        app._sort_index = SORT_OPTIONS.index("title")
         app._resolved_theme_runtime = MagicMock(return_value=theme_runtime)
         app._s2_state_for = MagicMock(return_value=("s2data", True))
         app._hf_state_for = MagicMock(return_value="hfdata")
@@ -741,9 +734,7 @@ class TestBrowserHelperCoverage:
         app._show_abstract_preview = True
         app._update_abstract_display(paper1.arxiv_id)
         app._update_option_for_paper.assert_called_with(paper1.arxiv_id)
-        app._save_config_or_warn = app_mod.ArxivBrowser._save_config_or_warn.__get__(
-            app, app_mod.ArxivBrowser
-        )
+        app._save_config_or_warn = ArxivBrowser._save_config_or_warn.__get__(app, ArxivBrowser)
         with patch_save_config(return_value=False):
             assert app._save_config_or_warn("theme preference") is False
         with patch_save_config(return_value=True):
@@ -779,7 +770,7 @@ class TestBrowserHelperCoverage:
         ]
         app._config.marks = {"a": paper1.arxiv_id}
         app._config.paper_metadata = {
-            paper1.arxiv_id: app_mod.PaperMetadata(arxiv_id=paper1.arxiv_id, starred=True)
+            paper1.arxiv_id: PaperMetadata(arxiv_id=paper1.arxiv_id, starred=True)
         }
         app.filtered_papers = [paper1]
         app.selected_ids = {paper1.arxiv_id}
@@ -875,12 +866,8 @@ class TestBrowserHelperCoverage:
                 return_value="status",
             ),
         ):
-            app._update_footer = app_mod.ArxivBrowser._update_footer.__get__(
-                app, app_mod.ArxivBrowser
-            )
-            app._update_status_bar = app_mod.ArxivBrowser._update_status_bar.__get__(
-                app, app_mod.ArxivBrowser
-            )
+            app._update_footer = ArxivBrowser._update_footer.__get__(app, ArxivBrowser)
+            app._update_status_bar = ArxivBrowser._update_status_bar.__get__(app, ArxivBrowser)
             assert app._get_footer_bindings() == [("", "search")]
             app._get_search_container_widget = MagicMock(
                 return_value=SimpleNamespace(has_class=MagicMock(return_value=False))

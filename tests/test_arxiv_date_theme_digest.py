@@ -7,19 +7,36 @@ from pathlib import Path
 
 import pytest
 
-from arxiv_browser.themes import THEME_NAMES, THEMES
-from tests.support.canonical_exports import (
-    ARXIV_API_DEFAULT_MAX_RESULTS,
-    ARXIV_DATE_FORMAT,
-    DEFAULT_CATEGORY_COLOR,
+from arxiv_browser.browser.core import SUBPROCESS_TIMEOUT
+from arxiv_browser.config import (
+    export_metadata,
+    import_metadata,
+    load_config,
+    save_config,
+)
+from arxiv_browser.export import (
+    escape_bibtex,
+    extract_year,
+    format_collection_as_markdown,
+    format_paper_as_bibtex,
+    format_paper_as_ris,
+    format_papers_as_csv,
+    format_papers_as_markdown_table,
+    generate_citation_key,
+    get_pdf_download_path,
+)
+from arxiv_browser.llm import (
     DEFAULT_LLM_PROMPT,
     LLM_PRESETS,
+    SUMMARY_MODES,
+    build_llm_prompt,
+    get_summary_db_path,
+)
+from arxiv_browser.models import (
+    ARXIV_API_DEFAULT_MAX_RESULTS,
     MAX_COLLECTIONS,
     MAX_PAPERS_PER_COLLECTION,
     SORT_OPTIONS,
-    SUBPROCESS_TIMEOUT,
-    SUMMARY_MODES,
-    TAG_NAMESPACE_COLORS,
     Paper,
     PaperCollection,
     PaperMetadata,
@@ -27,38 +44,34 @@ from tests.support.canonical_exports import (
     SearchBookmark,
     UserConfig,
     WatchListEntry,
+)
+from arxiv_browser.parsing import (
+    ARXIV_DATE_FORMAT,
     build_arxiv_search_query,
-    build_llm_prompt,
     clean_latex,
-    escape_bibtex,
-    export_metadata,
     extract_text_from_html,
-    extract_year,
-    format_categories,
-    format_collection_as_markdown,
-    format_paper_as_bibtex,
-    format_paper_as_ris,
-    format_papers_as_csv,
-    format_papers_as_markdown_table,
-    format_summary_as_rich,
-    generate_citation_key,
-    get_pdf_download_path,
-    get_summary_db_path,
-    get_tag_color,
-    import_metadata,
-    insert_implicit_and,
-    load_config,
     normalize_arxiv_id,
     parse_arxiv_api_feed,
     parse_arxiv_date,
     parse_arxiv_file,
     parse_arxiv_version_map,
-    parse_tag_namespace,
+)
+from arxiv_browser.query import (
+    format_categories,
+    format_summary_as_rich,
+    insert_implicit_and,
     pill_label_for_token,
     reconstruct_query,
-    save_config,
     to_rpn,
     tokenize_query,
+)
+from arxiv_browser.themes import (
+    DEFAULT_CATEGORY_COLOR,
+    TAG_NAMESPACE_COLORS,
+    THEME_NAMES,
+    THEMES,
+    get_tag_color,
+    parse_tag_namespace,
 )
 from tests.support.patch_helpers import patch_save_config
 
@@ -71,7 +84,7 @@ class TestCountPapersInFile:
     """Tests for count_papers_in_file utility."""
 
     def test_counts_ids(self, tmp_path):
-        from tests.support.canonical_exports import count_papers_in_file
+        from arxiv_browser.parsing import count_papers_in_file
 
         f = tmp_path / "test.txt"
         f.write_text(
@@ -81,12 +94,12 @@ class TestCountPapersInFile:
         assert count_papers_in_file(f) == 2
 
     def test_missing_file(self, tmp_path):
-        from tests.support.canonical_exports import count_papers_in_file
+        from arxiv_browser.parsing import count_papers_in_file
 
         assert count_papers_in_file(tmp_path / "nonexistent.txt") == 0
 
     def test_empty_file(self, tmp_path):
-        from tests.support.canonical_exports import count_papers_in_file
+        from arxiv_browser.parsing import count_papers_in_file
 
         f = tmp_path / "empty.txt"
         f.write_text("", encoding="utf-8")
@@ -186,7 +199,7 @@ class TestDateNavigator:
     def test_count_cache_tracks_file_path_not_index(self, tmp_path):
         from datetime import date as dt_date
 
-        from tests.support.canonical_exports import DateNavigator
+        from arxiv_browser.widgets.chrome import DateNavigator
 
         first = tmp_path / "2026-01-01.txt"
         second = tmp_path / "2026-01-02.txt"
@@ -211,7 +224,8 @@ class TestDateNavigator:
         from datetime import date as dt_date
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import ArxivBrowser, DateNavigator
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.widgets.chrome import DateNavigator
 
         f1 = tmp_path / "2026-01-01.txt"
         f2 = tmp_path / "2026-01-02.txt"
@@ -259,7 +273,8 @@ class TestDateNavigator:
         from datetime import date as dt_date
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import ArxivBrowser, DateNavigator
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.widgets.chrome import DateNavigator
 
         f1 = tmp_path / "2026-01-01.txt"
         f2 = tmp_path / "2026-01-02.txt"
@@ -302,7 +317,7 @@ class TestDateNavigator:
     async def test_update_dates_prunes_stale_count_cache(self, tmp_path):
         from datetime import date as dt_date
 
-        from tests.support.canonical_exports import DateNavigator
+        from arxiv_browser.widgets.chrome import DateNavigator
 
         keep = tmp_path / "2026-01-01.txt"
         stale = tmp_path / "2026-01-02.txt"
@@ -356,7 +371,7 @@ class TestChromeWidgetBranches:
         """Line 260: _compute_window calls _compute_window_bounds correctly."""
         from datetime import date as dt_date
 
-        from tests.support.canonical_exports import DateNavigator
+        from arxiv_browser.widgets.chrome import DateNavigator
 
         files = [(dt_date(2026, 1, i + 1), Path(f"/tmp/{i}.txt")) for i in range(10)]
         nav = DateNavigator(files, current_index=5)
@@ -368,7 +383,7 @@ class TestChromeWidgetBranches:
         from datetime import date as dt_date
         from unittest.mock import MagicMock
 
-        from tests.support.canonical_exports import DateNavigator
+        from arxiv_browser.widgets.chrome import DateNavigator
 
         nav = DateNavigator([])
         existing_label = MagicMock()
@@ -383,7 +398,7 @@ class TestChromeWidgetBranches:
         """Line 326: await child.remove() called for each existing item."""
         from unittest.mock import AsyncMock, MagicMock
 
-        from tests.support.canonical_exports import DateNavigator
+        from arxiv_browser.widgets.chrome import DateNavigator
 
         nav = DateNavigator([])
         mock_label = MagicMock()
@@ -400,7 +415,7 @@ class TestChromeWidgetBranches:
         """Line 378: on_click with a non-Click event does nothing."""
         from unittest.mock import MagicMock
 
-        from tests.support.canonical_exports import DateNavigator
+        from arxiv_browser.widgets.chrome import DateNavigator
 
         nav = DateNavigator([])
         nav.post_message = MagicMock()
@@ -413,7 +428,7 @@ class TestChromeWidgetBranches:
 
         from textual.events import Click
 
-        from tests.support.canonical_exports import DateNavigator
+        from arxiv_browser.widgets.chrome import DateNavigator
 
         nav = DateNavigator([])
         nav.post_message = MagicMock()
@@ -438,7 +453,7 @@ class TestChromeWidgetBranches:
         from textual.events import Click
         from textual.widgets import Label
 
-        from tests.support.canonical_exports import DateNavigator
+        from arxiv_browser.widgets.chrome import DateNavigator
 
         nav = DateNavigator([])
         nav.post_message = MagicMock()
@@ -465,7 +480,7 @@ class TestChromeWidgetBranches:
         from textual.events import Click
         from textual.widgets import Label
 
-        from tests.support.canonical_exports import DateNavigator
+        from arxiv_browser.widgets.chrome import DateNavigator
 
         nav = DateNavigator([])
         nav.post_message = MagicMock()
@@ -489,7 +504,7 @@ class TestChromeWidgetBranches:
 
     def test_bookmark_tab_bar_init_adds_visible_class(self):
         """Line 459: __init__ calls add_class('visible') when bookmarks present."""
-        from tests.support.canonical_exports import BookmarkTabBar
+        from arxiv_browser.widgets.chrome import BookmarkTabBar
 
         bm = SearchBookmark(name="Test", query="test")
         bar = BookmarkTabBar(bookmarks=[bm], active_index=0)
@@ -500,7 +515,7 @@ class TestChromeWidgetBranches:
 
     def test_bookmark_tab_bar_compose_renders_tabs(self):
         """Lines 465-468: compose yields tab labels when bookmarks non-empty."""
-        from tests.support.canonical_exports import BookmarkTabBar
+        from arxiv_browser.widgets.chrome import BookmarkTabBar
 
         bm = SearchBookmark(name="MLPapers", query="cat:cs.LG")
         bar = BookmarkTabBar(bookmarks=[bm], active_index=0)
@@ -511,7 +526,7 @@ class TestChromeWidgetBranches:
 
     def test_bookmark_tab_bar_compose_active_search_hint(self):
         """Line 470: compose yields save-hint label when active_search with no bookmarks."""
-        from tests.support.canonical_exports import BookmarkTabBar
+        from arxiv_browser.widgets.chrome import BookmarkTabBar
 
         bar = BookmarkTabBar(bookmarks=[], active_search=True)
         children = list(bar.compose())
@@ -523,7 +538,7 @@ class TestChromeWidgetBranches:
         """Lines 490-493: update_bookmarks mounts tab labels when bookmarks given."""
         from unittest.mock import AsyncMock, MagicMock
 
-        from tests.support.canonical_exports import BookmarkTabBar
+        from arxiv_browser.widgets.chrome import BookmarkTabBar
 
         bar = BookmarkTabBar(bookmarks=[])
         bar.remove_children = AsyncMock()
@@ -628,12 +643,18 @@ class TestThemeSwitcher:
     """Tests for U7: Color theme switcher."""
 
     def test_themes_have_matching_keys(self):
-        from tests.support.canonical_exports import CATPPUCCIN_MOCHA_THEME, DEFAULT_THEME
+        from arxiv_browser.themes import (
+            CATPPUCCIN_MOCHA_THEME,
+            DEFAULT_THEME,
+        )
 
         assert set(DEFAULT_THEME.keys()) == set(CATPPUCCIN_MOCHA_THEME.keys())
 
     def test_theme_name_roundtrip(self):
-        from tests.support.canonical_exports import _config_to_dict, _dict_to_config
+        from arxiv_browser.config import (
+            _config_to_dict,
+            _dict_to_config,
+        )
 
         config = UserConfig(theme_name="catppuccin-mocha")
         data = _config_to_dict(config)
@@ -642,13 +663,14 @@ class TestThemeSwitcher:
         assert restored.theme_name == "catppuccin-mocha"
 
     def test_theme_name_defaults_to_monokai(self):
-        from tests.support.canonical_exports import _dict_to_config
+        from arxiv_browser.config import _dict_to_config
 
         config = _dict_to_config({})
         assert config.theme_name == "monokai"
 
     def test_apply_uses_named_theme(self):
-        from tests.support.canonical_exports import CATPPUCCIN_MOCHA_THEME, ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.themes import CATPPUCCIN_MOCHA_THEME
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._config = UserConfig(theme_name="catppuccin-mocha")
@@ -658,7 +680,8 @@ class TestThemeSwitcher:
         assert app._theme_runtime.colors["green"] == CATPPUCCIN_MOCHA_THEME["green"]
 
     def test_per_key_override_layers(self):
-        from tests.support.canonical_exports import CATPPUCCIN_MOCHA_THEME, ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.themes import CATPPUCCIN_MOCHA_THEME
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._config = UserConfig(
@@ -673,7 +696,8 @@ class TestThemeSwitcher:
         assert app._theme_runtime.colors["green"] == CATPPUCCIN_MOCHA_THEME["green"]
 
     def test_unknown_theme_falls_back_to_default(self):
-        from tests.support.canonical_exports import DEFAULT_THEME, ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.themes import DEFAULT_THEME
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._config = UserConfig(theme_name="nonexistent-theme")
@@ -682,7 +706,8 @@ class TestThemeSwitcher:
         assert app._theme_runtime.colors["accent"] == DEFAULT_THEME["accent"]
 
     def test_category_overrides_rebuild_current_theme(self):
-        from tests.support.canonical_exports import SOLARIZED_DARK_THEME, ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.themes import SOLARIZED_DARK_THEME
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._config = UserConfig(theme_name="catppuccin-mocha")
@@ -698,7 +723,7 @@ class TestProgressIndicators:
     """Tests for U4: X/Y counter progress indicators in footer."""
 
     def _make_app(self):
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._http_client = None
@@ -767,12 +792,12 @@ class TestDailyDigest:
     """Tests for build_daily_digest function."""
 
     def test_empty_papers(self):
-        from tests.support.canonical_exports import build_daily_digest
+        from arxiv_browser.parsing import build_daily_digest
 
         assert build_daily_digest([]) == "No papers loaded"
 
     def test_basic_digest(self, make_paper):
-        from tests.support.canonical_exports import build_daily_digest
+        from arxiv_browser.parsing import build_daily_digest
 
         papers = [
             make_paper(categories="cs.AI cs.LG"),
@@ -784,7 +809,7 @@ class TestDailyDigest:
         assert "cs.AI (2)" in digest
 
     def test_digest_with_watch_matches(self, make_paper):
-        from tests.support.canonical_exports import build_daily_digest
+        from arxiv_browser.parsing import build_daily_digest
 
         papers = [make_paper(arxiv_id="2401.00001"), make_paper(arxiv_id="2401.00002")]
         digest = build_daily_digest(papers, watched_ids={"2401.00001"})
@@ -792,7 +817,7 @@ class TestDailyDigest:
         assert "watch list" in digest
 
     def test_digest_with_metadata(self, make_paper):
-        from tests.support.canonical_exports import build_daily_digest
+        from arxiv_browser.parsing import build_daily_digest
 
         papers = [make_paper(arxiv_id="2401.00001"), make_paper(arxiv_id="2401.00002")]
         meta = {
@@ -804,7 +829,7 @@ class TestDailyDigest:
         assert "1 starred" in digest
 
     def test_digest_top_categories_capped_at_5(self, make_paper):
-        from tests.support.canonical_exports import build_daily_digest
+        from arxiv_browser.parsing import build_daily_digest
 
         papers = [make_paper(categories=f"cs.{chr(65 + i)}") for i in range(10)]
         digest = build_daily_digest(papers)
@@ -816,7 +841,7 @@ class TestAutoTagPrompt:
     """Tests for build_auto_tag_prompt and _parse_auto_tag_response."""
 
     def test_build_prompt_with_taxonomy(self, make_paper):
-        from tests.support.canonical_exports import build_auto_tag_prompt
+        from arxiv_browser.llm import build_auto_tag_prompt
 
         paper = make_paper(
             title="Attention Is All You Need",
@@ -832,26 +857,26 @@ class TestAutoTagPrompt:
         assert "Vaswani et al." in prompt
 
     def test_build_prompt_empty_taxonomy(self, make_paper):
-        from tests.support.canonical_exports import build_auto_tag_prompt
+        from arxiv_browser.llm import build_auto_tag_prompt
 
         paper = make_paper(title="Test Paper")
         prompt = build_auto_tag_prompt(paper, [])
         assert "no existing tags" in prompt
 
     def test_parse_response_json(self):
-        from tests.support.canonical_exports import _parse_auto_tag_response
+        from arxiv_browser.llm import _parse_auto_tag_response
 
         result = _parse_auto_tag_response('{"tags": ["topic:nlp", "method:transformer"]}')
         assert result == ["topic:nlp", "method:transformer"]
 
     def test_parse_response_markdown_fence(self):
-        from tests.support.canonical_exports import _parse_auto_tag_response
+        from arxiv_browser.llm import _parse_auto_tag_response
 
         result = _parse_auto_tag_response('```json\n{"tags": ["topic:cv"]}\n```')
         assert result == ["topic:cv"]
 
     def test_parse_response_regex_fallback(self):
-        from tests.support.canonical_exports import _parse_auto_tag_response
+        from arxiv_browser.llm import _parse_auto_tag_response
 
         result = _parse_auto_tag_response(
             'Here are my suggestions:\n"tags": ["topic:ml", "status:important"]'
@@ -859,30 +884,30 @@ class TestAutoTagPrompt:
         assert result == ["topic:ml", "status:important"]
 
     def test_parse_response_lowercases(self):
-        from tests.support.canonical_exports import _parse_auto_tag_response
+        from arxiv_browser.llm import _parse_auto_tag_response
 
         result = _parse_auto_tag_response('{"tags": ["Topic:NLP", "METHOD:CNN"]}')
         assert result == ["topic:nlp", "method:cnn"]
 
     def test_parse_response_strips_whitespace(self):
-        from tests.support.canonical_exports import _parse_auto_tag_response
+        from arxiv_browser.llm import _parse_auto_tag_response
 
         result = _parse_auto_tag_response('{"tags": ["  topic:ml  ", " status:done "]}')
         assert result == ["topic:ml", "status:done"]
 
     def test_parse_response_invalid_returns_none(self):
-        from tests.support.canonical_exports import _parse_auto_tag_response
+        from arxiv_browser.llm import _parse_auto_tag_response
 
         assert _parse_auto_tag_response("I don't understand") is None
 
     def test_parse_response_empty_tags_list(self):
-        from tests.support.canonical_exports import _parse_auto_tag_response
+        from arxiv_browser.llm import _parse_auto_tag_response
 
         result = _parse_auto_tag_response('{"tags": []}')
         assert result == []
 
     def test_parse_response_filters_empty_strings(self):
-        from tests.support.canonical_exports import _parse_auto_tag_response
+        from arxiv_browser.llm import _parse_auto_tag_response
 
         result = _parse_auto_tag_response('{"tags": ["topic:ml", "", "  "]}')
         assert result == ["topic:ml"]
@@ -892,7 +917,8 @@ class TestAutoTagFooterProgress:
     """Tests for auto-tag progress in footer."""
 
     def _make_app(self):
-        from tests.support.canonical_exports import ArxivBrowser, UserConfig
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.models import UserConfig
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._http_client = None
@@ -943,19 +969,22 @@ class TestSolarizedDarkTheme:
     """Tests for U7: Solarized Dark theme expansion."""
 
     def test_solarized_theme_exists(self):
-        from tests.support.canonical_exports import SOLARIZED_DARK_THEME
-        from tests.support.canonical_exports import THEMES as APP_THEMES
+        from arxiv_browser.themes import SOLARIZED_DARK_THEME
+        from arxiv_browser.themes import THEMES as APP_THEMES
 
         assert "solarized-dark" in APP_THEMES
         assert APP_THEMES["solarized-dark"] is SOLARIZED_DARK_THEME
 
     def test_solarized_has_all_keys(self):
-        from tests.support.canonical_exports import DEFAULT_THEME, SOLARIZED_DARK_THEME
+        from arxiv_browser.themes import (
+            DEFAULT_THEME,
+            SOLARIZED_DARK_THEME,
+        )
 
         assert set(SOLARIZED_DARK_THEME.keys()) == set(DEFAULT_THEME.keys())
 
     def test_solarized_palette_spot_check(self):
-        from tests.support.canonical_exports import SOLARIZED_DARK_THEME
+        from arxiv_browser.themes import SOLARIZED_DARK_THEME
 
         assert SOLARIZED_DARK_THEME["background"] == "#002b36"
         assert SOLARIZED_DARK_THEME["accent"] == "#3c9be2"  # WCAG AA adjusted
@@ -963,7 +992,7 @@ class TestSolarizedDarkTheme:
         assert SOLARIZED_DARK_THEME["pink"] == "#e85da0"  # WCAG AA adjusted
 
     def test_four_themes_in_cycle(self):
-        from tests.support.canonical_exports import THEME_NAMES as APP_THEME_NAMES
+        from arxiv_browser.themes import THEME_NAMES as APP_THEME_NAMES
 
         assert len(APP_THEME_NAMES) == 4
         assert "monokai" in APP_THEME_NAMES
@@ -972,7 +1001,10 @@ class TestSolarizedDarkTheme:
         assert "high-contrast" in APP_THEME_NAMES
 
     def test_solarized_config_roundtrip(self):
-        from tests.support.canonical_exports import _config_to_dict, _dict_to_config
+        from arxiv_browser.config import (
+            _config_to_dict,
+            _dict_to_config,
+        )
 
         config = UserConfig(theme_name="solarized-dark")
         data = _config_to_dict(config)
@@ -980,7 +1012,8 @@ class TestSolarizedDarkTheme:
         assert restored.theme_name == "solarized-dark"
 
     def test_category_colors_update_on_theme(self):
-        from tests.support.canonical_exports import THEME_CATEGORY_COLORS, ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.themes import THEME_CATEGORY_COLORS
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._config = UserConfig(theme_name="solarized-dark")
@@ -991,7 +1024,8 @@ class TestSolarizedDarkTheme:
             assert app._theme_runtime.category_colors[cat] == color
 
     def test_tag_namespace_colors_update_on_theme(self):
-        from tests.support.canonical_exports import THEME_TAG_NAMESPACE_COLORS, ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.themes import THEME_TAG_NAMESPACE_COLORS
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._config = UserConfig(theme_name="solarized-dark")
@@ -1006,7 +1040,7 @@ class TestCollapsibleSections:
     """Tests for U3: Collapsible detail pane sections."""
 
     def test_default_collapsed_sections(self):
-        from tests.support.canonical_exports import DEFAULT_COLLAPSED_SECTIONS
+        from arxiv_browser.models import DEFAULT_COLLAPSED_SECTIONS
 
         config = UserConfig()
         assert config.collapsed_sections == DEFAULT_COLLAPSED_SECTIONS
@@ -1014,7 +1048,10 @@ class TestCollapsibleSections:
         assert "authors" not in config.collapsed_sections
 
     def test_collapsed_sections_roundtrip(self):
-        from tests.support.canonical_exports import _config_to_dict, _dict_to_config
+        from arxiv_browser.config import (
+            _config_to_dict,
+            _dict_to_config,
+        )
 
         config = UserConfig(collapsed_sections=["authors", "abstract"])
         data = _config_to_dict(config)
@@ -1023,20 +1060,21 @@ class TestCollapsibleSections:
         assert restored.collapsed_sections == ["authors", "abstract"]
 
     def test_invalid_sections_filtered(self):
-        from tests.support.canonical_exports import _dict_to_config
+        from arxiv_browser.config import _dict_to_config
 
         data = {"collapsed_sections": ["authors", "invalid_key", "abstract", 42]}
         config = _dict_to_config(data)
         assert config.collapsed_sections == ["authors", "abstract"]
 
     def test_missing_collapsed_sections_uses_defaults(self):
-        from tests.support.canonical_exports import DEFAULT_COLLAPSED_SECTIONS, _dict_to_config
+        from arxiv_browser.config import _dict_to_config
+        from arxiv_browser.models import DEFAULT_COLLAPSED_SECTIONS
 
         config = _dict_to_config({})
         assert config.collapsed_sections == DEFAULT_COLLAPSED_SECTIONS
 
     def test_expanded_section_shows_content(self, make_paper):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper(authors="John Doe")
@@ -1046,7 +1084,7 @@ class TestCollapsibleSections:
         assert "\u25be Authors" in rendered  # expanded indicator
 
     def test_collapsed_section_hides_content(self, make_paper):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper(authors="John Doe")
@@ -1057,7 +1095,7 @@ class TestCollapsibleSections:
 
     def test_collapsed_s2_shows_citation_hint(self, make_paper):
         from arxiv_browser.semantic_scholar import SemanticScholarPaper
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper()
@@ -1079,7 +1117,7 @@ class TestCollapsibleSections:
 
     def test_collapsed_hf_shows_upvote_hint(self, make_paper):
         from arxiv_browser.huggingface import HuggingFacePaper
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper()
@@ -1099,7 +1137,7 @@ class TestCollapsibleSections:
         assert "\u25b8 HuggingFace" in rendered
 
     def test_collapsed_tags_shows_count(self, make_paper):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper()
@@ -1111,7 +1149,7 @@ class TestCollapsibleSections:
         assert "\u25b8 Tags" in rendered
 
     def test_collapsed_relevance_shows_score(self, make_paper):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper()
@@ -1122,7 +1160,7 @@ class TestCollapsibleSections:
 
     def test_url_always_visible_despite_collapsed(self, make_paper):
         """URL section is always visible — not collapsible."""
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper()
@@ -1133,7 +1171,10 @@ class TestCollapsibleSections:
         assert "arxiv.org" in rendered
 
     def test_detail_section_keys_complete(self):
-        from tests.support.canonical_exports import DETAIL_SECTION_KEYS, DETAIL_SECTION_NAMES
+        from arxiv_browser.models import (
+            DETAIL_SECTION_KEYS,
+            DETAIL_SECTION_NAMES,
+        )
 
         assert len(DETAIL_SECTION_KEYS) == 8
         for key in DETAIL_SECTION_KEYS:

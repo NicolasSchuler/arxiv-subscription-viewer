@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.support.canonical_exports import build_viewer_args
+from arxiv_browser.io_actions import build_viewer_args
 
 
 def test_build_viewer_args_windows_quoted_executable(monkeypatch) -> None:

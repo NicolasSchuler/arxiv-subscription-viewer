@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from arxiv_browser.browser.core import ArxivBrowser
 from arxiv_browser.llm_providers import LLMResult
-from tests.support.canonical_exports import (
-    ArxivBrowser,
+from arxiv_browser.modals import (
     PaperChatScreen,
     ResearchInterestsModal,
     SummaryModeModal,

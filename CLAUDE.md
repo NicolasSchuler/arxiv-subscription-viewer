@@ -12,25 +12,27 @@ Published on PyPI as `arxiv-subscription-viewer`. Install with `pip install arxi
 
 ```
 src/arxiv_browser/
-├── __init__.py           # Re-exports public API from app.py
+├── __init__.py           # Explicit root-package public API
 ├── __main__.py           # python -m arxiv_browser support
 ├── action_messages.py    # Error/warning message builders
 ├── actions/              # Extracted action methods (mixed into ArxivBrowser)
 │   ├── __init__.py       # Re-exports action mixins
-│   ├── _runtime.py       # Runtime context for action methods
+│   ├── constants.py      # Shared action-layer constants and logger
 │   ├── external_io_actions.py  # Browser, PDF, clipboard, download actions
 │   ├── library_actions.py      # Read/star/notes/tags/collections actions
 │   ├── llm_actions.py          # Summary, relevance, auto-tag, chat actions
 │   ├── search_api_actions.py   # arXiv API search actions
 │   └── ui_actions.py           # Sort, theme, navigation, UI toggle actions
 ├── browser/              # Browser app mixins + compatibility helpers
-│   ├── __init__.py       # Browser package exports from browser/core.py
-│   ├── _runtime.py       # Shared browser runtime imports + compatibility syncing
+│   ├── __init__.py       # Browser package exports + canonical CLI entrypoint
+│   ├── bootstrap.py      # Browser-package wrapper around CLI bootstrap
+│   ├── constants.py      # Shared browser-layer constants and logger
+│   ├── empty_state.py    # Shared empty-state copy for the paper list
 │   ├── browse.py         # Dataset/filter state mixin
 │   ├── chrome.py         # Detail-pane/footer/command-palette mixin
-│   ├── core.py           # ArxivBrowser implementation + CLI bootstrap
+│   ├── core.py           # ArxivBrowser implementation
 │   └── discovery.py      # Similarity/recommendation/version-tracking mixin
-├── app.py                # Compatibility shim + re-export bridge
+├── app.py                # Narrow compatibility shim for legacy CLI/bootstrap patching
 ├── cli.py                # CLI argument parsing + bootstrap
 ├── config.py             # Config persistence: load/save/export/import
 ├── enrichment.py         # Enrichment toggle helpers
@@ -49,7 +51,7 @@ src/arxiv_browser/
 │   ├── arxiv_api_service.py    # arXiv API search + feed parsing
 │   ├── download_service.py     # PDF download to local folder
 │   ├── enrichment_service.py   # S2 + HF batch enrichment
-│   ├── interfaces.py           # Service facade (unified API for browser/core.py and app.py shim)
+│   ├── interfaces.py           # Service facade for browser/core.py and related workflows
 │   └── llm_service.py          # LLM subprocess orchestration
 ├── similarity.py         # TF-IDF index, cosine + Jaccard similarity
 ├── themes.py             # Color palettes, category colors, Textual themes
@@ -106,11 +108,11 @@ widgets/listing.py     ← models, query, themes, semantic_scholar, huggingface
 widgets/details.py     ← models, query, themes, semantic_scholar, huggingface, widgets/listing
 widgets/chrome.py      ← models, parsing, query, themes
 ui_runtime.py          ← widgets
-actions/*              ← action_messages, actions/_runtime
-app.py                 ← all above
+actions/*              ← action_messages + canonical modules
+app.py                 ← browser/core, cli, config, parsing (compat allowlist only)
 ```
 
-Submodules should import canonical modules directly; the browser compatibility seam may import `app.py` when it needs to preserve the legacy patch surface. Modal, widget, action, and service submodules otherwise follow the same DAG constraint. `app.py` re-exports all public symbols from sub-modules via `from arxiv_browser.X import *` for backward compatibility. `modals/__init__.py`, `widgets/__init__.py`, and `services/__init__.py` provide flat imports for extracted classes.
+Submodules should import canonical modules directly. Only the compatibility shim and dedicated compatibility tests should rely on `arxiv_browser.app`. `app.py` now exposes only a small documented allowlist instead of re-exporting the whole package. `modals/__init__.py`, `widgets/__init__.py`, and `services/__init__.py` still provide flat imports for extracted classes.
 
 ### Data Models (`models.py`)
 
@@ -201,7 +203,7 @@ Representative current coverage:
 - Pre-compile regex patterns at module level (not inside functions)
 - Use `@lru_cache` for expensive repeated operations
 - Constants in SCREAMING_SNAKE_CASE at module level
-- `__all__` defines public API per module; `app.py` re-exports all for backward compat
+- `__all__` defines public API per module; the root package and `app.py` both use explicit allowlists
 - Module-level logger for debug output
 
 ## Key Patterns
@@ -221,13 +223,13 @@ Representative current coverage:
 - **History mode**: Date navigation with `_history_files` list
 
 ### Import Patterns (src layout)
-- **Public API**: `from arxiv_browser import Paper, main` — via `__init__.py` → `app.py` re-exports
+- **Public API**: `from arxiv_browser import Paper, main` — via the explicit root-package `__all__`
 - **Canonical module import**: `from arxiv_browser.models import Paper` — preferred for new code
 - **Modal imports**: `from arxiv_browser.modals import TagsModal` — via `modals/__init__.py` re-exports
-- **Backward compat**: `from arxiv_browser.app import Paper` — still works via re-export bridge
+- **Backward compat**: `from arxiv_browser.app import ArxivBrowser, main` — only the documented compat allowlist is supported
 - **Mock paths in tests**: Patch at the module where the function is *resolved*, not where it's re-exported:
   - Functions called by other functions in the same module: patch at the actual module (e.g., `"arxiv_browser.config.get_config_path"`)
-  - Functions called by `ArxivBrowser`: patch the module where the symbol is resolved. Canonical implementations live under `arxiv_browser.browser.*`, but the compatibility shim still exposes many names through `arxiv_browser.app.X`.
+  - Functions called by `ArxivBrowser`: patch the module where the symbol is resolved. Canonical implementations live under `arxiv_browser.browser.*`, `arxiv_browser.actions.*`, and other direct modules.
   - Modal classes in tests: `from arxiv_browser.modals import X` (not `from arxiv_browser.app import X`)
   - S2/HF modules: `"arxiv_browser.semantic_scholar.X"`, `"arxiv_browser.huggingface.X"`
 

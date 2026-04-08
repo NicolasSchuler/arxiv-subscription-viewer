@@ -7,19 +7,36 @@ from pathlib import Path
 
 import pytest
 
-from arxiv_browser.themes import THEME_NAMES, THEMES
-from tests.support.canonical_exports import (
-    ARXIV_API_DEFAULT_MAX_RESULTS,
-    ARXIV_DATE_FORMAT,
-    DEFAULT_CATEGORY_COLOR,
+from arxiv_browser.browser.core import SUBPROCESS_TIMEOUT
+from arxiv_browser.config import (
+    export_metadata,
+    import_metadata,
+    load_config,
+    save_config,
+)
+from arxiv_browser.export import (
+    escape_bibtex,
+    extract_year,
+    format_collection_as_markdown,
+    format_paper_as_bibtex,
+    format_paper_as_ris,
+    format_papers_as_csv,
+    format_papers_as_markdown_table,
+    generate_citation_key,
+    get_pdf_download_path,
+)
+from arxiv_browser.llm import (
     DEFAULT_LLM_PROMPT,
     LLM_PRESETS,
+    SUMMARY_MODES,
+    build_llm_prompt,
+    get_summary_db_path,
+)
+from arxiv_browser.models import (
+    ARXIV_API_DEFAULT_MAX_RESULTS,
     MAX_COLLECTIONS,
     MAX_PAPERS_PER_COLLECTION,
     SORT_OPTIONS,
-    SUBPROCESS_TIMEOUT,
-    SUMMARY_MODES,
-    TAG_NAMESPACE_COLORS,
     Paper,
     PaperCollection,
     PaperMetadata,
@@ -27,38 +44,34 @@ from tests.support.canonical_exports import (
     SearchBookmark,
     UserConfig,
     WatchListEntry,
+)
+from arxiv_browser.parsing import (
+    ARXIV_DATE_FORMAT,
     build_arxiv_search_query,
-    build_llm_prompt,
     clean_latex,
-    escape_bibtex,
-    export_metadata,
     extract_text_from_html,
-    extract_year,
-    format_categories,
-    format_collection_as_markdown,
-    format_paper_as_bibtex,
-    format_paper_as_ris,
-    format_papers_as_csv,
-    format_papers_as_markdown_table,
-    format_summary_as_rich,
-    generate_citation_key,
-    get_pdf_download_path,
-    get_summary_db_path,
-    get_tag_color,
-    import_metadata,
-    insert_implicit_and,
-    load_config,
     normalize_arxiv_id,
     parse_arxiv_api_feed,
     parse_arxiv_date,
     parse_arxiv_file,
     parse_arxiv_version_map,
-    parse_tag_namespace,
+)
+from arxiv_browser.query import (
+    format_categories,
+    format_summary_as_rich,
+    insert_implicit_and,
     pill_label_for_token,
     reconstruct_query,
-    save_config,
     to_rpn,
     tokenize_query,
+)
+from arxiv_browser.themes import (
+    DEFAULT_CATEGORY_COLOR,
+    TAG_NAMESPACE_COLORS,
+    THEME_NAMES,
+    THEMES,
+    get_tag_color,
+    parse_tag_namespace,
 )
 
 # ============================================================================
@@ -70,13 +83,13 @@ class TestChatSystemPrompt:
     """Tests for the CHAT_SYSTEM_PROMPT template and PaperChatScreen."""
 
     def test_chat_prompt_has_required_placeholders(self):
-        from tests.support.canonical_exports import CHAT_SYSTEM_PROMPT
+        from arxiv_browser.llm import CHAT_SYSTEM_PROMPT
 
         for field in ("title", "authors", "categories", "paper_content"):
             assert f"{{{field}}}" in CHAT_SYSTEM_PROMPT
 
     def test_chat_prompt_formats_correctly(self, make_paper):
-        from tests.support.canonical_exports import CHAT_SYSTEM_PROMPT
+        from arxiv_browser.llm import CHAT_SYSTEM_PROMPT
 
         paper = make_paper(
             title="Test Paper",
@@ -124,7 +137,7 @@ class TestChatSystemPrompt:
         assert screen._history[1] == ("assistant", "This paper discusses...")
 
     def test_chat_command_palette_entry(self):
-        from tests.support.canonical_exports import COMMAND_PALETTE_COMMANDS
+        from arxiv_browser.browser.contracts import COMMAND_PALETTE_COMMANDS
 
         names = [cmd[0] for cmd in COMMAND_PALETTE_COMMANDS]
         assert "Chat with Paper" in names
@@ -134,7 +147,7 @@ class TestChatSystemPrompt:
         assert chat_entry[3] == "chat_with_paper"  # action
 
     def test_chat_context_builds_history(self, make_paper):
-        from tests.support.canonical_exports import CHAT_SYSTEM_PROMPT
+        from arxiv_browser.llm import CHAT_SYSTEM_PROMPT
 
         paper = make_paper(title="Test", authors="A", categories="cs.AI", abstract="Abstract.")
         context = CHAT_SYSTEM_PROMPT.format(
@@ -305,7 +318,7 @@ class TestPaperDetailsRenderHelpers:
     """Tests for PaperDetails._render_* helper methods."""
 
     def _make_details(self):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         return PaperDetails()
 

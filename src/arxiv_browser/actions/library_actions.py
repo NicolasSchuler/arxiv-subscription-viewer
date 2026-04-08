@@ -1,5 +1,4 @@
 # ruff: noqa: UP037
-# pyright: reportUndefinedVariable=false, reportAttributeAccessIssue=false
 """Library and organisation action handlers for ArxivBrowser.
 
 Covers: list navigation (cursor up/down), multi-paper selection (select,
@@ -11,17 +10,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from arxiv_browser.actions._runtime import (
-    SORT_OPTIONS,
-    TagsModal,
-    WatchListEntry,
-    WatchListModal,
-    save_config,
-)
+from arxiv_browser.config import save_config
+from arxiv_browser.modals import TagsModal, WatchListModal
 from arxiv_browser.modals.editing import NotesModal
+from arxiv_browser.models import SORT_OPTIONS, WatchListEntry
 
 if TYPE_CHECKING:
-    from arxiv_browser.app import ArxivBrowser
+    from arxiv_browser.browser.core import ArxivBrowser
 
 
 def action_cursor_down(app: "ArxivBrowser") -> None:

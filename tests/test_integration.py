@@ -18,6 +18,8 @@ from unittest.mock import patch
 
 import pytest
 
+from arxiv_browser.browser.core import ArxivBrowser
+from arxiv_browser.cli import _configure_logging
 from arxiv_browser.export import (
     format_paper_as_bibtex,
     format_paper_as_ris,
@@ -25,7 +27,6 @@ from arxiv_browser.export import (
     format_papers_as_markdown_table,
 )
 from arxiv_browser.parsing import discover_history_files, parse_arxiv_file
-from tests.support.canonical_exports import ArxivBrowser, _configure_logging
 from tests.support.patch_helpers import patch_save_config
 
 # ── Paths ────────────────────────────────────────────────────────────────────

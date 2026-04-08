@@ -12,23 +12,36 @@ import pytest
 
 
 class TestAppCompatibilityExports:
-    def test_app_exports_remain_importable(self) -> None:
+    def test_app_exports_are_explicit_and_importable(self) -> None:
         import arxiv_browser.app as app_module
         from arxiv_browser.app import __all__
 
+        assert __all__ == [
+            "ArxivBrowser",
+            "ArxivBrowserOptions",
+            "_configure_color_mode",
+            "_configure_logging",
+            "discover_history_files",
+            "load_config",
+            "main",
+            "_fetch_paper_content_async",
+            "_resolve_papers",
+            "_validate_interactive_tty",
+        ]
         for name in __all__:
             assert hasattr(app_module, name), f"{name} not found in arxiv_browser.app"
 
     @pytest.mark.parametrize(
         ("name", "module_name", "attr_name"),
         [
-            ("Paper", "arxiv_browser.models", "Paper"),
-            ("UserConfig", "arxiv_browser.models", "UserConfig"),
             ("ArxivBrowser", "arxiv_browser.browser.core", "ArxivBrowser"),
-            ("highlight_text", "arxiv_browser.query", "highlight_text"),
-            ("tokenize_query", "arxiv_browser.query", "tokenize_query"),
-            ("parse_arxiv_file", "arxiv_browser.parsing", "parse_arxiv_file"),
+            ("ArxivBrowserOptions", "arxiv_browser.browser.core", "ArxivBrowserOptions"),
+            ("_configure_color_mode", "arxiv_browser.cli", "_configure_color_mode"),
+            ("_configure_logging", "arxiv_browser.cli", "_configure_logging"),
+            ("discover_history_files", "arxiv_browser.parsing", "discover_history_files"),
             ("load_config", "arxiv_browser.config", "load_config"),
+            ("_resolve_papers", "arxiv_browser.cli", "_resolve_papers"),
+            ("_validate_interactive_tty", "arxiv_browser.cli", "_validate_interactive_tty"),
         ],
     )
     def test_app_exports_resolve_to_canonical_symbols(
@@ -46,22 +59,13 @@ class TestAppCompatibilityExports:
         assert resolved is canonical
         assert getattr(app_module, name) is canonical
 
-    def test_root_package_compatibility_exports_remain_importable(self) -> None:
-        package = cast(Any, importlib.import_module("arxiv_browser"))
-
-        default_theme = cast(dict[str, Any], package.DEFAULT_THEME)
-        highlight_text = package.highlight_text
-
-        assert default_theme["accent"]
-        assert callable(highlight_text)
-
     @pytest.mark.parametrize(
         ("name", "module_name", "attr_name"),
         [
             ("Paper", "arxiv_browser.models", "Paper"),
-            ("UserConfig", "arxiv_browser.models", "UserConfig"),
             ("ArxivBrowser", "arxiv_browser.browser.core", "ArxivBrowser"),
-            ("highlight_text", "arxiv_browser.query", "highlight_text"),
+            ("UserConfig", "arxiv_browser.models", "UserConfig"),
+            ("main", "arxiv_browser.cli", "main"),
         ],
     )
     def test_root_package_exports_resolve_to_canonical_symbols(
@@ -75,6 +79,15 @@ class TestAppCompatibilityExports:
         canonical = getattr(importlib.import_module(module_name), attr_name)
 
         assert getattr(arxiv_browser, name) is canonical
+
+    def test_root_package_removed_legacy_extras_fail_cleanly(self) -> None:
+        package = importlib.import_module("arxiv_browser")
+
+        with pytest.raises(AttributeError):
+            package.__getattr__("DEFAULT_THEME")
+
+        with pytest.raises(AttributeError):
+            package.__getattr__("highlight_text")
 
     def test_app_fetch_paper_content_async_uses_compat_patch_surface(self, monkeypatch) -> None:
         import arxiv_browser.app as app_module
@@ -132,11 +145,11 @@ class TestAppCompatibilityExports:
     def test_app_getattr_dir_and_missing_attr(self) -> None:
         import arxiv_browser.app as app_module
 
-        assert callable(app_module.__getattr__("highlight_text"))
-        assert "highlight_text" in app_module.__dir__()
+        assert "load_config" in app_module.__dir__()
+        assert "highlight_text" not in app_module.__dir__()
 
         with pytest.raises(AttributeError):
-            app_module.__getattr__("definitely_missing_symbol")
+            app_module.__getattr__("highlight_text")
 
     def test_app_main_uses_compatibility_resolved_dependencies(self, monkeypatch) -> None:
         import arxiv_browser.app as app_module

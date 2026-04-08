@@ -33,6 +33,24 @@ def _legacy_app_references(path: Path) -> list[str]:
     return refs
 
 
+def _canonical_export_bundle_references(path: Path) -> list[str]:
+    """Return import-style references to the removed test export bundle."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    refs: list[str] = []
+
+    class Visitor(ast.NodeVisitor):
+        def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+            if node.module == "tests.support.canonical_exports":
+                refs.append(f"line {node.lineno}: from tests.support.canonical_exports import ...")
+            if node.module == "tests.support" and any(
+                alias.name == "canonical_exports" for alias in node.names
+            ):
+                refs.append(f"line {node.lineno}: from tests.support import canonical_exports")
+
+    Visitor().visit(tree)
+    return refs
+
+
 def test_only_compat_tests_reference_legacy_app_module() -> None:
     root = Path(__file__).parent
     allowed = {"test_app_compat_cli.py", "test_app_compat_exports.py", "test_app_hygiene.py"}
@@ -49,4 +67,64 @@ def test_only_compat_tests_reference_legacy_app_module() -> None:
     assert bad_files == [], (
         "Only dedicated compatibility tests may import or patch arxiv_browser.app. "
         f"Found legacy references in: {', '.join(bad_files)}"
+    )
+
+
+def test_src_modules_do_not_import_legacy_app_module() -> None:
+    src_root = Path(__file__).resolve().parents[1] / "src" / "arxiv_browser"
+    bad_files: list[str] = []
+
+    for path in sorted(src_root.rglob("*.py")):
+        if path.name == "app.py":
+            continue
+        refs = _legacy_app_references(path)
+        if refs:
+            bad_files.append(f"{path.relative_to(src_root).as_posix()} ({'; '.join(refs)})")
+
+    assert bad_files == [], (
+        "Only the compatibility bridge may reference arxiv_browser.app from src/. "
+        f"Found legacy references in: {', '.join(bad_files)}"
+    )
+
+
+def test_tests_do_not_import_removed_canonical_export_bundle() -> None:
+    root = Path(__file__).parent
+    bad_files: list[str] = []
+
+    for path in sorted(root.rglob("*.py")):
+        if path.name == "test_app_hygiene.py":
+            continue
+        refs = _canonical_export_bundle_references(path)
+        if refs:
+            bad_files.append(f"{path.relative_to(root).as_posix()} ({'; '.join(refs)})")
+
+    assert bad_files == [], (
+        "Tests must import canonical modules directly instead of tests.support.canonical_exports. "
+        f"Found bundle references in: {', '.join(bad_files)}"
+    )
+
+
+def test_src_tree_avoids_repo_local_import_star_and_dynamic_dunder_all() -> None:
+    src_root = Path(__file__).resolve().parents[1] / "src" / "arxiv_browser"
+    bad_files: list[str] = []
+
+    for path in sorted(src_root.rglob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        tree = ast.parse(text, filename=str(path))
+        rel_path = path.relative_to(src_root).as_posix()
+
+        if "__all__ = [name for name in globals()" in text:
+            bad_files.append(f"{rel_path} (dynamic __all__ from globals())")
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and any(alias.name == "*" for alias in node.names):
+                module_name = node.module or ""
+                if module_name.startswith("arxiv_browser"):
+                    bad_files.append(
+                        f"{rel_path} (line {node.lineno}: wildcard import from {module_name})"
+                    )
+
+    assert bad_files == [], (
+        "src/arxiv_browser must avoid repo-local wildcard imports and dynamic globals()-derived __all__. "
+        f"Found violations in: {', '.join(bad_files)}"
     )

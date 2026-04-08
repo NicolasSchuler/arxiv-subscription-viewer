@@ -1,4 +1,4 @@
-# pyright: reportAttributeAccessIssue=false, reportUndefinedVariable=false
+# pyright: reportAttributeAccessIssue=false
 """Detail-pane, footer, and command-palette mixin for ArxivBrowser."""
 
 from __future__ import annotations
@@ -11,28 +11,23 @@ from textual.css.query import NoMatches
 
 from arxiv_browser.actions.llm_actions import _resolve_llm_command
 from arxiv_browser.actions.ui_actions import count_hf_matches
-from arxiv_browser.browser import _runtime as browser_runtime
-from arxiv_browser.browser._runtime import (
+from arxiv_browser.browser.constants import (
     BADGE_COALESCE_DELAY,
     MAX_ABSTRACT_LOADS,
-    DetailRenderState,
-    PaletteCommand,
-    PaperHighlightTerms,
-    PaperRowRenderState,
-    StatusBarState,
     logger,
 )
 from arxiv_browser.browser.contracts import COMMAND_PALETTE_COMMANDS, _PaletteAppState
 from arxiv_browser.config import save_config
 from arxiv_browser.help_ui import build_help_sections
+from arxiv_browser.modals import PaletteCommand
 from arxiv_browser.models import SORT_OPTIONS, Paper, SessionState, UserConfig
 from arxiv_browser.parsing import HISTORY_DATE_FORMAT, clean_latex
-from arxiv_browser.query import render_progress_bar, truncate_text
-from arxiv_browser.themes import build_theme_runtime
-
-# Keep explicit local aliases so existing tests and patch points remain stable.
-_widget_chrome = browser_runtime._widget_chrome
-format_categories = browser_runtime.format_categories
+from arxiv_browser.query import format_categories, render_progress_bar, truncate_text
+from arxiv_browser.themes import _build_textual_theme, build_theme_runtime
+from arxiv_browser.widgets import chrome as _widget_chrome
+from arxiv_browser.widgets.chrome import StatusBarState
+from arxiv_browser.widgets.details import DetailRenderState
+from arxiv_browser.widgets.listing import PaperHighlightTerms, PaperRowRenderState
 
 
 class ChromeMixin:
@@ -53,7 +48,7 @@ class ChromeMixin:
             category_overrides=self._config.category_colors,
         )
         self._theme_runtime = theme_runtime
-        browser_runtime.format_categories.cache_clear()
+        format_categories.cache_clear()
 
     def _apply_theme_overrides(self) -> None:
         """Apply theme overrides from config to both Rich markup and CSS variables.
@@ -70,9 +65,7 @@ class ChromeMixin:
         if self._config.theme:
             try:
                 self.register_theme(
-                    browser_runtime._build_textual_theme(
-                        self._config.theme_name, theme_runtime.colors
-                    )
+                    _build_textual_theme(self._config.theme_name, theme_runtime.colors)
                 )
             except Exception as e:
                 logger.debug("Skipping theme registration in current context: %s", e, exc_info=True)
@@ -819,9 +812,7 @@ class ChromeMixin:
             status = self._get_status_bar_widget()
         except NoMatches:
             return
-        status.update(
-            browser_runtime._widget_chrome.build_status_bar_text(self._build_status_bar_state())
-        )
+        status.update(_widget_chrome.build_status_bar_text(self._build_status_bar_state()))
         self._update_footer()
 
     def _get_footer_bindings(self) -> list[tuple[str, str]]:
@@ -857,21 +848,19 @@ class ChromeMixin:
         try:
             container = self._get_search_container_widget()
             if container.has_class("visible"):
-                return browser_runtime._widget_chrome.build_search_footer_bindings()
+                return _widget_chrome.build_search_footer_bindings()
         except NoMatches:
             pass
         # arXiv API search mode
         if self._in_arxiv_api_mode:
-            return browser_runtime._widget_chrome.build_api_footer_bindings()
+            return _widget_chrome.build_api_footer_bindings()
         # Selection mode — papers selected
         if self.selected_ids:
-            return browser_runtime._widget_chrome.build_selection_footer_bindings(
-                len(self.selected_ids)
-            )
+            return _widget_chrome.build_selection_footer_bindings(len(self.selected_ids))
         # Default browsing — dynamically show contextual hints
         has_starred = any(m.starred for m in self._config.paper_metadata.values())
         llm_configured = bool(_resolve_llm_command(self._config))
-        return browser_runtime._widget_chrome.build_browse_footer_bindings(
+        return _widget_chrome.build_browse_footer_bindings(
             s2_active=self._s2_active,
             has_starred=has_starred,
             llm_configured=llm_configured,
@@ -888,7 +877,7 @@ class ChromeMixin:
         except NoMatches:
             pass
         theme_runtime = self._resolved_theme_runtime()
-        return browser_runtime._widget_chrome.build_footer_mode_badge(
+        return _widget_chrome.build_footer_mode_badge(
             relevance_scoring_active=self._relevance_scoring_active,
             version_checking=self._version_checking,
             search_visible=search_visible,

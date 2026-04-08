@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from tests.support.canonical_exports import LLM_PRESETS, UserConfig
+from arxiv_browser.llm import LLM_PRESETS
+from arxiv_browser.models import UserConfig
 
 
 class TestRequireLlmCommand:
@@ -13,7 +14,7 @@ class TestRequireLlmCommand:
     def _make_mock_app(self, **config_kwargs):
         from unittest.mock import MagicMock
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._http_client = None
@@ -73,7 +74,7 @@ class TestCommandTrustGuardrails:
     def _make_mock_app(self, **config_kwargs):
         from unittest.mock import MagicMock
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._config = UserConfig(**config_kwargs)
@@ -93,8 +94,8 @@ class TestCommandTrustGuardrails:
         assert app._is_llm_command_trusted(command_template) is True
 
     def test_arxiv_browser_uses_shared_ui_constants(self):
+        from arxiv_browser.browser.core import ArxivBrowser
         from arxiv_browser.ui_constants import APP_BINDINGS, APP_CSS
-        from tests.support.canonical_exports import ArxivBrowser
 
         assert ArxivBrowser.BINDINGS is APP_BINDINGS
         assert ArxivBrowser.CSS == APP_CSS
@@ -230,14 +231,14 @@ class TestBuildLlmShellCommand:
     """Tests for shell command building with proper escaping."""
 
     def test_basic(self):
-        from tests.support.canonical_exports import _build_llm_shell_command
+        from arxiv_browser.llm import _build_llm_shell_command
 
         result = _build_llm_shell_command("claude -p {prompt}", "hello world")
         assert "claude -p" in result
         assert "hello world" in result
 
     def test_prompt_with_quotes(self):
-        from tests.support.canonical_exports import _build_llm_shell_command
+        from arxiv_browser.llm import _build_llm_shell_command
 
         result = _build_llm_shell_command("claude -p {prompt}", 'text with "quotes"')
         assert "claude -p" in result
@@ -246,7 +247,7 @@ class TestBuildLlmShellCommand:
     def test_prompt_with_shell_chars(self):
         import shlex
 
-        from tests.support.canonical_exports import _build_llm_shell_command
+        from arxiv_browser.llm import _build_llm_shell_command
 
         dangerous = "text; rm -rf /"
         result = _build_llm_shell_command("llm {prompt}", dangerous)
@@ -254,7 +255,7 @@ class TestBuildLlmShellCommand:
         assert result == f"llm {shlex.quote(dangerous)}"
 
     def test_missing_prompt_placeholder(self):
-        from tests.support.canonical_exports import _build_llm_shell_command
+        from arxiv_browser.llm import _build_llm_shell_command
 
         with pytest.raises(ValueError, match=r"must contain.*\{prompt\}"):
             _build_llm_shell_command("claude", "hello")
@@ -262,7 +263,7 @@ class TestBuildLlmShellCommand:
     def test_windows_prompt_uses_list2cmdline(self):
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import _build_llm_shell_command
+        from arxiv_browser.llm import _build_llm_shell_command
 
         with (
             patch("arxiv_browser.llm.os.name", "nt"),
@@ -280,28 +281,28 @@ class TestCommandHash:
     """Tests for command hash computation."""
 
     def test_same_input_same_hash(self):
-        from tests.support.canonical_exports import _compute_command_hash
+        from arxiv_browser.llm import _compute_command_hash
 
         h1 = _compute_command_hash("claude -p {prompt}", "Summarize: {title}")
         h2 = _compute_command_hash("claude -p {prompt}", "Summarize: {title}")
         assert h1 == h2
 
     def test_different_command_different_hash(self):
-        from tests.support.canonical_exports import _compute_command_hash
+        from arxiv_browser.llm import _compute_command_hash
 
         h1 = _compute_command_hash("claude -p {prompt}", "Summarize: {title}")
         h2 = _compute_command_hash("llm {prompt}", "Summarize: {title}")
         assert h1 != h2
 
     def test_different_prompt_different_hash(self):
-        from tests.support.canonical_exports import _compute_command_hash
+        from arxiv_browser.llm import _compute_command_hash
 
         h1 = _compute_command_hash("claude -p {prompt}", "Summarize: {title}")
         h2 = _compute_command_hash("claude -p {prompt}", "Explain: {title}")
         assert h1 != h2
 
     def test_hash_length(self):
-        from tests.support.canonical_exports import _compute_command_hash
+        from arxiv_browser.llm import _compute_command_hash
 
         h = _compute_command_hash("cmd", "prompt")
         assert len(h) == 16
@@ -325,7 +326,10 @@ class TestLlmConfigSerialization:
     """Tests for LLM config fields roundtrip."""
 
     def test_roundtrip(self):
-        from tests.support.canonical_exports import _config_to_dict, _dict_to_config
+        from arxiv_browser.config import (
+            _config_to_dict,
+            _dict_to_config,
+        )
 
         config = UserConfig(
             llm_command="claude -p {prompt}",
@@ -345,7 +349,7 @@ class TestLlmConfigSerialization:
         assert restored.trusted_pdf_viewer_hashes == ["def456"]
 
     def test_missing_fields_default(self):
-        from tests.support.canonical_exports import _dict_to_config
+        from arxiv_browser.config import _dict_to_config
 
         config = _dict_to_config({})
         assert config.llm_command == ""

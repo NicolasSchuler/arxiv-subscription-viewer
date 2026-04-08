@@ -1,4 +1,4 @@
-# pyright: reportAttributeAccessIssue=false, reportUndefinedVariable=false
+# pyright: reportAttributeAccessIssue=false
 """Discovery, recommendation, and version-tracking mixin for ArxivBrowser."""
 
 from __future__ import annotations
@@ -8,13 +8,13 @@ import asyncio
 import httpx
 
 from arxiv_browser.action_messages import build_actionable_error, build_actionable_warning
-from arxiv_browser.browser._runtime import ARXIV_API_URL, logger
+from arxiv_browser.browser.constants import logger
 from arxiv_browser.enrichment import apply_version_updates
 from arxiv_browser.modals.citations import CitationGraphScreen, RecommendationsScreen
 from arxiv_browser.models import Paper
 from arxiv_browser.parsing import clean_latex, parse_arxiv_version_map
 from arxiv_browser.semantic_scholar import SemanticScholarPaper
-from arxiv_browser.services.arxiv_api_service import ARXIV_API_TIMEOUT
+from arxiv_browser.services.arxiv_api_service import ARXIV_API_TIMEOUT, ARXIV_API_URL
 from arxiv_browser.services.llm_service import LLMExecutionError as _LLMExecutionError
 from arxiv_browser.similarity import (
     TfidfIndex,

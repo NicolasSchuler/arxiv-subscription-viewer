@@ -1,4 +1,4 @@
-# pyright: reportAttributeAccessIssue=false, reportUndefinedVariable=false
+# pyright: reportAttributeAccessIssue=false
 """Browse and dataset-state mixin for ArxivBrowser."""
 
 from __future__ import annotations
@@ -15,19 +15,17 @@ from textual.css.query import NoMatches
 from textual.widgets.option_list import Option, OptionDoesNotExist
 
 from arxiv_browser.action_messages import build_actionable_error
-from arxiv_browser.browser._runtime import (
+from arxiv_browser.browser.constants import (
     FUZZY_LIMIT,
     FUZZY_SCORE_CUTOFF,
     PDF_DOWNLOAD_TIMEOUT,
-    LocalBrowseSnapshot,
-    build_list_empty_message,
     logger,
-    render_paper_option,
 )
+from arxiv_browser.browser.empty_state import build_list_empty_message
 from arxiv_browser.export import format_paper_as_markdown
 from arxiv_browser.io_actions import resolve_target_papers
 from arxiv_browser.modals.editing import TagsModal
-from arxiv_browser.models import SORT_OPTIONS, Paper, PaperMetadata
+from arxiv_browser.models import SORT_OPTIONS, LocalBrowseSnapshot, Paper, PaperMetadata
 from arxiv_browser.parsing import build_daily_digest, parse_arxiv_file
 from arxiv_browser.query import (
     _HIGHLIGHT_PATTERN_CACHE,
@@ -40,6 +38,7 @@ from arxiv_browser.query import (
     paper_matches_watch_entry,
     sort_papers,
 )
+from arxiv_browser.widgets import render_paper_option
 
 
 class BrowseMixin:

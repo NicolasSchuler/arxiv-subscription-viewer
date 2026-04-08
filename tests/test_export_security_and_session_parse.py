@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from tests.support.canonical_exports import (
-    ArxivBrowser,
+from arxiv_browser.browser.core import ArxivBrowser
+from arxiv_browser.config import _dict_to_config
+from arxiv_browser.export import get_pdf_download_path
+from arxiv_browser.models import (
     Paper,
     UserConfig,
-    _dict_to_config,
-    get_pdf_download_path,
 )
 
 

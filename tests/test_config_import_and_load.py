@@ -9,14 +9,16 @@ from unittest.mock import patch
 import pytest
 
 import arxiv_browser.config as config_mod
-from tests.support.canonical_exports import (
+from arxiv_browser.config import (
+    import_metadata,
+    load_config,
+)
+from arxiv_browser.models import (
     PaperCollection,
     PaperMetadata,
     SearchBookmark,
     UserConfig,
     WatchListEntry,
-    import_metadata,
-    load_config,
 )
 
 

@@ -187,6 +187,8 @@ cd arxiv-subscription-viewer && uv sync
 just check   # lint + typecheck + tests
 ```
 
+For contributor-oriented architecture and import-boundary guidance, start with [docs/architecture.md](docs/architecture.md).
+
 ## 📄 License
 
 MIT — [Nicolas Sebastian Schuler](mailto:nicolas.schuler@kit.edu)

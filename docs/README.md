@@ -46,5 +46,6 @@ See the [main README](../README.md) for installation, usage, and key bindings, t
 
 The following are development-only references and not intended for end users:
 
+- [architecture.md](architecture.md) — contributor architecture, canonical imports, and compatibility boundaries
 - [tui-style-guide.md](tui-style-guide.md) — UI/UX conventions for TUI development
 - [code-quality-pipeline-prompt.md](code-quality-pipeline-prompt.md) — CI quality pipeline configuration

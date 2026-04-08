@@ -7,21 +7,23 @@ from typing import Any
 
 import pytest
 
-import arxiv_browser.browser._runtime as browser_runtime
+import arxiv_browser.browser.constants as browser_constants
 import arxiv_browser.browser.core as browser_core
-from arxiv_browser.widgets.chrome import set_ascii_glyphs as set_chrome_ascii_glyphs
-from arxiv_browser.widgets.details import set_ascii_glyphs as set_detail_ascii_glyphs
-from arxiv_browser.widgets.listing import set_ascii_icons
-from tests.support.canonical_exports import (
-    _HIGHLIGHT_PATTERN_CACHE,
+from arxiv_browser.models import (
     Paper,
     PaperMetadata,
     SearchBookmark,
     SessionState,
     UserConfig,
     WatchListEntry,
+)
+from arxiv_browser.query import (
+    _HIGHLIGHT_PATTERN_CACHE,
     format_categories,
 )
+from arxiv_browser.widgets.chrome import set_ascii_glyphs as set_chrome_ascii_glyphs
+from arxiv_browser.widgets.details import set_ascii_glyphs as set_detail_ascii_glyphs
+from arxiv_browser.widgets.listing import set_ascii_icons
 
 # ── Cache isolation ──────────────────────────────────────────────────────────
 
@@ -43,7 +45,7 @@ def _shorten_browser_debounce_windows(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(browser_core, "SEARCH_DEBOUNCE_DELAY", 0.05)
     monkeypatch.setattr(browser_core, "DETAIL_PANE_DEBOUNCE_DELAY", 0.01)
     monkeypatch.setattr(browser_core, "BADGE_COALESCE_DELAY", 0.01)
-    monkeypatch.setattr(browser_runtime, "BADGE_COALESCE_DELAY", 0.01)
+    monkeypatch.setattr(browser_constants, "BADGE_COALESCE_DELAY", 0.01)
 
 
 # ── Factories ────────────────────────────────────────────────────────────────

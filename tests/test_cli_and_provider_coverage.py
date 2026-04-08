@@ -28,7 +28,6 @@ from arxiv_browser.modals.collections import (
 )
 from arxiv_browser.models import MAX_COLLECTIONS, PaperCollection, UserConfig
 from arxiv_browser.services import enrichment_service as enrich
-from tests.support import canonical_exports as app_mod
 from tests.support.app_stubs import (
     _DummyInput,
     _DummyLabel,

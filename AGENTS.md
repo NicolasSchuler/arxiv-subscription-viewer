@@ -1,6 +1,6 @@
 # Agent Instructions
 
-Quick-reference for AI agents. See `CLAUDE.md` for full architecture, patterns, and dependency DAG.
+Quick-reference for AI agents. See `docs/architecture.md` for the human-facing architecture guide and `CLAUDE.md` for the fuller AI-oriented dependency notes.
 
 ## Task Runner
 
@@ -10,6 +10,7 @@ Quick-reference for AI agents. See `CLAUDE.md` for full architecture, patterns, 
 - **Docs drift**: `just docs-check`
 - **Dashboard**: `just report`
 - **Contributor docs**: `CONTRIBUTING.md`
+- **Architecture guide**: `docs/architecture.md`
 
 ## Before Making Changes
 
@@ -30,9 +31,12 @@ Quick-reference for AI agents. See `CLAUDE.md` for full architecture, patterns, 
 ## Key Rules
 
 - **Avoid circular imports**: Sub-modules should import canonical modules directly; only the narrow compatibility bridge may import from `app.py` when preserving legacy patch surfaces.
+- **Public imports are explicit**: `src/arxiv_browser/__init__.py::__all__` defines the supported root-package surface; do not add undocumented exports casually.
+- **Compatibility shim is narrow**: `src/arxiv_browser/app.py` is only for the documented compat allowlist and CLI/bootstrap patch surface.
 - **Soft Python file-size target**: Keep repo-tracked `.py` files at or below 1000 lines when feasible; do not grow existing over-cap files, and prefer extracting cohesive modules/tests over adding more code to them
 - **Function signature limit**: No new function or method in `src/` may exceed 6 effective named parameters; group related inputs into dataclasses, state objects, or request objects
 - **Test mock paths**: Patch at the module where the function is *resolved* (see CLAUDE.md Import Patterns)
+- **No test export bundles**: Tests should import canonical modules directly; do not reintroduce `tests.support.canonical_exports`-style aggregators.
 - **Modal test imports**: `from arxiv_browser.modals import X` (not `from arxiv_browser.app import X`)
 - **`make_paper` fixture**: Sets `abstract_raw = abstract` to prevent async HTTP fetches
 - **`conftest.py` autouse fixture**: Resets mutable module-level state between tests

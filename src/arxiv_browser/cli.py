@@ -894,11 +894,11 @@ def main(
     # Sort papers alphabetically by title
     papers.sort(key=lambda p: p.title.lower())
 
-    from arxiv_browser.app import ArxivBrowserOptions as _ArxivBrowserOptions
+    from arxiv_browser.browser.core import ArxivBrowserOptions as _ArxivBrowserOptions
 
     app_factory = dependencies.app_factory
     if app_factory is None:
-        from arxiv_browser.app import ArxivBrowser as _ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser as _ArxivBrowser
 
         app_factory = _ArxivBrowser
 

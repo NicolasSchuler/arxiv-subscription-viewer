@@ -7,19 +7,36 @@ from pathlib import Path
 
 import pytest
 
-from arxiv_browser.themes import THEME_NAMES, THEMES
-from tests.support.canonical_exports import (
-    ARXIV_API_DEFAULT_MAX_RESULTS,
-    ARXIV_DATE_FORMAT,
-    DEFAULT_CATEGORY_COLOR,
+from arxiv_browser.browser.core import SUBPROCESS_TIMEOUT
+from arxiv_browser.config import (
+    export_metadata,
+    import_metadata,
+    load_config,
+    save_config,
+)
+from arxiv_browser.export import (
+    escape_bibtex,
+    extract_year,
+    format_collection_as_markdown,
+    format_paper_as_bibtex,
+    format_paper_as_ris,
+    format_papers_as_csv,
+    format_papers_as_markdown_table,
+    generate_citation_key,
+    get_pdf_download_path,
+)
+from arxiv_browser.llm import (
     DEFAULT_LLM_PROMPT,
     LLM_PRESETS,
+    SUMMARY_MODES,
+    build_llm_prompt,
+    get_summary_db_path,
+)
+from arxiv_browser.models import (
+    ARXIV_API_DEFAULT_MAX_RESULTS,
     MAX_COLLECTIONS,
     MAX_PAPERS_PER_COLLECTION,
     SORT_OPTIONS,
-    SUBPROCESS_TIMEOUT,
-    SUMMARY_MODES,
-    TAG_NAMESPACE_COLORS,
     Paper,
     PaperCollection,
     PaperMetadata,
@@ -27,38 +44,34 @@ from tests.support.canonical_exports import (
     SearchBookmark,
     UserConfig,
     WatchListEntry,
+)
+from arxiv_browser.parsing import (
+    ARXIV_DATE_FORMAT,
     build_arxiv_search_query,
-    build_llm_prompt,
     clean_latex,
-    escape_bibtex,
-    export_metadata,
     extract_text_from_html,
-    extract_year,
-    format_categories,
-    format_collection_as_markdown,
-    format_paper_as_bibtex,
-    format_paper_as_ris,
-    format_papers_as_csv,
-    format_papers_as_markdown_table,
-    format_summary_as_rich,
-    generate_citation_key,
-    get_pdf_download_path,
-    get_summary_db_path,
-    get_tag_color,
-    import_metadata,
-    insert_implicit_and,
-    load_config,
     normalize_arxiv_id,
     parse_arxiv_api_feed,
     parse_arxiv_date,
     parse_arxiv_file,
     parse_arxiv_version_map,
-    parse_tag_namespace,
+)
+from arxiv_browser.query import (
+    format_categories,
+    format_summary_as_rich,
+    insert_implicit_and,
     pill_label_for_token,
     reconstruct_query,
-    save_config,
     to_rpn,
     tokenize_query,
+)
+from arxiv_browser.themes import (
+    DEFAULT_CATEGORY_COLOR,
+    TAG_NAMESPACE_COLORS,
+    THEME_NAMES,
+    THEMES,
+    get_tag_color,
+    parse_tag_namespace,
 )
 from tests.support.patch_helpers import patch_save_config
 
@@ -72,7 +85,10 @@ class TestHfConfigSerialization:
 
     def test_roundtrip_with_hf_fields(self):
         """HF config fields should survive serialization round-trip."""
-        from tests.support.canonical_exports import _config_to_dict, _dict_to_config
+        from arxiv_browser.config import (
+            _config_to_dict,
+            _dict_to_config,
+        )
 
         original = UserConfig(hf_enabled=True, hf_cache_ttl_hours=12)
         data = _config_to_dict(original)
@@ -82,7 +98,7 @@ class TestHfConfigSerialization:
 
     def test_defaults_when_absent(self):
         """HF config fields should use defaults when not present in data."""
-        from tests.support.canonical_exports import _dict_to_config
+        from arxiv_browser.config import _dict_to_config
 
         config = _dict_to_config({})
         assert config.hf_enabled is False
@@ -90,7 +106,7 @@ class TestHfConfigSerialization:
 
     def test_wrong_type_uses_default(self):
         """Non-bool hf_enabled and non-int hf_cache_ttl_hours should use defaults."""
-        from tests.support.canonical_exports import _dict_to_config
+        from arxiv_browser.config import _dict_to_config
 
         config = _dict_to_config({"hf_enabled": "yes", "hf_cache_ttl_hours": "six"})
         assert config.hf_enabled is False
@@ -102,7 +118,7 @@ class TestHfSortPapers:
 
     def test_sort_by_trending(self, make_paper):
         from arxiv_browser.huggingface import HuggingFacePaper
-        from tests.support.canonical_exports import sort_papers
+        from arxiv_browser.query import sort_papers
 
         papers = [
             make_paper(arxiv_id="a", title="A"),
@@ -119,7 +135,7 @@ class TestHfSortPapers:
 
     def test_sort_trending_without_cache(self, make_paper):
         """Trending sort with no hf_cache should just keep original order."""
-        from tests.support.canonical_exports import sort_papers
+        from arxiv_browser.query import sort_papers
 
         papers = [
             make_paper(arxiv_id="a", title="A"),
@@ -132,7 +148,7 @@ class TestHfSortPapers:
     def test_papers_without_hf_sort_last(self, make_paper):
         """Papers without HF data should sort after papers with HF data."""
         from arxiv_browser.huggingface import HuggingFacePaper
-        from tests.support.canonical_exports import sort_papers
+        from arxiv_browser.query import sort_papers
 
         papers = [
             make_paper(arxiv_id="x"),
@@ -151,7 +167,7 @@ class TestHfDetailPane:
 
     def test_hf_section_shown_when_data_present(self, make_paper):
         from arxiv_browser.huggingface import HuggingFacePaper
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper()
@@ -169,7 +185,7 @@ class TestHfDetailPane:
         assert "100 stars" in content
 
     def test_hf_section_hidden_when_no_data(self, make_paper):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper()
@@ -180,7 +196,7 @@ class TestHfDetailPane:
     def test_hf_section_optional_fields(self, make_paper):
         """HF section omits optional fields when empty."""
         from arxiv_browser.huggingface import HuggingFacePaper
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper()
@@ -199,7 +215,7 @@ class TestHfPaperListItem:
 
     def test_hf_badge_present(self, make_paper):
         from arxiv_browser.huggingface import HuggingFacePaper
-        from tests.support.canonical_exports import PaperListItem
+        from arxiv_browser.widgets.listing import PaperListItem
 
         paper = make_paper()
         item = PaperListItem(paper)
@@ -209,7 +225,7 @@ class TestHfPaperListItem:
         assert "\u219142" in meta
 
     def test_hf_badge_absent_when_no_data(self, make_paper):
-        from tests.support.canonical_exports import PaperListItem
+        from arxiv_browser.widgets.listing import PaperListItem
 
         paper = make_paper()
         item = PaperListItem(paper)
@@ -224,7 +240,7 @@ class TestHfAppState:
         """Create a minimal ArxivBrowser without running the full TUI."""
         from unittest.mock import MagicMock
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._hf_active = False
@@ -291,7 +307,7 @@ class TestHfAppState:
         import asyncio
         from unittest.mock import AsyncMock, MagicMock, patch
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         paper = make_paper(arxiv_id="2401.51515")
         app = ArxivBrowser([paper], restore_session=False)
@@ -319,7 +335,7 @@ class TestBadgeCoalescing:
     """Tests for the P5 badge refresh coalescing system."""
 
     def _make_badge_app(self):
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._http_client = None
@@ -400,7 +416,7 @@ class TestBadgeCoalescing:
         """Verify _badge_timer is stopped during on_unmount."""
         from unittest.mock import MagicMock
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         app = self._make_badge_app()
         app._search_timer = None
@@ -441,7 +457,7 @@ class TestDetailCacheKey:
     """Tests for the _detail_cache_key pure function."""
 
     def test_deterministic(self, make_paper):
-        from tests.support.canonical_exports import _detail_cache_key
+        from arxiv_browser.widgets.details import _detail_cache_key
 
         paper = make_paper(arxiv_id="2401.00001")
         key1 = _detail_cache_key(paper, "abstract text", tags=["ml", "cv"])
@@ -449,7 +465,7 @@ class TestDetailCacheKey:
         assert key1 == key2
 
     def test_varies_on_summary(self, make_paper):
-        from tests.support.canonical_exports import _detail_cache_key
+        from arxiv_browser.widgets.details import _detail_cache_key
 
         paper = make_paper(arxiv_id="2401.00001")
         key1 = _detail_cache_key(paper, "abstract")
@@ -457,7 +473,7 @@ class TestDetailCacheKey:
         assert key1 != key2
 
     def test_varies_on_tags(self, make_paper):
-        from tests.support.canonical_exports import _detail_cache_key
+        from arxiv_browser.widgets.details import _detail_cache_key
 
         paper = make_paper(arxiv_id="2401.00001")
         key1 = _detail_cache_key(paper, "abstract", tags=["ml"])
@@ -465,7 +481,7 @@ class TestDetailCacheKey:
         assert key1 != key2
 
     def test_varies_on_highlight(self, make_paper):
-        from tests.support.canonical_exports import _detail_cache_key
+        from arxiv_browser.widgets.details import _detail_cache_key
 
         paper = make_paper(arxiv_id="2401.00001")
         key1 = _detail_cache_key(paper, "abstract", highlight_terms=["attention"])
@@ -473,7 +489,7 @@ class TestDetailCacheKey:
         assert key1 != key2
 
     def test_varies_on_collapsed(self, make_paper):
-        from tests.support.canonical_exports import _detail_cache_key
+        from arxiv_browser.widgets.details import _detail_cache_key
 
         paper = make_paper(arxiv_id="2401.00001")
         key1 = _detail_cache_key(paper, "abstract", collapsed_sections=["authors"])
@@ -481,7 +497,7 @@ class TestDetailCacheKey:
         assert key1 != key2
 
     def test_varies_on_abstract_tail_beyond_prefix(self, make_paper):
-        from tests.support.canonical_exports import _detail_cache_key
+        from arxiv_browser.widgets.details import _detail_cache_key
 
         paper = make_paper(arxiv_id="2401.00001")
         prefix = "A" * 80
@@ -492,7 +508,7 @@ class TestDetailCacheKey:
     def test_varies_on_s2_citation_count(self, make_paper):
         from unittest.mock import MagicMock
 
-        from tests.support.canonical_exports import _detail_cache_key
+        from arxiv_browser.widgets.details import _detail_cache_key
 
         paper = make_paper(arxiv_id="2401.00001")
         s2_a = MagicMock()
@@ -505,7 +521,7 @@ class TestDetailCacheKey:
 
     def test_varies_on_s2_non_count_fields(self, make_paper):
         from arxiv_browser.semantic_scholar import SemanticScholarPaper
-        from tests.support.canonical_exports import _detail_cache_key
+        from arxiv_browser.widgets.details import _detail_cache_key
 
         paper = make_paper(arxiv_id="2401.00001")
         s2_a = SemanticScholarPaper(
@@ -538,7 +554,7 @@ class TestDetailCacheKey:
 
     def test_varies_on_hf_non_upvote_fields(self, make_paper):
         from arxiv_browser.huggingface import HuggingFacePaper
-        from tests.support.canonical_exports import _detail_cache_key
+        from arxiv_browser.widgets.details import _detail_cache_key
 
         paper = make_paper(arxiv_id="2401.00001")
         hf_a = HuggingFacePaper(
@@ -570,7 +586,7 @@ class TestDetailPaneCache:
     """Tests for the PaperDetails caching behavior."""
 
     def test_cache_hit_skips_rebuild(self, make_paper):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper(arxiv_id="2401.00001", title="Test Paper")
@@ -588,7 +604,7 @@ class TestDetailPaneCache:
     def test_cache_miss_on_new_data(self, make_paper):
         from unittest.mock import MagicMock
 
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper(arxiv_id="2401.00001", title="Test Paper")
@@ -605,7 +621,10 @@ class TestDetailPaneCache:
         assert len(details._detail_cache) == 2
 
     def test_cache_eviction(self, make_paper):
-        from tests.support.canonical_exports import DETAIL_CACHE_MAX, PaperDetails
+        from arxiv_browser.widgets.details import (
+            DETAIL_CACHE_MAX,
+            PaperDetails,
+        )
 
         details = PaperDetails()
         for i in range(DETAIL_CACHE_MAX + 5):
@@ -615,7 +634,7 @@ class TestDetailPaneCache:
         assert len(details._detail_cache) == DETAIL_CACHE_MAX
 
     def test_clear_cache(self, make_paper):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper(arxiv_id="2401.00001", title="Test")
@@ -777,7 +796,7 @@ class TestVersionDetailPane:
         )
 
     def test_version_section_shown_with_update(self):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = self._make_paper()
@@ -789,7 +808,7 @@ class TestVersionDetailPane:
         assert "2401.12345" in content
 
     def test_version_section_hidden_without_update(self):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = self._make_paper()
@@ -799,7 +818,7 @@ class TestVersionDetailPane:
         assert "arxivdiff" not in content
 
     def test_version_section_absent_by_default(self):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = self._make_paper()
@@ -825,7 +844,7 @@ class TestVersionListBadge:
         )
 
     def test_badge_appears_with_update(self):
-        from tests.support.canonical_exports import PaperListItem
+        from arxiv_browser.widgets.listing import PaperListItem
 
         item = PaperListItem(self._make_paper())
         item._version_update = (1, 3)
@@ -834,7 +853,7 @@ class TestVersionListBadge:
         assert "v3" in meta_text
 
     def test_badge_absent_without_update(self):
-        from tests.support.canonical_exports import PaperListItem
+        from arxiv_browser.widgets.listing import PaperListItem
 
         item = PaperListItem(self._make_paper())
         meta_text = item._get_meta_text()
@@ -847,7 +866,7 @@ class TestVersionAppState:
 
     def _make_mock_app(self):
         """Create a minimal ArxivBrowser without running the full TUI."""
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._http_client = None

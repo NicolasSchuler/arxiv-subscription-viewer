@@ -27,14 +27,22 @@ import arxiv_browser.llm_providers as llm_providers
 import arxiv_browser.semantic_scholar as s2
 from arxiv_browser.actions import external_io_actions as io_actions
 from arxiv_browser.actions import llm_actions as llm_actions
+from arxiv_browser.browser.content import (
+    MAX_PAPER_CONTENT_LENGTH,
+    _fetch_paper_content_async,
+)
+from arxiv_browser.browser.core import (
+    MAX_ABSTRACT_LOADS,
+    ArxivBrowser,
+    build_list_empty_message,
+)
 from arxiv_browser.modals.collections import (
     AddToCollectionModal,
     CollectionsModal,
     CollectionViewModal,
 )
-from arxiv_browser.models import MAX_COLLECTIONS, PaperCollection, UserConfig
+from arxiv_browser.models import MAX_COLLECTIONS, PaperCollection, SessionState, UserConfig
 from arxiv_browser.services import enrichment_service as enrich
-from tests.support import canonical_exports as app_mod
 from tests.support.app_stubs import (
     _DummyInput,
     _DummyLabel,
@@ -50,31 +58,31 @@ from tests.support.patch_helpers import patch_save_config
 
 class TestAppHelperCoverage:
     def test_list_message_and_paper_content_branches(self) -> None:
-        assert "No papers match your search" in app_mod.build_list_empty_message(
+        assert "No papers match your search" in build_list_empty_message(
             query="x",
             in_arxiv_api_mode=False,
             watch_filter_active=False,
             history_mode=False,
         )
-        assert "No API results on this page" in app_mod.build_list_empty_message(
+        assert "No API results on this page" in build_list_empty_message(
             query="",
             in_arxiv_api_mode=True,
             watch_filter_active=False,
             history_mode=False,
         )
-        assert "No watched papers found" in app_mod.build_list_empty_message(
+        assert "No watched papers found" in build_list_empty_message(
             query="",
             in_arxiv_api_mode=False,
             watch_filter_active=True,
             history_mode=False,
         )
-        assert "No papers available for this date" in app_mod.build_list_empty_message(
+        assert "No papers available for this date" in build_list_empty_message(
             query="",
             in_arxiv_api_mode=False,
             watch_filter_active=False,
             history_mode=True,
         )
-        assert "No papers available." in app_mod.build_list_empty_message(
+        assert "No papers available." in build_list_empty_message(
             query="",
             in_arxiv_api_mode=False,
             watch_filter_active=False,
@@ -108,18 +116,16 @@ class TestAppHelperCoverage:
 
         paper = _paper(arxiv_id="2401.00001", abstract="Fallback abstract.")
         empty_paper = _paper(arxiv_id="2401.00002", abstract=None, abstract_raw=None)
-        long_text = "x" * (app_mod.MAX_PAPER_CONTENT_LENGTH + 10)
+        long_text = "x" * (MAX_PAPER_CONTENT_LENGTH + 10)
 
         with patch("arxiv_browser.browser.content.extract_text_from_html", return_value=long_text):
             text = asyncio.run(
-                app_mod._fetch_paper_content_async(paper, _Client(_Response(200, "<p>x</p>")))
+                _fetch_paper_content_async(paper, _Client(_Response(200, "<p>x</p>")))
             )
-        assert len(text) == app_mod.MAX_PAPER_CONTENT_LENGTH
+        assert len(text) == MAX_PAPER_CONTENT_LENGTH
 
         with patch("arxiv_browser.browser.content.extract_text_from_html", return_value=""):
-            text = asyncio.run(
-                app_mod._fetch_paper_content_async(paper, _Client(_Response(404, "")))
-            )
+            text = asyncio.run(_fetch_paper_content_async(paper, _Client(_Response(404, ""))))
         assert text == "Abstract:\nFallback abstract."
 
         with (
@@ -129,7 +135,7 @@ class TestAppHelperCoverage:
                 return_value=_TempClient(_Response(200, "<p>x</p>")),
             ),
         ):
-            text = asyncio.run(app_mod._fetch_paper_content_async(empty_paper, None))
+            text = asyncio.run(_fetch_paper_content_async(empty_paper, None))
         assert text == ""
 
     @pytest.mark.asyncio
@@ -351,7 +357,7 @@ class TestAppHelperCoverage:
             config_defaulted=True,
             s2_enabled=True,
             hf_enabled=True,
-            session=app_mod.SessionState(
+            session=SessionState(
                 scroll_index=3,
                 current_filter="graph",
                 selected_ids=[paper.arxiv_id],
@@ -403,7 +409,7 @@ class TestAppHelperCoverage:
             paper_details=_Widget(),
         )
         app._ui_refs = second_refs
-        app._config.session = app_mod.SessionState(
+        app._config.session = SessionState(
             scroll_index=0,
             current_filter="",
             selected_ids=[],
@@ -581,7 +587,7 @@ class TestAppHelperCoverage:
         app._schedule_abstract_load(paper)
         assert len(app._abstract_loading) == 1
 
-        app._abstract_loading = {str(i) for i in range(app_mod.MAX_ABSTRACT_LOADS)}
+        app._abstract_loading = {str(i) for i in range(MAX_ABSTRACT_LOADS)}
         app._schedule_abstract_load(other)
         assert other.arxiv_id in app._abstract_pending_ids
         assert next(iter(app._abstract_queue)) == other
@@ -644,8 +650,8 @@ class TestAppHelperCoverage:
         )
         app._get_paper_details_widget = MagicMock(return_value=details)
         app._build_detail_state = MagicMock(return_value=object())
-        app._update_abstract_display = app_mod.ArxivBrowser._update_abstract_display.__get__(
-            app, app_mod.ArxivBrowser
+        app._update_abstract_display = ArxivBrowser._update_abstract_display.__get__(
+            app, ArxivBrowser
         )
         app._show_abstract_preview = False
         app._abstract_cache[latex.arxiv_id] = "beta"

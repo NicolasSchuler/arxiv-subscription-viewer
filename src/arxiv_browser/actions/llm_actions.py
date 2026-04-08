@@ -1,5 +1,4 @@
 # ruff: noqa: UP037
-# pyright: reportUndefinedVariable=false, reportAttributeAccessIssue=false
 """LLM, Semantic Scholar, and command-trust action handlers for ArxivBrowser.
 
 Covers: AI summary generation, paper chat, relevance scoring, auto-tagging,
@@ -17,7 +16,7 @@ from typing import TYPE_CHECKING
 
 from textual.app import ScreenStackError
 
-from arxiv_browser.actions._runtime import logger
+from arxiv_browser.actions.constants import logger
 from arxiv_browser.config import get_config_path, save_config
 from arxiv_browser.llm import (
     LLM_PRESETS,
@@ -41,7 +40,7 @@ from arxiv_browser.models import Paper
 from arxiv_browser.query import truncate_text
 
 if TYPE_CHECKING:
-    from arxiv_browser.app import ArxivBrowser
+    from arxiv_browser.browser.core import ArxivBrowser
 
 
 _RECOVERABLE_ACTION_ERRORS = (OSError, RuntimeError, ValueError, TypeError)

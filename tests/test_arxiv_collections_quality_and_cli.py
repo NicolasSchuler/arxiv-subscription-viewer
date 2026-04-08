@@ -7,19 +7,36 @@ from pathlib import Path
 
 import pytest
 
-from arxiv_browser.themes import THEME_NAMES, THEMES
-from tests.support.canonical_exports import (
-    ARXIV_API_DEFAULT_MAX_RESULTS,
-    ARXIV_DATE_FORMAT,
-    DEFAULT_CATEGORY_COLOR,
+from arxiv_browser.browser.core import SUBPROCESS_TIMEOUT
+from arxiv_browser.config import (
+    export_metadata,
+    import_metadata,
+    load_config,
+    save_config,
+)
+from arxiv_browser.export import (
+    escape_bibtex,
+    extract_year,
+    format_collection_as_markdown,
+    format_paper_as_bibtex,
+    format_paper_as_ris,
+    format_papers_as_csv,
+    format_papers_as_markdown_table,
+    generate_citation_key,
+    get_pdf_download_path,
+)
+from arxiv_browser.llm import (
     DEFAULT_LLM_PROMPT,
     LLM_PRESETS,
+    SUMMARY_MODES,
+    build_llm_prompt,
+    get_summary_db_path,
+)
+from arxiv_browser.models import (
+    ARXIV_API_DEFAULT_MAX_RESULTS,
     MAX_COLLECTIONS,
     MAX_PAPERS_PER_COLLECTION,
     SORT_OPTIONS,
-    SUBPROCESS_TIMEOUT,
-    SUMMARY_MODES,
-    TAG_NAMESPACE_COLORS,
     Paper,
     PaperCollection,
     PaperMetadata,
@@ -27,38 +44,34 @@ from tests.support.canonical_exports import (
     SearchBookmark,
     UserConfig,
     WatchListEntry,
+)
+from arxiv_browser.parsing import (
+    ARXIV_DATE_FORMAT,
     build_arxiv_search_query,
-    build_llm_prompt,
     clean_latex,
-    escape_bibtex,
-    export_metadata,
     extract_text_from_html,
-    extract_year,
-    format_categories,
-    format_collection_as_markdown,
-    format_paper_as_bibtex,
-    format_paper_as_ris,
-    format_papers_as_csv,
-    format_papers_as_markdown_table,
-    format_summary_as_rich,
-    generate_citation_key,
-    get_pdf_download_path,
-    get_summary_db_path,
-    get_tag_color,
-    import_metadata,
-    insert_implicit_and,
-    load_config,
     normalize_arxiv_id,
     parse_arxiv_api_feed,
     parse_arxiv_date,
     parse_arxiv_file,
     parse_arxiv_version_map,
-    parse_tag_namespace,
+)
+from arxiv_browser.query import (
+    format_categories,
+    format_summary_as_rich,
+    insert_implicit_and,
     pill_label_for_token,
     reconstruct_query,
-    save_config,
     to_rpn,
     tokenize_query,
+)
+from arxiv_browser.themes import (
+    DEFAULT_CATEGORY_COLOR,
+    TAG_NAMESPACE_COLORS,
+    THEME_NAMES,
+    THEMES,
+    get_tag_color,
+    parse_tag_namespace,
 )
 
 # ============================================================================
@@ -70,7 +83,7 @@ class TestUpdatePaperParity:
     """Verify update_paper() produces correct output via section helpers."""
 
     def test_full_paper_all_sections(self, make_paper):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper(
@@ -93,14 +106,14 @@ class TestUpdatePaperParity:
         assert "▾ Tags" in output
 
     def test_none_paper(self):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         details.update_paper(None)
         assert "Select a paper" in details.content
 
     def test_collapsed_sections(self, make_paper):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper(abstract="Test abstract")
@@ -111,7 +124,7 @@ class TestUpdatePaperParity:
         assert "Test abstract" not in output
 
     def test_scan_mode_truncates_long_sections(self, make_paper):
-        from tests.support.canonical_exports import PaperDetails
+        from arxiv_browser.widgets.details import PaperDetails
 
         details = PaperDetails()
         paper = make_paper(
@@ -157,7 +170,10 @@ class TestPaperCollectionSerialization:
     """Tests for PaperCollection config round-trip."""
 
     def test_roundtrip(self):
-        from tests.support.canonical_exports import _config_to_dict, _dict_to_config
+        from arxiv_browser.config import (
+            _config_to_dict,
+            _dict_to_config,
+        )
 
         config = UserConfig()
         config.collections = [
@@ -179,21 +195,21 @@ class TestPaperCollectionSerialization:
         assert len(restored.collections[1].paper_ids) == 2
 
     def test_max_collections_enforced(self):
-        from tests.support.canonical_exports import _dict_to_config
+        from arxiv_browser.config import _dict_to_config
 
         data = {"collections": [{"name": f"col-{i}", "paper_ids": []} for i in range(30)]}
         config = _dict_to_config(data)
         assert len(config.collections) <= MAX_COLLECTIONS
 
     def test_max_papers_per_collection_enforced(self):
-        from tests.support.canonical_exports import _dict_to_config
+        from arxiv_browser.config import _dict_to_config
 
         data = {"collections": [{"name": "big", "paper_ids": [f"id-{i}" for i in range(600)]}]}
         config = _dict_to_config(data)
         assert len(config.collections[0].paper_ids) <= MAX_PAPERS_PER_COLLECTION
 
     def test_invalid_entries_skipped(self):
-        from tests.support.canonical_exports import _dict_to_config
+        from arxiv_browser.config import _dict_to_config
 
         data = {"collections": ["not-a-dict", {"name": ""}, {"name": "valid", "paper_ids": []}]}
         config = _dict_to_config(data)
@@ -201,7 +217,7 @@ class TestPaperCollectionSerialization:
         assert config.collections[0].name == "valid"
 
     def test_non_string_paper_ids_filtered(self):
-        from tests.support.canonical_exports import _dict_to_config
+        from arxiv_browser.config import _dict_to_config
 
         data = {"collections": [{"name": "test", "paper_ids": ["ok", 123, None, "also-ok"]}]}
         config = _dict_to_config(data)
@@ -545,7 +561,7 @@ class TestCLIVersionAndSubcommands:
 
     def test_version_flag_exits_zero(self, monkeypatch, capsys):
         """``--version`` should print version info and exit 0."""
-        from tests.support.canonical_exports import main
+        from arxiv_browser.cli import main
 
         monkeypatch.setattr("sys.argv", ["arxiv_browser", "--version"])
 
@@ -557,7 +573,7 @@ class TestCLIVersionAndSubcommands:
 
     def test_short_version_flag_exits_zero(self, monkeypatch, capsys):
         """``-V`` should behave the same as ``--version``."""
-        from tests.support.canonical_exports import main
+        from arxiv_browser.cli import main
 
         monkeypatch.setattr("sys.argv", ["arxiv_browser", "-V"])
 
@@ -590,7 +606,7 @@ class TestCLIVersionAndSubcommands:
 
     def test_config_path_subcommand(self, monkeypatch, capsys):
         """``config-path`` should print the config path and exit 0."""
-        from tests.support.canonical_exports import main
+        from arxiv_browser.cli import main
 
         monkeypatch.setattr("sys.argv", ["arxiv_browser", "config-path"])
 

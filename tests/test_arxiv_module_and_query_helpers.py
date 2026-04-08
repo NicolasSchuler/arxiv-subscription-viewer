@@ -7,19 +7,36 @@ from pathlib import Path
 
 import pytest
 
-from arxiv_browser.themes import THEME_NAMES, THEMES
-from tests.support.canonical_exports import (
-    ARXIV_API_DEFAULT_MAX_RESULTS,
-    ARXIV_DATE_FORMAT,
-    DEFAULT_CATEGORY_COLOR,
+from arxiv_browser.browser.core import SUBPROCESS_TIMEOUT
+from arxiv_browser.config import (
+    export_metadata,
+    import_metadata,
+    load_config,
+    save_config,
+)
+from arxiv_browser.export import (
+    escape_bibtex,
+    extract_year,
+    format_collection_as_markdown,
+    format_paper_as_bibtex,
+    format_paper_as_ris,
+    format_papers_as_csv,
+    format_papers_as_markdown_table,
+    generate_citation_key,
+    get_pdf_download_path,
+)
+from arxiv_browser.llm import (
     DEFAULT_LLM_PROMPT,
     LLM_PRESETS,
+    SUMMARY_MODES,
+    build_llm_prompt,
+    get_summary_db_path,
+)
+from arxiv_browser.models import (
+    ARXIV_API_DEFAULT_MAX_RESULTS,
     MAX_COLLECTIONS,
     MAX_PAPERS_PER_COLLECTION,
     SORT_OPTIONS,
-    SUBPROCESS_TIMEOUT,
-    SUMMARY_MODES,
-    TAG_NAMESPACE_COLORS,
     Paper,
     PaperCollection,
     PaperMetadata,
@@ -27,38 +44,34 @@ from tests.support.canonical_exports import (
     SearchBookmark,
     UserConfig,
     WatchListEntry,
+)
+from arxiv_browser.parsing import (
+    ARXIV_DATE_FORMAT,
     build_arxiv_search_query,
-    build_llm_prompt,
     clean_latex,
-    escape_bibtex,
-    export_metadata,
     extract_text_from_html,
-    extract_year,
-    format_categories,
-    format_collection_as_markdown,
-    format_paper_as_bibtex,
-    format_paper_as_ris,
-    format_papers_as_csv,
-    format_papers_as_markdown_table,
-    format_summary_as_rich,
-    generate_citation_key,
-    get_pdf_download_path,
-    get_summary_db_path,
-    get_tag_color,
-    import_metadata,
-    insert_implicit_and,
-    load_config,
     normalize_arxiv_id,
     parse_arxiv_api_feed,
     parse_arxiv_date,
     parse_arxiv_file,
     parse_arxiv_version_map,
-    parse_tag_namespace,
+)
+from arxiv_browser.query import (
+    format_categories,
+    format_summary_as_rich,
+    insert_implicit_and,
     pill_label_for_token,
     reconstruct_query,
-    save_config,
     to_rpn,
     tokenize_query,
+)
+from arxiv_browser.themes import (
+    DEFAULT_CATEGORY_COLOR,
+    TAG_NAMESPACE_COLORS,
+    THEME_NAMES,
+    THEMES,
+    get_tag_color,
+    parse_tag_namespace,
 )
 
 # ============================================================================
@@ -76,7 +89,7 @@ class TestStatusFilterRegressions:
 
     def test_help_sections_include_history_and_palette_keys(self):
         """Help content should include key hints from runtime bindings."""
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         sections = app._build_help_sections()
@@ -93,7 +106,7 @@ class TestStatusFilterRegressions:
         """Command palette labels should reflect the current UI state."""
         from types import SimpleNamespace
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._in_arxiv_api_mode = True
@@ -136,7 +149,7 @@ class TestStatusFilterRegressions:
 
     def test_help_sections_include_getting_started_shortcuts(self):
         """Help content should lead with a concise getting-started flow."""
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         sections = app._build_help_sections()
@@ -153,7 +166,7 @@ class TestStatusFilterRegressions:
 
     def test_binding_labels_use_long_form_naming(self):
         """Binding descriptions should use long-form action names."""
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         by_action = {binding.action: binding for binding in ArxivBrowser.BINDINGS}
         assert by_action["command_palette"].description == "Command palette"
@@ -265,7 +278,7 @@ class TestStatusFilterRegressions:
         assert "[dim]│[/]" in wide
 
     def test_empty_state_messages_include_try_guidance(self):
-        from tests.support.canonical_exports import build_list_empty_message
+        from arxiv_browser.browser.core import build_list_empty_message
 
         query_msg = build_list_empty_message(
             query="transformer",
@@ -381,20 +394,21 @@ class TestModuleExports:
         for name in __all__:
             assert hasattr(arxiv_browser, name), f"{name} not found in module"
 
-    def test_root_package_compatibility_exports_remain_importable(self):
-        """Legacy root-package imports should keep resolving via the app shim."""
-        from arxiv_browser import DEFAULT_THEME, highlight_text
+    def test_root_package_legacy_extras_fail_cleanly(self):
+        """Undocumented root-package extras should no longer resolve."""
+        import arxiv_browser
 
-        assert DEFAULT_THEME["accent"]
-        assert callable(highlight_text)
+        with pytest.raises(AttributeError):
+            arxiv_browser.__getattr__("DEFAULT_THEME")
+
+        with pytest.raises(AttributeError):
+            arxiv_browser.__getattr__("highlight_text")
 
     def test_main_exports_exist(self):
         """Key exports should be available."""
-        from tests.support.canonical_exports import (
-            ArxivBrowser,
-            SessionState,
-            main,
-        )
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.cli import main
+        from arxiv_browser.models import SessionState
 
         assert Paper is not None
         assert ArxivBrowser is not None
@@ -404,37 +418,37 @@ class TestHighlightText:
     """Tests for highlight_text()."""
 
     def test_empty_text_returns_empty(self):
-        from tests.support.canonical_exports import highlight_text
+        from arxiv_browser.query import highlight_text
 
         assert highlight_text("", ["foo"], "#ff0000") == ""
 
     def test_empty_terms_returns_escaped(self):
-        from tests.support.canonical_exports import highlight_text
+        from arxiv_browser.query import highlight_text
 
         # Rich's escape only escapes recognized markup-like brackets
         result = highlight_text("Hello [bold]text[/bold]", [], "#ff0000")
         assert r"\[bold]" in result
 
     def test_short_terms_filtered(self):
-        from tests.support.canonical_exports import highlight_text
+        from arxiv_browser.query import highlight_text
 
         result = highlight_text("a b c", ["a"], "#ff0000")
         assert "[bold" not in result  # "a" is too short (< 2 chars)
 
     def test_dedup_terms(self):
-        from tests.support.canonical_exports import highlight_text
+        from arxiv_browser.query import highlight_text
 
         result = highlight_text("hello world", ["hello", "HELLO"], "#ff0000")
         assert result.count("[bold") == 1  # Deduped
 
     def test_case_insensitive_highlight(self):
-        from tests.support.canonical_exports import highlight_text
+        from arxiv_browser.query import highlight_text
 
         result = highlight_text("Deep Learning", ["deep"], "#ff0000")
         assert "[bold #ff0000]Deep[/]" in result
 
     def test_rich_escaping_preserved(self):
-        from tests.support.canonical_exports import highlight_text
+        from arxiv_browser.query import highlight_text
 
         result = highlight_text("[bold]text[/bold]", ["text"], "#ff0000")
         assert r"\[bold]" in result
@@ -444,17 +458,17 @@ class TestEscapeRichText:
     """Tests for escape_rich_text()."""
 
     def test_empty_string(self):
-        from tests.support.canonical_exports import escape_rich_text
+        from arxiv_browser.query import escape_rich_text
 
         assert escape_rich_text("") == ""
 
     def test_normal_text(self):
-        from tests.support.canonical_exports import escape_rich_text
+        from arxiv_browser.query import escape_rich_text
 
         assert escape_rich_text("Hello World") == "Hello World"
 
     def test_brackets_escaped(self):
-        from tests.support.canonical_exports import escape_rich_text
+        from arxiv_browser.query import escape_rich_text
 
         assert escape_rich_text("[bold]text[/bold]") == r"\[bold]text\[/bold]"
 
@@ -463,12 +477,12 @@ class TestFormatAuthorsBibtex:
     """Tests for format_authors_bibtex()."""
 
     def test_single_author(self):
-        from tests.support.canonical_exports import format_authors_bibtex
+        from arxiv_browser.export import format_authors_bibtex
 
         assert format_authors_bibtex("John Smith") == "John Smith"
 
     def test_special_chars_escaped(self):
-        from tests.support.canonical_exports import format_authors_bibtex
+        from arxiv_browser.export import format_authors_bibtex
 
         assert format_authors_bibtex("A & B") == r"A \& B"
 
@@ -477,7 +491,7 @@ class TestGetConfigPath:
     """Tests for get_config_path()."""
 
     def test_returns_path_with_config_json(self):
-        from tests.support.canonical_exports import get_config_path
+        from arxiv_browser.config import get_config_path
 
         path = get_config_path()
         assert isinstance(path, Path)
@@ -488,20 +502,20 @@ class TestComputePaperSimilarity:
     """Tests for compute_paper_similarity()."""
 
     def test_identity_similarity(self, make_paper):
-        from tests.support.canonical_exports import compute_paper_similarity
+        from arxiv_browser.similarity import compute_paper_similarity
 
         paper = make_paper()
         assert compute_paper_similarity(paper, paper) == 1.0
 
     def test_different_papers_less_than_one(self, make_paper):
-        from tests.support.canonical_exports import compute_paper_similarity
+        from arxiv_browser.similarity import compute_paper_similarity
 
         p1 = make_paper(arxiv_id="001", categories="cs.AI", authors="Smith")
         p2 = make_paper(arxiv_id="002", categories="quant-ph", authors="Jones")
         assert compute_paper_similarity(p1, p2) < 1.0
 
     def test_category_weight_dominates(self, make_paper):
-        from tests.support.canonical_exports import compute_paper_similarity
+        from arxiv_browser.similarity import compute_paper_similarity
 
         # Same categories, different authors
         p1 = make_paper(arxiv_id="001", categories="cs.AI cs.LG", authors="Smith")
@@ -518,7 +532,7 @@ class TestTfidfIndex:
     """Tests for TF-IDF tokenizer, TF computation, and TfidfIndex class."""
 
     def test_tokenize_basic(self):
-        from tests.support.canonical_exports import _tokenize_for_tfidf
+        from arxiv_browser.similarity import _tokenize_for_tfidf
 
         tokens = _tokenize_for_tfidf("Deep learning for natural language processing")
         assert isinstance(tokens, list)
@@ -529,19 +543,19 @@ class TestTfidfIndex:
         assert "processing" in tokens
 
     def test_tokenize_preserves_frequency(self):
-        from tests.support.canonical_exports import _tokenize_for_tfidf
+        from arxiv_browser.similarity import _tokenize_for_tfidf
 
         tokens = _tokenize_for_tfidf("transformer transformer transformer")
         assert tokens.count("transformer") == 3
 
     def test_tokenize_empty(self):
-        from tests.support.canonical_exports import _tokenize_for_tfidf
+        from arxiv_browser.similarity import _tokenize_for_tfidf
 
         assert _tokenize_for_tfidf(None) == []
         assert _tokenize_for_tfidf("") == []
 
     def test_tokenize_min_length(self):
-        from tests.support.canonical_exports import _tokenize_for_tfidf
+        from arxiv_browser.similarity import _tokenize_for_tfidf
 
         tokens = _tokenize_for_tfidf("a bb ccc dddd")
         # Only tokens with 3+ chars matching [a-z][a-z0-9]{2,}
@@ -550,7 +564,7 @@ class TestTfidfIndex:
         assert "bb" not in tokens
 
     def test_tokenize_stopwords(self):
-        from tests.support.canonical_exports import _tokenize_for_tfidf
+        from arxiv_browser.similarity import _tokenize_for_tfidf
 
         tokens = _tokenize_for_tfidf("this paper presents the method")
         assert "this" not in tokens
@@ -562,20 +576,20 @@ class TestTfidfIndex:
     def test_compute_tf_sublinear(self):
         import math
 
-        from tests.support.canonical_exports import _compute_tf
+        from arxiv_browser.similarity import _compute_tf
 
         tf = _compute_tf(["transformer", "transformer", "transformer", "model"])
         assert tf["transformer"] == pytest.approx(1.0 + math.log(3))
         assert tf["model"] == pytest.approx(1.0 + math.log(1))
 
     def test_build_empty_corpus(self):
-        from tests.support.canonical_exports import TfidfIndex
+        from arxiv_browser.similarity import TfidfIndex
 
         index = TfidfIndex.build([], text_fn=lambda p: p.title)
         assert len(index) == 0
 
     def test_build_single_paper(self, make_paper):
-        from tests.support.canonical_exports import TfidfIndex
+        from arxiv_browser.similarity import TfidfIndex
 
         papers = [make_paper(title="Attention mechanisms in deep learning")]
         index = TfidfIndex.build(papers, text_fn=lambda p: p.title)
@@ -583,7 +597,7 @@ class TestTfidfIndex:
         assert len(index) == 0
 
     def test_build_two_papers(self, make_paper):
-        from tests.support.canonical_exports import TfidfIndex
+        from arxiv_browser.similarity import TfidfIndex
 
         papers = [
             make_paper(arxiv_id="001", title="Attention mechanisms in deep learning"),
@@ -595,7 +609,7 @@ class TestTfidfIndex:
         assert "002" in index
 
     def test_cosine_self_is_one(self, make_paper):
-        from tests.support.canonical_exports import TfidfIndex
+        from arxiv_browser.similarity import TfidfIndex
 
         papers = [
             make_paper(arxiv_id="001", title="Attention mechanisms in deep learning"),
@@ -605,7 +619,7 @@ class TestTfidfIndex:
         assert index.cosine_similarity("001", "001") == pytest.approx(1.0)
 
     def test_similar_scores_higher(self, make_paper):
-        from tests.support.canonical_exports import TfidfIndex
+        from arxiv_browser.similarity import TfidfIndex
 
         papers = [
             make_paper(arxiv_id="001", title="Deep learning for image classification"),
@@ -618,7 +632,7 @@ class TestTfidfIndex:
         assert sim_related > sim_unrelated
 
     def test_cosine_missing_returns_zero(self, make_paper):
-        from tests.support.canonical_exports import TfidfIndex
+        from arxiv_browser.similarity import TfidfIndex
 
         papers = [
             make_paper(arxiv_id="001", title="Deep learning methods"),
@@ -629,7 +643,7 @@ class TestTfidfIndex:
         assert index.cosine_similarity("unknown", "001") == 0.0
 
     def test_idf_downweights_common(self, make_paper):
-        from tests.support.canonical_exports import TfidfIndex
+        from arxiv_browser.similarity import TfidfIndex
 
         papers = [
             make_paper(arxiv_id="001", title="Deep learning attention mechanisms"),
@@ -642,7 +656,7 @@ class TestTfidfIndex:
         assert index._idf.get("quantum", 0) > index._idf.get("deep", 0)
 
     def test_contains_protocol(self, make_paper):
-        from tests.support.canonical_exports import TfidfIndex
+        from arxiv_browser.similarity import TfidfIndex
 
         papers = [
             make_paper(arxiv_id="001", title="Testing containment protocol"),
@@ -653,7 +667,7 @@ class TestTfidfIndex:
         assert "nonexistent" not in index
 
     def test_compute_similarity_with_tfidf(self, make_paper):
-        from tests.support.canonical_exports import (
+        from arxiv_browser.similarity import (
             SIMILARITY_WEIGHT_AUTHOR,
             SIMILARITY_WEIGHT_CATEGORY,
             SIMILARITY_WEIGHT_TEXT,
@@ -683,7 +697,7 @@ class TestTfidfIndex:
         assert score >= SIMILARITY_WEIGHT_CATEGORY * 0.99
 
     def test_compute_similarity_without_tfidf(self, make_paper):
-        from tests.support.canonical_exports import compute_paper_similarity
+        from arxiv_browser.similarity import compute_paper_similarity
 
         p1 = make_paper(
             arxiv_id="001",
@@ -707,13 +721,13 @@ class TestIsAdvancedQuery:
     """Tests for is_advanced_query()."""
 
     def test_plain_terms_not_advanced(self):
-        from tests.support.canonical_exports import is_advanced_query
+        from arxiv_browser.query import is_advanced_query
 
         tokens = [QueryToken(kind="term", value="attention")]
         assert is_advanced_query(tokens) is False
 
     def test_operator_is_advanced(self):
-        from tests.support.canonical_exports import is_advanced_query
+        from arxiv_browser.query import is_advanced_query
 
         tokens = [
             QueryToken(kind="term", value="a"),
@@ -723,25 +737,25 @@ class TestIsAdvancedQuery:
         assert is_advanced_query(tokens) is True
 
     def test_field_prefix_is_advanced(self):
-        from tests.support.canonical_exports import is_advanced_query
+        from arxiv_browser.query import is_advanced_query
 
         tokens = [QueryToken(kind="term", value="cs.AI", field="cat")]
         assert is_advanced_query(tokens) is True
 
     def test_quoted_phrase_is_advanced(self):
-        from tests.support.canonical_exports import is_advanced_query
+        from arxiv_browser.query import is_advanced_query
 
         tokens = [QueryToken(kind="term", value="deep learning", phrase=True)]
         assert is_advanced_query(tokens) is True
 
     def test_unread_virtual_term_is_advanced(self):
-        from tests.support.canonical_exports import is_advanced_query
+        from arxiv_browser.query import is_advanced_query
 
         tokens = [QueryToken(kind="term", value="unread")]
         assert is_advanced_query(tokens) is True
 
     def test_starred_virtual_term_is_advanced(self):
-        from tests.support.canonical_exports import is_advanced_query
+        from arxiv_browser.query import is_advanced_query
 
         tokens = [QueryToken(kind="term", value="starred")]
         assert is_advanced_query(tokens) is True
@@ -751,28 +765,28 @@ class TestMatchQueryTerm:
     """Tests for match_query_term()."""
 
     def test_empty_value_matches_all(self, make_paper):
-        from tests.support.canonical_exports import match_query_term
+        from arxiv_browser.query import match_query_term
 
         paper = make_paper()
         token = QueryToken(kind="term", value="   ")
         assert match_query_term(paper, token, None) is True
 
     def test_cat_field_matches(self, make_paper):
-        from tests.support.canonical_exports import match_query_term
+        from arxiv_browser.query import match_query_term
 
         paper = make_paper(categories="cs.AI cs.LG")
         token = QueryToken(kind="term", value="cs.AI", field="cat")
         assert match_query_term(paper, token, None) is True
 
     def test_cat_field_no_match(self, make_paper):
-        from tests.support.canonical_exports import match_query_term
+        from arxiv_browser.query import match_query_term
 
         paper = make_paper(categories="cs.AI")
         token = QueryToken(kind="term", value="cs.CV", field="cat")
         assert match_query_term(paper, token, None) is False
 
     def test_tag_field_matches(self, make_paper):
-        from tests.support.canonical_exports import match_query_term
+        from arxiv_browser.query import match_query_term
 
         paper = make_paper()
         meta = PaperMetadata(arxiv_id=paper.arxiv_id, tags=["important", "to-read"])
@@ -780,35 +794,35 @@ class TestMatchQueryTerm:
         assert match_query_term(paper, token, meta) is True
 
     def test_tag_field_no_metadata(self, make_paper):
-        from tests.support.canonical_exports import match_query_term
+        from arxiv_browser.query import match_query_term
 
         paper = make_paper()
         token = QueryToken(kind="term", value="important", field="tag")
         assert match_query_term(paper, token, None) is False
 
     def test_title_field_matches(self, make_paper):
-        from tests.support.canonical_exports import match_query_term
+        from arxiv_browser.query import match_query_term
 
         paper = make_paper(title="Deep Learning for NLP")
         token = QueryToken(kind="term", value="Deep", field="title")
         assert match_query_term(paper, token, None) is True
 
     def test_author_field_matches(self, make_paper):
-        from tests.support.canonical_exports import match_query_term
+        from arxiv_browser.query import match_query_term
 
         paper = make_paper(authors="John Smith")
         token = QueryToken(kind="term", value="smith", field="author")
         assert match_query_term(paper, token, None) is True
 
     def test_abstract_field_matches(self, make_paper):
-        from tests.support.canonical_exports import match_query_term
+        from arxiv_browser.query import match_query_term
 
         paper = make_paper()
         token = QueryToken(kind="term", value="test abstract", field="abstract")
         assert match_query_term(paper, token, None, abstract_text="Test abstract content.") is True
 
     def test_unread_virtual_term(self, make_paper):
-        from tests.support.canonical_exports import match_query_term
+        from arxiv_browser.query import match_query_term
 
         paper = make_paper()
         token = QueryToken(kind="term", value="unread")
@@ -819,7 +833,7 @@ class TestMatchQueryTerm:
         assert match_query_term(paper, token, meta) is False
 
     def test_starred_virtual_term(self, make_paper):
-        from tests.support.canonical_exports import match_query_term
+        from arxiv_browser.query import match_query_term
 
         paper = make_paper()
         token = QueryToken(kind="term", value="starred")
@@ -830,7 +844,7 @@ class TestMatchQueryTerm:
         assert match_query_term(paper, token, meta) is True
 
     def test_fallback_search_title_and_authors(self, make_paper):
-        from tests.support.canonical_exports import match_query_term
+        from arxiv_browser.query import match_query_term
 
         paper = make_paper(title="Attention Mechanism", authors="Jane Doe")
         token = QueryToken(kind="term", value="attention")
@@ -841,20 +855,20 @@ class TestMatchesAdvancedQuery:
     """Tests for matches_advanced_query()."""
 
     def test_empty_rpn_matches_all(self, make_paper):
-        from tests.support.canonical_exports import matches_advanced_query
+        from arxiv_browser.query import matches_advanced_query
 
         paper = make_paper()
         assert matches_advanced_query(paper, [], None) is True
 
     def test_single_term(self, make_paper):
-        from tests.support.canonical_exports import matches_advanced_query
+        from arxiv_browser.query import matches_advanced_query
 
         paper = make_paper(categories="cs.AI")
         rpn = [QueryToken(kind="term", value="cs.AI", field="cat")]
         assert matches_advanced_query(paper, rpn, None) is True
 
     def test_and_query(self, make_paper):
-        from tests.support.canonical_exports import matches_advanced_query
+        from arxiv_browser.query import matches_advanced_query
 
         paper = make_paper(title="Deep Learning for NLP")
         rpn = [
@@ -865,7 +879,7 @@ class TestMatchesAdvancedQuery:
         assert matches_advanced_query(paper, rpn, None) is True
 
     def test_or_query(self, make_paper):
-        from tests.support.canonical_exports import matches_advanced_query
+        from arxiv_browser.query import matches_advanced_query
 
         paper = make_paper(title="Deep Learning")
         rpn = [
@@ -876,7 +890,7 @@ class TestMatchesAdvancedQuery:
         assert matches_advanced_query(paper, rpn, None) is True
 
     def test_not_query(self, make_paper):
-        from tests.support.canonical_exports import matches_advanced_query
+        from arxiv_browser.query import matches_advanced_query
 
         paper = make_paper(title="Deep Learning")
         rpn = [
@@ -890,49 +904,49 @@ class TestPaperMatchesWatchEntry:
     """Tests for paper_matches_watch_entry()."""
 
     def test_author_match(self, make_paper):
-        from tests.support.canonical_exports import paper_matches_watch_entry
+        from arxiv_browser.query import paper_matches_watch_entry
 
         paper = make_paper(authors="John Smith, Jane Doe")
         entry = WatchListEntry(pattern="Smith", match_type="author")
         assert paper_matches_watch_entry(paper, entry) is True
 
     def test_author_no_match(self, make_paper):
-        from tests.support.canonical_exports import paper_matches_watch_entry
+        from arxiv_browser.query import paper_matches_watch_entry
 
         paper = make_paper(authors="John Smith")
         entry = WatchListEntry(pattern="Wilson", match_type="author")
         assert paper_matches_watch_entry(paper, entry) is False
 
     def test_title_match(self, make_paper):
-        from tests.support.canonical_exports import paper_matches_watch_entry
+        from arxiv_browser.query import paper_matches_watch_entry
 
         paper = make_paper(title="Deep Learning for NLP")
         entry = WatchListEntry(pattern="Deep Learning", match_type="title")
         assert paper_matches_watch_entry(paper, entry) is True
 
     def test_keyword_match_in_title(self, make_paper):
-        from tests.support.canonical_exports import paper_matches_watch_entry
+        from arxiv_browser.query import paper_matches_watch_entry
 
         paper = make_paper(title="Transformer Architecture", abstract_raw="Some abstract")
         entry = WatchListEntry(pattern="transformer", match_type="keyword")
         assert paper_matches_watch_entry(paper, entry) is True
 
     def test_keyword_match_in_abstract(self, make_paper):
-        from tests.support.canonical_exports import paper_matches_watch_entry
+        from arxiv_browser.query import paper_matches_watch_entry
 
         paper = make_paper(title="Some Title", abstract_raw="attention mechanism")
         entry = WatchListEntry(pattern="attention", match_type="keyword")
         assert paper_matches_watch_entry(paper, entry) is True
 
     def test_case_sensitive(self, make_paper):
-        from tests.support.canonical_exports import paper_matches_watch_entry
+        from arxiv_browser.query import paper_matches_watch_entry
 
         paper = make_paper(authors="john smith")
         entry = WatchListEntry(pattern="John", match_type="author", case_sensitive=True)
         assert paper_matches_watch_entry(paper, entry) is False
 
     def test_unknown_match_type(self, make_paper):
-        from tests.support.canonical_exports import paper_matches_watch_entry
+        from arxiv_browser.query import paper_matches_watch_entry
 
         paper = make_paper()
         entry = WatchListEntry(pattern="test", match_type="unknown")
@@ -943,7 +957,7 @@ class TestSortPapers:
     """Tests for sort_papers()."""
 
     def test_sort_by_title(self, make_paper):
-        from tests.support.canonical_exports import sort_papers
+        from arxiv_browser.query import sort_papers
 
         papers = [
             make_paper(title="Zebra"),
@@ -954,7 +968,7 @@ class TestSortPapers:
         assert [p.title for p in result] == ["Apple", "Mango", "Zebra"]
 
     def test_sort_by_date_descending(self, make_paper):
-        from tests.support.canonical_exports import sort_papers
+        from arxiv_browser.query import sort_papers
 
         papers = [
             make_paper(date="Mon, 1 Jan 2024"),
@@ -966,7 +980,7 @@ class TestSortPapers:
         assert result[-1].date == "Mon, 1 Jan 2024"
 
     def test_sort_by_arxiv_id_descending(self, make_paper):
-        from tests.support.canonical_exports import sort_papers
+        from arxiv_browser.query import sort_papers
 
         papers = [
             make_paper(arxiv_id="2401.00001"),
@@ -977,7 +991,7 @@ class TestSortPapers:
         assert [p.arxiv_id for p in result] == ["2401.00003", "2401.00002", "2401.00001"]
 
     def test_sort_does_not_mutate_original(self, make_paper):
-        from tests.support.canonical_exports import sort_papers
+        from arxiv_browser.query import sort_papers
 
         papers = [make_paper(title="B"), make_paper(title="A")]
         original_order = [p.title for p in papers]
@@ -989,7 +1003,7 @@ class TestFormatPaperForClipboard:
     """Tests for format_paper_for_clipboard()."""
 
     def test_basic_format(self, make_paper):
-        from tests.support.canonical_exports import format_paper_for_clipboard
+        from arxiv_browser.export import format_paper_for_clipboard
 
         paper = make_paper(title="Test Paper", authors="Author", arxiv_id="2401.12345")
         result = format_paper_for_clipboard(paper, abstract_text="Some abstract")
@@ -998,14 +1012,14 @@ class TestFormatPaperForClipboard:
         assert "Abstract: Some abstract" in result
 
     def test_includes_comments(self, make_paper):
-        from tests.support.canonical_exports import format_paper_for_clipboard
+        from arxiv_browser.export import format_paper_for_clipboard
 
         paper = make_paper(comments="10 pages, 5 figures")
         result = format_paper_for_clipboard(paper)
         assert "Comments: 10 pages, 5 figures" in result
 
     def test_omits_none_comments(self, make_paper):
-        from tests.support.canonical_exports import format_paper_for_clipboard
+        from arxiv_browser.export import format_paper_for_clipboard
 
         paper = make_paper(comments=None)
         result = format_paper_for_clipboard(paper)
@@ -1016,7 +1030,7 @@ class TestFormatPaperAsMarkdown:
     """Tests for format_paper_as_markdown()."""
 
     def test_headers_and_sections(self, make_paper):
-        from tests.support.canonical_exports import format_paper_as_markdown
+        from arxiv_browser.export import format_paper_as_markdown
 
         paper = make_paper(title="Test Paper", authors="Author")
         result = format_paper_as_markdown(paper, abstract_text="Some abstract")
@@ -1025,7 +1039,7 @@ class TestFormatPaperAsMarkdown:
         assert "**Authors:** Author" in result
 
     def test_arxiv_link_format(self, make_paper):
-        from tests.support.canonical_exports import format_paper_as_markdown
+        from arxiv_browser.export import format_paper_as_markdown
 
         paper = make_paper(arxiv_id="2401.12345")
         result = format_paper_as_markdown(paper)
@@ -1036,19 +1050,19 @@ class TestGetPdfUrl:
     """Tests for get_pdf_url()."""
 
     def test_standard_abs_url(self, make_paper):
-        from tests.support.canonical_exports import get_pdf_url
+        from arxiv_browser.export import get_pdf_url
 
         paper = make_paper(url="https://arxiv.org/abs/2401.12345", arxiv_id="2401.12345")
         assert get_pdf_url(paper) == "https://arxiv.org/pdf/2401.12345.pdf"
 
     def test_already_pdf_url(self, make_paper):
-        from tests.support.canonical_exports import get_pdf_url
+        from arxiv_browser.export import get_pdf_url
 
         paper = make_paper(url="https://arxiv.org/pdf/2401.12345.pdf")
         assert get_pdf_url(paper) == "https://arxiv.org/pdf/2401.12345.pdf"
 
     def test_pdf_url_without_extension(self, make_paper):
-        from tests.support.canonical_exports import get_pdf_url
+        from arxiv_browser.export import get_pdf_url
 
         paper = make_paper(url="https://arxiv.org/pdf/2401.12345")
         assert get_pdf_url(paper) == "https://arxiv.org/pdf/2401.12345.pdf"
@@ -1058,13 +1072,13 @@ class TestGetPaperUrl:
     """Tests for get_paper_url()."""
 
     def test_default_abs_url(self, make_paper):
-        from tests.support.canonical_exports import get_paper_url
+        from arxiv_browser.export import get_paper_url
 
         paper = make_paper(url="https://arxiv.org/abs/2401.12345")
         assert get_paper_url(paper) == "https://arxiv.org/abs/2401.12345"
 
     def test_prefer_pdf(self, make_paper):
-        from tests.support.canonical_exports import get_paper_url
+        from arxiv_browser.export import get_paper_url
 
         paper = make_paper(url="https://arxiv.org/abs/2401.12345", arxiv_id="2401.12345")
         result = get_paper_url(paper, prefer_pdf=True)
@@ -1075,7 +1089,7 @@ class TestBuildHighlightTerms:
     """Tests for build_highlight_terms()."""
 
     def test_title_field(self):
-        from tests.support.canonical_exports import build_highlight_terms
+        from arxiv_browser.query import build_highlight_terms
 
         tokens = [QueryToken(kind="term", value="deep", field="title")]
         result = build_highlight_terms(tokens)
@@ -1083,7 +1097,7 @@ class TestBuildHighlightTerms:
         assert result["author"] == []
 
     def test_unfielded_goes_to_title_and_author(self):
-        from tests.support.canonical_exports import build_highlight_terms
+        from arxiv_browser.query import build_highlight_terms
 
         tokens = [QueryToken(kind="term", value="smith")]
         result = build_highlight_terms(tokens)
@@ -1091,14 +1105,14 @@ class TestBuildHighlightTerms:
         assert "smith" in result["author"]
 
     def test_operators_skipped(self):
-        from tests.support.canonical_exports import build_highlight_terms
+        from arxiv_browser.query import build_highlight_terms
 
         tokens = [QueryToken(kind="op", value="AND")]
         result = build_highlight_terms(tokens)
         assert all(v == [] for v in result.values())
 
     def test_virtual_terms_skipped(self):
-        from tests.support.canonical_exports import build_highlight_terms
+        from arxiv_browser.query import build_highlight_terms
 
         tokens = [QueryToken(kind="term", value="unread")]
         result = build_highlight_terms(tokens)

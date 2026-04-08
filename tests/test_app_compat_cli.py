@@ -7,19 +7,36 @@ from pathlib import Path
 
 import pytest
 
-from arxiv_browser.themes import THEME_NAMES, THEMES
-from tests.support.canonical_exports import (
-    ARXIV_API_DEFAULT_MAX_RESULTS,
-    ARXIV_DATE_FORMAT,
-    DEFAULT_CATEGORY_COLOR,
+from arxiv_browser.browser.core import SUBPROCESS_TIMEOUT
+from arxiv_browser.config import (
+    export_metadata,
+    import_metadata,
+    load_config,
+    save_config,
+)
+from arxiv_browser.export import (
+    escape_bibtex,
+    extract_year,
+    format_collection_as_markdown,
+    format_paper_as_bibtex,
+    format_paper_as_ris,
+    format_papers_as_csv,
+    format_papers_as_markdown_table,
+    generate_citation_key,
+    get_pdf_download_path,
+)
+from arxiv_browser.llm import (
     DEFAULT_LLM_PROMPT,
     LLM_PRESETS,
+    SUMMARY_MODES,
+    build_llm_prompt,
+    get_summary_db_path,
+)
+from arxiv_browser.models import (
+    ARXIV_API_DEFAULT_MAX_RESULTS,
     MAX_COLLECTIONS,
     MAX_PAPERS_PER_COLLECTION,
     SORT_OPTIONS,
-    SUBPROCESS_TIMEOUT,
-    SUMMARY_MODES,
-    TAG_NAMESPACE_COLORS,
     Paper,
     PaperCollection,
     PaperMetadata,
@@ -27,38 +44,34 @@ from tests.support.canonical_exports import (
     SearchBookmark,
     UserConfig,
     WatchListEntry,
+)
+from arxiv_browser.parsing import (
+    ARXIV_DATE_FORMAT,
     build_arxiv_search_query,
-    build_llm_prompt,
     clean_latex,
-    escape_bibtex,
-    export_metadata,
     extract_text_from_html,
-    extract_year,
-    format_categories,
-    format_collection_as_markdown,
-    format_paper_as_bibtex,
-    format_paper_as_ris,
-    format_papers_as_csv,
-    format_papers_as_markdown_table,
-    format_summary_as_rich,
-    generate_citation_key,
-    get_pdf_download_path,
-    get_summary_db_path,
-    get_tag_color,
-    import_metadata,
-    insert_implicit_and,
-    load_config,
     normalize_arxiv_id,
     parse_arxiv_api_feed,
     parse_arxiv_date,
     parse_arxiv_file,
     parse_arxiv_version_map,
-    parse_tag_namespace,
+)
+from arxiv_browser.query import (
+    format_categories,
+    format_summary_as_rich,
+    insert_implicit_and,
     pill_label_for_token,
     reconstruct_query,
-    save_config,
     to_rpn,
     tokenize_query,
+)
+from arxiv_browser.themes import (
+    DEFAULT_CATEGORY_COLOR,
+    TAG_NAMESPACE_COLORS,
+    THEME_NAMES,
+    THEMES,
+    get_tag_color,
+    parse_tag_namespace,
 )
 
 # ============================================================================
@@ -461,39 +474,12 @@ class TestMainCLI:
         assert captured["current_date_index"] == 0
         assert captured["ascii_icons"] is False
 
-    def test_package_main_uses_app_patch_surface(self, monkeypatch, make_paper):
-        """Top-level package main should preserve the app-module patch surface."""
-        from arxiv_browser import main
+    def test_package_main_resolves_to_canonical_cli_entrypoint(self):
+        """Top-level package main should resolve directly to ``arxiv_browser.cli.main``."""
+        import arxiv_browser
+        import arxiv_browser.cli as cli_module
 
-        paper = make_paper(arxiv_id="2602.00005")
-        seen: dict[str, bool] = {"load_config": False, "resolve_papers": False}
-
-        class FakeApp:
-            def __init__(self, papers, *_args, **_kwargs):
-                assert papers == [paper]
-
-            def run(self):
-                return None
-
-        def fake_load_config() -> UserConfig:
-            seen["load_config"] = True
-            return UserConfig()
-
-        def fake_resolve(args, base_dir, config, history_files):
-            seen["resolve_papers"] = True
-            return ([paper], [], 0)
-
-        monkeypatch.setattr("sys.argv", ["arxiv_browser", "browse"])
-        monkeypatch.setattr("arxiv_browser.app.load_config", fake_load_config)
-        monkeypatch.setattr("arxiv_browser.app._resolve_papers", fake_resolve)
-        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-        monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-        monkeypatch.setattr("arxiv_browser.app.ArxivBrowser", FakeApp)
-
-        result = main()
-
-        assert result == 0
-        assert seen == {"load_config": True, "resolve_papers": True}
+        assert arxiv_browser.main is cli_module.main
 
     def test_search_page_mode_fetches_single_page(self, monkeypatch, make_paper):
         """`search --mode page` should use a single API page instead of latest-day mode."""

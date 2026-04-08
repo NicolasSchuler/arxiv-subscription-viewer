@@ -10,14 +10,14 @@ import pytest
 from textual.css.query import NoMatches
 
 from arxiv_browser.actions import library_actions, llm_actions
-from arxiv_browser.browser import _runtime as browser_runtime
 from arxiv_browser.browser import discovery
+from arxiv_browser.browser.core import ArxivBrowser
+from arxiv_browser.browser.empty_state import build_list_empty_message
 from arxiv_browser.modals.collections import CollectionsModal
 from arxiv_browser.modals.search import CommandPaletteModal, _truncate_palette_text
 from arxiv_browser.models import PaperCollection, PaperMetadata, WatchListEntry
 from arxiv_browser.semantic_scholar import S2RecommendationsCacheSnapshot, SemanticScholarPaper
 from arxiv_browser.services import enrichment_service as enrich
-from tests.support import canonical_exports as app_mod
 from tests.support.app_stubs import _make_app_config, _new_app_stub, _paper
 from tests.support.patch_helpers import patch_save_config
 
@@ -311,31 +311,31 @@ class TestCollectionsModalBehavior:
 
 class TestBrowserRuntimeBehavior:
     def test_build_list_empty_message_covers_all_states(self) -> None:
-        assert "No papers match your search" in browser_runtime.build_list_empty_message(
+        assert "No papers match your search" in build_list_empty_message(
             query="graph",
             in_arxiv_api_mode=False,
             watch_filter_active=False,
             history_mode=False,
         )
-        assert "No API results on this page" in browser_runtime.build_list_empty_message(
+        assert "No API results on this page" in build_list_empty_message(
             query="",
             in_arxiv_api_mode=True,
             watch_filter_active=False,
             history_mode=False,
         )
-        assert "No watched papers found" in browser_runtime.build_list_empty_message(
+        assert "No watched papers found" in build_list_empty_message(
             query="",
             in_arxiv_api_mode=False,
             watch_filter_active=True,
             history_mode=False,
         )
-        assert "No papers available for this date" in browser_runtime.build_list_empty_message(
+        assert "No papers available for this date" in build_list_empty_message(
             query="",
             in_arxiv_api_mode=False,
             watch_filter_active=False,
             history_mode=True,
         )
-        assert "No papers available" in browser_runtime.build_list_empty_message(
+        assert "No papers available" in build_list_empty_message(
             query="",
             in_arxiv_api_mode=False,
             watch_filter_active=False,
@@ -343,8 +343,10 @@ class TestBrowserRuntimeBehavior:
         )
 
     def test_legacy_sync_wrappers_are_removed(self) -> None:
-        assert not hasattr(browser_runtime, "sync_browser_globals")
-        assert not hasattr(browser_runtime, "sync_app_methods")
+        import importlib
+
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module("arxiv_browser.browser._runtime")
 
 
 class TestLlmActionBehavior:
@@ -543,8 +545,8 @@ class TestDiscoveryAndBrowseBehavior:
     @pytest.mark.asyncio
     async def test_build_tfidf_index_async_error_and_stale_epoch_paths(self) -> None:
         app = _new_app_stub()
-        app._build_tfidf_index_async = app_mod.ArxivBrowser._build_tfidf_index_async.__get__(
-            app, app_mod.ArxivBrowser
+        app._build_tfidf_index_async = ArxivBrowser._build_tfidf_index_async.__get__(
+            app, ArxivBrowser
         )
         app._capture_dataset_epoch = MagicMock(return_value=1)
         app.all_papers = [_paper("2403.60001"), _paper("2403.60002")]
@@ -577,12 +579,10 @@ class TestDiscoveryAndBrowseBehavior:
 
     def test_browse_fallback_paths_handle_missing_widgets(self) -> None:
         app = _new_app_stub()
-        app._capture_local_browse_snapshot = (
-            app_mod.ArxivBrowser._capture_local_browse_snapshot.__get__(app, app_mod.ArxivBrowser)
+        app._capture_local_browse_snapshot = ArxivBrowser._capture_local_browse_snapshot.__get__(
+            app, ArxivBrowser
         )
-        app._update_filter_pills = app_mod.ArxivBrowser._update_filter_pills.__get__(
-            app, app_mod.ArxivBrowser
-        )
+        app._update_filter_pills = ArxivBrowser._update_filter_pills.__get__(app, ArxivBrowser)
         app._in_arxiv_api_mode = True
         app._get_paper_list_widget = MagicMock(side_effect=NoMatches())
         app._get_filter_pill_bar_widget = MagicMock(side_effect=NoMatches())

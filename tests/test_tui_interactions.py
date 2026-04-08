@@ -12,15 +12,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 from textual.widgets import Input, Label, OptionList, Static
 
+from arxiv_browser.browser.core import ArxivBrowser
 from arxiv_browser.modals.editing import AutoTagSuggestModal, NotesModal, TagsModal
-from tests.support.canonical_exports import (
-    ArxivBrowser,
-    FilterPillBar,
+from arxiv_browser.models import (
     Paper,
     PaperMetadata,
     UserConfig,
-    tokenize_query,
 )
+from arxiv_browser.query import tokenize_query
+from arxiv_browser.widgets.chrome import FilterPillBar
 from tests.support.patch_helpers import patch_save_config
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

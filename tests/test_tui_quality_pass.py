@@ -12,27 +12,31 @@ import pytest
 from textual.events import Click
 from textual.widgets import Checkbox, Input, Label, ListView, Select, Static
 
-from arxiv_browser.widgets.listing import PaperListItem
-from tests.support.canonical_exports import (
-    MAX_COLLECTIONS,
+from arxiv_browser.browser.core import ArxivBrowser
+from arxiv_browser.modals import (
     AddToCollectionModal,
-    ArxivBrowser,
     ArxivSearchModal,
-    ArxivSearchRequest,
-    CitationEntry,
     CitationGraphScreen,
     CollectionsModal,
     CollectionViewModal,
     CommandPaletteModal,
-    DateNavigator,
-    FilterPillBar,
-    PaperCollection,
     RecommendationSourceModal,
     RecommendationsScreen,
-    WatchListEntry,
     WatchListModal,
-    tokenize_query,
 )
+from arxiv_browser.models import (
+    MAX_COLLECTIONS,
+    ArxivSearchRequest,
+    PaperCollection,
+    WatchListEntry,
+)
+from arxiv_browser.query import tokenize_query
+from arxiv_browser.semantic_scholar import CitationEntry
+from arxiv_browser.widgets.chrome import (
+    DateNavigator,
+    FilterPillBar,
+)
+from arxiv_browser.widgets.listing import PaperListItem
 from tests.support.patch_helpers import patch_save_config
 
 

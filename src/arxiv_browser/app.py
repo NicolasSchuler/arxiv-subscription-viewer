@@ -9,181 +9,35 @@ import sys
 
 import httpx
 
+from arxiv_browser.browser.content import ARXIV_HTML_TIMEOUT, MAX_PAPER_CONTENT_LENGTH
+from arxiv_browser.parsing import extract_text_from_html as _extract_text_from_html
+
 logger = logging.getLogger(__name__)
 
 _PUBLIC_EXPORTS = [
-    "ARXIV_API_DEFAULT_MAX_RESULTS",
-    "ARXIV_API_MAX_RESULTS_LIMIT",
-    "ARXIV_DATE_FORMAT",
-    "ARXIV_QUERY_FIELDS",
-    "ATOM_NS",
-    "AUTO_TAG_PROMPT_TEMPLATE",
-    "CATEGORY_COLORS",
-    "CATPPUCCIN_MOCHA_THEME",
-    "CHAT_SYSTEM_PROMPT",
-    "COMMAND_PALETTE_COMMANDS",
-    "CONFIG_APP_NAME",
-    "CONFIG_FILENAME",
-    "DEFAULT_BIBTEX_EXPORT_DIR",
-    "DEFAULT_CATEGORY_COLOR",
-    "DEFAULT_CATEGORY_COLORS",
-    "DEFAULT_COLLAPSED_SECTIONS",
-    "DEFAULT_LLM_PROMPT",
-    "DEFAULT_PDF_DOWNLOAD_DIR",
-    "DEFAULT_THEME",
-    "DETAIL_SECTION_KEYS",
-    "DETAIL_SECTION_NAMES",
-    "HISTORY_DATE_FORMAT",
-    "LLM_PRESETS",
-    "MAX_COLLECTIONS",
-    "MAX_PAPERS_PER_COLLECTION",
-    "RELEVANCE_PROMPT_TEMPLATE",
-    "SIMILARITY_READ_PENALTY",
-    "SIMILARITY_RECENCY_DAYS",
-    "SIMILARITY_RECENCY_WEIGHT",
-    "SIMILARITY_STARRED_BOOST",
-    "SIMILARITY_TOP_N",
-    "SIMILARITY_UNREAD_BOOST",
-    "SIMILARITY_WEIGHT_AUTHOR",
-    "SIMILARITY_WEIGHT_CATEGORY",
-    "SIMILARITY_WEIGHT_TEXT",
-    "SOLARIZED_DARK_THEME",
-    "SORT_OPTIONS",
-    "STOPWORDS",
-    "SUMMARY_MODES",
-    "TAG_NAMESPACE_COLORS",
-    "TEXTUAL_THEMES",
-    "THEMES",
-    "THEME_CATEGORY_COLORS",
-    "THEME_COLORS",
-    "THEME_NAMES",
-    "THEME_TAG_NAMESPACE_COLORS",
-    "WATCH_MATCH_TYPES",
-    "AddToCollectionModal",
     "ArxivBrowser",
     "ArxivBrowserOptions",
-    "ArxivSearchModeState",
-    "ArxivSearchRequest",
-    "CLIProvider",
-    "CliDependencies",
-    "CollectionViewModal",
-    "CollectionsModal",
-    "CommandPaletteModal",
-    "DetailRenderState",
-    "FilterPillBar",
-    "LLMResult",
-    "LocalBrowseSnapshot",
-    "MetadataSnapshotPickerModal",
-    "Paper",
-    "PaperChatScreen",
-    "PaperCollection",
-    "PaperDetails",
-    "PaperHighlightTerms",
-    "PaperListItem",
-    "PaperMetadata",
-    "PaperRowRenderState",
-    "QueryToken",
-    "RecommendationSourceModal",
-    "SearchBookmark",
-    "SectionToggleModal",
-    "SessionState",
-    "StatusBarState",
-    "TfidfIndex",
-    "UserConfig",
-    "WatchListEntry",
+    "_configure_color_mode",
     "_configure_logging",
-    "build_arxiv_search_query",
-    "build_auto_tag_prompt",
-    "build_daily_digest",
-    "build_highlight_terms",
-    "build_llm_prompt",
-    "build_relevance_prompt",
-    "clean_latex",
-    "compute_paper_similarity",
-    "count_papers_in_file",
     "discover_history_files",
-    "escape_bibtex",
-    "escape_rich_text",
-    "export_metadata",
-    "extract_text_from_html",
-    "extract_year",
-    "find_similar_papers",
-    "format_authors_bibtex",
-    "format_categories",
-    "format_collection_as_markdown",
-    "format_paper_as_bibtex",
-    "format_paper_as_markdown",
-    "format_paper_as_ris",
-    "format_paper_for_clipboard",
-    "format_papers_as_csv",
-    "format_papers_as_markdown_table",
-    "format_summary_as_rich",
-    "generate_citation_key",
-    "get_config_path",
-    "get_paper_url",
-    "get_pdf_download_path",
-    "get_pdf_url",
-    "get_relevance_db_path",
-    "get_summary_db_path",
-    "get_tag_color",
-    "highlight_text",
-    "import_metadata",
-    "insert_implicit_and",
-    "is_advanced_query",
     "load_config",
     "main",
-    "match_query_term",
-    "matches_advanced_query",
-    "normalize_arxiv_id",
-    "paper_matches_watch_entry",
-    "parse_arxiv_api_feed",
-    "parse_arxiv_date",
-    "parse_arxiv_file",
-    "parse_arxiv_version_map",
-    "parse_tag_namespace",
-    "pill_label_for_token",
-    "reconstruct_query",
-    "render_paper_option",
-    "render_progress_bar",
-    "resolve_provider",
-    "save_config",
-    "sort_papers",
-    "to_rpn",
-    "tokenize_query",
-    "truncate_text",
+    "_fetch_paper_content_async",
+    "_resolve_papers",
+    "_validate_interactive_tty",
 ]
 __all__ = list(_PUBLIC_EXPORTS)  # pyright: ignore[reportUnsupportedDunderAll]
 
-_EXPORT_MODULES = (
-    "arxiv_browser.browser.core",
-    "arxiv_browser.browser.content",
-    "arxiv_browser.browser.contracts",
-    "arxiv_browser.action_messages",
-    "arxiv_browser.cli",
-    "arxiv_browser.config",
-    "arxiv_browser.enrichment",
-    "arxiv_browser.export",
-    "arxiv_browser.help_ui",
-    "arxiv_browser.huggingface",
-    "arxiv_browser.io_actions",
-    "arxiv_browser.llm",
-    "arxiv_browser.llm_providers",
-    "arxiv_browser.modals",
-    "arxiv_browser.models",
-    "arxiv_browser.parsing",
-    "arxiv_browser.query",
-    "arxiv_browser.semantic_scholar",
-    "arxiv_browser.services.interfaces",
-    "arxiv_browser.services.llm_service",
-    "arxiv_browser.similarity",
-    "arxiv_browser.themes",
-    "arxiv_browser.ui_constants",
-    "arxiv_browser.ui_runtime",
-    "arxiv_browser.widgets",
-    "arxiv_browser.widgets.chrome",
-    "arxiv_browser.widgets.details",
-    "arxiv_browser.widgets.listing",
-)
+_EXPORT_SPECS = {
+    "ArxivBrowser": ("arxiv_browser.browser.core", "ArxivBrowser"),
+    "ArxivBrowserOptions": ("arxiv_browser.browser.core", "ArxivBrowserOptions"),
+    "_configure_color_mode": ("arxiv_browser.cli", "_configure_color_mode"),
+    "_configure_logging": ("arxiv_browser.cli", "_configure_logging"),
+    "discover_history_files": ("arxiv_browser.parsing", "discover_history_files"),
+    "load_config": ("arxiv_browser.config", "load_config"),
+    "_resolve_papers": ("arxiv_browser.cli", "_resolve_papers"),
+    "_validate_interactive_tty": ("arxiv_browser.cli", "_validate_interactive_tty"),
+}
 
 
 async def _fetch_paper_content_async(
@@ -191,11 +45,8 @@ async def _fetch_paper_content_async(
 ) -> str:
     """Fetch full paper text through the compatibility module patch surface."""
     html_url = f"https://arxiv.org/html/{paper.arxiv_id}"
-    request_timeout = __getattr__("ARXIV_HTML_TIMEOUT") if timeout is None else timeout
-    max_length = __getattr__("MAX_PAPER_CONTENT_LENGTH")
-    extract_html = globals().get("extract_text_from_html")
-    if extract_html is None:
-        extract_html = __getattr__("extract_text_from_html")
+    request_timeout = ARXIV_HTML_TIMEOUT if timeout is None else timeout
+    extract_html = globals().get("extract_text_from_html", _extract_text_from_html)
 
     try:
         if client is not None:
@@ -210,7 +61,7 @@ async def _fetch_paper_content_async(
         if response.status_code == 200:
             text = await asyncio.to_thread(extract_html, response.text)
             if text:
-                return text[:max_length]
+                return text[:MAX_PAPER_CONTENT_LENGTH]
         else:
             logger.warning(
                 "arXiv HTML fetch returned %d for %s",
@@ -225,17 +76,18 @@ async def _fetch_paper_content_async(
 
 
 def __getattr__(name: str):
-    for module_name in _EXPORT_MODULES:
-        module = importlib.import_module(module_name)
-        if hasattr(module, name):
-            value = getattr(module, name)
-            globals()[name] = value
-            return value
-    raise AttributeError(f"module 'arxiv_browser.app' has no attribute {name!r}")
+    export_spec = _EXPORT_SPECS.get(name)
+    if export_spec is None:
+        raise AttributeError(f"module 'arxiv_browser.app' has no attribute {name!r}")
+    module_name, attr_name = export_spec
+    module = importlib.import_module(module_name)
+    value = getattr(module, attr_name)
+    globals()[name] = value
+    return value
 
 
 def __dir__() -> list[str]:
-    return sorted(set(globals()) | set(__all__))
+    return sorted(__all__)
 
 
 def main() -> int:

@@ -18,7 +18,7 @@ from arxiv_browser.io_actions import (
     resolve_target_papers,
     write_timestamped_export_file,
 )
-from tests.support.canonical_exports import Paper
+from arxiv_browser.models import Paper
 
 
 def _paper(arxiv_id: str = "2401.12345", title: str = "Test") -> Paper:

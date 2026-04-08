@@ -6,11 +6,10 @@ from collections import deque
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from arxiv_browser.browser.core import ArxivBrowser
 from arxiv_browser.huggingface import HuggingFacePaper
 from arxiv_browser.models import UserConfig
 from arxiv_browser.semantic_scholar import SemanticScholarPaper
-from tests.support import canonical_exports as app_mod
-from tests.support.canonical_exports import ArxivBrowser
 
 
 def _new_app() -> ArxivBrowser:
@@ -143,7 +142,7 @@ class _DummyTimer:
 
 
 def _paper(arxiv_id: str = "2401.12345", **kwargs):
-    from tests.support.canonical_exports import Paper
+    from arxiv_browser.models import Paper
 
     defaults = {
         "arxiv_id": arxiv_id,
@@ -168,7 +167,7 @@ def _make_app_config(**kwargs):
 
 
 def _new_app_stub():
-    app = app_mod.ArxivBrowser.__new__(app_mod.ArxivBrowser)
+    app = ArxivBrowser.__new__(ArxivBrowser)
     app.notify = MagicMock()
     app._config = UserConfig()
     app._detail_timer = None

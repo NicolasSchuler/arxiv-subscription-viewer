@@ -7,19 +7,36 @@ from pathlib import Path
 
 import pytest
 
-from arxiv_browser.themes import THEME_NAMES, THEMES
-from tests.support.canonical_exports import (
-    ARXIV_API_DEFAULT_MAX_RESULTS,
-    ARXIV_DATE_FORMAT,
-    DEFAULT_CATEGORY_COLOR,
+from arxiv_browser.browser.core import SUBPROCESS_TIMEOUT
+from arxiv_browser.config import (
+    export_metadata,
+    import_metadata,
+    load_config,
+    save_config,
+)
+from arxiv_browser.export import (
+    escape_bibtex,
+    extract_year,
+    format_collection_as_markdown,
+    format_paper_as_bibtex,
+    format_paper_as_ris,
+    format_papers_as_csv,
+    format_papers_as_markdown_table,
+    generate_citation_key,
+    get_pdf_download_path,
+)
+from arxiv_browser.llm import (
     DEFAULT_LLM_PROMPT,
     LLM_PRESETS,
+    SUMMARY_MODES,
+    build_llm_prompt,
+    get_summary_db_path,
+)
+from arxiv_browser.models import (
+    ARXIV_API_DEFAULT_MAX_RESULTS,
     MAX_COLLECTIONS,
     MAX_PAPERS_PER_COLLECTION,
     SORT_OPTIONS,
-    SUBPROCESS_TIMEOUT,
-    SUMMARY_MODES,
-    TAG_NAMESPACE_COLORS,
     Paper,
     PaperCollection,
     PaperMetadata,
@@ -27,38 +44,34 @@ from tests.support.canonical_exports import (
     SearchBookmark,
     UserConfig,
     WatchListEntry,
+)
+from arxiv_browser.parsing import (
+    ARXIV_DATE_FORMAT,
     build_arxiv_search_query,
-    build_llm_prompt,
     clean_latex,
-    escape_bibtex,
-    export_metadata,
     extract_text_from_html,
-    extract_year,
-    format_categories,
-    format_collection_as_markdown,
-    format_paper_as_bibtex,
-    format_paper_as_ris,
-    format_papers_as_csv,
-    format_papers_as_markdown_table,
-    format_summary_as_rich,
-    generate_citation_key,
-    get_pdf_download_path,
-    get_summary_db_path,
-    get_tag_color,
-    import_metadata,
-    insert_implicit_and,
-    load_config,
     normalize_arxiv_id,
     parse_arxiv_api_feed,
     parse_arxiv_date,
     parse_arxiv_file,
     parse_arxiv_version_map,
-    parse_tag_namespace,
+)
+from arxiv_browser.query import (
+    format_categories,
+    format_summary_as_rich,
+    insert_implicit_and,
     pill_label_for_token,
     reconstruct_query,
-    save_config,
     to_rpn,
     tokenize_query,
+)
+from arxiv_browser.themes import (
+    DEFAULT_CATEGORY_COLOR,
+    TAG_NAMESPACE_COLORS,
+    THEME_NAMES,
+    THEMES,
+    get_tag_color,
+    parse_tag_namespace,
 )
 from tests.support.patch_helpers import patch_save_config
 
@@ -74,7 +87,7 @@ class TestWatchListActions:
     def _make_mock_app():
         from unittest.mock import MagicMock
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._config = UserConfig(watch_list=[WatchListEntry(pattern="old", match_type="title")])
@@ -145,7 +158,7 @@ class TestWatchFilterIntegration:
         """Pressing 'w' with empty watch list should remain inactive."""
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=3)
         app = ArxivBrowser(papers, restore_session=False)
@@ -161,7 +174,8 @@ class TestWatchFilterIntegration:
         """Pressing 'w' with watch entries should toggle filter on/off."""
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import ArxivBrowser, WatchListEntry
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.models import WatchListEntry
 
         papers = self._make_papers(make_paper, count=3)
         config = UserConfig(watch_list=[WatchListEntry(pattern="Author A", match_type="author")])
@@ -187,7 +201,8 @@ class TestWatchFilterIntegration:
 
         from textual.widgets import OptionList
 
-        from tests.support.canonical_exports import ArxivBrowser, WatchListEntry
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.models import WatchListEntry
 
         papers = self._make_papers(make_paper, count=3)
         # Only watch Author A — should match papers[0] only
@@ -226,8 +241,8 @@ class TestThemeCyclingIntegration:
         """Pressing Ctrl+T should cycle to the next theme."""
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import THEME_NAMES as APP_THEME_NAMES
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.themes import THEME_NAMES as APP_THEME_NAMES
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
@@ -245,8 +260,8 @@ class TestThemeCyclingIntegration:
         """Pressing Ctrl+T len(THEME_NAMES) times should return to the first theme."""
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import THEME_NAMES as APP_THEME_NAMES
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.themes import THEME_NAMES as APP_THEME_NAMES
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
@@ -264,7 +279,7 @@ class TestThemeCyclingIntegration:
 
         from textual.widgets import OptionList
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         papers = self._make_papers(make_paper, count=3)
         app = ArxivBrowser(papers, restore_session=False)
@@ -281,7 +296,8 @@ class TestThemeCyclingIntegration:
         """Theme cycling should invalidate detail cache and re-render markup colors."""
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import ArxivBrowser, PaperDetails
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.widgets.details import PaperDetails
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
@@ -325,7 +341,8 @@ class TestHistoryNavigationIntegration:
         from datetime import date as dt_date
         from unittest.mock import AsyncMock, patch
 
-        from tests.support.canonical_exports import ArxivBrowser, DateNavigator
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.widgets.chrome import DateNavigator
 
         # Create history files
         f1 = self._make_history_file(tmp_path, "2024-01-17", "2401.00003")
@@ -362,7 +379,8 @@ class TestHistoryNavigationIntegration:
         from datetime import date as dt_date
         from unittest.mock import AsyncMock, patch
 
-        from tests.support.canonical_exports import ArxivBrowser, DateNavigator
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.widgets.chrome import DateNavigator
 
         f1 = self._make_history_file(tmp_path, "2024-01-17", "2401.00003")
         f2 = self._make_history_file(tmp_path, "2024-01-16", "2401.00002")
@@ -397,7 +415,8 @@ class TestHistoryNavigationIntegration:
         from datetime import date as dt_date
         from unittest.mock import AsyncMock, patch
 
-        from tests.support.canonical_exports import ArxivBrowser, DateNavigator
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.widgets.chrome import DateNavigator
 
         f1 = self._make_history_file(tmp_path, "2024-01-17", "2401.00003")
         f2 = self._make_history_file(tmp_path, "2024-01-15", "2401.00001")
@@ -431,7 +450,8 @@ class TestHistoryNavigationIntegration:
         from datetime import date as dt_date
         from unittest.mock import AsyncMock, patch
 
-        from tests.support.canonical_exports import ArxivBrowser, DateNavigator
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.widgets.chrome import DateNavigator
 
         f1 = self._make_history_file(tmp_path, "2024-01-17", "2401.00003")
         f2 = self._make_history_file(tmp_path, "2024-01-15", "2401.00001")
@@ -465,7 +485,8 @@ class TestHistoryNavigationIntegration:
         from datetime import date as dt_date
         from unittest.mock import AsyncMock, patch
 
-        from tests.support.canonical_exports import ArxivBrowser, DateNavigator
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.widgets.chrome import DateNavigator
 
         f1 = self._make_history_file(tmp_path, "2024-01-17", "2401.00003")
         f2 = self._make_history_file(tmp_path, "2024-01-16", "2401.00002")
@@ -499,7 +520,7 @@ class TestHistoryNavigationIntegration:
         """Without history files, '[' and ']' should not crash or change state."""
         from unittest.mock import patch
 
-        from tests.support.canonical_exports import ArxivBrowser
+        from arxiv_browser.browser.core import ArxivBrowser
 
         papers = [make_paper()]
         app = ArxivBrowser(papers, restore_session=False)
@@ -521,7 +542,8 @@ class TestHistoryNavigationIntegration:
         from datetime import date as dt_date
         from unittest.mock import AsyncMock, patch
 
-        from tests.support.canonical_exports import ArxivBrowser, DateNavigator
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.widgets.chrome import DateNavigator
 
         f1 = self._make_history_file(tmp_path, "2024-01-17", "2401.00003")
         f2 = self._make_history_file(tmp_path, "2024-01-16", "2401.00002")
@@ -559,7 +581,8 @@ class TestHistoryNavigationIntegration:
         from datetime import date as dt_date
         from unittest.mock import AsyncMock, patch
 
-        from tests.support.canonical_exports import ArxivBrowser, DateNavigator
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.widgets.chrome import DateNavigator
 
         f1 = self._make_history_file(tmp_path, "2024-01-17", "2401.00003")
         f2 = self._make_history_file(tmp_path, "2024-01-16", "2401.00002")
