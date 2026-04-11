@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 import re
 from datetime import date, datetime
@@ -94,6 +95,7 @@ ARXIV_QUERY_FIELDS = {
 HISTORY_DATE_FORMAT = "%Y-%m-%d"
 
 
+@functools.lru_cache(maxsize=512)
 def parse_arxiv_date(date_str: str) -> datetime:
     """Parse arXiv date string to datetime for proper sorting.
 

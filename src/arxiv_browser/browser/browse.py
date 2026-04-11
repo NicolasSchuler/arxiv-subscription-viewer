@@ -10,7 +10,6 @@ from collections.abc import Callable
 from datetime import date
 
 import httpx
-from rapidfuzz import fuzz
 from textual.css.query import NoMatches
 from textual.widgets.option_list import Option, OptionDoesNotExist
 
@@ -23,6 +22,7 @@ from arxiv_browser.browser.constants import (
 )
 from arxiv_browser.browser.empty_state import build_list_empty_message
 from arxiv_browser.export import format_paper_as_markdown
+from arxiv_browser.fuzzy import weighted_fuzzy_score
 from arxiv_browser.io_actions import resolve_target_papers
 from arxiv_browser.modals.editing import TagsModal
 from arxiv_browser.models import SORT_OPTIONS, LocalBrowseSnapshot, Paper, PaperMetadata
@@ -165,7 +165,7 @@ class BrowseMixin:
         for paper in search_space:
             # Combine title and authors for matching
             text = f"{paper.title} {paper.authors}"
-            score = fuzz.WRatio(query_lower, text.lower())
+            score = weighted_fuzzy_score(query_lower, text)
             if score >= FUZZY_SCORE_CUTOFF:
                 scored_papers.append((paper, score))
         # Sort by score descending
@@ -698,29 +698,22 @@ class BrowseMixin:
     async def _download_pdf_async(
         self, paper: Paper, client: httpx.AsyncClient | None = None
     ) -> bool:
-        """Download a single PDF asynchronously.
-        Args:
-            paper: The paper to download.
-            client: Shared HTTP client required for the download.
-        Returns:
-            True if download succeeded, False otherwise.
-        """
         if client is None:
             logger.warning(
                 "Download skipped for %s: shared HTTP client unavailable", paper.arxiv_id
             )
             return False
-        success = await self._get_services().download.download_pdf(
+        result = await self._get_services().download.download_pdf(
             paper=paper,
             config=self._config,
             client=client,
             timeout_seconds=PDF_DOWNLOAD_TIMEOUT,
         )
-        if success:
+        if result.success:
             logger.debug("Downloaded PDF for %s", paper.arxiv_id)
         else:
-            logger.warning("Download failed for %s", paper.arxiv_id)
-        return success
+            logger.warning("Download failed for %s: %s", paper.arxiv_id, result.failure)
+        return result.success
 
     def _is_download_batch_active(self) -> bool:
         """Return True when a download batch is active or pending."""

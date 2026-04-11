@@ -7,7 +7,7 @@ import asyncio
 import logging
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -151,7 +151,7 @@ def _coerce_browser_options(
 
 
 # History file discovery cap retained for custom callers/tests.
-MAX_HISTORY_FILES = 365  # Compatibility constant for callers that want capped discovery.
+MAX_HISTORY_FILES = 365
 SUBPROCESS_TIMEOUT = _action_constants.SUBPROCESS_TIMEOUT
 BOOKMARK_NAME_MAX_LEN = _action_constants.BOOKMARK_NAME_MAX_LEN
 MAX_CONCURRENT_DOWNLOADS = _action_constants.MAX_CONCURRENT_DOWNLOADS
@@ -205,6 +205,7 @@ class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
     _collect_all_tags = _llm_actions._collect_all_tags
     action_toggle_watch_filter = _library_actions.action_toggle_watch_filter
     action_manage_watch_list = _library_actions.action_manage_watch_list
+    action_mark_visible_read = _library_actions.action_mark_visible_read
     action_goto_bookmark = _search_api_actions.action_goto_bookmark
     action_add_bookmark = _search_api_actions.action_add_bookmark
     action_remove_bookmark = _search_api_actions.action_remove_bookmark
@@ -743,7 +744,9 @@ class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
         if hasattr(self, "_dataset_tasks"):
             self._dataset_tasks.clear()
 
-    def _track_task(self, coro: Any, *, dataset_bound: bool = False) -> asyncio.Task[None]:
+    def _track_task(
+        self, coro: Coroutine[Any, Any, None], *, dataset_bound: bool = False
+    ) -> asyncio.Task[None]:
         """Create an asyncio task and track it to prevent garbage collection."""
         task = asyncio.create_task(coro)
         self._background_tasks.add(task)
@@ -754,7 +757,7 @@ class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
         task.add_done_callback(self._on_task_done)
         return task
 
-    def _track_dataset_task(self, coro: Any) -> asyncio.Task[None]:
+    def _track_dataset_task(self, coro: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
         """Track background work that must be cancelled on dataset swaps."""
         tracker = self._track_task
         if getattr(tracker, "__func__", None) is ArxivBrowser._track_task:

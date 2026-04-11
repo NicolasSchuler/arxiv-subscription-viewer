@@ -19,7 +19,7 @@ from arxiv_browser.action_messages import (
     build_actionable_success,
     build_actionable_warning,
 )
-from arxiv_browser.actions.constants import logger
+from arxiv_browser.actions.constants import RECOVERABLE_ACTION_ERRORS, log_action_failure, logger
 from arxiv_browser.config import save_config
 from arxiv_browser.enrichment import count_hf_matches, get_starred_paper_ids_for_version_check
 from arxiv_browser.modals.citations import RecommendationSourceModal
@@ -45,14 +45,11 @@ if TYPE_CHECKING:
     from arxiv_browser.browser.core import ArxivBrowser
 
 
-_RECOVERABLE_ACTION_ERRORS = (OSError, RuntimeError, ValueError, TypeError)
+_RECOVERABLE_ACTION_ERRORS = RECOVERABLE_ACTION_ERRORS
 
 
 def _log_action_failure(action: str, exc: Exception, *, unexpected: bool = False) -> None:
-    """Log an action failure with consistent severity/context formatting."""
-    qualifier = "Unexpected " if unexpected else ""
-    message = f"{qualifier}{action} failed ({type(exc).__name__}): {exc}"
-    logger.warning(message, exc_info=True)
+    return log_action_failure(action, exc, unexpected=unexpected)
 
 
 def _notify_hf_matches(app: "ArxivBrowser", matched: int) -> None:

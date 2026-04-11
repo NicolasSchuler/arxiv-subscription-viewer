@@ -29,6 +29,7 @@ from arxiv_browser.semantic_scholar import (
     S2RecommendationsCacheSnapshot,
     SemanticScholarPaper,
 )
+from arxiv_browser.services.download_service import DownloadFailure, DownloadResult
 from tests.support.app_stubs import (
     _DummyOptionList,
     _make_hf_paper,
@@ -279,7 +280,7 @@ class TestDownloadClipboardAndOpenCoverage:
         app._config = UserConfig()
         paper = make_paper(arxiv_id="2401.50001")
         client = object()
-        service_mock = AsyncMock(return_value=True)
+        service_mock = AsyncMock(return_value=DownloadResult(success=True))
         app._services = SimpleNamespace(download=SimpleNamespace(download_pdf=service_mock))
 
         ok = await app._download_pdf_async(paper, client)
@@ -287,7 +288,7 @@ class TestDownloadClipboardAndOpenCoverage:
         service_mock.assert_awaited_once()
 
         service_mock.reset_mock()
-        service_mock.return_value = False
+        service_mock.return_value = DownloadResult(success=False, failure=DownloadFailure.NETWORK)
         ok = await app._download_pdf_async(paper, client)
         assert ok is False
         service_mock.assert_awaited_once()

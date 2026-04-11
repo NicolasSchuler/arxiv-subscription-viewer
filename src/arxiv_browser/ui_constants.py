@@ -218,6 +218,7 @@ APP_BINDINGS: list[BindingType] = [
     Binding("L", "score_relevance", "Score Relevance", show=False),
     Binding("ctrl+l", "edit_interests", "Edit Interests", show=False),
     Binding("ctrl+g", "auto_tag", "Auto-Tag", show=False),
+    Binding("ctrl+r", "mark_visible_read", "Mark Visible Read", show=False),
     # Theme cycling
     Binding("ctrl+t", "cycle_theme", "Theme", show=False),
     # Collapsible sections

@@ -41,6 +41,7 @@ from arxiv_browser.models import (
     UserConfig,
 )
 from arxiv_browser.services import enrichment_service as enrich
+from arxiv_browser.services.download_service import DownloadFailure, DownloadResult
 from tests.support.app_stubs import (
     _DummyInput,
     _DummyLabel,
@@ -374,11 +375,13 @@ class TestBrowserHelperCoverage:
 
         assert await app._download_pdf_async(paper, client=None) is False
         download_service = SimpleNamespace(
-            download_pdf=AsyncMock(return_value=True),
+            download_pdf=AsyncMock(return_value=DownloadResult(success=True)),
         )
         app._get_services = MagicMock(return_value=SimpleNamespace(download=download_service))
         assert await app._download_pdf_async(paper, client=object()) is True
-        download_service.download_pdf = AsyncMock(return_value=False)
+        download_service.download_pdf = AsyncMock(
+            return_value=DownloadResult(success=False, failure=DownloadFailure.NETWORK)
+        )
         assert await app._download_pdf_async(paper, client=object()) is False
 
         status_bar = SimpleNamespace(update=MagicMock())

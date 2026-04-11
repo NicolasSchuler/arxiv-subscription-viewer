@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
+from dataclasses import dataclass
+from enum import StrEnum
 
 import httpx
 
@@ -14,13 +16,42 @@ from arxiv_browser.models import Paper, UserConfig
 logger = logging.getLogger(__name__)
 
 
+class DownloadFailure(StrEnum):
+    """Categorised download failure reasons for user-facing messages."""
+
+    NETWORK = "network"
+    HTTP_ERROR = "http_error"
+    DISK = "disk"
+    NOT_FOUND = "not_found"
+
+
+@dataclass(slots=True, frozen=True)
+class DownloadResult:
+    """Structured outcome of a single PDF download attempt."""
+
+    success: bool
+    failure: DownloadFailure | None = None
+    detail: str = ""
+
+
+def _classify_failure(exc: Exception) -> DownloadFailure:
+    """Map an exception to a user-facing failure category."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        if exc.response.status_code == 404:
+            return DownloadFailure.NOT_FOUND
+        return DownloadFailure.HTTP_ERROR
+    if isinstance(exc, OSError):
+        return DownloadFailure.DISK
+    return DownloadFailure.NETWORK
+
+
 async def download_pdf(
     *,
     paper: Paper,
     config: UserConfig,
     client: httpx.AsyncClient,
     timeout_seconds: int,
-) -> bool:
+) -> DownloadResult:
     """Download a single PDF using atomic temp-file replacement."""
     url = get_pdf_url(paper)
     path = get_pdf_download_path(paper, config)
@@ -51,7 +82,7 @@ async def download_pdf(
         await _stream_to_tmp(client)
 
         os.replace(tmp_path, path)
-        return True
+        return DownloadResult(success=True)
     except (httpx.HTTPError, OSError) as exc:
         logger.warning(
             "PDF download failed for %s from %s to %s: %s",
@@ -72,9 +103,12 @@ async def download_pdf(
                     cleanup_exc,
                     exc_info=True,
                 )
-        return False
+        failure = _classify_failure(exc)
+        return DownloadResult(success=False, failure=failure, detail=str(exc)[:200])
 
 
 __all__ = [
+    "DownloadFailure",
+    "DownloadResult",
     "download_pdf",
 ]

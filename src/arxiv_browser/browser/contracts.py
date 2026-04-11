@@ -66,6 +66,12 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
     ("Download PDF", "Download PDF(s) to local folder", "d", "download_pdf"),
     ("Copy to Clipboard", "Copy paper info to clipboard", "c", "copy_selected"),
     ("Toggle Read", "Mark paper(s) as read/unread", "r", "toggle_read"),
+    (
+        "Mark Visible Read",
+        "Mark all visible (filtered) papers as read",
+        "Ctrl+r",
+        "mark_visible_read",
+    ),
     ("Toggle Star", "Star/unstar paper(s)", "x", "toggle_star"),
     ("Edit Notes", "Add or edit notes for current paper", "n", "edit_notes"),
     ("Edit Tags", "Add or edit tags (bulk when selected)", "t", "edit_tags"),

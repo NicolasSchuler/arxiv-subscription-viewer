@@ -11,9 +11,9 @@ import time
 from pathlib import Path
 
 import pytest
-from rapidfuzz import fuzz
 
 from arxiv_browser.export import format_papers_as_csv
+from arxiv_browser.fuzzy import weighted_fuzzy_score
 from arxiv_browser.models import Paper, WatchListEntry
 from arxiv_browser.parsing import clean_latex, parse_arxiv_file
 from arxiv_browser.query import paper_matches_watch_entry, sort_papers
@@ -94,7 +94,7 @@ class TestBenchmarks:
 
         def run() -> None:
             for p in papers_500:
-                fuzz.WRatio(query, p.title)
+                weighted_fuzzy_score(query, p.title)
 
         _assert_within(run, 0.5, "fuzzy_search_500")
 

@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from arxiv_browser.models import ArxivSearchRequest, UserConfig
+from arxiv_browser.services.download_service import DownloadResult
 from arxiv_browser.services.interfaces import (
     AppServices,
     ArxivApiService,
@@ -127,7 +128,7 @@ async def test_default_download_adapter_delegates(make_paper) -> None:
 
     with patch(
         "arxiv_browser.services.interfaces._download.download_pdf",
-        new=AsyncMock(return_value=True),
+        new=AsyncMock(return_value=DownloadResult(success=True)),
     ) as download:
         ok = await services.download.download_pdf(
             paper=paper,
@@ -136,7 +137,7 @@ async def test_default_download_adapter_delegates(make_paper) -> None:
             timeout_seconds=30,
         )
 
-    assert ok is True
+    assert ok == DownloadResult(success=True)
     download.assert_awaited_once()
 
 
@@ -263,7 +264,7 @@ async def test_protocol_method_bodies_return_none_without_adapters() -> None:
             client=AsyncMock(),
             timeout_seconds=10,
         )
-        is None
+        is None  # Protocol ellipsis returns None
     )
 
     assert (

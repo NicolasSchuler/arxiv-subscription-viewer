@@ -8,7 +8,7 @@ import os
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, overload
 
 from platformdirs import user_config_dir
 
@@ -144,6 +144,30 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
         "marks": config.marks,
         "onboarding_seen": config.onboarding_seen,
     }
+
+
+@overload
+def _safe_get(data: dict, key: str, default: str, expected_type: type[str]) -> str: ...
+
+
+@overload
+def _safe_get(data: dict, key: str, default: bool, expected_type: type[bool]) -> bool: ...
+
+
+@overload
+def _safe_get(data: dict, key: str, default: int, expected_type: type[int]) -> int: ...
+
+
+@overload
+def _safe_get(data: dict, key: str, default: list, expected_type: type[list]) -> list: ...
+
+
+@overload
+def _safe_get(data: dict, key: str, default: dict, expected_type: type[dict]) -> dict: ...
+
+
+@overload
+def _safe_get(data: dict, key: str, default: Any, expected_type: type) -> Any: ...
 
 
 def _safe_get(data: dict, key: str, default: Any, expected_type: type) -> Any:

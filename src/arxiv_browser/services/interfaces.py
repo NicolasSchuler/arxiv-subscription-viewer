@@ -15,6 +15,7 @@ from arxiv_browser.services import arxiv_api_service as _arxiv_api
 from arxiv_browser.services import download_service as _download
 from arxiv_browser.services import enrichment_service as _enrichment
 from arxiv_browser.services import llm_service as _llm
+from arxiv_browser.services.download_service import DownloadResult
 
 
 @runtime_checkable
@@ -101,9 +102,7 @@ class DownloadService(Protocol):
         config: UserConfig,
         client: httpx.AsyncClient,
         timeout_seconds: int,
-    ) -> bool:
-        """Download a paper PDF and return success."""
-        ...
+    ) -> DownloadResult: ...
 
 
 @runtime_checkable
@@ -255,8 +254,7 @@ class DefaultDownloadService:
         config: UserConfig,
         client: httpx.AsyncClient,
         timeout_seconds: int,
-    ) -> bool:
-        """Download a paper PDF and return success."""
+    ) -> DownloadResult:
         return await _download.download_pdf(
             paper=paper,
             config=config,

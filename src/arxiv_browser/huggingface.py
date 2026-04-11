@@ -34,6 +34,7 @@ from typing import Any, Literal, overload
 import httpx
 from platformdirs import user_config_dir
 
+from arxiv_browser.config import _safe_get
 from arxiv_browser.http_retry import retry_with_backoff
 from arxiv_browser.models import CONFIG_APP_NAME
 
@@ -216,17 +217,11 @@ async def fetch_hf_daily_papers(
 
 
 def _coerce_int(value: Any, default: int = 0) -> int:
-    """Coerce untrusted values to int, excluding bool."""
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    return default
+    return _safe_get({"v": value}, "v", default, int)
 
 
 def _coerce_str(value: Any, default: str = "") -> str:
-    """Coerce untrusted values to str."""
-    if isinstance(value, str):
-        return value
-    return default
+    return _safe_get({"v": value}, "v", default, str)
 
 
 # ============================================================================

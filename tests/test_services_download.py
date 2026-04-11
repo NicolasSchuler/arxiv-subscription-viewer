@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from arxiv_browser.models import UserConfig
-from arxiv_browser.services.download_service import download_pdf
+from arxiv_browser.services.download_service import DownloadFailure, DownloadResult, download_pdf
 
 
 class _FakeResponse:
@@ -58,7 +58,7 @@ async def test_download_pdf_success_and_failure(make_paper, tmp_path, caplog) ->
             timeout_seconds=30,
         )
 
-    assert ok is True
+    assert ok == DownloadResult(success=True)
     assert target.exists()
     assert target.read_bytes() == b"%PDF-1.4 body"
     assert list(target.parent.glob(".*.tmp")) == []
@@ -80,7 +80,8 @@ async def test_download_pdf_success_and_failure(make_paper, tmp_path, caplog) ->
             timeout_seconds=30,
         )
 
-    assert ok is False
+    assert ok.success is False
+    assert ok.failure == DownloadFailure.DISK
     assert list(target.parent.glob(".*.tmp")) == []
     assert "PDF download failed for 2401.50001" in caplog.text
 
@@ -111,7 +112,8 @@ async def test_download_pdf_replace_failure_cleans_temp_file(make_paper, tmp_pat
             timeout_seconds=30,
         )
 
-    assert ok is False
+    assert ok.success is False
+    assert ok.failure == DownloadFailure.DISK
     assert target.exists() is False
     assert list(target.parent.glob(".*.tmp")) == []
     assert "PDF download failed for 2401.50002" in caplog.text
@@ -143,7 +145,8 @@ async def test_download_pdf_logs_cleanup_failure_after_stream_error(
             timeout_seconds=30,
         )
 
-    assert ok is False
+    assert ok.success is False
+    assert ok.failure == DownloadFailure.DISK
     assert "PDF download failed for 2401.50003" in caplog.text
     assert "Failed to clean temp PDF file" in caplog.text
 
@@ -173,5 +176,6 @@ async def test_download_pdf_returns_false_when_temp_file_is_never_created(
             timeout_seconds=30,
         )
 
-    assert ok is False
+    assert ok.success is False
+    assert ok.failure == DownloadFailure.DISK
     assert "PDF download failed for 2401.50004" in caplog.text

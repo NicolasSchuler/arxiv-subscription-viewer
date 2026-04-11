@@ -28,11 +28,13 @@ classifiers = [
 dependencies = [
     "textual>=7.3.0",
     "rich>=13.0.0",
-    "rapidfuzz>=3.0.0",
     "httpx>=0.27.0",
     "platformdirs>=3.0",
     "defusedxml>=0.7.1",
 ]
+
+[project.optional-dependencies]
+fuzzy = ["rapidfuzz>=3.0.0"]
 
 [project.scripts]
 arxiv-viewer = "arxiv_browser.cli:main"

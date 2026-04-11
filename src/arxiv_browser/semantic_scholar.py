@@ -245,33 +245,10 @@ async def fetch_s2_recommendations(
     timeout: int = S2_REQUEST_TIMEOUT,
 ) -> list[SemanticScholarPaper]:
     """Fetch recommended papers from S2 Recommendations API."""
-    response = await _s2_get_with_retry(
-        client,
-        S2Request(
-            url=f"{S2_REC_BASE}/papers/forpaper/ARXIV:{arxiv_id}",
-            params={"fields": S2_REC_FIELDS, "limit": str(limit)},
-            api_key=api_key,
-            timeout=timeout,
-            label=f"S2 recs arXiv:{arxiv_id}",
-        ),
+    result = await fetch_s2_recommendations_with_status(
+        arxiv_id, client, limit=limit, api_key=api_key, timeout=timeout
     )
-    if response is None:
-        return []
-    payload = _parse_json_object(response, f"S2 recs arXiv:{arxiv_id}")
-    if payload is None:
-        return []
-    papers_data = payload.get("recommendedPapers")
-    if not isinstance(papers_data, list):
-        logger.warning("S2 recs arXiv:%s returned non-list recommendedPapers", arxiv_id)
-        return []
-    papers: list[SemanticScholarPaper] = []
-    for item in papers_data:
-        if not isinstance(item, dict):
-            continue
-        parsed = parse_s2_paper_response(item)
-        if parsed is not None:
-            papers.append(parsed)
-    return papers
+    return result if isinstance(result, list) else result[0]
 
 
 @overload

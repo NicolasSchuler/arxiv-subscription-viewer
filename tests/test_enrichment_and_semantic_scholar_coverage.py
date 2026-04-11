@@ -944,8 +944,8 @@ class TestSemanticScholarCoverage:
 
         recs_payload = {"recommendedPapers": [paper_payload, "skip"]}
         with patch(
-            "arxiv_browser.semantic_scholar._s2_get_with_retry",
-            return_value=httpx.Response(200, json=recs_payload, request=request),
+            "arxiv_browser.semantic_scholar._s2_get_with_retry_status",
+            return_value=(httpx.Response(200, json=recs_payload, request=request), True),
         ):
             recs = await s2.fetch_s2_recommendations("2401.1", client, limit=5)
         assert len(recs) == 1

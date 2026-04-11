@@ -6,11 +6,13 @@ __all__ = [
     "BACKOFF_BASE",
     "MAX_RETRIES",
     "RETRYABLE_STATUS_CODES",
+    "retry_sync_with_backoff",
     "retry_with_backoff",
 ]
 
 import asyncio
 import logging
+import time
 from collections.abc import Awaitable, Callable
 
 import httpx
@@ -73,3 +75,50 @@ async def retry_with_backoff[T](
                 )
                 await asyncio.sleep(delay)
     raise last_exc  # type: ignore[misc]  # last_exc is non-None: loop ran at least once
+
+
+def retry_sync_with_backoff[T](
+    fn: Callable[[], T],
+    *,
+    max_retries: int = MAX_RETRIES,
+    backoff_base: float = BACKOFF_BASE,
+    operation: str = "HTTP request",
+) -> T:
+    """Execute a synchronous function with exponential backoff on transient failures.
+
+    Mirrors ``retry_with_backoff`` but uses ``time.sleep`` instead of
+    ``asyncio.sleep`` for synchronous callers (e.g. CLI startup).
+    """
+    last_exc: Exception | None = None
+    for attempt in range(max_retries + 1):
+        try:
+            return fn()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in RETRYABLE_STATUS_CODES:
+                raise
+            last_exc = exc
+            if attempt < max_retries:
+                delay = backoff_base * (2**attempt)
+                logger.warning(
+                    "%s: HTTP %d, retrying in %.1fs (attempt %d/%d)",
+                    operation,
+                    exc.response.status_code,
+                    delay,
+                    attempt + 1,
+                    max_retries,
+                )
+                time.sleep(delay)
+        except (httpx.ConnectError, httpx.TimeoutException, httpx.ReadError) as exc:
+            last_exc = exc
+            if attempt < max_retries:
+                delay = backoff_base * (2**attempt)
+                logger.warning(
+                    "%s: %s, retrying in %.1fs (attempt %d/%d)",
+                    operation,
+                    type(exc).__name__,
+                    delay,
+                    attempt + 1,
+                    max_retries,
+                )
+                time.sleep(delay)
+    raise last_exc  # type: ignore[misc]

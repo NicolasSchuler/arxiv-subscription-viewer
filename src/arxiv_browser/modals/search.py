@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from rapidfuzz import fuzz
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -14,6 +13,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, OptionList, Select, Static
 from textual.widgets.option_list import Option
 
+from arxiv_browser.fuzzy import partial_fuzzy_score
 from arxiv_browser.models import ArxivSearchRequest
 from arxiv_browser.parsing import ARXIV_QUERY_FIELDS, build_arxiv_search_query
 from arxiv_browser.query import escape_rich_text
@@ -287,8 +287,8 @@ class CommandPaletteModal(ModalScreen[str]):
                 name = cmd.name
                 desc = cmd.description
                 score = max(
-                    fuzz.partial_ratio(q, name.lower()),
-                    fuzz.partial_ratio(q, desc.lower()),
+                    partial_fuzzy_score(q, name),
+                    partial_fuzzy_score(q, desc),
                 )
                 if score >= 40:
                     scored.append((score, int(cmd.enabled), int(cmd.suggested), cmd))

@@ -8,7 +8,7 @@ from datetime import date, datetime
 
 import httpx
 
-from arxiv_browser.http_retry import retry_with_backoff
+from arxiv_browser.http_retry import retry_sync_with_backoff, retry_with_backoff
 from arxiv_browser.models import ArxivSearchRequest, Paper
 from arxiv_browser.parsing import build_arxiv_search_query, parse_arxiv_api_feed, parse_arxiv_date
 
@@ -97,13 +97,18 @@ def fetch_page_sync(
     user_agent: str = ARXIV_API_USER_AGENT,
 ) -> list[Paper]:
     """Fetch a single page of arXiv API results for synchronous CLI startup."""
-    response = httpx.get(
-        ARXIV_API_URL,
-        params=_search_params(request, start=start, max_results=max_results),
-        headers={"User-Agent": user_agent},
-        timeout=timeout_seconds,
-    )
-    response.raise_for_status()
+
+    def _do_sync_request() -> httpx.Response:
+        resp = httpx.get(
+            ARXIV_API_URL,
+            params=_search_params(request, start=start, max_results=max_results),
+            headers={"User-Agent": user_agent},
+            timeout=timeout_seconds,
+        )
+        resp.raise_for_status()
+        return resp
+
+    response = retry_sync_with_backoff(_do_sync_request, operation="arXiv API search")
     return parse_arxiv_api_feed(response.text)
 
 

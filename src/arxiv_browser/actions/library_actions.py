@@ -215,3 +215,22 @@ def action_manage_watch_list(app: "ArxivBrowser") -> None:
         app.notify("Watch list updated", title="Watch")
 
     app.push_screen(WatchListModal(app._config.watch_list), on_watch_list_updated)
+
+
+def action_mark_visible_read(app: "ArxivBrowser") -> None:
+    """Mark all currently visible (filtered) papers as read."""
+    changed = 0
+    for paper in app.filtered_papers:
+        meta = app._get_or_create_metadata(paper.arxiv_id)
+        if not meta.is_read:
+            meta.is_read = True
+            changed += 1
+    if changed:
+        app._save_config_or_warn("mark visible read")
+        app._mark_badges_dirty("read", immediate=True)
+        app._refresh_list_view()
+        app._refresh_detail_pane()
+    app.notify(
+        f"Marked {changed} paper{'s' if changed != 1 else ''} as read",
+        title="Read Status",
+    )

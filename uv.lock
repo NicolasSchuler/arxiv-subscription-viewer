@@ -26,9 +26,13 @@ dependencies = [
     { name = "defusedxml" },
     { name = "httpx" },
     { name = "platformdirs" },
-    { name = "rapidfuzz" },
     { name = "rich" },
     { name = "textual" },
+]
+
+[package.optional-dependencies]
+fuzzy = [
+    { name = "rapidfuzz" },
 ]
 
 [package.dev-dependencies]
@@ -54,10 +58,11 @@ requires-dist = [
     { name = "defusedxml", specifier = ">=0.7.1" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "platformdirs", specifier = ">=3.0" },
-    { name = "rapidfuzz", specifier = ">=3.0.0" },
+    { name = "rapidfuzz", marker = "extra == 'fuzzy'", specifier = ">=3.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "textual", specifier = ">=7.3.0" },
 ]
+provides-extras = ["fuzzy"]
 
 [package.metadata.requires-dev]
 dev = [

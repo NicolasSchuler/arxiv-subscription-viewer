@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 from textual.app import ScreenStackError
 
-from arxiv_browser.actions.constants import logger
+from arxiv_browser.actions.constants import RECOVERABLE_ACTION_ERRORS, log_action_failure, logger
 from arxiv_browser.config import get_config_path, save_config
 from arxiv_browser.llm import (
     LLM_PRESETS,
@@ -43,7 +43,7 @@ if TYPE_CHECKING:
     from arxiv_browser.browser.core import ArxivBrowser
 
 
-_RECOVERABLE_ACTION_ERRORS = (OSError, RuntimeError, ValueError, TypeError)
+_RECOVERABLE_ACTION_ERRORS = RECOVERABLE_ACTION_ERRORS
 _TRUST_HASH_LENGTH = 16
 _COMMAND_PREVIEW_MAX_LEN = 120
 _NOTIFY_TIMEOUT_DEFAULT = 8
@@ -67,10 +67,7 @@ class CommandTrustRequest:
 
 
 def _log_action_failure(action: str, exc: Exception, *, unexpected: bool = False) -> None:
-    """Log an action failure with a consistent message shape."""
-    qualifier = "Unexpected " if unexpected else ""
-    message = f"{qualifier}{action} failed ({type(exc).__name__}): {exc}"
-    logger.warning(message, exc_info=True)
+    return log_action_failure(action, exc, unexpected=unexpected)
 
 
 def _collect_all_tags(app: "ArxivBrowser") -> list[str]:
