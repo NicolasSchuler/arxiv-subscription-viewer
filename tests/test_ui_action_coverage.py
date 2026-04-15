@@ -461,6 +461,7 @@ class TestUiActionCoverage:
         app._get_paper_list_widget = MagicMock(return_value=SimpleNamespace(highlighted=0))
         app._resolve_visible_index = MagicMock(return_value=1)
         app._show_local_recommendations = MagicMock()
+        app._show_recommendations = MagicMock()
         app._show_s2_recommendations = AsyncMock(return_value=None)
         app._show_citation_graph = AsyncMock(return_value=None)
         app._fetch_s2_recommendations_async = AsyncMock(return_value=[])
@@ -479,19 +480,12 @@ class TestUiActionCoverage:
         app.push_screen = MagicMock()
 
         ui_actions.action_show_similar(app)
-        app._show_local_recommendations.assert_called_once_with(paper)
+        app._show_recommendations.assert_called_once_with(paper, "local", s2_available=False)
 
-        app._show_local_recommendations.reset_mock()
+        app._show_recommendations.reset_mock()
         app._s2_active = True
-        with patch(
-            "arxiv_browser.actions.ui_actions.RecommendationSourceModal",
-            return_value="source-modal",
-        ):
-            ui_actions.action_show_similar(app)
-        callback = app.push_screen.call_args.kwargs["callback"]
-        callback("s2")
-        callback("local")
-        assert app._show_local_recommendations.called
+        ui_actions.action_show_similar(app)
+        app._show_recommendations.assert_called_once_with(paper, "local", s2_available=True)
 
         app.notify.reset_mock()
         app._get_current_paper = MagicMock(return_value=None)

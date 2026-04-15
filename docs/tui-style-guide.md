@@ -45,8 +45,8 @@ Large modals also keep `min-width: 60; min-height: 20;` for small-terminal safet
 
 **Current assignments:**
 
-- **Small**: ConfirmModal, ExportMenuModal, SummaryModeModal, RecommendationSourceModal, SectionToggleModal, AddToCollectionModal, MetadataSnapshotPickerModal
-- **Medium**: NotesModal, TagsModal, AutoTagSuggestModal, ArxivSearchModal, CommandPaletteModal, WatchListModal, CollectionsModal, CollectionViewModal, ResearchInterestsModal
+- **Small**: ConfirmModal, ExportMenuModal, SummaryModeModal, SectionToggleModal, AddToCollectionModal, MetadataSnapshotPickerModal
+- **Medium**: PaperEditModal, ArxivSearchModal, CommandPaletteModal, WatchListModal, CollectionsModal, CollectionViewModal, ResearchInterestsModal
 - **Large**: HelpScreen, RecommendationsScreen, CitationGraphScreen, PaperChatScreen
 
 - Preserve the three-zone structure:

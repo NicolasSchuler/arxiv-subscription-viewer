@@ -22,7 +22,6 @@ from arxiv_browser.action_messages import (
 from arxiv_browser.actions.constants import RECOVERABLE_ACTION_ERRORS, log_action_failure, logger
 from arxiv_browser.config import save_config
 from arxiv_browser.enrichment import count_hf_matches, get_starred_paper_ids_for_version_check
-from arxiv_browser.modals.citations import RecommendationSourceModal
 from arxiv_browser.modals.collections import AddToCollectionModal, CollectionsModal
 from arxiv_browser.modals.common import SectionToggleModal
 from arxiv_browser.modals.help import HelpScreen
@@ -417,10 +416,10 @@ async def action_check_versions(app: "ArxivBrowser") -> None:
 def action_show_similar(app: "ArxivBrowser") -> None:
     """Show papers similar to the currently highlighted paper.
 
-    When Semantic Scholar is active (``app._s2_active``), a source-selection
-    modal is pushed first so the user can choose between local TF-IDF and
-    S2 recommendations.  When S2 is disabled, the local-only path is taken
-    directly without prompting.
+    Always starts with local TF-IDF recommendations.  When Semantic Scholar
+    is active (``app._s2_active``), the ``RecommendationsScreen`` displays
+    an inline source toggle so the user can switch between local and S2
+    results without a separate pre-flight modal.
 
     Args:
         app: The running ``ArxivBrowser`` application instance.
@@ -437,13 +436,7 @@ def action_show_similar(app: "ArxivBrowser") -> None:
         )
         return
 
-    if app._s2_active:
-        app.push_screen(
-            RecommendationSourceModal(),
-            callback=lambda source: app._show_recommendations(paper, source),
-        )
-    else:
-        app._show_recommendations(paper, "local")
+    app._show_recommendations(paper, "local", s2_available=app._s2_active)
 
 
 async def _fetch_s2_recommendations_async(

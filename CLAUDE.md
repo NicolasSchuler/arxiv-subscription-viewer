@@ -61,10 +61,10 @@ src/arxiv_browser/
 ├── modals/               # ModalScreen subclasses, domain-grouped
 │   ├── __init__.py       # Re-exports all modals for flat imports
 │   ├── common.py         # HelpScreen, ConfirmModal, ExportMenuModal, MetadataSnapshotPickerModal, WatchListModal, SectionToggleModal
-│   ├── editing.py        # NotesModal, TagsModal, AutoTagSuggestModal
+│   ├── editing.py        # PaperEditModal (unified notes + tags + auto-tag)
 │   ├── search.py         # ArxivSearchModal, CommandPaletteModal
 │   ├── collections.py    # CollectionsModal, CollectionViewModal, AddToCollectionModal
-│   ├── citations.py      # RecommendationSourceModal, RecommendationsScreen, CitationGraphScreen
+│   ├── citations.py      # RecommendationsScreen, CitationGraphScreen
 │   └── llm.py            # SummaryModeModal, ResearchInterestsModal, PaperChatScreen
 ├── widgets/              # Reusable widgets extracted from app.py
 │   ├── __init__.py       # Re-exports all widget classes/helpers/constants
@@ -152,12 +152,12 @@ Submodules should import canonical modules directly. Only the compatibility shim
 
 ### Modal Screens (`modals/`)
 
-20 ModalScreen subclasses organized by domain:
+18 ModalScreen subclasses organized by domain:
 - **common.py**: HelpScreen, ConfirmModal, ExportMenuModal, MetadataSnapshotPickerModal, WatchListModal, SectionToggleModal
-- **editing.py**: NotesModal, TagsModal, AutoTagSuggestModal
+- **editing.py**: PaperEditModal (unified notes + tags + auto-tag via TabbedContent)
 - **search.py**: ArxivSearchModal, CommandPaletteModal
 - **collections.py**: CollectionsModal, CollectionViewModal, AddToCollectionModal
-- **citations.py**: RecommendationSourceModal, RecommendationsScreen, CitationGraphScreen
+- **citations.py**: RecommendationsScreen, CitationGraphScreen
 - **llm.py**: SummaryModeModal, ResearchInterestsModal, PaperChatScreen
 
 ### Performance Optimizations
@@ -231,7 +231,7 @@ Representative current coverage:
 ### Import Patterns (src layout)
 - **Public API**: `from arxiv_browser import Paper, main` — via the explicit root-package `__all__`
 - **Canonical module import**: `from arxiv_browser.models import Paper` — preferred for new code
-- **Modal imports**: `from arxiv_browser.modals import TagsModal` — via `modals/__init__.py` re-exports
+- **Modal imports**: `from arxiv_browser.modals import PaperEditModal` — via `modals/__init__.py` re-exports
 - **Backward compat**: `from arxiv_browser.app import ArxivBrowser, main` — only the documented compat allowlist is supported
 - **Mock paths in tests**: Patch at the module where the function is *resolved*, not where it's re-exported:
   - Functions called by other functions in the same module: patch at the actual module (e.g., `"arxiv_browser.config.get_config_path"`)

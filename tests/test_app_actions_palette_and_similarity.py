@@ -316,11 +316,12 @@ class TestArxivApiAndSimilarityCoverage:
         app._get_current_paper = MagicMock(return_value=paper)
         app._s2_active = True
         app.action_show_similar()
-        app.push_screen.assert_called_once()
+        app._show_recommendations.assert_called_with(paper, "local", s2_available=True)
 
+        app._show_recommendations.reset_mock()
         app._s2_active = False
         app.action_show_similar()
-        app._show_recommendations.assert_called_with(paper, "local")
+        app._show_recommendations.assert_called_with(paper, "local", s2_available=False)
 
     def test_show_recommendations_dispatch(self, make_paper):
         app = _new_app()
@@ -338,7 +339,7 @@ class TestArxivApiAndSimilarityCoverage:
         app._show_recommendations(paper, "local")
         app._show_recommendations(paper, "s2")
 
-        app._show_local_recommendations.assert_called_once_with(paper)
+        app._show_local_recommendations.assert_called_once_with(paper, s2_available=False)
         app._track_task.assert_called_once()
 
     def test_show_local_recommendations_empty_and_success(self, make_paper):

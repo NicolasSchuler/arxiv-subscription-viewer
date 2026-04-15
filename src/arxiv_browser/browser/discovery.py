@@ -134,16 +134,16 @@ class DiscoveryMixin:
         target_start = max(0, state.start + (direction * state.max_results))
         await self._run_arxiv_search(state.request, start=target_start)
 
-    def _show_recommendations(self, paper: Paper, source: str | None) -> None:
+    def _show_recommendations(self, paper: Paper, source: str | None, *, s2_available: bool = False) -> None:
         """Dispatcher for local or S2 recommendations."""
-        if not source:  # User cancelled the source modal
+        if not source:  # User cancelled
             return
         if source == "s2":
-            self._track_dataset_task(self._show_s2_recommendations(paper))
+            self._track_dataset_task(self._show_s2_recommendations(paper, s2_available=s2_available))
         else:
-            self._show_local_recommendations(paper)
+            self._show_local_recommendations(paper, s2_available=s2_available)
 
-    def _show_local_recommendations(self, paper: Paper) -> None:
+    def _show_local_recommendations(self, paper: Paper, *, s2_available: bool = False) -> None:
         """Show local recommendations, building the TF-IDF index lazily if needed.
         Similarity indexing is intentionally corpus-scoped to ``self.all_papers``
         rather than the currently filtered subset. When the corpus changes, the
@@ -155,6 +155,7 @@ class DiscoveryMixin:
         tfidf_corpus_key = getattr(self, "_tfidf_corpus_key", None)
         if tfidf_index is None or tfidf_corpus_key != corpus_key:
             self._pending_similarity_paper_id = paper.arxiv_id
+            self._pending_similarity_s2_available = s2_available
             build_task = getattr(self, "_tfidf_build_task", None)
             if build_task is not None and not build_task.done():
                 self.notify("Similarity indexing in progress...", title="Similar")
@@ -182,8 +183,8 @@ class DiscoveryMixin:
             )
             return
         self.push_screen(
-            RecommendationsScreen(paper, similar_papers),
-            self._on_recommendation_selected,
+            RecommendationsScreen(paper, similar_papers, source="local", s2_available=s2_available),
+            lambda result: self._on_recommendation_result(paper, result, s2_available=s2_available),
         )
 
     @staticmethod
@@ -246,6 +247,8 @@ class DiscoveryMixin:
         self._tfidf_corpus_key = corpus_key
         pending_id = self._pending_similarity_paper_id
         self._pending_similarity_paper_id = None
+        pending_s2 = getattr(self, "_pending_similarity_s2_available", False)
+        self._pending_similarity_s2_available = False
         if pending_id is None:
             self.notify("Similarity index ready", title="Similar")
             return
@@ -253,9 +256,9 @@ class DiscoveryMixin:
         if current_paper is None or current_paper.arxiv_id != pending_id:
             self.notify("Similarity index ready", title="Similar")
             return
-        self._show_local_recommendations(current_paper)
+        self._show_local_recommendations(current_paper, s2_available=pending_s2)
 
-    async def _show_s2_recommendations(self, paper: Paper) -> None:
+    async def _show_s2_recommendations(self, paper: Paper, *, s2_available: bool = True) -> None:
         """Fetch S2 recommendations and show them in the modal."""
         task_epoch = self._capture_dataset_epoch()
         try:
@@ -275,8 +278,10 @@ class DiscoveryMixin:
                 return
             similar = self._s2_recs_to_paper_tuples(recs)
             self.push_screen(
-                RecommendationsScreen(paper, similar),
-                self._on_recommendation_selected,
+                RecommendationsScreen(paper, similar, source="s2", s2_available=s2_available),
+                lambda result: self._on_recommendation_result(
+                    paper, result, s2_available=s2_available
+                ),
             )
         except asyncio.CancelledError:
             raise
@@ -317,6 +322,16 @@ class DiscoveryMixin:
             title="Similar",
             severity="warning",
         )
+
+    def _on_recommendation_result(
+        self, paper: Paper, result: str | None, *, s2_available: bool
+    ) -> None:
+        """Handle result from RecommendationsScreen including source switch sentinels."""
+        if result and result.startswith("switch:"):
+            new_source = result.split(":", 1)[1]
+            self._show_recommendations(paper, new_source, s2_available=s2_available)
+        else:
+            self._on_recommendation_selected(result)
 
     @staticmethod
     def _s2_recs_to_paper_tuples(

@@ -13,11 +13,11 @@ from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.screen import ModalScreen
 from textual.widgets import Button, Label, ListItem, ListView, Static
 
 from arxiv_browser.action_messages import build_actionable_error
 from arxiv_browser.browser.contracts import TaskTrackingApp
+from arxiv_browser.modals.base import ModalBase
 from arxiv_browser.models import Paper
 from arxiv_browser.query import escape_rich_text, truncate_text
 from arxiv_browser.semantic_scholar import CitationEntry
@@ -26,84 +26,6 @@ from arxiv_browser.themes import theme_colors_for
 logger = logging.getLogger(__name__)
 
 RECOMMENDATION_TITLE_MAX_LEN = 60  # Max title length in recommendations modal
-
-
-class RecommendationSourceModal(ModalScreen[str]):
-    """Simple choice dialog: local or Semantic Scholar recommendations."""
-
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel"),
-        Binding("q", "cancel", "Cancel"),
-        Binding("l", "local", "Local", show=False),
-        Binding("s", "s2", "S2", show=False),
-    ]
-
-    CSS = """
-    RecommendationSourceModal {
-        align: center middle;
-    }
-
-    #rec-source-dialog {
-        width: 52;
-        height: auto;
-        background: $th-background;
-        border: tall $th-orange;
-        padding: 0 2;
-    }
-
-    #rec-source-title {
-        text-style: bold;
-        color: $th-orange;
-        margin-bottom: 1;
-    }
-
-    #rec-source-buttons {
-        height: auto;
-        margin-top: 1;
-        align: center middle;
-    }
-
-    #rec-source-buttons Button {
-        margin: 0 1;
-    }
-
-    #rec-source-footer {
-        color: $th-muted;
-        margin-top: 1;
-        text-align: center;
-    }
-    """
-
-    def compose(self) -> ComposeResult:
-        """Yield title label, local/S2 choice buttons, and footer hint."""
-        with Vertical(id="rec-source-dialog"):
-            yield Label("Recommendation Source", id="rec-source-title")
-            with Horizontal(id="rec-source-buttons"):
-                yield Button("Local (TF-IDF)", variant="default", id="local-btn")
-                yield Button("Semantic Scholar", variant="primary", id="s2-btn")
-            yield Static("Close: Esc/q", id="rec-source-footer")
-
-    def action_cancel(self) -> None:
-        """Dismiss the modal without making a selection."""
-        self.dismiss("")
-
-    def action_local(self) -> None:
-        """Dismiss the modal with 'local' as the chosen source."""
-        self.dismiss("local")
-
-    def action_s2(self) -> None:
-        """Dismiss the modal with 's2' as the chosen source."""
-        self.dismiss("s2")
-
-    @on(Button.Pressed, "#local-btn")
-    def on_local_pressed(self) -> None:
-        """Handle the Local (TF-IDF) button press."""
-        self.action_local()
-
-    @on(Button.Pressed, "#s2-btn")
-    def on_s2_pressed(self) -> None:
-        """Handle the Semantic Scholar button press."""
-        self.action_s2()
 
 
 class RecommendationListItem(ListItem):
@@ -115,12 +37,16 @@ class RecommendationListItem(ListItem):
         self.paper = paper
 
 
-class RecommendationsScreen(ModalScreen[str | None]):
+class RecommendationsScreen(ModalBase[str | None]):
     """Modal screen displaying similar papers and allowing the user to jump to one.
 
     Accepts a target paper and a ranked list of ``(paper, score)`` pairs.
-    Dismisses with the arXiv ID of the selected paper, or ``None`` if the
-    user cancels without making a selection.
+    When ``s2_available`` is ``True``, an inline source toggle bar is shown
+    so the user can switch between local TF-IDF and Semantic Scholar
+    recommendations without a separate pre-flight modal.
+
+    Dismisses with the arXiv ID of the selected paper, ``None`` if the
+    user cancels, or ``"switch:<source>"`` to request a source change.
     """
 
     BINDINGS = [
@@ -129,6 +55,8 @@ class RecommendationsScreen(ModalScreen[str | None]):
         Binding("enter", "select", "Select"),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
+        Binding("l", "switch_local", "Local", show=False),
+        Binding("s", "switch_s2", "S2", show=False),
     ]
 
     CSS = """
@@ -150,6 +78,16 @@ class RecommendationsScreen(ModalScreen[str | None]):
         text-style: bold;
         color: $th-orange;
         margin-bottom: 1;
+    }
+
+    #source-bar {
+        height: auto;
+        align: center middle;
+        margin-bottom: 1;
+    }
+
+    #source-bar Button {
+        margin: 0 1;
     }
 
     #recommendations-list {
@@ -186,17 +124,37 @@ class RecommendationsScreen(ModalScreen[str | None]):
     }
     """
 
-    def __init__(self, target_paper: Paper, similar_papers: list[tuple[Paper, float]]) -> None:
+    def __init__(
+        self,
+        target_paper: Paper,
+        similar_papers: list[tuple[Paper, float]],
+        source: str = "local",
+        s2_available: bool = False,
+    ) -> None:
         """Initialize with the target paper and its ranked similar papers."""
         super().__init__()
         self._target_paper = target_paper
         self._similar_papers = similar_papers
+        self._source = source
+        self._s2_available = s2_available
 
     def compose(self) -> ComposeResult:
-        """Yield title label, scrollable paper list, and close/select buttons."""
+        """Yield title label, optional source toggle, paper list, and buttons."""
         with Vertical(id="recommendations-dialog"):
             truncated_title = truncate_text(self._target_paper.title, RECOMMENDATION_TITLE_MAX_LEN)
             yield Label(f"Similar to: {truncated_title}", id="recommendations-title")
+            if self._s2_available:
+                with Horizontal(id="source-bar"):
+                    yield Button(
+                        "Local (TF-IDF)",
+                        variant="primary" if self._source == "local" else "default",
+                        id="source-local-btn",
+                    )
+                    yield Button(
+                        "Semantic Scholar",
+                        variant="primary" if self._source == "s2" else "default",
+                        id="source-s2-btn",
+                    )
             yield ListView(id="recommendations-list")
             with Horizontal(id="recommendations-buttons"):
                 yield Button("Close (Esc/q)", variant="default", id="close-btn")
@@ -221,10 +179,6 @@ class RecommendationsScreen(ModalScreen[str | None]):
         if list_view.children:
             list_view.index = 0
         list_view.focus()
-
-    def action_cancel(self) -> None:
-        """Dismiss the modal without selecting a paper."""
-        self.dismiss(None)
 
     def action_select(self) -> None:
         """Dismiss with the highlighted paper's arxiv_id, or None if nothing is highlighted."""
@@ -258,6 +212,28 @@ class RecommendationsScreen(ModalScreen[str | None]):
         if isinstance(event.item, RecommendationListItem):
             self.dismiss(event.item.paper.arxiv_id)
 
+    # -- Source toggle (inline replacement for RecommendationSourceModal) --
+
+    def action_switch_local(self) -> None:
+        """Switch to local recommendations via keybinding."""
+        if self._s2_available and self._source != "local":
+            self.dismiss("switch:local")
+
+    def action_switch_s2(self) -> None:
+        """Switch to Semantic Scholar recommendations via keybinding."""
+        if self._s2_available and self._source != "s2":
+            self.dismiss("switch:s2")
+
+    @on(Button.Pressed, "#source-local-btn")
+    def on_source_local_pressed(self) -> None:
+        """Handle the Local source button press."""
+        self.action_switch_local()
+
+    @on(Button.Pressed, "#source-s2-btn")
+    def on_source_s2_pressed(self) -> None:
+        """Handle the Semantic Scholar source button press."""
+        self.action_switch_s2()
+
 
 # ============================================================================
 # Citation Graph Modal
@@ -290,7 +266,7 @@ class CitationGraphListItem(ListItem):
         self.is_local = is_local
 
 
-class CitationGraphScreen(ModalScreen[str | None]):
+class CitationGraphScreen(ModalBase[str | None]):
     """Modal screen for exploring citation graphs with depth-limited drill-down.
 
     Displays a two-panel layout: **References** (papers this paper cites) on

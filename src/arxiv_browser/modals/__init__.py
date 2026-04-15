@@ -12,7 +12,6 @@ from arxiv_browser.modals.citations import (
     CitationGraphListItem,
     CitationGraphScreen,
     RecommendationListItem,
-    RecommendationSourceModal,
     RecommendationsScreen,
 )
 
@@ -31,11 +30,10 @@ from arxiv_browser.modals.common import (
     SectionToggleModal,
 )
 
-# editing.py — notes, tags, auto-tag suggestions
+# editing.py — unified paper editing modal (notes + tags + auto-tag)
 from arxiv_browser.modals.editing import (
-    AutoTagSuggestModal,
-    NotesModal,
-    TagsModal,
+    PaperEditModal,
+    PaperEditResult,
 )
 
 # help.py — full-screen keyboard shortcut overlay
@@ -64,7 +62,6 @@ from arxiv_browser.modals.welcome import WelcomeScreen
 __all__ = [
     "AddToCollectionModal",
     "ArxivSearchModal",
-    "AutoTagSuggestModal",
     "CitationGraphListItem",
     "CitationGraphScreen",
     "CollectionViewModal",
@@ -75,16 +72,15 @@ __all__ = [
     "HelpScreen",
     "MetadataSnapshotPickerModal",
     "ModalBase",
-    "NotesModal",
     "PaletteCommand",
     "PaperChatScreen",
+    "PaperEditModal",
+    "PaperEditResult",
     "RecommendationListItem",
-    "RecommendationSourceModal",
     "RecommendationsScreen",
     "ResearchInterestsModal",
     "SectionToggleModal",
     "SummaryModeModal",
-    "TagsModal",
     "WatchListItem",
     "WatchListModal",
     "WelcomeScreen",

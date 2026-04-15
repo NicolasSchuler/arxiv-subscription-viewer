@@ -20,7 +20,6 @@ from arxiv_browser.modals import (
     CollectionsModal,
     CollectionViewModal,
     CommandPaletteModal,
-    RecommendationSourceModal,
     RecommendationsScreen,
     WatchListModal,
 )
@@ -216,16 +215,48 @@ async def test_add_to_collection_modal_select_and_cancel(make_paper):
             modal.dismiss.assert_called_once_with(None)
 
 
-def test_recommendation_source_modal_actions():
-    modal = RecommendationSourceModal()
+def test_recommendations_screen_source_toggle_actions():
+    """Test that RecommendationsScreen source toggle keybindings dismiss with sentinels."""
+    from arxiv_browser.models import Paper
+
+    paper = Paper(
+        arxiv_id="2401.00001",
+        date="2024-01-01",
+        title="T",
+        authors="A",
+        categories="cs.AI",
+        comments=None,
+        abstract=None,
+        url="",
+    )
+    modal = RecommendationsScreen(paper, [], source="local", s2_available=True)
     modal.dismiss = MagicMock()
 
-    modal.action_local()
-    modal.dismiss.assert_called_with("local")
-    modal.action_s2()
-    modal.dismiss.assert_called_with("s2")
-    modal.action_cancel()
-    modal.dismiss.assert_called_with("")
+    # Pressing s when source is local → switch:s2
+    modal.action_switch_s2()
+    modal.dismiss.assert_called_with("switch:s2")
+
+    modal.dismiss.reset_mock()
+    # Pressing l when source is already local → no-op
+    modal.action_switch_local()
+    modal.dismiss.assert_not_called()
+
+    # Now test from s2 source
+    modal2 = RecommendationsScreen(paper, [], source="s2", s2_available=True)
+    modal2.dismiss = MagicMock()
+
+    modal2.action_switch_local()
+    modal2.dismiss.assert_called_with("switch:local")
+
+    modal2.dismiss.reset_mock()
+    modal2.action_switch_s2()
+    modal2.dismiss.assert_not_called()
+
+    # No toggle when s2_available is False
+    modal3 = RecommendationsScreen(paper, [], source="local", s2_available=False)
+    modal3.dismiss = MagicMock()
+    modal3.action_switch_s2()
+    modal3.dismiss.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -526,13 +557,11 @@ def test_read_only_modals_support_q_close_binding():
         AddToCollectionModal,
         CitationGraphScreen,
         ExportMenuModal,
-        RecommendationSourceModal,
         RecommendationsScreen,
         SectionToggleModal,
     )
 
     classes = [
-        RecommendationSourceModal,
         RecommendationsScreen,
         CitationGraphScreen,
         AddToCollectionModal,
@@ -908,7 +937,7 @@ async def test_modal_tail_branches_cover_common_search_and_citation_edges(make_p
     from textual.css.query import NoMatches
 
     from arxiv_browser._ascii import set_ascii_mode
-    from arxiv_browser.modals.citations import CitationGraphScreen, RecommendationSourceModal
+    from arxiv_browser.modals.citations import CitationGraphScreen
     from arxiv_browser.modals.common import (
         ConfirmModal,
         MetadataSnapshotPickerModal,
@@ -1093,10 +1122,3 @@ async def test_modal_tail_branches_cover_common_search_and_citation_edges(make_p
     screen.dismiss = MagicMock()
     screen.action_go_to_local()
     screen.dismiss.assert_called_once_with("2401.00002")
-
-    source_modal = RecommendationSourceModal()
-    source_modal.dismiss = MagicMock()
-    source_modal.action_local()
-    source_modal.action_s2()
-    source_modal.action_cancel()
-    assert source_modal.dismiss.call_args_list[-1].args == ("",)

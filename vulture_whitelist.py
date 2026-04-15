@@ -202,39 +202,18 @@ SectionToggleModal.action_toggle_v
 SectionToggleModal.action_save
 SectionToggleModal.action_cancel
 
-# ── NotesModal ──────────────────────────────────────────────────────
-from arxiv_browser.modals.editing import NotesModal
+# ── PaperEditModal ──────────────────────────────────────────────────
+from arxiv_browser.modals.editing import PaperEditModal
 
-NotesModal.BINDINGS
-NotesModal.CSS
-NotesModal.compose
-NotesModal.action_save
-NotesModal.action_cancel
-NotesModal.on_save_pressed
-NotesModal.on_cancel_pressed
-
-# ── TagsModal ───────────────────────────────────────────────────────
-from arxiv_browser.modals.editing import TagsModal
-
-TagsModal.BINDINGS
-TagsModal.CSS
-TagsModal.compose
-TagsModal.action_save
-TagsModal.action_cancel
-TagsModal.on_save_pressed
-TagsModal.on_cancel_pressed
-TagsModal.on_input_submitted
-
-# ── AutoTagSuggestModal ─────────────────────────────────────────────
-from arxiv_browser.modals.editing import AutoTagSuggestModal
-
-AutoTagSuggestModal.BINDINGS
-AutoTagSuggestModal.CSS
-AutoTagSuggestModal.compose
-AutoTagSuggestModal.action_accept
-AutoTagSuggestModal.action_cancel
-AutoTagSuggestModal.on_accept_pressed
-AutoTagSuggestModal.on_cancel_pressed
+PaperEditModal.BINDINGS
+PaperEditModal.CSS
+PaperEditModal.compose
+PaperEditModal.action_save
+PaperEditModal.action_cancel
+PaperEditModal.on_save_pressed
+PaperEditModal.on_cancel_pressed
+PaperEditModal.on_tags_submitted
+PaperEditModal.on_autotag_submitted
 
 # ── ArxivSearchModal ────────────────────────────────────────────────
 from arxiv_browser.modals.search import ArxivSearchModal
@@ -299,17 +278,6 @@ AddToCollectionModal.action_cancel
 AddToCollectionModal.on_list_selected
 AddToCollectionModal.on_cancel_pressed
 
-# ── RecommendationSourceModal ───────────────────────────────────────
-from arxiv_browser.modals.citations import RecommendationSourceModal
-
-RecommendationSourceModal.BINDINGS
-RecommendationSourceModal.CSS
-RecommendationSourceModal.compose
-RecommendationSourceModal.action_local
-RecommendationSourceModal.action_s2
-RecommendationSourceModal.on_local_pressed
-RecommendationSourceModal.on_s2_pressed
-
 # ── RecommendationListItem ──────────────────────────────────────────
 from arxiv_browser.modals.citations import RecommendationListItem
 
@@ -326,9 +294,13 @@ RecommendationsScreen.action_select
 RecommendationsScreen.action_dismiss
 RecommendationsScreen.action_cursor_down
 RecommendationsScreen.action_cursor_up
+RecommendationsScreen.action_switch_local
+RecommendationsScreen.action_switch_s2
 RecommendationsScreen.on_close_pressed
 RecommendationsScreen.on_select_pressed
 RecommendationsScreen.on_list_selected
+RecommendationsScreen.on_source_local_pressed
+RecommendationsScreen.on_source_s2_pressed
 
 # ── CitationGraphListItem ──────────────────────────────────────────
 from arxiv_browser.modals.citations import CitationGraphListItem

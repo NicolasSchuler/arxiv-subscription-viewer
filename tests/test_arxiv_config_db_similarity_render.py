@@ -777,7 +777,7 @@ class TestSimilarityIndexLifecycle:
 
         assert app._tfidf_index is sentinel_index
         assert app._tfidf_corpus_key == corpus_key
-        app._show_local_recommendations.assert_called_once_with(paper)
+        app._show_local_recommendations.assert_called_once_with(paper, s2_available=False)
 
 
 class TestRenderPaperOptionBadges:
