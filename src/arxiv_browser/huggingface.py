@@ -32,11 +32,9 @@ from pathlib import Path
 from typing import Any, Literal, overload
 
 import httpx
-from platformdirs import user_config_dir
 
 from arxiv_browser.config import _safe_get
 from arxiv_browser.http_retry import retry_with_backoff
-from arxiv_browser.models import CONFIG_APP_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -231,8 +229,9 @@ def _coerce_str(value: Any, default: str = "") -> str:
 
 def get_hf_db_path() -> Path:
     """Get the path to the HuggingFace SQLite cache."""
-    config_dir = Path(user_config_dir(CONFIG_APP_NAME))
-    return config_dir / HF_DB_FILENAME
+    from arxiv_browser.database import resolve_db_path
+
+    return resolve_db_path(HF_DB_FILENAME)
 
 
 def init_hf_db(db_path: Path) -> None:

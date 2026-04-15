@@ -496,7 +496,7 @@ class TestFetchS2Recommendations:
 class TestGetS2DbPath:
     def test_returns_path(self) -> None:
         path = get_s2_db_path()
-        assert path.name == "semantic_scholar.db"
+        assert path.name in ("semantic_scholar.db", "cache.db")
         assert "arxiv-browser" in str(path)
 
 

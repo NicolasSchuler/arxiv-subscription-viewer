@@ -37,8 +37,8 @@ from arxiv_browser.browser.content import (
 )
 from arxiv_browser.browser.discovery import DiscoveryMixin
 from arxiv_browser.config import _coerce_arxiv_api_max_results
-from arxiv_browser.huggingface import HuggingFacePaper, get_hf_db_path
-from arxiv_browser.llm import get_relevance_db_path, get_summary_db_path
+from arxiv_browser.database import get_cache_db_path, init_cache_db
+from arxiv_browser.huggingface import HuggingFacePaper
 from arxiv_browser.llm_providers import resolve_provider
 from arxiv_browser.modals.help import HelpScreen
 from arxiv_browser.models import (
@@ -50,7 +50,6 @@ from arxiv_browser.models import (
 )
 from arxiv_browser.query import remove_query_token
 from arxiv_browser.semantic_scholar import SemanticScholarPaper
-from arxiv_browser.semantic_scholar_cache import get_s2_db_path
 from arxiv_browser.services.interfaces import AppServices, build_default_app_services
 from arxiv_browser.similarity import TfidfIndex
 from arxiv_browser.themes import TEXTUAL_THEMES, ThemeRuntime, build_theme_runtime
@@ -157,10 +156,8 @@ BOOKMARK_NAME_MAX_LEN = _action_constants.BOOKMARK_NAME_MAX_LEN
 MAX_CONCURRENT_DOWNLOADS = _action_constants.MAX_CONCURRENT_DOWNLOADS
 BATCH_CONFIRM_THRESHOLD = _action_constants.BATCH_CONFIRM_THRESHOLD
 # LLM summary settings
-SUMMARY_DB_FILENAME = "summaries.db"
 SUMMARY_HTML_TIMEOUT = 10  # Faster timeout for summary generation path
 RELEVANCE_SCORE_TIMEOUT = 30  # Seconds to wait for relevance scoring LLM response
-RELEVANCE_DB_FILENAME = "relevance.db"
 AUTO_TAG_TIMEOUT = 30  # Seconds to wait for auto-tag LLM response
 # Search debounce delay in seconds
 SEARCH_DEBOUNCE_DELAY = 0.3
@@ -377,7 +374,9 @@ class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
         """Initialize LLM summary state, API browsing state, and shared clients."""
         self._paper_summaries: dict[str, str] = {}
         self._summary_loading: set[str] = set()
-        self._summary_db_path = get_summary_db_path()
+        self._cache_db_path = get_cache_db_path()
+        init_cache_db(self._cache_db_path)
+        self._summary_db_path = self._cache_db_path
         self._summary_mode_label: dict[str, str] = {}
         self._summary_command_hash: dict[str, str] = {}
         self._in_arxiv_api_mode = False
@@ -395,12 +394,12 @@ class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
         self._s2_active = False
         self._s2_cache: dict[str, SemanticScholarPaper] = {}
         self._s2_loading: set[str] = set()
-        self._s2_db_path = get_s2_db_path()
+        self._s2_db_path = self._cache_db_path
         self._s2_api_error = False
         self._hf_active = False
         self._hf_cache: dict[str, HuggingFacePaper] = {}
         self._hf_loading = False
-        self._hf_db_path = get_hf_db_path()
+        self._hf_db_path = self._cache_db_path
         self._hf_api_error = False
         self._version_updates: dict[str, tuple[int, int]] = {}
         self._version_checking = False
@@ -408,7 +407,7 @@ class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
         self._relevance_scores: dict[str, tuple[int, str]] = {}
         self._relevance_scoring_active = False
         self._scoring_progress: tuple[int, int] | None = None
-        self._relevance_db_path = get_relevance_db_path()
+        self._relevance_db_path = self._cache_db_path
         self._auto_tag_active = False
         self._auto_tag_progress: tuple[int, int] | None = None
         self._cancel_batch_requested = False

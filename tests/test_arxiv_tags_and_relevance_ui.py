@@ -730,7 +730,7 @@ class TestRelevanceDbPath:
 
         result = get_relevance_db_path()
         assert isinstance(result, Path)
-        assert result.name == "relevance.db"
+        assert result.name in ("relevance.db", "cache.db")
 
     def test_in_config_dir(self):
         from arxiv_browser.llm import get_relevance_db_path

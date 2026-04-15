@@ -95,6 +95,10 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
         "allow_llm_shell_fallback": config.allow_llm_shell_fallback,
         "llm_max_retries": config.llm_max_retries,
         "llm_timeout": config.llm_timeout,
+        "llm_provider_type": config.llm_provider_type,
+        "llm_api_base_url": config.llm_api_base_url,
+        "llm_api_key": config.llm_api_key,
+        "llm_api_model": config.llm_api_model,
         "arxiv_api_max_results": max_results,
         "s2_enabled": config.s2_enabled,
         "s2_api_key": config.s2_api_key,
@@ -502,6 +506,10 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         allow_llm_shell_fallback=_safe_get(data, "allow_llm_shell_fallback", True, bool),
         llm_max_retries=max(0, min(5, _safe_get(data, "llm_max_retries", 1, int))),
         llm_timeout=max(10, min(600, _safe_get(data, "llm_timeout", 120, int))),
+        llm_provider_type=_safe_get(data, "llm_provider_type", "cli", str),
+        llm_api_base_url=_safe_get(data, "llm_api_base_url", "", str),
+        llm_api_key=_safe_get(data, "llm_api_key", "", str),
+        llm_api_model=_safe_get(data, "llm_api_model", "", str),
         arxiv_api_max_results=_coerce_arxiv_api_max_results(
             data.get("arxiv_api_max_results", ARXIV_API_DEFAULT_MAX_RESULTS)
         ),

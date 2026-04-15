@@ -7,20 +7,8 @@ import re
 from collections.abc import Callable
 from datetime import datetime
 from hashlib import sha256
-from typing import TYPE_CHECKING
 
-from arxiv_browser.models import STOPWORDS, Paper, PaperMetadata
-
-if TYPE_CHECKING:
-    from arxiv_browser.parsing import parse_arxiv_date
-else:
-    # Deferred import to avoid circular deps at runtime
-    def parse_arxiv_date(date_str: str) -> datetime:  # type: ignore[assignment]
-        """Parse an arXiv date string via deferred import to avoid circular deps."""
-        from arxiv_browser.parsing import parse_arxiv_date as _parse
-
-        return _parse(date_str)
-
+from arxiv_browser.models import STOPWORDS, Paper, PaperMetadata, parse_arxiv_date
 
 # ============================================================================
 # Similarity Constants

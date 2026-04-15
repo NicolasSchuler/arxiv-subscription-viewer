@@ -96,6 +96,16 @@ Examples:
 - `browser/core.py` owns app construction and orchestration, but no longer owns the CLI entrypoint wrapper.
 - `arxiv_browser.app` is intentionally small and only preserves the legacy CLI/bootstrap monkeypatch seam.
 - `browser/core.py` still coordinates a broad set of subsystem state, even though behavior has already been split across browser mixins and action modules.
+- `database.py` provides a unified `cache.db` for new installs. Legacy per-module SQLite files (`summaries.db`, `relevance.db`, `semantic_scholar.db`, `huggingface.db`) are still supported via dual-path resolution in `resolve_db_path()`.
+
+## LLM Provider Architecture
+
+The LLM subsystem uses a `LLMProvider` protocol (`llm_providers.py`) with two implementations:
+
+- **`CLIProvider`** — invokes an external CLI command (e.g., `llm`, `ollama`)
+- **`HTTPProvider`** — targets OpenAI-compatible `/v1/chat/completions` endpoints (OpenAI, Ollama, LM Studio, vLLM)
+
+Providers are registered in a simple registry (`register_provider` / `get_provider_class`). `resolve_provider(config)` reads `config.llm_provider_type` to select the appropriate implementation.
 
 ## Follow-Up Extraction Plan
 

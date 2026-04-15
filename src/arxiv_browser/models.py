@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import functools
+import re
 from dataclasses import dataclass, field
+from datetime import datetime
 
 # Application identity — single source of truth for platformdirs config paths
 CONFIG_APP_NAME = "arxiv-browser"
@@ -271,6 +274,10 @@ class UserConfig:
     allow_llm_shell_fallback: bool = True  # False = reject shell-only command templates
     llm_max_retries: int = 1  # Retries for transient LLM failures (timeout, non-zero exit)
     llm_timeout: int = 120  # Seconds to wait for LLM CLI response
+    llm_provider_type: str = "cli"  # "cli" | "http" — selects LLM execution backend
+    llm_api_base_url: str = ""  # Base URL for HTTP providers (e.g. https://api.openai.com)
+    llm_api_key: str = ""  # API key for HTTP providers
+    llm_api_model: str = ""  # Model name for HTTP providers (e.g. "gpt-4o")
     arxiv_api_max_results: int = ARXIV_API_DEFAULT_MAX_RESULTS
     s2_enabled: bool = False  # Semantic Scholar enrichment (opt-in)
     s2_api_key: str = ""  # Optional S2 API key for higher rate limits
@@ -331,9 +338,48 @@ class LocalBrowseSnapshot:
     match_scores: dict[str, float]
 
 
+# ============================================================================
+# Date Parsing
+# ============================================================================
+
+# Date format used in arXiv emails (e.g., "Mon, 15 Jan 2024")
+ARXIV_DATE_FORMAT = "%a, %d %b %Y"
+_ARXIV_DATE_PREFIX_PATTERN = re.compile(r"([A-Za-z]{3},\s+\d{1,2}\s+[A-Za-z]{3}\s+\d{4})")
+
+
+@functools.lru_cache(maxsize=512)
+def parse_arxiv_date(date_str: str) -> datetime:
+    """Parse arXiv date string to datetime for proper sorting.
+
+    Args:
+        date_str: Date string like "Mon, 15 Jan 2024"
+
+    Returns:
+        Parsed datetime object, or datetime.min for malformed dates.
+    """
+    cleaned = date_str.strip()
+    if not cleaned:
+        return datetime.min
+
+    try:
+        return datetime.strptime(cleaned, ARXIV_DATE_FORMAT)
+    except ValueError:
+        pass
+
+    match = _ARXIV_DATE_PREFIX_PATTERN.search(cleaned)
+    if match:
+        try:
+            return datetime.strptime(match.group(1), ARXIV_DATE_FORMAT)
+        except ValueError:
+            pass
+
+    return datetime.min
+
+
 __all__ = [
     "ARXIV_API_DEFAULT_MAX_RESULTS",
     "ARXIV_API_MAX_RESULTS_LIMIT",
+    "ARXIV_DATE_FORMAT",
     "CONFIG_APP_NAME",
     "DEFAULT_COLLAPSED_SECTIONS",
     "DETAIL_MODES",
@@ -355,4 +401,5 @@ __all__ = [
     "SessionState",
     "UserConfig",
     "WatchListEntry",
+    "parse_arxiv_date",
 ]

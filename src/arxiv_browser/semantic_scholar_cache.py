@@ -10,9 +10,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from platformdirs import user_config_dir
-
-from arxiv_browser.models import CONFIG_APP_NAME
 from arxiv_browser.semantic_scholar_models import (
     S2_CITATION_GRAPH_CACHE_TTL_DAYS,
     S2_DB_FILENAME,
@@ -29,8 +26,9 @@ logger = logging.getLogger(__name__)
 
 def get_s2_db_path() -> Path:
     """Get the path to the Semantic Scholar SQLite cache."""
-    config_dir = Path(user_config_dir(CONFIG_APP_NAME))
-    return config_dir / S2_DB_FILENAME
+    from arxiv_browser.database import resolve_db_path
+
+    return resolve_db_path(S2_DB_FILENAME)
 
 
 def init_s2_db(db_path: Path) -> None:

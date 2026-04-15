@@ -15,19 +15,13 @@ from arxiv_browser.models import (
     PaperMetadata,
     QueryToken,
     WatchListEntry,
+    parse_arxiv_date,
 )
 from arxiv_browser.themes import DEFAULT_CATEGORY_COLOR, DEFAULT_CATEGORY_COLORS, DEFAULT_THEME
 
 if TYPE_CHECKING:
     from arxiv_browser.huggingface import HuggingFacePaper
-    from arxiv_browser.parsing import parse_arxiv_date
     from arxiv_browser.semantic_scholar import SemanticScholarPaper
-else:
-    # Deferred imports to avoid circular deps at runtime
-    def parse_arxiv_date(date_str: str) -> datetime:  # type: ignore[assignment]  # noqa: F821
-        from arxiv_browser.parsing import parse_arxiv_date as _parse
-
-        return _parse(date_str)
 
 
 # ============================================================================

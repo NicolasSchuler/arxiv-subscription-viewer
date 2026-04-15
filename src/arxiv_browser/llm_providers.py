@@ -1,13 +1,14 @@
-"""LLM provider abstraction — Protocol + CLI subprocess implementation."""
+"""LLM provider abstraction — Protocol, registry, CLI + HTTP implementations."""
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import shlex
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from arxiv_browser.llm import _build_llm_shell_command, _resolve_llm_command
 from arxiv_browser.models import UserConfig
@@ -282,19 +283,165 @@ class CLIProvider:
             return LLMResult(output="", success=False, error=str(e))
 
 
-def resolve_provider(config: UserConfig) -> CLIProvider | None:
+class HTTPProvider:
+    """LLM provider using the OpenAI-compatible chat completions API.
+
+    Works with OpenAI, Ollama, LM Studio, vLLM, and any other server
+    exposing the ``/v1/chat/completions`` endpoint.  Uses ``httpx`` (already
+    a runtime dependency) for async HTTP.
+    """
+
+    __slots__ = ("_api_key", "_base_url", "_max_retries", "_model")
+
+    _RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        model: str,
+        *,
+        max_retries: int = 1,
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._api_key = api_key
+        self._model = model
+        self._max_retries = max(0, max_retries)
+
+    @property
+    def base_url(self) -> str:
+        """The API base URL (without trailing slash)."""
+        return self._base_url
+
+    @property
+    def model(self) -> str:
+        """The model name sent in the request body."""
+        return self._model
+
+    async def execute(self, prompt: str, timeout: int) -> LLMResult:
+        """Send a chat completion request and return the LLM result."""
+        try:
+            import httpx
+        except ModuleNotFoundError:
+            return LLMResult(output="", success=False, error="httpx is not installed")
+
+        url = f"{self._base_url}/v1/chat/completions"
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        body = {
+            "model": self._model,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+
+        last_result: LLMResult | None = None
+        for attempt in range(1 + self._max_retries):
+            if attempt > 0:
+                delay = min(2**attempt, 8)
+                logger.info("HTTP retry %d/%d after %ds", attempt, self._max_retries, delay)
+                await asyncio.sleep(delay)
+            result = await self._request_once(httpx, url, headers, body, timeout)
+            if result.success:
+                return result
+            last_result = result
+            if not self._is_retryable(result.error):
+                return result
+        return last_result or LLMResult(output="", success=False, error="No attempts made")
+
+    def _is_retryable(self, error: str) -> bool:
+        """Determine whether an error message indicates a transient failure."""
+        if error.startswith("Timed out"):
+            return True
+        return any(f"HTTP {code}" in error for code in self._RETRYABLE_STATUS_CODES)
+
+    async def _request_once(
+        self,
+        httpx: object,
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, object],
+        timeout: int,
+    ) -> LLMResult:
+        """Execute a single HTTP request without retry logic."""
+        httpx_mod: Any = httpx  # Module typed as Any for dynamic import
+        try:
+            async with httpx_mod.AsyncClient(timeout=timeout) as client:
+                response = await client.post(url, headers=headers, json=body)
+        except httpx_mod.TimeoutException:
+            return LLMResult(output="", success=False, error=f"Timed out after {timeout}s")
+        except Exception as e:
+            logger.warning("HTTP request failed: %s", e, exc_info=True)
+            return LLMResult(output="", success=False, error=str(e))
+
+        if response.status_code != 200:
+            err_body = response.text[:200]
+            return LLMResult(
+                output="",
+                success=False,
+                error=f"HTTP {response.status_code}: {err_body}",
+            )
+
+        try:
+            data = response.json()
+        except (json.JSONDecodeError, ValueError) as e:
+            return LLMResult(output="", success=False, error=f"Invalid JSON: {e}")
+
+        try:
+            content = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as e:
+            return LLMResult(
+                output="",
+                success=False,
+                error=f"Unexpected response structure: {e}",
+            )
+
+        output = content.strip() if isinstance(content, str) else str(content).strip()
+        if not output:
+            return LLMResult(output="", success=False, error="Empty response content")
+        return LLMResult(output=output, success=True)
+
+
+# ---------------------------------------------------------------------------
+# Provider Registry
+# ---------------------------------------------------------------------------
+
+_PROVIDER_REGISTRY: dict[str, type[CLIProvider] | type[HTTPProvider]] = {}
+
+
+def register_provider(name: str, cls: type[CLIProvider] | type[HTTPProvider]) -> None:
+    """Register a provider class under *name* (case-insensitive)."""
+    _PROVIDER_REGISTRY[name.lower()] = cls
+
+
+def get_provider_class(name: str) -> type[CLIProvider] | type[HTTPProvider] | None:
+    """Look up a registered provider class by name (case-insensitive)."""
+    return _PROVIDER_REGISTRY.get(name.lower())
+
+
+register_provider("cli", CLIProvider)
+register_provider("http", HTTPProvider)
+
+
+def resolve_provider(config: UserConfig) -> LLMProvider | None:
     """Create an LLM provider from user config, or None if not configured.
 
-    Args:
-        config: The application's ``UserConfig`` instance.  Reads
-            ``llm_command``, ``llm_preset``, ``allow_llm_shell_fallback``, and
-            ``llm_max_retries``.
-
-    Returns:
-        A ``CLIProvider`` instance when a command or preset is configured, or
-        ``None`` when neither ``llm_command`` nor ``llm_preset`` resolves to a
-        non-empty template.
+    When ``config.llm_provider_type`` is ``"http"``, returns an
+    ``HTTPProvider`` (requires ``llm_api_base_url``).  Otherwise falls back
+    to the CLI subprocess path (requires ``llm_command`` or ``llm_preset``).
     """
+    provider_type = config.llm_provider_type.lower()
+
+    if provider_type == "http":
+        if not config.llm_api_base_url:
+            return None
+        return HTTPProvider(
+            base_url=config.llm_api_base_url,
+            api_key=config.llm_api_key,
+            model=config.llm_api_model,
+            max_retries=config.llm_max_retries,
+        )
+
+    # Default: CLI provider path
     template = _resolve_llm_command(config)
     if not template:
         return None
@@ -307,8 +454,11 @@ def resolve_provider(config: UserConfig) -> CLIProvider | None:
 
 __all__ = [
     "CLIProvider",
+    "HTTPProvider",
     "LLMProvider",
     "LLMResult",
+    "get_provider_class",
     "llm_command_requires_shell",
+    "register_provider",
     "resolve_provider",
 ]

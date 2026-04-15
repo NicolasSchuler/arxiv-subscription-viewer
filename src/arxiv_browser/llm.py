@@ -15,9 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from platformdirs import user_config_dir
-
-from arxiv_browser.models import CONFIG_APP_NAME, Paper, UserConfig
+from arxiv_browser.models import Paper, UserConfig
 
 logger = logging.getLogger(__name__)
 LLM_COMMAND_TIMEOUT = 120  # Seconds to wait for LLM CLI response
@@ -155,8 +153,9 @@ CHAT_SYSTEM_PROMPT = (
 
 def get_summary_db_path() -> Path:
     """Get the path to the summary SQLite database."""
-    config_dir = Path(user_config_dir(CONFIG_APP_NAME))
-    return config_dir / SUMMARY_DB_FILENAME
+    from arxiv_browser.database import resolve_db_path
+
+    return resolve_db_path(SUMMARY_DB_FILENAME)
 
 
 def _init_summary_db(db_path: Path) -> None:
@@ -273,8 +272,9 @@ def _compute_command_hash(command_template: str, prompt_template: str) -> str:
 
 def get_relevance_db_path() -> Path:
     """Get the path to the relevance scoring SQLite database."""
-    config_dir = Path(user_config_dir(CONFIG_APP_NAME))
-    return config_dir / RELEVANCE_DB_FILENAME
+    from arxiv_browser.database import resolve_db_path
+
+    return resolve_db_path(RELEVANCE_DB_FILENAME)
 
 
 def _init_relevance_db(db_path: Path) -> None:

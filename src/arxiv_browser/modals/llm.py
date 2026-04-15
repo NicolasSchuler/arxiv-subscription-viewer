@@ -15,7 +15,7 @@ from textual.widgets import Button, Input, Label, Static, TextArea
 
 from arxiv_browser.browser.contracts import TaskTrackingApp
 from arxiv_browser.llm import CHAT_SYSTEM_PROMPT, LLM_COMMAND_TIMEOUT
-from arxiv_browser.llm_providers import CLIProvider
+from arxiv_browser.llm_providers import LLMProvider
 from arxiv_browser.models import Paper
 from arxiv_browser.query import escape_rich_text
 from arxiv_browser.themes import theme_colors_for
@@ -285,7 +285,7 @@ class PaperChatScreen(ModalScreen[None]):
     def __init__(
         self,
         paper: Paper,
-        provider: CLIProvider,
+        provider: LLMProvider,
         paper_content: str = "",
         *,
         timeout: int = 0,

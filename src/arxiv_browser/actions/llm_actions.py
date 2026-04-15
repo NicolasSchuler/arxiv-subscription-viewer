@@ -28,7 +28,7 @@ from arxiv_browser.llm import (
     _save_relevance_score,
     _save_summary,
 )
-from arxiv_browser.llm_providers import CLIProvider, llm_command_requires_shell, resolve_provider
+from arxiv_browser.llm_providers import LLMProvider, llm_command_requires_shell, resolve_provider
 from arxiv_browser.modals import (
     AutoTagSuggestModal,
     ConfirmModal,
@@ -482,7 +482,7 @@ def _start_chat_with_paper(app: "ArxivBrowser") -> None:
     app._track_dataset_task(app._open_chat_screen(paper, app._llm_provider))
 
 
-async def _open_chat_screen(app: "ArxivBrowser", paper: Paper, provider: CLIProvider) -> None:
+async def _open_chat_screen(app: "ArxivBrowser", paper: Paper, provider: LLMProvider) -> None:
     """Fetch paper content and open the chat modal."""
     task_epoch = app._capture_dataset_epoch()
     paper_content = await app._fetch_paper_content_async(paper)

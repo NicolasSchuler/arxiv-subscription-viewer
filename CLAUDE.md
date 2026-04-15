@@ -35,6 +35,7 @@ src/arxiv_browser/
 ├── app.py                # Narrow compatibility shim for legacy CLI/bootstrap patching
 ├── cli.py                # CLI argument parsing + bootstrap
 ├── config.py             # Config persistence: load/save/export/import
+├── database.py           # Unified cache DB: schema, init, dual-path resolution
 ├── enrichment.py         # Enrichment toggle helpers
 ├── export.py             # BibTeX, RIS, CSV, Markdown export
 ├── help_ui.py            # Help overlay section builder
@@ -81,15 +82,17 @@ themes.py              ← 0 internal deps (leaf)
 action_messages.py     ← 0 internal deps (leaf)
 ui_constants.py        ← 0 internal deps (leaf)
 help_ui.py             ← 0 internal deps (leaf)
+database.py            ← 0 internal deps (leaf; uses models.CONFIG_APP_NAME)
 config.py              ← models
 parsing.py             ← models
 export.py              ← models
 query.py               ← models, themes
-llm.py                 ← models
+llm.py                 ← database, models
 llm_providers.py       ← llm, models
 similarity.py          ← models
 semantic_scholar.py    ← models
-huggingface.py         ← models
+semantic_scholar_cache.py ← database, semantic_scholar_models
+huggingface.py         ← database, models
 enrichment.py          ← models
 io_actions.py          ← models
 cli.py                 ← action_messages, config, models, parsing
@@ -109,6 +112,7 @@ widgets/details.py     ← models, query, themes, semantic_scholar, huggingface,
 widgets/chrome.py      ← models, parsing, query, themes
 ui_runtime.py          ← widgets
 actions/*              ← action_messages + canonical modules
+browser/core.py        ← database + canonical modules
 app.py                 ← browser/core, cli, config, parsing (compat allowlist only)
 ```
 
@@ -128,8 +132,10 @@ Submodules should import canonical modules directly. Only the compatibility shim
 
 - **`parsing.py`**: `parse_arxiv_file()`, `clean_latex()`, `discover_history_files()`, `parse_arxiv_date()`
 - **`config.py`**: `load_config()`, `save_config()`, `export_metadata()`, `import_metadata()`
+- **`database.py`**: `get_cache_db_path()`, `resolve_db_path()`, `init_cache_db()`
 - **`similarity.py`**: `find_similar_papers()`, `TfidfIndex`, `compute_paper_similarity()`
 - **`llm.py`**: `build_llm_prompt()`, `get_summary_db_path()`, `SUMMARY_MODES`, `LLM_PRESETS`
+- **`llm_providers.py`**: `LLMProvider`, `CLIProvider`, `HTTPProvider`, `resolve_provider()`, `register_provider()`
 - **`query.py`**: `tokenize_query()`, `sort_papers()`, `highlight_text()`, `format_categories()`
 - **`export.py`**: `format_paper_as_bibtex()`, `format_papers_as_csv()`, `format_paper_as_ris()`
 - **`themes.py`**: `get_tag_color()`, `parse_tag_namespace()`, `TEXTUAL_THEMES`
@@ -352,7 +358,7 @@ Config file location (via platformdirs):
 
 BibTeX exports default to `~/arxiv-exports/` (configurable).
 
-LLM summaries are cached in a SQLite database (`summaries.db`) in the same config directory. Summaries are invalidated when the LLM command or prompt template changes.
+LLM summaries, Semantic Scholar data, and HuggingFace trending are cached in SQLite. New installs use a unified `cache.db`; existing installs continue using legacy per-module files (`summaries.db`, `relevance.db`, `semantic_scholar.db`, `huggingface.db`). The unified DB uses WAL mode and foreign keys. Summaries are invalidated when the LLM command or prompt template changes.
 
 ## Feature Configuration
 

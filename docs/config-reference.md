@@ -40,6 +40,10 @@ Configure AI summaries, paper chat, relevance scoring, and auto-tagging. See [ll
 | `allow_llm_shell_fallback` | `bool` | `true` | Allow commands that require shell parsing. Set `false` to reject shell-only templates. |
 | `llm_max_retries` | `int` | `1` | Retries for transient LLM failures such as timeouts or non-zero exits. Range `0..5` (`1` means up to 2 total attempts). |
 | `llm_timeout` | `int` | `120` | Seconds to wait for each LLM attempt before timing out. Range `10..600`. |
+| `llm_provider_type` | `string` | `"cli"` | LLM provider backend: `"cli"` (shell command) or `"http"` (OpenAI-compatible API). |
+| `llm_api_base_url` | `string` | `""` | Base URL for the HTTP provider, e.g. `"https://api.openai.com"` or `"http://localhost:11434"`. Required when `llm_provider_type` is `"http"`. |
+| `llm_api_key` | `string` | `""` | API key for the HTTP provider. Leave empty for local models that don't require auth. |
+| `llm_api_model` | `string` | `""` | Model name for the HTTP provider, e.g. `"gpt-4o"`, `"llama3"`. |
 | `trusted_llm_command_hashes` | `list[str]` | `[]` | SHA-256 hashes of LLM commands the user has approved. **Managed by the app** — do not edit. |
 
 ## Semantic Scholar

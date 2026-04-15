@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import functools
 import logging
 import re
 from datetime import date, datetime
@@ -13,14 +12,14 @@ from typing import Any
 from defusedxml import ElementTree as ET
 from defusedxml.common import DefusedXmlException
 
-from arxiv_browser.models import Paper, PaperMetadata
+from arxiv_browser.models import (
+    ARXIV_DATE_FORMAT,
+    Paper,
+    PaperMetadata,
+    parse_arxiv_date,
+)
 
 logger = logging.getLogger(__name__)
-
-# Date format used in arXiv emails (e.g., "Mon, 15 Jan 2024")
-ARXIV_DATE_FORMAT = "%a, %d %b %Y"
-# Extract the date prefix when time/zone info is present
-_ARXIV_DATE_PREFIX_PATTERN = re.compile(r"([A-Za-z]{3},\s+\d{1,2}\s+[A-Za-z]{3}\s+\d{4})")
 
 # Placeholder using control characters (cannot appear in academic text)
 _ESCAPED_DOLLAR = "\x00ESCAPED_DOLLAR\x00"
@@ -93,35 +92,6 @@ ARXIV_QUERY_FIELDS = {
 
 # History file date format (ISO 8601)
 HISTORY_DATE_FORMAT = "%Y-%m-%d"
-
-
-@functools.lru_cache(maxsize=512)
-def parse_arxiv_date(date_str: str) -> datetime:
-    """Parse arXiv date string to datetime for proper sorting.
-
-    Args:
-        date_str: Date string like "Mon, 15 Jan 2024"
-
-    Returns:
-        Parsed datetime object, or datetime.min for malformed dates.
-    """
-    cleaned = date_str.strip()
-    if not cleaned:
-        return datetime.min
-
-    try:
-        return datetime.strptime(cleaned, ARXIV_DATE_FORMAT)
-    except ValueError:
-        pass
-
-    match = _ARXIV_DATE_PREFIX_PATTERN.search(cleaned)
-    if match:
-        try:
-            return datetime.strptime(match.group(1), ARXIV_DATE_FORMAT)
-        except ValueError:
-            pass
-
-    return datetime.min  # Fallback for malformed dates
 
 
 def clean_latex(text: str) -> str:

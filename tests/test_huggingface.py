@@ -352,7 +352,7 @@ class TestHfCache:
 
     def test_get_hf_db_path(self) -> None:
         path = get_hf_db_path()
-        assert path.name == "huggingface.db"
+        assert path.name in ("huggingface.db", "cache.db")
         assert "arxiv-browser" in str(path)
 
 
