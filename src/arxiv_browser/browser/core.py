@@ -552,6 +552,16 @@ class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
             self._get_paper_list_widget().focus()
         except NoMatches:
             pass
+        # Show first-run tutorial if user hasn't seen it
+        if not self._config.onboarding_seen:
+            from arxiv_browser.modals.welcome import WelcomeScreen
+
+            self.push_screen(WelcomeScreen(), callback=self._on_welcome_dismissed)
+
+    def _on_welcome_dismissed(self, result: None) -> None:
+        """Mark onboarding as seen after the welcome screen is dismissed."""
+        self._config.onboarding_seen = True
+        self._save_config_or_warn("onboarding status")
 
     async def on_unmount(self) -> None:
         """Called when app is unmounted. Saves session state and cleans up timers.

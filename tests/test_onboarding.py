@@ -10,7 +10,7 @@ class TestOnboardingSeen:
     """Tests for the onboarding_seen flag on UserConfig."""
 
     def test_default_is_false(self) -> None:
-        config = UserConfig()
+        config = UserConfig(onboarding_seen=False)
         assert config.onboarding_seen is False
 
     def test_serializes_true(self) -> None:

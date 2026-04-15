@@ -4,6 +4,9 @@ Domain-grouped ModalScreen subclasses extracted from app.py.
 Import modals from this package: ``from arxiv_browser.modals import HelpScreen``
 """
 
+# base.py — shared base class for all modals
+from arxiv_browser.modals.base import ModalBase
+
 # citations.py — recommendation and citation graph modals
 from arxiv_browser.modals.citations import (
     CitationGraphListItem,
@@ -55,6 +58,9 @@ from arxiv_browser.modals.search import (
 # watchlist.py — watch list management modals
 from arxiv_browser.modals.watchlist import WatchListItem, WatchListModal
 
+# welcome.py — first-run tutorial overlay
+from arxiv_browser.modals.welcome import WelcomeScreen
+
 __all__ = [
     "AddToCollectionModal",
     "ArxivSearchModal",
@@ -68,6 +74,7 @@ __all__ = [
     "ExportMenuModal",
     "HelpScreen",
     "MetadataSnapshotPickerModal",
+    "ModalBase",
     "NotesModal",
     "PaletteCommand",
     "PaperChatScreen",
@@ -80,4 +87,5 @@ __all__ = [
     "TagsModal",
     "WatchListItem",
     "WatchListModal",
+    "WelcomeScreen",
 ]

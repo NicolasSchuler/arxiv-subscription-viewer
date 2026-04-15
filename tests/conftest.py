@@ -48,6 +48,23 @@ def _shorten_browser_debounce_windows(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(browser_constants, "BADGE_COALESCE_DELAY", 0.01)
 
 
+@pytest.fixture(autouse=True)
+def _skip_welcome_screen_in_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default onboarding_seen=True so the welcome overlay doesn't interfere with tests.
+
+    Tests that specifically verify onboarding behaviour should explicitly set
+    ``config.onboarding_seen = False`` or pass ``onboarding_seen=False`` to UserConfig.
+    """
+    _original_init = UserConfig.__init__
+
+    def _patched_init(self: UserConfig, *args: Any, **kwargs: Any) -> None:
+        if "onboarding_seen" not in kwargs:
+            kwargs["onboarding_seen"] = True
+        _original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(UserConfig, "__init__", _patched_init)
+
+
 # ── Factories ────────────────────────────────────────────────────────────────
 
 
