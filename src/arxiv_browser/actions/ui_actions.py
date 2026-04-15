@@ -22,7 +22,7 @@ from arxiv_browser.action_messages import (
 from arxiv_browser.actions.constants import RECOVERABLE_ACTION_ERRORS, log_action_failure, logger
 from arxiv_browser.config import save_config
 from arxiv_browser.enrichment import count_hf_matches, get_starred_paper_ids_for_version_check
-from arxiv_browser.modals.collections import AddToCollectionModal, CollectionsModal
+from arxiv_browser.modals.collections import CollectionsModal
 from arxiv_browser.modals.common import SectionToggleModal
 from arxiv_browser.modals.help import HelpScreen
 from arxiv_browser.modals.search import CommandPaletteModal
@@ -707,4 +707,4 @@ def action_add_to_collection(app: "ArxivBrowser") -> None:
                 )
                 break
 
-    app.push_screen(AddToCollectionModal(app._config.collections), _on_collection_selected)
+    app.push_screen(CollectionsModal(app._config.collections, mode="pick"), _on_collection_selected)

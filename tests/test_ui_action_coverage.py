@@ -22,11 +22,7 @@ import arxiv_browser.llm_providers as llm_providers
 import arxiv_browser.semantic_scholar as s2
 from arxiv_browser.actions import external_io_actions as io_actions
 from arxiv_browser.actions import llm_actions as llm_actions
-from arxiv_browser.modals.collections import (
-    AddToCollectionModal,
-    CollectionsModal,
-    CollectionViewModal,
-)
+from arxiv_browser.modals.collections import CollectionsModal
 from arxiv_browser.models import MAX_COLLECTIONS, PaperCollection, PaperMetadata, UserConfig
 from arxiv_browser.services import enrichment_service as enrich
 from tests.support.app_stubs import (
@@ -607,9 +603,7 @@ class TestUiActionCoverage:
 
         app.notify.reset_mock()
         app._config.collections = [PaperCollection(name="Reading", paper_ids=[paper.arxiv_id])]
-        with patch(
-            "arxiv_browser.actions.ui_actions.AddToCollectionModal", return_value="add-modal"
-        ):
+        with patch("arxiv_browser.actions.ui_actions.CollectionsModal", return_value="add-modal"):
             ui_actions.action_add_to_collection(app)
         callback = app.push_screen.call_args.args[1]
         callback(None)

@@ -15,12 +15,8 @@ from arxiv_browser.modals.citations import (
     RecommendationsScreen,
 )
 
-# collections.py — paper collections (reading lists) modals
-from arxiv_browser.modals.collections import (
-    AddToCollectionModal,
-    CollectionsModal,
-    CollectionViewModal,
-)
+# collections.py — paper collections (reading lists) modal
+from arxiv_browser.modals.collections import CollectionsModal
 
 # common.py — general-purpose dialogs
 from arxiv_browser.modals.common import (
@@ -60,11 +56,9 @@ from arxiv_browser.modals.watchlist import WatchListItem, WatchListModal
 from arxiv_browser.modals.welcome import WelcomeScreen
 
 __all__ = [
-    "AddToCollectionModal",
     "ArxivSearchModal",
     "CitationGraphListItem",
     "CitationGraphScreen",
-    "CollectionViewModal",
     "CollectionsModal",
     "CommandPaletteModal",
     "ConfirmModal",

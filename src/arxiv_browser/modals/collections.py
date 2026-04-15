@@ -1,28 +1,38 @@
-"""Paper collections (reading lists) modals."""
+"""Paper collections (reading lists) modal with manage/pick modes."""
 
 from __future__ import annotations
 
 import logging
 from datetime import datetime
+from typing import Literal
 
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, ListItem, ListView
 
 from arxiv_browser.action_messages import build_actionable_warning
+from arxiv_browser.modals.base import ModalBase
 from arxiv_browser.models import MAX_COLLECTIONS, Paper, PaperCollection
 
 logger = logging.getLogger(__name__)
 
 
-class CollectionsModal(ModalScreen[str | None]):
-    """Modal dialog for managing paper collections (reading lists)."""
+class CollectionsModal(ModalBase[str | None]):
+    """Unified modal for managing and picking paper collections.
+
+    ``mode="manage"`` (default) shows a full collection manager with
+    create/rename/delete/view actions.  ``mode="pick"`` shows a simplified
+    collection picker for "add paper to collection" flows.
+
+    The manage view includes an inline detail sub-view for viewing papers in
+    a collection, accessible via the "View" button (no nested modal).
+    """
 
     BINDINGS = [
-        Binding("escape", "cancel", "Cancel"),
+        Binding("escape", "cancel_or_back", "Cancel"),
+        Binding("q", "cancel_or_back", "Cancel", show=False),
     ]
 
     CSS = """
@@ -30,6 +40,7 @@ class CollectionsModal(ModalScreen[str | None]):
         align: center middle;
     }
 
+    /* ── shared dialog chrome ────────────────────────────── */
     #col-dialog {
         width: 70;
         height: 70%;
@@ -45,9 +56,10 @@ class CollectionsModal(ModalScreen[str | None]):
         margin-bottom: 1;
     }
 
-    #col-body {
-        height: 1fr;
-    }
+    /* ── manage-view ─────────────────────────────────────── */
+    #manage-view { height: 1fr; }
+
+    #col-body { height: 1fr; }
 
     #col-list {
         width: 2fr;
@@ -85,9 +97,7 @@ class CollectionsModal(ModalScreen[str | None]):
         align: left middle;
     }
 
-    #col-actions Button {
-        margin-right: 1;
-    }
+    #col-actions Button { margin-right: 1; }
 
     #col-buttons {
         height: auto;
@@ -95,17 +105,63 @@ class CollectionsModal(ModalScreen[str | None]):
         align: right middle;
     }
 
-    #col-buttons Button {
-        margin-left: 1;
+    #col-buttons Button { margin-left: 1; }
+
+    /* ── detail-view ─────────────────────────────────────── */
+    #detail-view { height: 1fr; }
+
+    #detail-title {
+        text-style: bold;
+        color: $th-accent;
+        margin-bottom: 1;
     }
+
+    #detail-list {
+        height: 1fr;
+        background: $th-panel;
+        border: none;
+    }
+
+    #detail-buttons {
+        height: auto;
+        margin-top: 1;
+        align: right middle;
+    }
+
+    #detail-buttons Button { margin-left: 1; }
+
+    /* ── pick-view ───────────────────────────────────────── */
+    #pick-view { height: 1fr; }
+
+    #pick-title {
+        text-style: bold;
+        color: $th-accent;
+        margin-bottom: 1;
+    }
+
+    #pick-list {
+        height: 1fr;
+        background: $th-panel;
+        border: none;
+    }
+
+    #pick-buttons {
+        height: auto;
+        margin-top: 1;
+        align: right middle;
+    }
+
+    #pick-buttons Button { margin-left: 1; }
     """
 
     def __init__(
         self,
         collections: list[PaperCollection],
         papers_by_id: dict[str, Paper] | None = None,
+        *,
+        mode: Literal["manage", "pick"] = "manage",
     ) -> None:
-        """Initialize with deep-copied collections and an optional paper lookup."""
+        """Initialize with deep-copied collections, optional paper lookup, and mode."""
         super().__init__()
         self._collections = [
             PaperCollection(
@@ -117,34 +173,79 @@ class CollectionsModal(ModalScreen[str | None]):
             for c in collections
         ]
         self._papers_by_id = papers_by_id or {}
+        self._mode: Literal["manage", "pick"] = mode
+        self._viewing_collection: PaperCollection | None = None
+
+    # ── compose ──────────────────────────────────────────────────────
 
     def compose(self) -> ComposeResult:
-        """Yield the collections dialog with a list view, name/description form, and action buttons."""
+        """Yield all three sub-views; visibility is toggled in on_mount."""
         with Vertical(id="col-dialog"):
             yield Label("Collections Manager", id="col-title")
-            with Horizontal(id="col-body"):
-                yield ListView(id="col-list")
-                with Vertical(id="col-form"):
-                    yield Label("Name")
-                    yield Input(placeholder="e.g., ML Reading List", id="col-name")
-                    yield Label("Description")
-                    yield Input(placeholder="Optional description", id="col-desc")
-                    with Horizontal(id="col-actions"):
-                        yield Button("Create", variant="primary", id="col-create")
-                        yield Button("Rename", variant="default", id="col-rename")
-                        yield Button("Delete", variant="default", id="col-delete")
-                        yield Button("View", variant="default", id="col-view")
-            with Horizontal(id="col-buttons"):
-                yield Button("Close", variant="default", id="col-close")
-                yield Button("Save", variant="primary", id="col-save")
+
+            # manage-view
+            with Vertical(id="manage-view"):
+                with Horizontal(id="col-body"):
+                    yield ListView(id="col-list")
+                    with Vertical(id="col-form"):
+                        yield Label("Name")
+                        yield Input(placeholder="e.g., ML Reading List", id="col-name")
+                        yield Label("Description")
+                        yield Input(placeholder="Optional description", id="col-desc")
+                        with Horizontal(id="col-actions"):
+                            yield Button("Create", variant="primary", id="col-create")
+                            yield Button("Rename", variant="default", id="col-rename")
+                            yield Button("Delete", variant="default", id="col-delete")
+                            yield Button("View", variant="default", id="col-view")
+                with Horizontal(id="col-buttons"):
+                    yield Button("Close", variant="default", id="col-close")
+                    yield Button("Save", variant="primary", id="col-save")
+
+            # detail-view (papers in a collection)
+            with Vertical(id="detail-view"):
+                yield Label("", id="detail-title")
+                yield ListView(id="detail-list")
+                with Horizontal(id="detail-buttons"):
+                    yield Button("Remove Selected", variant="default", id="detail-remove")
+                    yield Button("Back", variant="primary", id="detail-back")
+
+            # pick-view (quick collection picker)
+            with Vertical(id="pick-view"):
+                yield Label("Add to Collection", id="pick-title")
+                yield ListView(id="pick-list")
+                with Horizontal(id="pick-buttons"):
+                    yield Button("Cancel (Esc/q)", variant="default", id="pick-cancel")
+
+    # ── lifecycle ────────────────────────────────────────────────────
 
     def on_mount(self) -> None:
-        """Populate the collections list and focus the name input on mount."""
-        self._refresh_list()
-        self.query_one("#col-name", Input).focus()
+        """Show the correct initial view and populate lists."""
+        self._show_view(self._mode)
+        if self._mode == "manage":
+            self._refresh_manage_list()
+            self._focus_widget("#col-name")
+        else:
+            self._refresh_pick_list()
 
-    def _refresh_list(self) -> None:
-        """Clear and repopulate the collections list view with current collection data."""
+    # ── view switching ───────────────────────────────────────────────
+
+    def _show_view(self, view: Literal["manage", "detail", "pick"]) -> None:
+        """Toggle visibility of the three sub-views."""
+        self.query_one("#manage-view", Vertical).display = view == "manage"
+        self.query_one("#detail-view", Vertical).display = view == "detail"
+        self.query_one("#pick-view", Vertical).display = view == "pick"
+        # Update dialog title
+        titles = {
+            "manage": "Collections Manager",
+            "detail": "",  # set separately with collection name
+            "pick": "Add to Collection",
+        }
+        self.query_one("#col-title", Label).update(titles[view])
+
+    # ── manage-view helpers ──────────────────────────────────────────
+
+    def _refresh_manage_list(self) -> None:
+        """Clear and repopulate the manage-view collections list."""
         list_view = self.query_one("#col-list", ListView)
         list_view.clear()
         for col in self._collections:
@@ -155,6 +256,9 @@ class CollectionsModal(ModalScreen[str | None]):
             list_view.index = 0
             self._populate_form(0)
 
+    # Keep legacy alias for tests that mock _refresh_list
+    _refresh_list = _refresh_manage_list
+
     def _populate_form(self, index: int) -> None:
         """Fill the name and description inputs from the collection at the given index."""
         if index < 0 or index >= len(self._collections):
@@ -164,7 +268,7 @@ class CollectionsModal(ModalScreen[str | None]):
         self.query_one("#col-desc", Input).value = col.description
 
     def _get_selected_index(self) -> int | None:
-        """Return the currently highlighted list index, or None if nothing is selected."""
+        """Return the currently highlighted manage-list index, or None."""
         list_view = self.query_one("#col-list", ListView)
         idx = list_view.index
         if idx is None or idx < 0 or idx >= len(self._collections):
@@ -179,9 +283,7 @@ class CollectionsModal(ModalScreen[str | None]):
             severity="warning",
         )
 
-    def action_cancel(self) -> None:
-        """Dismiss the modal without saving changes."""
-        self.dismiss(None)
+    # ── manage-view event handlers ───────────────────────────────────
 
     @on(ListView.Highlighted, "#col-list")
     def on_list_highlighted(self, event: ListView.Highlighted) -> None:
@@ -221,7 +323,7 @@ class CollectionsModal(ModalScreen[str | None]):
                 created=datetime.now().isoformat(),
             )
         )
-        self._refresh_list()
+        self._refresh_manage_list()
 
     @on(Button.Pressed, "#col-rename")
     def on_rename_pressed(self) -> None:
@@ -243,7 +345,7 @@ class CollectionsModal(ModalScreen[str | None]):
         desc = self.query_one("#col-desc", Input).value.strip()
         self._collections[idx].name = name
         self._collections[idx].description = desc
-        self._refresh_list()
+        self._refresh_manage_list()
 
     @on(Button.Pressed, "#col-delete")
     def on_delete_pressed(self) -> None:
@@ -256,11 +358,11 @@ class CollectionsModal(ModalScreen[str | None]):
             )
             return
         self._collections.pop(idx)
-        self._refresh_list()
+        self._refresh_manage_list()
 
     @on(Button.Pressed, "#col-view")
     def on_view_pressed(self) -> None:
-        """Open the CollectionViewModal for the selected collection's papers."""
+        """Switch to the detail-view for the selected collection's papers."""
         idx = self._get_selected_index()
         if idx is None:
             self._notify_warning(
@@ -269,20 +371,13 @@ class CollectionsModal(ModalScreen[str | None]):
             )
             return
         col = self._collections[idx]
-        self.app.push_screen(
-            CollectionViewModal(col, self._papers_by_id),
-            callback=self._on_view_result,
+        self._viewing_collection = PaperCollection(
+            name=col.name,
+            description=col.description,
+            paper_ids=list(col.paper_ids),
+            created=col.created,
         )
-
-    def _on_view_result(self, result: PaperCollection | None) -> None:
-        """Handle the result from CollectionViewModal by updating the modified collection."""
-        if result is not None:
-            # Find and update the collection
-            for i, c in enumerate(self._collections):
-                if c.name == result.name:
-                    self._collections[i] = result
-                    break
-            self._refresh_list()
+        self._show_detail_view()
 
     @on(Button.Pressed, "#col-save")
     def on_save_pressed(self) -> None:
@@ -294,195 +389,67 @@ class CollectionsModal(ModalScreen[str | None]):
         """Dismiss the modal without saving changes."""
         self.dismiss(None)
 
-    @property
-    def collections(self) -> list[PaperCollection]:
-        """Return the current list of collections, including any unsaved edits."""
-        return self._collections
+    # ── detail-view helpers & handlers ───────────────────────────────
 
+    def _show_detail_view(self) -> None:
+        """Activate the detail-view and populate it with the viewed collection."""
+        assert self._viewing_collection is not None
+        col = self._viewing_collection
+        count = len(col.paper_ids)
+        title = f"{col.name} ({count} paper{'s' if count != 1 else ''})"
+        self.query_one("#detail-title", Label).update(title)
+        self._show_view("detail")
+        self._refresh_detail_list()
 
-class CollectionViewModal(ModalScreen[PaperCollection | None]):
-    """Modal for viewing and editing papers in a collection."""
-
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel"),
-    ]
-
-    CSS = """
-    CollectionViewModal {
-        align: center middle;
-    }
-
-    #colview-dialog {
-        width: 70;
-        height: 65%;
-        min-height: 15;
-        background: $th-background;
-        border: tall $th-accent;
-        padding: 0 2;
-    }
-
-    #colview-title {
-        text-style: bold;
-        color: $th-accent;
-        margin-bottom: 1;
-    }
-
-    #colview-list {
-        height: 1fr;
-        background: $th-panel;
-        border: none;
-    }
-
-    #colview-buttons {
-        height: auto;
-        margin-top: 1;
-        align: right middle;
-    }
-
-    #colview-buttons Button {
-        margin-left: 1;
-    }
-    """
-
-    def __init__(
-        self,
-        collection: PaperCollection,
-        papers_by_id: dict[str, Paper] | None = None,
-    ) -> None:
-        """Initialize with a deep-copied collection and an optional paper lookup."""
-        super().__init__()
-        self._collection = PaperCollection(
-            name=collection.name,
-            description=collection.description,
-            paper_ids=list(collection.paper_ids),
-            created=collection.created,
-        )
-        self._papers_by_id = papers_by_id or {}
-
-    def compose(self) -> ComposeResult:
-        """Yield the collection view dialog with a paper list and remove/done buttons."""
-        count = len(self._collection.paper_ids)
-        title = f"{self._collection.name} ({count} paper{'s' if count != 1 else ''})"
-        with Vertical(id="colview-dialog"):
-            yield Label(title, id="colview-title")
-            yield ListView(id="colview-list")
-            with Horizontal(id="colview-buttons"):
-                yield Button("Remove Selected", variant="default", id="colview-remove")
-                yield Button("Done", variant="primary", id="colview-done")
-
-    def on_mount(self) -> None:
-        """Populate the paper list on mount."""
-        self._refresh_list()
-
-    def _refresh_list(self) -> None:
-        """Clear and repopulate the paper list view from the collection's paper IDs."""
-        list_view = self.query_one("#colview-list", ListView)
+    def _refresh_detail_list(self) -> None:
+        """Clear and repopulate the detail-view paper list."""
+        assert self._viewing_collection is not None
+        list_view = self.query_one("#detail-list", ListView)
         list_view.clear()
-        for pid in self._collection.paper_ids:
+        for pid in self._viewing_collection.paper_ids:
             paper = self._papers_by_id.get(pid)
             label = paper.title if paper else pid
             list_view.mount(ListItem(Label(label)))
         if list_view.children:
             list_view.index = 0
 
-    def action_cancel(self) -> None:
-        """Dismiss the modal without applying paper removals."""
-        self.dismiss(None)
-
-    def _notify_warning(self, message: str, *, next_step: str) -> None:
-        """Emit a standardized collection warning with actionable next step."""
-        self.notify(
-            build_actionable_warning(message, next_step=next_step),
-            title="Collection",
-            severity="warning",
-        )
-
-    @on(Button.Pressed, "#colview-remove")
-    def on_remove_pressed(self) -> None:
-        """Remove the highlighted paper from the collection and refresh the list."""
-        list_view = self.query_one("#colview-list", ListView)
+    @on(Button.Pressed, "#detail-remove")
+    def on_detail_remove_pressed(self) -> None:
+        """Remove the highlighted paper from the viewed collection."""
+        assert self._viewing_collection is not None
+        list_view = self.query_one("#detail-list", ListView)
         idx = list_view.index
-        if idx is None or idx < 0 or idx >= len(self._collection.paper_ids):
+        if idx is None or idx < 0 or idx >= len(self._viewing_collection.paper_ids):
             self._notify_warning(
                 "No paper is selected",
                 next_step="highlight a paper in the list, then press Remove Selected",
             )
             return
-        self._collection.paper_ids.pop(idx)
-        self._refresh_list()
-        # Update title
-        count = len(self._collection.paper_ids)
-        self.query_one("#colview-title", Label).update(
-            f"{self._collection.name} ({count} paper{'s' if count != 1 else ''})"
+        self._viewing_collection.paper_ids.pop(idx)
+        self._refresh_detail_list()
+        count = len(self._viewing_collection.paper_ids)
+        self.query_one("#detail-title", Label).update(
+            f"{self._viewing_collection.name} ({count} paper{'s' if count != 1 else ''})"
         )
 
-    @on(Button.Pressed, "#colview-done")
-    def on_done_pressed(self) -> None:
-        """Dismiss the modal and return the updated collection."""
-        self.dismiss(self._collection)
+    @on(Button.Pressed, "#detail-back")
+    def on_detail_back_pressed(self) -> None:
+        """Return to manage-view, applying any paper removals."""
+        if self._viewing_collection is not None:
+            for i, c in enumerate(self._collections):
+                if c.name == self._viewing_collection.name:
+                    self._collections[i] = self._viewing_collection
+                    break
+            self._viewing_collection = None
+        self._show_view("manage")
+        self._refresh_manage_list()
 
+    # ── pick-view helpers & handlers ─────────────────────────────────
 
-class AddToCollectionModal(ModalScreen[str | None]):
-    """Quick picker to select a collection to add papers to."""
-
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel"),
-        Binding("q", "cancel", "Cancel"),
-    ]
-
-    CSS = """
-    AddToCollectionModal {
-        align: center middle;
-    }
-
-    #addcol-dialog {
-        width: 52;
-        height: 50%;
-        min-height: 12;
-        background: $th-background;
-        border: tall $th-accent;
-        padding: 0 2;
-    }
-
-    #addcol-title {
-        text-style: bold;
-        color: $th-accent;
-        margin-bottom: 1;
-    }
-
-    #addcol-list {
-        height: 1fr;
-        background: $th-panel;
-        border: none;
-    }
-
-    #addcol-buttons {
-        height: auto;
-        margin-top: 1;
-        align: right middle;
-    }
-
-    #addcol-buttons Button {
-        margin-left: 1;
-    }
-    """
-
-    def __init__(self, collections: list[PaperCollection]) -> None:
-        """Initialize with the list of available collections to choose from."""
-        super().__init__()
-        self._collections = collections
-
-    def compose(self) -> ComposeResult:
-        """Yield the collection picker dialog with a selectable list and cancel button."""
-        with Vertical(id="addcol-dialog"):
-            yield Label("Add to Collection", id="addcol-title")
-            yield ListView(id="addcol-list")
-            with Horizontal(id="addcol-buttons"):
-                yield Button("Cancel (Esc/q)", variant="default", id="addcol-cancel")
-
-    def on_mount(self) -> None:
-        """Populate the list view with available collections on mount."""
-        list_view = self.query_one("#addcol-list", ListView)
+    def _refresh_pick_list(self) -> None:
+        """Populate the pick-view collection list."""
+        list_view = self.query_one("#pick-list", ListView)
+        list_view.clear()
         for col in self._collections:
             count = len(col.paper_ids)
             label = f"{col.name} ({count} paper{'s' if count != 1 else ''})"
@@ -490,19 +457,31 @@ class AddToCollectionModal(ModalScreen[str | None]):
         if list_view.children:
             list_view.index = 0
 
-    def action_cancel(self) -> None:
-        """Dismiss the picker without selecting a collection."""
-        self.dismiss(None)
-
-    @on(ListView.Selected, "#addcol-list")
-    def on_list_selected(self, event: ListView.Selected) -> None:
-        """Handle list item selection by dismissing with the chosen collection name."""
-        list_view = self.query_one("#addcol-list", ListView)
+    @on(ListView.Selected, "#pick-list")
+    def on_pick_list_selected(self, event: ListView.Selected) -> None:
+        """Handle pick-list item selection by dismissing with the chosen collection name."""
+        list_view = self.query_one("#pick-list", ListView)
         idx = list_view.index
         if idx is not None and 0 <= idx < len(self._collections):
             self.dismiss(self._collections[idx].name)
 
-    @on(Button.Pressed, "#addcol-cancel")
-    def on_cancel_pressed(self) -> None:
-        """Handle the cancel button press by dismissing without a selection."""
+    @on(Button.Pressed, "#pick-cancel")
+    def on_pick_cancel_pressed(self) -> None:
+        """Handle the cancel button press in pick mode."""
         self.dismiss(None)
+
+    # ── shared escape/q handler ──────────────────────────────────────
+
+    def action_cancel_or_back(self) -> None:
+        """Escape returns to manage-view from detail-view, otherwise dismisses."""
+        if self._viewing_collection is not None:
+            self.on_detail_back_pressed()
+        else:
+            self.dismiss(None)
+
+    # ── public API ───────────────────────────────────────────────────
+
+    @property
+    def collections(self) -> list[PaperCollection]:
+        """Return the current list of collections, including any unsaved edits."""
+        return self._collections

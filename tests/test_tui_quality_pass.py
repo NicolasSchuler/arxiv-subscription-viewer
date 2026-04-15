@@ -14,11 +14,9 @@ from textual.widgets import Checkbox, Input, Label, ListView, Select, Static
 
 from arxiv_browser.browser.core import ArxivBrowser
 from arxiv_browser.modals import (
-    AddToCollectionModal,
     ArxivSearchModal,
     CitationGraphScreen,
     CollectionsModal,
-    CollectionViewModal,
     CommandPaletteModal,
     RecommendationsScreen,
     WatchListModal,
@@ -152,7 +150,7 @@ async def test_collections_modal_enforces_max_collection_count(make_paper):
 
 
 @pytest.mark.asyncio
-async def test_collection_view_modal_remove_and_done(make_paper):
+async def test_collection_detail_view_remove_and_back(make_paper):
     papers = [
         make_paper(arxiv_id="2401.00001", title="A"),
         make_paper(arxiv_id="2401.00002", title="B"),
@@ -163,55 +161,62 @@ async def test_collection_view_modal_remove_and_done(make_paper):
         paper_ids=[papers[0].arxiv_id, papers[1].arxiv_id],
     )
     app = ArxivBrowser(papers, restore_session=False)
-    modal = CollectionViewModal(collection, papers_by_id={p.arxiv_id: p for p in papers})
+    modal = CollectionsModal([collection], papers_by_id={p.arxiv_id: p for p in papers})
 
     with patch_save_config(return_value=True):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
-            modal.on_remove_pressed()
-            assert modal._collection.paper_ids == [papers[1].arxiv_id]
-
-            modal.dismiss = MagicMock()
-            modal.on_done_pressed()
-            assert modal.dismiss.call_args[0][0].paper_ids == [papers[1].arxiv_id]
+            # Switch to detail view via View button
+            modal.on_view_pressed()
+            assert modal._viewing_collection is not None
+            assert modal._viewing_collection.paper_ids == [papers[0].arxiv_id, papers[1].arxiv_id]
+            # Remove first paper
+            modal.on_detail_remove_pressed()
+            assert modal._viewing_collection.paper_ids == [papers[1].arxiv_id]
+            # Back to manage
+            modal.on_detail_back_pressed()
+            assert modal._viewing_collection is None
+            assert modal.collections[0].paper_ids == [papers[1].arxiv_id]
 
 
 @pytest.mark.asyncio
-async def test_collection_view_modal_requires_selection_for_remove(make_paper):
+async def test_collection_detail_view_requires_selection_for_remove(make_paper):
     papers = [make_paper(arxiv_id="2401.00001", title="A")]
     collection = PaperCollection(name="Reading", description="", paper_ids=[])
     app = ArxivBrowser(papers, restore_session=False)
-    modal = CollectionViewModal(collection, papers_by_id={papers[0].arxiv_id: papers[0]})
+    modal = CollectionsModal([collection], papers_by_id={papers[0].arxiv_id: papers[0]})
 
     with patch_save_config(return_value=True):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
+            # Switch to detail view
+            modal.on_view_pressed()
             modal.notify = MagicMock()
-            modal.on_remove_pressed()
+            modal.on_detail_remove_pressed()
             assert "No paper is selected" in modal.notify.call_args[0][0]
 
 
 @pytest.mark.asyncio
-async def test_add_to_collection_modal_select_and_cancel(make_paper):
+async def test_pick_mode_select_and_cancel(make_paper):
     papers = [make_paper(arxiv_id="2401.00001")]
     app = ArxivBrowser(papers, restore_session=False)
     collections = [
         PaperCollection(name="A", description="", paper_ids=[]),
         PaperCollection(name="B", description="", paper_ids=[]),
     ]
-    modal = AddToCollectionModal(collections)
+    modal = CollectionsModal(collections, mode="pick")
 
     with patch_save_config(return_value=True):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
-            list_view = modal.query_one("#addcol-list", ListView)
+            list_view = modal.query_one("#pick-list", ListView)
             list_view.index = 1
             modal.dismiss = MagicMock()
-            modal.on_list_selected(SimpleNamespace())
+            modal.on_pick_list_selected(SimpleNamespace())
             modal.dismiss.assert_called_once_with("B")
 
             modal.dismiss.reset_mock()
-            modal.on_cancel_pressed()
+            modal.on_pick_cancel_pressed()
             modal.dismiss.assert_called_once_with(None)
 
 
@@ -554,8 +559,8 @@ async def test_command_palette_modal_filters_and_executes(make_paper):
 
 def test_read_only_modals_support_q_close_binding():
     from arxiv_browser.modals import (
-        AddToCollectionModal,
         CitationGraphScreen,
+        CollectionsModal,
         ExportMenuModal,
         RecommendationsScreen,
         SectionToggleModal,
@@ -564,7 +569,7 @@ def test_read_only_modals_support_q_close_binding():
     classes = [
         RecommendationsScreen,
         CitationGraphScreen,
-        AddToCollectionModal,
+        CollectionsModal,
         ExportMenuModal,
         SectionToggleModal,
     ]
@@ -613,6 +618,8 @@ def test_help_screen_filter_sections():
 @pytest.mark.asyncio
 async def test_help_screen_has_filter_input_and_filters(make_paper):
     """HelpScreen contains a filter Input and dynamically filters sections."""
+    from textual.widgets import TabbedContent
+
     from arxiv_browser.modals.help import HelpScreen
 
     app = ArxivBrowser([make_paper()], restore_session=False)
@@ -626,27 +633,41 @@ async def test_help_screen_has_filter_input_and_filters(make_paper):
             filter_input = modal.query_one("#help-filter", Input)
             assert "Filter help" in filter_input.placeholder
 
-            # Initially all sections are shown
+            # Initially tabs are visible and flat section container is hidden
             from textual.containers import Vertical
 
-            container = modal.query_one("#help-sections", Vertical)
-            section_titles = container.query(".help-section-title")
-            assert len(section_titles) == len(modal._sections)
+            tabs = modal.query_one("#help-tabs", TabbedContent)
+            flat_container = modal.query_one("#help-sections", Vertical)
+            assert "hidden" not in tabs.classes
+            assert "hidden" in flat_container.classes
 
-            # Type a filter that narrows results
+            # The "All" tab has all sections
+            all_body = modal.query_one("#help-tab-all", Vertical)
+            all_titles = all_body.query(".help-section-title")
+            assert len(all_titles) == len(modal._sections)
+
+            # Type a filter that narrows results — flat container becomes visible
             filter_input.value = "bookmark"
             await pilot.pause(0.1)
-            section_titles = container.query(".help-section-title")
+            assert "hidden" in tabs.classes
+            assert "hidden" not in flat_container.classes
+            section_titles = flat_container.query(".help-section-title")
             assert len(section_titles) >= 1
-            keys_widgets = container.query(".help-keys")
+            keys_widgets = flat_container.query(".help-keys")
             for widget in keys_widgets:
                 assert "bookmark" in widget.render().plain.lower()
 
             # Nonsense query shows "No matches" message
             filter_input.value = "xyzzyplugh"
             await pilot.pause(0.1)
-            no_match = container.query_one("#help-no-matches", Static)
+            no_match = flat_container.query_one("#help-no-matches", Static)
             assert "No matches" in no_match.render().plain
+
+            # Clearing filter restores tabs
+            filter_input.value = ""
+            await pilot.pause(0.1)
+            assert "hidden" not in tabs.classes
+            assert "hidden" in flat_container.classes
 
 
 def test_help_ui_helper_branches_cover_binding_resolution_and_ascii_mode():

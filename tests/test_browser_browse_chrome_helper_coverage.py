@@ -27,11 +27,8 @@ import arxiv_browser.semantic_scholar as s2
 from arxiv_browser.actions import external_io_actions as io_actions
 from arxiv_browser.actions import llm_actions as llm_actions
 from arxiv_browser.browser.core import ArxivBrowser
-from arxiv_browser.modals.collections import (
-    AddToCollectionModal,
-    CollectionsModal,
-    CollectionViewModal,
-)
+from arxiv_browser.modals.collections import CollectionsModal
+from arxiv_browser.modals.editing import PaperEditResult
 from arxiv_browser.models import (
     MAX_COLLECTIONS,
     SORT_OPTIONS,
@@ -515,7 +512,7 @@ class TestBrowserHelperCoverage:
         app._bulk_edit_tags()
         callback = app.push_screen.call_args.args[1]
         callback(None)
-        callback(["alpha", "gamma"])
+        callback(PaperEditResult(notes="", tags=["alpha", "gamma"], active_tab="tags"))
         assert "gamma" in app._config.paper_metadata[paper.arxiv_id].tags
         assert "gamma" in app._config.paper_metadata[other.arxiv_id].tags
         assert "Added gamma" in app.notify.call_args[0][0]

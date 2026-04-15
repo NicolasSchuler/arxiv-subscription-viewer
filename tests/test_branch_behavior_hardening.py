@@ -14,11 +14,19 @@ from arxiv_browser.browser import discovery
 from arxiv_browser.browser.core import ArxivBrowser
 from arxiv_browser.browser.empty_state import build_list_empty_message
 from arxiv_browser.modals.collections import CollectionsModal
+from arxiv_browser.modals.editing import PaperEditResult
 from arxiv_browser.modals.search import CommandPaletteModal, _truncate_palette_text
 from arxiv_browser.models import PaperCollection, PaperMetadata, WatchListEntry
 from arxiv_browser.semantic_scholar import S2RecommendationsCacheSnapshot, SemanticScholarPaper
 from arxiv_browser.services import enrichment_service as enrich
-from tests.support.app_stubs import _make_app_config, _new_app_stub, _paper
+from tests.support.app_stubs import (
+    _DummyInput,
+    _DummyLabel,
+    _DummyListView,
+    _make_app_config,
+    _new_app_stub,
+    _paper,
+)
 from tests.support.patch_helpers import patch_save_config
 
 
@@ -40,7 +48,7 @@ class TestLibraryActionBehavior:
 
         library_actions.action_edit_tags(app)
         callback = app.push_screen.call_args.args[1]
-        callback(["topic:a"])
+        callback(PaperEditResult(notes="", tags=["topic:a"], active_tab="tags"))
 
         assert metadata.tags == ["topic:a"]
         app._update_option_at_index.assert_called_once_with(2)
@@ -48,7 +56,7 @@ class TestLibraryActionBehavior:
 
         app._update_option_at_index.reset_mock()
         app._get_current_paper = MagicMock(return_value=other)
-        callback(["topic:b"])
+        callback(PaperEditResult(notes="", tags=["topic:b"], active_tab="tags"))
         app._update_option_at_index.assert_not_called()
 
     def test_toggle_watch_filter_handles_empty_and_non_empty_watch_sets(self) -> None:
@@ -176,17 +184,17 @@ class TestLibraryActionBehavior:
 
         # 131->135: cur is None → update_option_at_index NOT called, notify still fires
         app._get_current_paper = MagicMock(return_value=None)
-        callback("saved note")
+        callback(PaperEditResult(notes="saved note", tags=[], active_tab="notes"))
         app._update_option_at_index.assert_not_called()
-        assert "Notes saved" in app.notify.call_args.args[0]
+        assert "Saved" in app.notify.call_args.args[0]
 
         # 133->135: same paper but idx is None → update_option_at_index NOT called
         app._get_current_paper = MagicMock(return_value=paper)
         app._get_current_index = MagicMock(return_value=None)
         app.notify.reset_mock()
-        callback("another note")
+        callback(PaperEditResult(notes="another note", tags=[], active_tab="notes"))
         app._update_option_at_index.assert_not_called()
-        assert "Notes saved" in app.notify.call_args.args[0]
+        assert "Saved" in app.notify.call_args.args[0]
 
     def test_edit_tags_guard_bulk_and_no_paper(self) -> None:
         """Lines 143-144 (bulk path), 148 (no paper guard), 167->169 (cur mismatch)."""
@@ -219,7 +227,7 @@ class TestLibraryActionBehavior:
         callback = app.push_screen.call_args.args[1]
 
         app._get_current_paper = MagicMock(return_value=None)
-        callback(["new-tag"])
+        callback(PaperEditResult(notes="", tags=["new-tag"], active_tab="tags"))
         app._update_option_at_index.assert_not_called()
         assert "Tags: new-tag" in app.notify.call_args.args[0]
 
@@ -285,28 +293,63 @@ class TestSearchModalBehavior:
 
 
 class TestCollectionsModalBehavior:
-    def test_on_view_result_none_does_not_refresh(self) -> None:
+    def test_detail_back_with_no_viewing_collection(self) -> None:
+        """Back from detail-view with no _viewing_collection is a no-op on collections."""
         collection = PaperCollection(name="Reading", paper_ids=["2401.00001"])
         modal = CollectionsModal([collection], papers_by_id={})
-        modal._refresh_list = MagicMock()
+        manage_view = MagicMock()
+        detail_view = MagicMock()
+        pick_view = MagicMock()
+        col_title = _DummyLabel()
+        col_list = _DummyListView(index=0)
+        name_input = _DummyInput("Reading")
+        desc_input = _DummyInput("")
+        modal.query_one = MagicMock(
+            side_effect=lambda selector, _type=None: {
+                "#manage-view": manage_view,
+                "#detail-view": detail_view,
+                "#pick-view": pick_view,
+                "#col-title": col_title,
+                "#col-list": col_list,
+                "#col-name": name_input,
+                "#col-desc": desc_input,
+            }[selector]
+        )
+        # _viewing_collection is None by default, back should not crash
+        modal.on_detail_back_pressed()
+        assert modal.collections[0].paper_ids == ["2401.00001"]
 
-        modal._on_view_result(None)
-        modal._refresh_list.assert_not_called()
-
-    def test_on_view_result_found_and_not_found_paths(self) -> None:
+    def test_detail_back_applies_paper_removal(self) -> None:
+        """Back from detail-view applies paper changes to the parent collection."""
         original = PaperCollection(name="Reading", paper_ids=["2401.00001"])
-        replacement = PaperCollection(name="Reading", paper_ids=["2401.00002"])
         modal = CollectionsModal([original], papers_by_id={})
-        modal._refresh_list = MagicMock()
-
-        modal._on_view_result(replacement)
+        manage_view = MagicMock()
+        detail_view = MagicMock()
+        pick_view = MagicMock()
+        col_title = _DummyLabel()
+        col_list = _DummyListView(index=0)
+        name_input = _DummyInput("Reading")
+        desc_input = _DummyInput("")
+        modal.query_one = MagicMock(
+            side_effect=lambda selector, _type=None: {
+                "#manage-view": manage_view,
+                "#detail-view": detail_view,
+                "#pick-view": pick_view,
+                "#col-title": col_title,
+                "#col-list": col_list,
+                "#col-name": name_input,
+                "#col-desc": desc_input,
+            }[selector]
+        )
+        # Simulate viewing with modified paper list
+        modal._viewing_collection = PaperCollection(name="Reading", paper_ids=["2401.00002"])
+        modal.on_detail_back_pressed()
         assert modal.collections[0].paper_ids == ["2401.00002"]
-        modal._refresh_list.assert_called_once()
 
-        modal._refresh_list.reset_mock()
-        modal._on_view_result(PaperCollection(name="Unknown", paper_ids=[]))
+        # Unknown collection name — should not change existing collections
+        modal._viewing_collection = PaperCollection(name="Unknown", paper_ids=[])
+        modal.on_detail_back_pressed()
         assert modal.collections[0].name == "Reading"
-        modal._refresh_list.assert_called_once()
 
 
 class TestBrowserRuntimeBehavior:

@@ -23,11 +23,7 @@ import arxiv_browser.semantic_scholar as s2
 from arxiv_browser.actions import external_io_actions as io_actions
 from arxiv_browser.actions import llm_actions as llm_actions
 from arxiv_browser.browser.core import ArxivBrowser
-from arxiv_browser.modals.collections import (
-    AddToCollectionModal,
-    CollectionsModal,
-    CollectionViewModal,
-)
+from arxiv_browser.modals.collections import CollectionsModal
 from arxiv_browser.models import MAX_COLLECTIONS, PaperCollection, PaperMetadata, UserConfig
 from arxiv_browser.services import enrichment_service as enrich
 from tests.support.app_stubs import (
@@ -625,10 +621,14 @@ class TestLlmActionCoverage:
 
         app._call_auto_tag_llm = AsyncMock(return_value=["topic:new"])
         app.push_screen = MagicMock()
+        app._config = SimpleNamespace(paper_metadata={}, llm_timeout=8)
+        app._get_or_create_metadata = MagicMock(return_value=SimpleNamespace(notes="", tags=[]))
         await llm_actions._auto_tag_single_async(app, paper, ["existing"], ["existing"])
         assert app.push_screen.called
         callback = app.push_screen.call_args.args[1]
-        callback(["topic:accepted"])
+        from arxiv_browser.modals.editing import PaperEditResult
+
+        callback(PaperEditResult(notes="", tags=["topic:accepted"], active_tab="ai-tags"))
 
         app._call_auto_tag_llm = AsyncMock(side_effect=RuntimeError("boom"))
         await llm_actions._auto_tag_single_async(app, paper, ["existing"], ["existing"])

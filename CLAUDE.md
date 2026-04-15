@@ -63,7 +63,7 @@ src/arxiv_browser/
 │   ├── common.py         # HelpScreen, ConfirmModal, ExportMenuModal, MetadataSnapshotPickerModal, WatchListModal, SectionToggleModal
 │   ├── editing.py        # PaperEditModal (unified notes + tags + auto-tag)
 │   ├── search.py         # ArxivSearchModal, CommandPaletteModal
-│   ├── collections.py    # CollectionsModal, CollectionViewModal, AddToCollectionModal
+│   ├── collections.py    # CollectionsModal (manage + pick modes, inline detail view)
 │   ├── citations.py      # RecommendationsScreen, CitationGraphScreen
 │   └── llm.py            # SummaryModeModal, ResearchInterestsModal, PaperChatScreen
 ├── widgets/              # Reusable widgets extracted from app.py
@@ -152,11 +152,11 @@ Submodules should import canonical modules directly. Only the compatibility shim
 
 ### Modal Screens (`modals/`)
 
-18 ModalScreen subclasses organized by domain:
+16 ModalScreen subclasses organized by domain:
 - **common.py**: HelpScreen, ConfirmModal, ExportMenuModal, MetadataSnapshotPickerModal, WatchListModal, SectionToggleModal
 - **editing.py**: PaperEditModal (unified notes + tags + auto-tag via TabbedContent)
 - **search.py**: ArxivSearchModal, CommandPaletteModal
-- **collections.py**: CollectionsModal, CollectionViewModal, AddToCollectionModal
+- **collections.py**: CollectionsModal (manage/pick modes with inline detail view)
 - **citations.py**: RecommendationsScreen, CitationGraphScreen
 - **llm.py**: SummaryModeModal, ResearchInterestsModal, PaperChatScreen
 

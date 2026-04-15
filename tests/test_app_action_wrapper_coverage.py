@@ -26,11 +26,7 @@ import arxiv_browser.llm_providers as llm_providers
 import arxiv_browser.semantic_scholar as s2
 from arxiv_browser.actions import external_io_actions as io_actions
 from arxiv_browser.actions import llm_actions as llm_actions
-from arxiv_browser.modals.collections import (
-    AddToCollectionModal,
-    CollectionsModal,
-    CollectionViewModal,
-)
+from arxiv_browser.modals.collections import CollectionsModal
 from arxiv_browser.models import MAX_COLLECTIONS, PaperCollection, UserConfig
 from arxiv_browser.services import enrichment_service as enrich
 from tests.support.app_stubs import (

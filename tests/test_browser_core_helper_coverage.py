@@ -36,11 +36,7 @@ from arxiv_browser.browser.core import (
     ArxivBrowser,
     build_list_empty_message,
 )
-from arxiv_browser.modals.collections import (
-    AddToCollectionModal,
-    CollectionsModal,
-    CollectionViewModal,
-)
+from arxiv_browser.modals.collections import CollectionsModal
 from arxiv_browser.models import MAX_COLLECTIONS, PaperCollection, SessionState, UserConfig
 from arxiv_browser.services import enrichment_service as enrich
 from tests.support.app_stubs import (

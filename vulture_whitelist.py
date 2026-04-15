@@ -247,7 +247,7 @@ CollectionsModal.BINDINGS
 CollectionsModal.CSS
 CollectionsModal.compose
 CollectionsModal.on_mount
-CollectionsModal.action_cancel
+CollectionsModal.action_cancel_or_back
 CollectionsModal.on_list_highlighted
 CollectionsModal.on_create_pressed
 CollectionsModal.on_rename_pressed
@@ -255,28 +255,11 @@ CollectionsModal.on_delete_pressed
 CollectionsModal.on_view_pressed
 CollectionsModal.on_save_pressed
 CollectionsModal.on_close_pressed
-
-# ── CollectionViewModal ─────────────────────────────────────────────
-from arxiv_browser.modals.collections import CollectionViewModal
-
-CollectionViewModal.BINDINGS
-CollectionViewModal.CSS
-CollectionViewModal.compose
-CollectionViewModal.on_mount
-CollectionViewModal.action_cancel
-CollectionViewModal.on_remove_pressed
-CollectionViewModal.on_done_pressed
-
-# ── AddToCollectionModal ────────────────────────────────────────────
-from arxiv_browser.modals.collections import AddToCollectionModal
-
-AddToCollectionModal.BINDINGS
-AddToCollectionModal.CSS
-AddToCollectionModal.compose
-AddToCollectionModal.on_mount
-AddToCollectionModal.action_cancel
-AddToCollectionModal.on_list_selected
-AddToCollectionModal.on_cancel_pressed
+CollectionsModal.on_detail_remove_pressed
+CollectionsModal.on_detail_back_pressed
+CollectionsModal.on_pick_list_selected
+CollectionsModal.on_pick_cancel_pressed
+CollectionsModal._refresh_list
 
 # ── RecommendationListItem ──────────────────────────────────────────
 from arxiv_browser.modals.citations import RecommendationListItem
