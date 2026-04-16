@@ -211,11 +211,11 @@ class TestMetadataActionsIntegration:
                 assert meta.starred is True
 
     async def test_notes_modal_opens(self, make_paper):
-        """Pressing 'n' should open the NotesModal."""
+        """Pressing 'n' should open the PaperEditModal on notes tab."""
         from unittest.mock import patch
 
         from arxiv_browser.browser.core import ArxivBrowser
-        from arxiv_browser.modals import NotesModal
+        from arxiv_browser.modals import PaperEditModal
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
@@ -225,16 +225,16 @@ class TestMetadataActionsIntegration:
                 await pilot.press("n")
                 await pilot.pause(0.2)
                 assert len(app.screen_stack) == 2
-                assert isinstance(app.screen_stack[-1], NotesModal)
+                assert isinstance(app.screen_stack[-1], PaperEditModal)
 
     async def test_notes_modal_save_persists(self, make_paper):
-        """Type text in NotesModal and save with Ctrl+S should persist notes."""
+        """Type text in PaperEditModal and save with Ctrl+S should persist notes."""
         from unittest.mock import patch
 
         from textual.widgets import TextArea
 
         from arxiv_browser.browser.core import ArxivBrowser
-        from arxiv_browser.modals import NotesModal
+        from arxiv_browser.modals import PaperEditModal
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
@@ -243,7 +243,7 @@ class TestMetadataActionsIntegration:
                 first_id = papers[0].arxiv_id
                 await pilot.press("n")
                 await pilot.pause(0.2)
-                assert isinstance(app.screen_stack[-1], NotesModal)
+                assert isinstance(app.screen_stack[-1], PaperEditModal)
 
                 # Type into the text area
                 textarea = app.screen_stack[-1].query_one("#notes-textarea", TextArea)
@@ -261,7 +261,7 @@ class TestMetadataActionsIntegration:
                 assert app._config.paper_metadata[first_id].notes == "My test notes"
 
     async def test_notes_modal_cancel_does_not_save(self, make_paper):
-        """Pressing Escape on NotesModal should not save new notes."""
+        """Pressing Escape on PaperEditModal should not save new notes."""
         from unittest.mock import patch
 
         from arxiv_browser.browser.core import ArxivBrowser
@@ -311,11 +311,11 @@ class TestMetadataActionsIntegration:
         assert app._config.paper_metadata[first_id].notes == "Keep this note"
 
     async def test_tags_modal_opens(self, make_paper):
-        """Pressing 't' should open the TagsModal."""
+        """Pressing 't' should open the PaperEditModal on tags tab."""
         from unittest.mock import patch
 
         from arxiv_browser.browser.core import ArxivBrowser
-        from arxiv_browser.modals import TagsModal
+        from arxiv_browser.modals import PaperEditModal
 
         papers = self._make_papers(make_paper, count=1)
         app = ArxivBrowser(papers, restore_session=False)
@@ -325,7 +325,7 @@ class TestMetadataActionsIntegration:
                 await pilot.press("t")
                 await pilot.pause(0.2)
                 assert len(app.screen_stack) == 2
-                assert isinstance(app.screen_stack[-1], TagsModal)
+                assert isinstance(app.screen_stack[-1], PaperEditModal)
 
     async def test_tags_modal_cancel_preserves_existing_tags(self, make_paper):
         """Escape should discard tag edits and preserve existing tags."""

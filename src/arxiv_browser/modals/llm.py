@@ -10,12 +10,12 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
-from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Static, TextArea
 
 from arxiv_browser.browser.contracts import TaskTrackingApp
 from arxiv_browser.llm import CHAT_SYSTEM_PROMPT, LLM_COMMAND_TIMEOUT
 from arxiv_browser.llm_providers import LLMProvider
+from arxiv_browser.modals.base import ModalBase
 from arxiv_browser.models import Paper
 from arxiv_browser.query import escape_rich_text
 from arxiv_browser.themes import theme_colors_for
@@ -23,7 +23,7 @@ from arxiv_browser.themes import theme_colors_for
 logger = logging.getLogger(__name__)
 
 
-class SummaryModeModal(ModalScreen[str]):
+class SummaryModeModal(ModalBase[str]):
     """Modal for selecting AI summary mode (TLDR, methods, results, etc.)."""
 
     BINDINGS = [
@@ -114,7 +114,7 @@ class SummaryModeModal(ModalScreen[str]):
         self.dismiss("comparison")
 
 
-class ResearchInterestsModal(ModalScreen[str]):
+class ResearchInterestsModal(ModalBase[str]):
     """Modal dialog for editing research interests used for relevance scoring."""
 
     BINDINGS = [
@@ -189,7 +189,7 @@ class ResearchInterestsModal(ModalScreen[str]):
 
     def on_mount(self) -> None:
         """Focus the research interests text area on mount."""
-        self.query_one("#interests-textarea", TextArea).focus()
+        self._focus_widget("#interests-textarea")
 
     def action_save(self) -> None:
         """Save the trimmed text area content and dismiss the modal."""
@@ -211,7 +211,7 @@ class ResearchInterestsModal(ModalScreen[str]):
         self.action_cancel()
 
 
-class PaperChatScreen(ModalScreen[None]):
+class PaperChatScreen(ModalBase[None]):
     """Interactive chat modal for asking questions about a paper."""
 
     BINDINGS = [
@@ -315,7 +315,7 @@ class PaperChatScreen(ModalScreen[None]):
 
     def on_mount(self) -> None:
         """Focus the chat input and display a hint about available paper content."""
-        self.query_one("#chat-input", Input).focus()
+        self._focus_widget("#chat-input")
         hint = (
             "Paper content loaded. Ask anything!"
             if self._paper_content

@@ -165,10 +165,26 @@ class TestStatusCommandPaletteAndChatCoverage:
 
         content = str(label.content)
         assert "HF:err" in content
+
+        # Test that action_command_palette opens OmniInput in command mode
         app = _new_app()
-        app.notify = MagicMock()
-        captured = {}
-        app.push_screen = lambda _modal, cb: captured.setdefault("callback", cb)
+        omni_mock = SimpleNamespace(
+            set_commands=MagicMock(),
+            open=MagicMock(),
+        )
+        app._get_search_container_widget = MagicMock(return_value=omni_mock)
+        app._build_command_palette_commands = MagicMock(return_value=[("Demo", "demo")])
+        app.action_command_palette()
+        omni_mock.set_commands.assert_called_once_with([("Demo", "demo")])
+        omni_mock.open.assert_called_once_with(">")
+
+        # Test on_omni_command_selected dispatches actions correctly
+        from arxiv_browser.widgets.omni_input import OmniInput
+
+        app2 = _new_app()
+        omni_mock2 = SimpleNamespace(close=MagicMock())
+        app2._get_search_container_widget = MagicMock(return_value=omni_mock2)
+        app2._update_footer = MagicMock()
 
         tracked = []
 
@@ -176,7 +192,7 @@ class TestStatusCommandPaletteAndChatCoverage:
             tracked.append(coro)
             coro.close()
 
-        app._track_task = MagicMock(side_effect=track_task)
+        app2._track_task = MagicMock(side_effect=track_task)
 
         async def fake_async():
             return None
@@ -187,30 +203,29 @@ class TestStatusCommandPaletteAndChatCoverage:
         def action_boom():
             raise RuntimeError("boom")
 
-        app.action_demo = action_demo
-        app.action_boom = action_boom
+        app2.action_demo = action_demo
+        app2.action_boom = action_boom
 
-        with patch("arxiv_browser.actions.ui_actions.logger") as logger_mock:
-            app.action_command_palette()
-            callback = captured["callback"]
-            callback("demo")
-            callback("boom")
-            callback("missing")
-            callback(None)
+        handler = ArxivBrowser.on_omni_command_selected.__get__(app2, ArxivBrowser)
+        with patch("arxiv_browser.browser.core.logger") as logger_mock:
+            # Successful async action
+            event = OmniInput.CommandSelected(action="demo")
+            handler(event)
+            app2._track_task.assert_called_once()
 
-        app._track_task.assert_called_once()
-        assert (
-            app.notify.call_args[0][0] == "boom failed. Try: retry from Ctrl+p or press ? for help."
-        )
-        boom_warnings = [
-            call
-            for call in logger_mock.warning.call_args_list
-            if call.args and call.args[0].startswith("Command palette action")
-        ]
-        assert boom_warnings
-        assert any(
-            call.args[1] == "boom" and call.args[2] == "RuntimeError" for call in boom_warnings
-        )
+            # Failing action
+            event = OmniInput.CommandSelected(action="boom")
+            handler(event)
+            boom_warnings = [
+                call
+                for call in logger_mock.warning.call_args_list
+                if call.args and "OmniInput command failed" in call.args[0]
+            ]
+            assert boom_warnings
+
+            # Missing action — no crash
+            event = OmniInput.CommandSelected(action="missing")
+            handler(event)
 
     @pytest.mark.asyncio
     async def test_chat_and_summary_action_paths(self, make_paper):

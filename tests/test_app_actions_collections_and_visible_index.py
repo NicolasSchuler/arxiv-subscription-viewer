@@ -9,7 +9,6 @@ from datetime import date, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
 
 from arxiv_browser.browser.core import ArxivBrowser
@@ -18,6 +17,7 @@ from arxiv_browser.cli import (
     _resolve_papers,
 )
 from arxiv_browser.huggingface import HuggingFacePaper
+from arxiv_browser.modals.editing import PaperEditResult
 from arxiv_browser.models import (
     SORT_OPTIONS,
     PaperCollection,
@@ -204,7 +204,7 @@ class TestImportCollectionAndTagsCoverage:
         app.push_screen = lambda _modal, cb: captured.setdefault("callback", cb)
 
         app._bulk_edit_tags()
-        captured["callback"](["new"])
+        captured["callback"](PaperEditResult(notes="", tags=["new"], active_tab="tags"))
 
         assert "shared" not in app._config.paper_metadata["a"].tags
         assert "shared" not in app._config.paper_metadata["b"].tags

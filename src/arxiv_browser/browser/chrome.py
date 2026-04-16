@@ -844,10 +844,10 @@ class ChromeMixin:
             return [("", f"Auto-tagging {bar} {current}/{total}"), ("?", "help")]
         if self._auto_tag_active:
             return [("", f"Auto-tagging{ellipsis}"), ("?", "help")]
-        # Search mode — search container visible
+        # Search mode — OmniInput visible
         try:
-            container = self._get_search_container_widget()
-            if container.has_class("visible"):
+            omni = self._get_search_container_widget()
+            if omni.is_open:
                 return _widget_chrome.build_search_footer_bindings()
         except NoMatches:
             pass
@@ -871,8 +871,8 @@ class ChromeMixin:
         """Return a Rich-markup mode badge string for the current state."""
         search_visible = False
         try:
-            container = self._get_search_container_widget()
-            if container.has_class("visible"):
+            omni = self._get_search_container_widget()
+            if omni.is_open:
                 search_visible = True
         except NoMatches:
             pass

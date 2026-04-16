@@ -12,7 +12,7 @@ _arxiv_viewer() {
     local cur prev words cword
     _init_completion || return
 
-    local commands="browse search dates completions config-path doctor"
+    local commands="browse search dates completions config-path doctor keybindings"
     local global_opts="--debug --color --no-color --ascii --version -V --help -h"
 
     # Find the subcommand (skip global flags)
@@ -50,6 +50,17 @@ _arxiv_viewer() {
         dates|config-path|doctor)
             COMPREPLY=($(compgen -W "--help -h" -- "$cur"))
             ;;
+        keybindings)
+            case "$prev" in
+                --format)
+                    COMPREPLY=($(compgen -W "table json markdown" -- "$cur"))
+                    return ;;
+                --tier)
+                    COMPREPLY=($(compgen -W "core standard power all" -- "$cur"))
+                    return ;;
+            esac
+            COMPREPLY=($(compgen -W "--format --tier --help -h" -- "$cur"))
+            ;;
         completions)
             COMPREPLY=($(compgen -W "bash zsh fish" -- "$cur"))
             ;;
@@ -72,6 +83,7 @@ _arxiv_viewer() {
         'completions:Generate shell completion scripts'
         'config-path:Print the configuration file path'
         'doctor:Check environment and configuration health'
+        'keybindings:Print keyboard shortcuts and exit'
     )
 
     local -a global_opts
@@ -114,6 +126,12 @@ _arxiv_viewer() {
                 dates|config-path|doctor)
                     _arguments '(-h --help)'{-h,--help}'[Show help]'
                     ;;
+                keybindings)
+                    _arguments \
+                        '--format[Output format]:format:(table json markdown)' \
+                        '--tier[Filter by tier]:tier:(core standard power all)' \
+                        '(-h --help)'{-h,--help}'[Show help]'
+                    ;;
                 completions)
                     _arguments '1:shell:(bash zsh fish)'
                     ;;
@@ -145,6 +163,7 @@ complete -c arxiv-viewer -n '__fish_use_subcommand' -a dates -d 'List available 
 complete -c arxiv-viewer -n '__fish_use_subcommand' -a completions -d 'Generate shell completion scripts'
 complete -c arxiv-viewer -n '__fish_use_subcommand' -a config-path -d 'Print the configuration file path'
 complete -c arxiv-viewer -n '__fish_use_subcommand' -a doctor -d 'Check environment and configuration health'
+complete -c arxiv-viewer -n '__fish_use_subcommand' -a keybindings -d 'Print keyboard shortcuts and exit'
 
 # browse options
 complete -c arxiv-viewer -n '__fish_seen_subcommand_from browse' -s i -l input -r -d 'Input file'
@@ -160,6 +179,10 @@ complete -c arxiv-viewer -n '__fish_seen_subcommand_from search' -l max-results 
 
 # completions options
 complete -c arxiv-viewer -n '__fish_seen_subcommand_from completions' -a 'bash zsh fish' -d 'Shell type'
+
+# keybindings options
+complete -c arxiv-viewer -n '__fish_seen_subcommand_from keybindings' -l format -x -a 'table json markdown' -d 'Output format'
+complete -c arxiv-viewer -n '__fish_seen_subcommand_from keybindings' -l tier -x -a 'core standard power all' -d 'Filter by tier'
 """
 
 SUPPORTED_SHELLS = ("bash", "zsh", "fish")

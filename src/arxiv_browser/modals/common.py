@@ -18,7 +18,6 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
-from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
     Label,
@@ -27,6 +26,7 @@ from textual.widgets import (
     Static,
 )
 
+from arxiv_browser.modals.base import ModalBase
 from arxiv_browser.models import DETAIL_SECTION_NAMES
 from arxiv_browser.themes import theme_colors_for
 
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 
-class ConfirmModal(ModalScreen[bool]):
+class ConfirmModal(ModalBase[bool]):
     """Modal dialog for confirming batch operations."""
 
     BINDINGS = [
@@ -118,7 +118,7 @@ class ConfirmModal(ModalScreen[bool]):
 # ============================================================================
 
 
-class ExportMenuModal(ModalScreen[str]):
+class ExportMenuModal(ModalBase[str]):
     """Unified export menu offering all clipboard and file export formats."""
 
     BINDINGS = [
@@ -253,7 +253,7 @@ class MetadataSnapshotItem(ListItem):
         self.snapshot_path = snapshot_path
 
 
-class MetadataSnapshotPickerModal(ModalScreen[Path | None]):
+class MetadataSnapshotPickerModal(ModalBase[Path | None]):
     """Modal for choosing which metadata snapshot to import."""
 
     BINDINGS = [
@@ -351,10 +351,6 @@ class MetadataSnapshotPickerModal(ModalScreen[Path | None]):
         else:
             self.dismiss(None)
 
-    def action_cancel(self) -> None:
-        """Close the picker without selecting a snapshot."""
-        self.dismiss(None)
-
     @on(ListView.Selected, "#metadata-snapshot-list")
     def on_list_selected(self, event: ListView.Selected) -> None:
         """Handle list item selection by dismissing with the chosen snapshot."""
@@ -379,7 +375,7 @@ _SECTION_TOGGLE_KEYS: dict[str, str] = {
 }
 
 
-class SectionToggleModal(ModalScreen[list[str] | None]):
+class SectionToggleModal(ModalBase[list[str] | None]):
     """Modal for toggling collapsible detail pane sections.
 
     Dismisses with a **sorted list of the section keys that should remain
@@ -509,7 +505,3 @@ class SectionToggleModal(ModalScreen[list[str] | None]):
     def action_save(self) -> None:
         """Dismiss and return the sorted list of collapsed section keys."""
         self.dismiss(sorted(self._collapsed))
-
-    def action_cancel(self) -> None:
-        """Dismiss without applying any changes."""
-        self.dismiss(None)

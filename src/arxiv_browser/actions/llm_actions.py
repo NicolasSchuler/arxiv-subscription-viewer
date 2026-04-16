@@ -30,12 +30,13 @@ from arxiv_browser.llm import (
 )
 from arxiv_browser.llm_providers import LLMProvider, llm_command_requires_shell, resolve_provider
 from arxiv_browser.modals import (
-    AutoTagSuggestModal,
     ConfirmModal,
     PaperChatScreen,
+    PaperEditModal,
     ResearchInterestsModal,
     SummaryModeModal,
 )
+from arxiv_browser.modals.editing import PaperEditResult
 from arxiv_browser.models import Paper
 from arxiv_browser.query import truncate_text
 
@@ -855,10 +856,28 @@ async def _auto_tag_single_async(
             app.notify("Auto-tagging failed", title="Auto-Tag", severity="warning")
             return
 
-        # Show modal for user to accept/modify
+        current_notes = ""
+        if paper.arxiv_id in app._config.paper_metadata:
+            current_notes = app._config.paper_metadata[paper.arxiv_id].notes
+
+        def on_edit_result(result: PaperEditResult | None) -> None:
+            if result is None:
+                return
+            # Save notes if the user edited them
+            metadata = app._get_or_create_metadata(paper.arxiv_id)
+            metadata.notes = result.notes
+            # Delegate tag saving to existing handler
+            app._on_auto_tag_accepted(result.tags, paper.arxiv_id)
+
         app.push_screen(
-            AutoTagSuggestModal(paper.title, suggested, current_tags),
-            lambda tags: app._on_auto_tag_accepted(tags, paper.arxiv_id),
+            PaperEditModal(
+                paper.arxiv_id,
+                current_notes=current_notes,
+                current_tags=current_tags,
+                suggested_tags=suggested,
+                initial_tab="ai-tags",
+            ),
+            on_edit_result,
         )
     except asyncio.CancelledError:
         raise

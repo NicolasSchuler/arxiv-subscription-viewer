@@ -424,13 +424,13 @@ class TestFooterDiscoverability:
         bindings = app._get_footer_bindings()
         assert bindings == [
             ("/", "search"),
-            ("Space", "select"),
             ("o", "open"),
-            ("s", "sort"),
             ("r", "read"),
             ("x", "star"),
+            ("t", "tags"),
+            ("n", "notes"),
+            ("s", "sort"),
             ("E", "export"),
-            ("Ctrl+p", "commands"),
             ("?", "help"),
         ]
 
@@ -442,7 +442,7 @@ class TestFooterDiscoverability:
         bindings = app._get_footer_bindings()
         keys = [k for k, _ in bindings]
         assert "E" in keys
-        assert "Space" in keys
+        assert "o" in keys
 
     def test_footer_is_capped_and_keeps_help_palette(self):
         from arxiv_browser.models import UserConfig
@@ -452,7 +452,6 @@ class TestFooterDiscoverability:
         bindings = app._get_footer_bindings()
         keys = [k for k, _ in bindings]
         assert len(bindings) <= 10
-        assert "Ctrl+p" in keys
         assert "?" in keys
 
     def test_footer_keeps_core_actions_when_s2_active(self):
@@ -464,13 +463,13 @@ class TestFooterDiscoverability:
         bindings = app._get_footer_bindings()
         assert bindings == [
             ("/", "search"),
-            ("Space", "select"),
             ("o", "open"),
-            ("s", "sort"),
             ("r", "read"),
             ("x", "star"),
+            ("t", "tags"),
+            ("n", "notes"),
+            ("s", "sort"),
             ("E", "export"),
-            ("Ctrl+p", "commands"),
             ("?", "help"),
         ]
 
@@ -487,9 +486,8 @@ class TestFooterDiscoverability:
         ]
         bindings = app._get_footer_bindings()
         assert len(bindings) == 9
-        assert ("Ctrl+p", "commands") in bindings
         assert ("[/]", "dates") in bindings
-        assert ("x", "star") not in bindings
+        assert ("n", "notes") not in bindings
 
     def test_search_and_api_footer_copy(self):
         from arxiv_browser.browser.contracts import FOOTER_CONTEXTS

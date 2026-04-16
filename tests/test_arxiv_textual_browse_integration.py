@@ -544,7 +544,7 @@ class TestArxivApiModeIntegration:
 
                 app._restore_local_browse_snapshot()
 
-                search_input = app.query_one("#search-input", Input)
+                search_input = app.query_one("#omni-input", Input)
                 option_list = app.query_one("#paper-list", OptionList)
                 assert search_input.value == "Transformer"
                 assert app._pending_query == "Transformer"
@@ -715,7 +715,7 @@ class TestStatusFilterIntegration:
                 # Open search and inject Rich markup directly into input
                 # (bracket keys are intercepted by app bindings, so set value directly)
                 await pilot.press("slash")
-                search_input = app.query_one("#search-input", Input)
+                search_input = app.query_one("#omni-input", Input)
                 search_input.value = "[/]"
                 await pilot.pause(0.7)
                 # Verify the app didn't crash — status bar has content
@@ -765,7 +765,7 @@ class TestStatusFilterIntegration:
                 await pilot.pause(0.4)
                 assert app._pending_query == ""
                 # Verify search input was cleared
-                search_input = app.query_one("#search-input", Input)
+                search_input = app.query_one("#omni-input", Input)
                 assert search_input.value == ""
                 # Verify all papers are restored in the list
                 option_list = app.query_one("#paper-list", OptionList)

@@ -682,9 +682,7 @@ class TestBrowserHelperCoverage:
         app._get_footer_widget = MagicMock(
             return_value=SimpleNamespace(render_bindings=MagicMock())
         )
-        app._get_search_container_widget = MagicMock(
-            return_value=SimpleNamespace(has_class=MagicMock(return_value=True))
-        )
+        app._get_search_container_widget = MagicMock(return_value=SimpleNamespace(is_open=True))
         app._get_paper_details_widget = MagicMock(
             return_value=SimpleNamespace(paper=paper1, update_state=MagicMock())
         )
@@ -870,7 +868,7 @@ class TestBrowserHelperCoverage:
             app._update_status_bar = ArxivBrowser._update_status_bar.__get__(app, ArxivBrowser)
             assert app._get_footer_bindings() == [("", "search")]
             app._get_search_container_widget = MagicMock(
-                return_value=SimpleNamespace(has_class=MagicMock(return_value=False))
+                return_value=SimpleNamespace(is_open=False)
             )
             app._in_arxiv_api_mode = True
             assert app._get_footer_bindings() == [("", "api")]

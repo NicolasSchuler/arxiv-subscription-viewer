@@ -169,7 +169,7 @@ class TestStatusFilterRegressions:
         from arxiv_browser.browser.core import ArxivBrowser
 
         by_action = {binding.action: binding for binding in ArxivBrowser.BINDINGS}
-        assert by_action["command_palette"].description == "Command palette"
+        assert by_action["command_palette"].description == "Command palette (>cmd)"
         assert by_action["open_url"].description == "Open in Browser"
 
     def test_status_bar_compacts_for_narrow_width(self):

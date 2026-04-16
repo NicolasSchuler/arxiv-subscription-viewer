@@ -40,6 +40,7 @@ def get_filter_pill_remove_glyph() -> str:
 
 _SELECTION_FOOTER_BINDINGS: tuple[tuple[str, str], ...] = (
     ("o", "open"),
+    ("c", "copy"),
     ("r", "read"),
     ("x", "star"),
     ("t", "tags"),
@@ -165,16 +166,16 @@ def build_browse_footer_bindings(
 ) -> list[tuple[str, str]]:
     """Build a capped default browsing footer with deterministic priority."""
     _ = (s2_active, has_starred, llm_configured)
-    slot_a = ("[/]", "dates") if has_history_navigation else ("x", "star")
+    slot_a = ("[/]", "dates") if has_history_navigation else ("n", "notes")
     return [
         ("/", "search"),
-        ("Space", "select"),
         ("o", "open"),
-        ("s", "sort"),
         ("r", "read"),
+        ("x", "star"),
+        ("t", "tags"),
         slot_a,
+        ("s", "sort"),
         ("E", "export"),
-        ("Ctrl+p", "commands"),
         ("?", "help"),
     ]
 

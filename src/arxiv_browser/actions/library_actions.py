@@ -11,8 +11,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from arxiv_browser.config import save_config
-from arxiv_browser.modals import TagsModal, WatchListModal
-from arxiv_browser.modals.editing import NotesModal
+from arxiv_browser.modals import PaperEditModal, WatchListModal
+from arxiv_browser.modals.editing import PaperEditResult
 from arxiv_browser.models import SORT_OPTIONS, WatchListEntry
 
 if TYPE_CHECKING:
@@ -120,23 +120,35 @@ def action_edit_notes(app: "ArxivBrowser") -> None:
 
     arxiv_id = paper.arxiv_id
     current_notes = ""
+    current_tags: list[str] = []
     if arxiv_id in app._config.paper_metadata:
         current_notes = app._config.paper_metadata[arxiv_id].notes
+        current_tags = app._config.paper_metadata[arxiv_id].tags.copy()
+    all_tags = app._collect_all_tags()
 
-    def on_notes_saved(notes: str | None) -> None:
-        if notes is None:
+    def on_edit_result(result: PaperEditResult | None) -> None:
+        if result is None:
             return
         metadata = app._get_or_create_metadata(arxiv_id)
-        metadata.notes = notes
-        # Update the option display if still on the same paper
+        metadata.notes = result.notes
+        metadata.tags = result.tags
         cur = app._get_current_paper()
         if cur and cur.arxiv_id == arxiv_id:
             idx = app._get_current_index()
             if idx is not None:
                 app._update_option_at_index(idx)
-        app.notify("Notes saved", title="Notes")
+        app.notify("Saved", title="Edit")
 
-    app.push_screen(NotesModal(arxiv_id, current_notes), on_notes_saved)
+    app.push_screen(
+        PaperEditModal(
+            arxiv_id,
+            current_notes=current_notes,
+            current_tags=current_tags,
+            all_tags=all_tags,
+            initial_tab="notes",
+        ),
+        on_edit_result,
+    )
 
 
 def action_edit_tags(app: "ArxivBrowser") -> None:
@@ -150,27 +162,38 @@ def action_edit_tags(app: "ArxivBrowser") -> None:
         return
 
     arxiv_id = paper.arxiv_id
+    current_notes = ""
     current_tags: list[str] = []
     if arxiv_id in app._config.paper_metadata:
+        current_notes = app._config.paper_metadata[arxiv_id].notes
         current_tags = app._config.paper_metadata[arxiv_id].tags.copy()
 
-    # Collect all unique tags across all paper metadata for suggestions
     all_tags = app._collect_all_tags()
 
-    def on_tags_saved(tags: list[str] | None) -> None:
-        if tags is None:
+    def on_edit_result(result: PaperEditResult | None) -> None:
+        if result is None:
             return
         metadata = app._get_or_create_metadata(arxiv_id)
-        metadata.tags = tags
-        # Update the option display if still on the same paper
+        metadata.notes = result.notes
+        metadata.tags = result.tags
         cur = app._get_current_paper()
         if cur and cur.arxiv_id == arxiv_id:
             idx = app._get_current_index()
             if idx is not None:
                 app._update_option_at_index(idx)
-        app.notify(f"Tags: {', '.join(tags) if tags else 'none'}", title="Tags")
+        tag_desc = ", ".join(result.tags) if result.tags else "none"
+        app.notify(f"Tags: {tag_desc}", title="Saved")
 
-    app.push_screen(TagsModal(arxiv_id, current_tags, all_tags=all_tags), on_tags_saved)
+    app.push_screen(
+        PaperEditModal(
+            arxiv_id,
+            current_notes=current_notes,
+            current_tags=current_tags,
+            all_tags=all_tags,
+            initial_tab="tags",
+        ),
+        on_edit_result,
+    )
 
 
 def action_toggle_watch_filter(app: "ArxivBrowser") -> None:

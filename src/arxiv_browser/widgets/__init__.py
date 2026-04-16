@@ -20,6 +20,7 @@ from arxiv_browser.widgets.listing import (
     render_paper_option,
     set_ascii_icons,
 )
+from arxiv_browser.widgets.omni_input import OmniInput, OmniMode, parse_omni_mode
 
 __all__ = [
     "DATE_NAV_WINDOW_SIZE",
@@ -30,11 +31,14 @@ __all__ = [
     "DateNavigator",
     "DetailRenderState",
     "FilterPillBar",
+    "OmniInput",
+    "OmniMode",
     "PaperDetails",
     "PaperHighlightTerms",
     "PaperListItem",
     "PaperRowRenderState",
     "StatusBarState",
+    "parse_omni_mode",
     "render_paper_option",
     "set_ascii_chrome_glyphs",
     "set_ascii_icons",

@@ -13,7 +13,7 @@ import pytest
 from textual.widgets import Input, Label, OptionList, Static
 
 from arxiv_browser.browser.core import ArxivBrowser
-from arxiv_browser.modals.editing import AutoTagSuggestModal, NotesModal, TagsModal
+from arxiv_browser.modals.editing import PaperEditModal, PaperEditResult
 from arxiv_browser.models import (
     Paper,
     PaperMetadata,
@@ -21,6 +21,7 @@ from arxiv_browser.models import (
 )
 from arxiv_browser.query import tokenize_query
 from arxiv_browser.widgets.chrome import FilterPillBar
+from arxiv_browser.widgets.omni_input import OmniInput
 from tests.support.patch_helpers import patch_save_config
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -160,19 +161,19 @@ class TestKeyboardFocus:
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause(0.1)
 
-                # Initially the search container is hidden
-                search_container = app.query_one("#search-container")
-                assert "visible" not in search_container.classes
+                # Initially the OmniInput is hidden
+                omni = app.query_one(OmniInput)
+                assert not omni.is_open
 
                 # Press / to toggle search
                 await pilot.press("slash")
                 await pilot.pause(0.1)
 
-                # Search container is now visible
-                assert "visible" in search_container.classes
+                # OmniInput is now visible
+                assert omni.is_open
 
                 # Search input should have focus
-                search_input = app.query_one("#search-input", Input)
+                search_input = app.query_one("#omni-input", Input)
                 assert search_input.has_focus
 
     @pytest.mark.asyncio
@@ -189,22 +190,22 @@ class TestKeyboardFocus:
                 await pilot.press("slash")
                 await pilot.pause(0.1)
 
-                search_container = app.query_one("#search-container")
-                assert "visible" in search_container.classes
+                omni = app.query_one(OmniInput)
+                assert omni.is_open
 
                 # Press Escape to cancel search
                 await pilot.press("escape")
                 await pilot.pause(0.1)
 
-                # Search container should be hidden again
-                assert "visible" not in search_container.classes
+                # OmniInput should be hidden again
+                assert not omni.is_open
 
     @pytest.mark.asyncio
     async def test_modal_takes_and_returns_focus(self, make_paper):
         """When a modal opens it takes focus; when closed, app retains control."""
         papers = _papers(make_paper)
         app = ArxivBrowser(papers, restore_session=False)
-        modal = NotesModal("2401.00001", "test notes")
+        modal = PaperEditModal("2401.00001", current_notes="test notes", initial_tab="notes")
 
         with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
@@ -218,7 +219,7 @@ class TestKeyboardFocus:
                 assert app.screen_stack[-1] is modal
 
                 # Verify modal widgets exist
-                assert modal.query_one("#notes-dialog") is not None
+                assert modal.query_one("#edit-dialog") is not None
 
                 # Dismiss modal
                 modal.dismiss(None)
@@ -234,17 +235,18 @@ class TestKeyboardFocus:
 
 
 class TestModalValidation:
-    """Test error handling and validation in editing modals."""
+    """Test error handling and validation in the unified PaperEditModal."""
 
     @pytest.mark.asyncio
-    async def test_tags_modal_parses_comma_separated_tags(self, make_paper):
-        """TagsModal correctly parses comma-separated tag input."""
+    async def test_tags_tab_parses_comma_separated_tags(self, make_paper):
+        """PaperEditModal tags tab correctly parses comma-separated tag input."""
         papers = _papers(make_paper)
         app = ArxivBrowser(papers, restore_session=False)
-        modal = TagsModal(
+        modal = PaperEditModal(
             "2401.00001",
             current_tags=["topic:ml"],
             all_tags=["topic:ml", "topic:nlp", "status:todo"],
+            initial_tab="tags",
         )
 
         with patch_save_config(return_value=True):
@@ -262,16 +264,16 @@ class TestModalValidation:
                 # Capture dismiss
                 modal.dismiss = MagicMock()
                 modal.action_save()
-                modal.dismiss.assert_called_once_with(
-                    ["topic:cv", "status:done", "method:transformer"]
-                )
+                result = modal.dismiss.call_args[0][0]
+                assert isinstance(result, PaperEditResult)
+                assert result.tags == ["topic:cv", "status:done", "method:transformer"]
 
     @pytest.mark.asyncio
-    async def test_tags_modal_strips_whitespace_from_tags(self, make_paper):
-        """TagsModal strips extra whitespace around tags."""
+    async def test_tags_tab_strips_whitespace_from_tags(self, make_paper):
+        """PaperEditModal tags tab strips extra whitespace around tags."""
         papers = _papers(make_paper)
         app = ArxivBrowser(papers, restore_session=False)
-        modal = TagsModal("2401.00001")
+        modal = PaperEditModal("2401.00001", initial_tab="tags")
 
         with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
@@ -283,14 +285,16 @@ class TestModalValidation:
 
                 modal.dismiss = MagicMock()
                 modal.action_save()
-                modal.dismiss.assert_called_once_with(["topic:ml", "status:todo", "method:rl"])
+                result = modal.dismiss.call_args[0][0]
+                assert isinstance(result, PaperEditResult)
+                assert result.tags == ["topic:ml", "status:todo", "method:rl"]
 
     @pytest.mark.asyncio
-    async def test_tags_modal_empty_input_returns_empty_list(self, make_paper):
-        """TagsModal with empty input returns an empty list (not None)."""
+    async def test_tags_tab_empty_input_returns_empty_list(self, make_paper):
+        """PaperEditModal tags tab with empty input returns an empty tag list."""
         papers = _papers(make_paper)
         app = ArxivBrowser(papers, restore_session=False)
-        modal = TagsModal("2401.00001")
+        modal = PaperEditModal("2401.00001", initial_tab="tags")
 
         with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
@@ -302,14 +306,16 @@ class TestModalValidation:
 
                 modal.dismiss = MagicMock()
                 modal.action_save()
-                modal.dismiss.assert_called_once_with([])
+                result = modal.dismiss.call_args[0][0]
+                assert isinstance(result, PaperEditResult)
+                assert result.tags == []
 
     @pytest.mark.asyncio
-    async def test_notes_modal_captures_content(self, make_paper):
-        """NotesModal submit returns the text content."""
+    async def test_notes_tab_captures_content(self, make_paper):
+        """PaperEditModal notes tab returns the text content on save."""
         papers = _papers(make_paper)
         app = ArxivBrowser(papers, restore_session=False)
-        modal = NotesModal("2401.00001", "initial notes")
+        modal = PaperEditModal("2401.00001", current_notes="initial notes", initial_tab="notes")
 
         with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
@@ -321,14 +327,16 @@ class TestModalValidation:
 
                 modal.dismiss = MagicMock()
                 modal.action_save()
-                modal.dismiss.assert_called_once_with("initial notes")
+                result = modal.dismiss.call_args[0][0]
+                assert isinstance(result, PaperEditResult)
+                assert result.notes == "initial notes"
 
     @pytest.mark.asyncio
-    async def test_notes_modal_cancel_returns_none(self, make_paper):
-        """NotesModal cancel returns None, preserving existing notes."""
+    async def test_cancel_returns_none(self, make_paper):
+        """PaperEditModal cancel returns None, preserving existing data."""
         papers = _papers(make_paper)
         app = ArxivBrowser(papers, restore_session=False)
-        modal = NotesModal("2401.00001", "do not lose me")
+        modal = PaperEditModal("2401.00001", current_notes="do not lose me", initial_tab="notes")
 
         with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
@@ -340,13 +348,14 @@ class TestModalValidation:
                 modal.dismiss.assert_called_once_with(None)
 
     @pytest.mark.asyncio
-    async def test_tags_modal_escape_dismisses_without_saving(self, make_paper):
-        """Pressing Escape on TagsModal should dismiss without saving."""
+    async def test_escape_dismisses_without_saving(self, make_paper):
+        """Pressing Escape on PaperEditModal should dismiss without saving."""
         papers = _papers(make_paper)
         app = ArxivBrowser(papers, restore_session=False)
-        modal = TagsModal(
+        modal = PaperEditModal(
             "2401.00001",
             current_tags=["topic:ml"],
+            initial_tab="tags",
         )
 
         with patch_save_config(return_value=True):
@@ -359,14 +368,15 @@ class TestModalValidation:
                 modal.dismiss.assert_called_once_with(None)
 
     @pytest.mark.asyncio
-    async def test_autotag_modal_merges_current_and_suggested(self, make_paper):
-        """AutoTagSuggestModal merges current tags with suggestions, deduping."""
+    async def test_autotag_tab_merges_current_and_suggested(self, make_paper):
+        """PaperEditModal AI Tags tab merges current tags with suggestions, deduping."""
         papers = _papers(make_paper)
         app = ArxivBrowser(papers, restore_session=False)
-        modal = AutoTagSuggestModal(
-            "Test Paper Title",
-            suggested_tags=["topic:ml", "topic:ml", "method:transformer"],
+        modal = PaperEditModal(
+            "2401.00001",
             current_tags=["status:todo"],
+            suggested_tags=["topic:ml", "topic:ml", "method:transformer"],
+            initial_tab="ai-tags",
         )
 
         with patch_save_config(return_value=True):
@@ -378,23 +388,24 @@ class TestModalValidation:
                 input_widget = modal.query_one("#autotag-input", Input)
                 assert input_widget.value == "status:todo, topic:ml, method:transformer"
 
-                # Accept should lower-case and parse
+                # Save should lower-case and parse (AI Tags tab active)
                 modal.dismiss = MagicMock()
-                modal.action_accept()
+                modal.action_save()
                 result = modal.dismiss.call_args[0][0]
-                assert isinstance(result, list)
-                assert "status:todo" in result
-                assert "topic:ml" in result
-                assert "method:transformer" in result
+                assert isinstance(result, PaperEditResult)
+                assert "status:todo" in result.tags
+                assert "topic:ml" in result.tags
+                assert "method:transformer" in result.tags
 
     @pytest.mark.asyncio
-    async def test_autotag_modal_cancel_returns_none(self, make_paper):
-        """AutoTagSuggestModal cancel returns None."""
+    async def test_autotag_tab_cancel_returns_none(self, make_paper):
+        """PaperEditModal AI Tags tab cancel returns None."""
         papers = _papers(make_paper)
         app = ArxivBrowser(papers, restore_session=False)
-        modal = AutoTagSuggestModal(
-            "Test Paper Title",
+        modal = PaperEditModal(
+            "2401.00001",
             suggested_tags=["topic:ml"],
+            initial_tab="ai-tags",
         )
 
         with patch_save_config(return_value=True):
@@ -407,14 +418,15 @@ class TestModalValidation:
                 modal.dismiss.assert_called_once_with(None)
 
     @pytest.mark.asyncio
-    async def test_tags_modal_shows_suggestions(self, make_paper):
-        """TagsModal displays tag suggestions from all known tags."""
+    async def test_tags_tab_shows_suggestions(self, make_paper):
+        """PaperEditModal tags tab displays tag suggestions from all known tags."""
         papers = _papers(make_paper)
         app = ArxivBrowser(papers, restore_session=False)
-        modal = TagsModal(
+        modal = PaperEditModal(
             "2401.00001",
             current_tags=[],
             all_tags=["topic:ml", "topic:nlp", "status:todo"],
+            initial_tab="tags",
         )
 
         with patch_save_config(return_value=True):
@@ -427,11 +439,11 @@ class TestModalValidation:
                 assert suggestions is not None
 
     @pytest.mark.asyncio
-    async def test_tags_modal_input_submitted_triggers_save(self, make_paper):
+    async def test_tags_input_submitted_triggers_save(self, make_paper):
         """Pressing Enter in the tags input triggers save."""
         papers = _papers(make_paper)
         app = ArxivBrowser(papers, restore_session=False)
-        modal = TagsModal("2401.00001", current_tags=["topic:ml"])
+        modal = PaperEditModal("2401.00001", current_tags=["topic:ml"], initial_tab="tags")
 
         with patch_save_config(return_value=True):
             async with app.run_test(size=(120, 40)) as pilot:
@@ -439,7 +451,7 @@ class TestModalValidation:
                 await pilot.pause(0.1)
 
                 modal.action_save = MagicMock()
-                modal.on_input_submitted()
+                modal.on_tags_submitted()
                 modal.action_save.assert_called_once()
 
 
@@ -465,7 +477,7 @@ class TestFilterPills:
                 await pilot.press("slash")
                 await pilot.pause(0.1)
 
-                search_input = app.query_one("#search-input", Input)
+                search_input = app.query_one("#omni-input", Input)
                 search_input.value = "transformer"
 
                 # Wait for debounce (0.3s) + render
@@ -488,7 +500,7 @@ class TestFilterPills:
                 # Apply a filter
                 await pilot.press("slash")
                 await pilot.pause(0.1)
-                search_input = app.query_one("#search-input", Input)
+                search_input = app.query_one("#omni-input", Input)
                 search_input.value = "transformer"
                 await pilot.pause(0.5)
 
@@ -515,7 +527,7 @@ class TestFilterPills:
                 # Apply a filter
                 await pilot.press("slash")
                 await pilot.pause(0.1)
-                search_input = app.query_one("#search-input", Input)
+                search_input = app.query_one("#omni-input", Input)
                 search_input.value = "transformer"
                 await pilot.pause(0.5)
 

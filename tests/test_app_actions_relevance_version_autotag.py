@@ -372,9 +372,8 @@ class TestAutoTagCoverage:
         app._auto_tag_active = True
         app._auto_tag_progress = None
         app._cancel_batch_requested = False
-        app._get_search_container_widget = MagicMock(
-            return_value=SimpleNamespace(classes=set(), remove_class=MagicMock())
-        )
+        omni_mock = SimpleNamespace(is_open=False, close=MagicMock(), value="")
+        app._get_search_container_widget = MagicMock(return_value=omni_mock)
 
         app.action_cancel_search()
 

@@ -25,7 +25,6 @@ from arxiv_browser.enrichment import count_hf_matches, get_starred_paper_ids_for
 from arxiv_browser.modals.collections import CollectionsModal
 from arxiv_browser.modals.common import SectionToggleModal
 from arxiv_browser.modals.help import HelpScreen
-from arxiv_browser.modals.search import CommandPaletteModal
 from arxiv_browser.models import MAX_PAPERS_PER_COLLECTION
 from arxiv_browser.semantic_scholar import (
     S2_CITATION_GRAPH_CACHE_TTL_DAYS,
@@ -610,50 +609,11 @@ def action_show_help(app: "ArxivBrowser") -> None:
 
 
 def action_command_palette(app: "ArxivBrowser") -> None:
-    """Open the fuzzy-searchable command palette."""
+    """Open the OmniInput in command palette mode."""
+    omni = app._get_search_container_widget()
     commands = app._build_command_palette_commands()
-    command_labels = {command.action: command.name for command in commands}
-
-    def _on_command_selected(action_name: str | None) -> None:
-        if not action_name:
-            return
-        command_label = command_labels.get(action_name, action_name)
-        method = getattr(app, f"action_{action_name}", None)
-        if method is not None:
-            try:
-                result = method()
-                if asyncio.iscoroutine(result):
-                    app._track_task(result)
-            except _RECOVERABLE_ACTION_ERRORS as exc:
-                logger.warning(
-                    "Command palette action %s failed (%s): %s",
-                    action_name,
-                    type(exc).__name__,
-                    exc,
-                    exc_info=True,
-                )
-                app.notify(
-                    f"{command_label} failed. Try: retry from Ctrl+p or press ? for help.",
-                    title="Commands",
-                    severity="error",
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Unexpected command palette action failure %s (%s): %s",
-                    action_name,
-                    type(exc).__name__,
-                    exc,
-                    exc_info=True,
-                )
-                app.notify(
-                    f"{command_label} failed. Try: retry from Ctrl+p or press ? for help.",
-                    title="Commands",
-                    severity="error",
-                )
-        else:
-            logger.warning("Unknown command palette action: %s", action_name)
-
-    app.push_screen(CommandPaletteModal(commands), _on_command_selected)
+    omni.set_commands(commands)
+    omni.open(">")
 
 
 def action_collections(app: "ArxivBrowser") -> None:

@@ -584,18 +584,11 @@ class TestUiActionCoverage:
         app.action_explode = MagicMock(side_effect=Exception("boom"))
         app._track_task = MagicMock(side_effect=lambda coro: coro.close())
         app.push_screen = MagicMock()
-        with patch(
-            "arxiv_browser.actions.ui_actions.CommandPaletteModal", return_value="palette-modal"
-        ):
-            ui_actions.action_command_palette(app)
-        callback = app.push_screen.call_args.args[1]
-        callback(None)
-        callback("sample")
-        callback("broken")
-        callback("explode")
-        callback("missing")
-        assert app._track_task.called
-        assert "failed" in app.notify.call_args[0][0].lower()
+        omni_mock = SimpleNamespace(set_commands=MagicMock(), open=MagicMock())
+        app._get_search_container_widget = MagicMock(return_value=omni_mock)
+        ui_actions.action_command_palette(app)
+        omni_mock.set_commands.assert_called_once()
+        omni_mock.open.assert_called_once_with(">")
 
         app._config.collections = []
         ui_actions.action_add_to_collection(app)

@@ -69,30 +69,29 @@ Header {
     padding: 0 1;
 }
 
-#search-container {
-    height: auto;
+OmniInput {
     padding: 0 1;
     background: $th-panel;
-    display: none;
 }
 
-#search-container.visible {
-    display: block;
-}
-
-#search-input {
+OmniInput #omni-input {
     width: 100%;
     border: tall $th-accent;
     background: $th-background;
 }
 
-#search-input:focus {
+OmniInput #omni-input:focus {
     border: tall $th-accent-alt;
 }
 
-#search-hint {
+OmniInput #omni-hint {
     color: $th-muted;
     padding: 0 1 1 1;
+}
+
+OmniInput #omni-results {
+    background: $th-panel;
+    max-height: 12;
 }
 
 #paper-list > .option-list--option-highlighted {
@@ -155,7 +154,7 @@ VerticalScroll {
 APP_BINDINGS: list[BindingType] = [
     Binding("q", "quit", "Quit", show=False),
     Binding("slash", "toggle_search", "Search", show=False),
-    Binding("A", "arxiv_search", "arXiv Search", show=False),
+    Binding("A", "arxiv_search", "arXiv Search (@query)", show=False),
     Binding(
         "ctrl+e",
         "ctrl_e_dispatch",
@@ -229,7 +228,7 @@ APP_BINDINGS: list[BindingType] = [
     # Help overlay
     Binding("question_mark", "show_help", "Help (?)", show=False),
     # Command palette
-    Binding("ctrl+p", "command_palette", "Command palette", show=False),
+    Binding("ctrl+p", "command_palette", "Command palette (>cmd)", show=False),
     # Collections
     Binding("ctrl+k", "collections", "Collections", show=False),
 ]

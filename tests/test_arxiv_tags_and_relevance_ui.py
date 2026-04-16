@@ -205,18 +205,18 @@ class TestTagNamespaceDisplay:
 
 
 class TestTagSuggestionGrouping:
-    """Tests for the TagsModal suggestion label."""
+    """Tests for the PaperEditModal suggestion label."""
 
     def test_build_suggestions_empty(self):
-        from arxiv_browser.modals import TagsModal
+        from arxiv_browser.modals import PaperEditModal
 
-        modal = TagsModal("2401.00001", all_tags=[])
+        modal = PaperEditModal("2401.00001", all_tags=[])
         assert modal._build_suggestions_markup() == ""
 
     def test_build_suggestions_groups_by_namespace(self):
-        from arxiv_browser.modals import TagsModal
+        from arxiv_browser.modals import PaperEditModal
 
-        modal = TagsModal(
+        modal = PaperEditModal(
             "2401.00001",
             all_tags=["topic:ml", "topic:nlp", "status:to-read", "important"],
         )
@@ -226,9 +226,9 @@ class TestTagSuggestionGrouping:
         assert "important" in markup
 
     def test_build_suggestions_deduplicates(self):
-        from arxiv_browser.modals import TagsModal
+        from arxiv_browser.modals import PaperEditModal
 
-        modal = TagsModal(
+        modal = PaperEditModal(
             "2401.00001",
             all_tags=["topic:ml", "topic:ml", "topic:ml"],
         )
@@ -237,9 +237,9 @@ class TestTagSuggestionGrouping:
         assert markup.count("ml") == 1
 
     def test_modal_accepts_all_tags_param(self):
-        from arxiv_browser.modals import TagsModal
+        from arxiv_browser.modals import PaperEditModal
 
-        modal = TagsModal(
+        modal = PaperEditModal(
             "2401.00001",
             current_tags=["existing"],
             all_tags=["topic:ml", "status:done"],

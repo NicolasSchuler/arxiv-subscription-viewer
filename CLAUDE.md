@@ -60,17 +60,23 @@ src/arxiv_browser/
 ├── ui_runtime.py         # Runtime UI state + refresh coordination
 ├── modals/               # ModalScreen subclasses, domain-grouped
 │   ├── __init__.py       # Re-exports all modals for flat imports
-│   ├── common.py         # HelpScreen, ConfirmModal, ExportMenuModal, MetadataSnapshotPickerModal, WatchListModal, SectionToggleModal
+│   ├── base.py           # ModalBase — shared CSS, action_cancel, _focus_widget
+│   ├── common.py         # ConfirmModal, ExportMenuModal, MetadataSnapshotPickerModal, SectionToggleModal
 │   ├── editing.py        # PaperEditModal (unified notes + tags + auto-tag)
-│   ├── search.py         # ArxivSearchModal, CommandPaletteModal
+│   ├── search.py         # ArxivSearchModal (deprecated), CommandPaletteModal (deprecated)
 │   ├── collections.py    # CollectionsModal (manage + pick modes, inline detail view)
 │   ├── citations.py      # RecommendationsScreen, CitationGraphScreen
-│   └── llm.py            # SummaryModeModal, ResearchInterestsModal, PaperChatScreen
+│   ├── llm.py            # SummaryModeModal, ResearchInterestsModal, PaperChatScreen
+│   ├── watchlist.py      # WatchListModal
+│   ├── help.py           # HelpScreen (progressive tabs: Core/Standard/Power/All)
+│   └── welcome.py        # WelcomeScreen (first-run onboarding overlay)
 ├── widgets/              # Reusable widgets extracted from app.py
 │   ├── __init__.py       # Re-exports all widget classes/helpers/constants
 │   ├── listing.py        # PaperListItem + render_paper_option list helpers
 │   ├── details.py        # PaperDetails + detail pane cache/render helpers
-│   └── chrome.py         # FilterPillBar, BookmarkTabBar, DateNavigator, ContextFooter
+│   ├── chrome.py         # FilterPillBar, BookmarkTabBar, DateNavigator, ContextFooter
+│   ├── chrome_status.py  # Context-sensitive footer hints (browse/selection/search modes)
+│   └── omni_input.py     # OmniInput — unified search with mode prefixes (>, @)
 └── py.typed              # PEP 561 type marker
 ```
 
@@ -110,6 +116,7 @@ modals/llm.py          ← llm, llm_providers, models, query, themes
 widgets/listing.py     ← models, query, themes, semantic_scholar, huggingface
 widgets/details.py     ← models, query, themes, semantic_scholar, huggingface, widgets/listing
 widgets/chrome.py      ← models, parsing, query, themes
+widgets/omni_input.py  ← query (pure — no browser or action deps)
 ui_runtime.py          ← widgets
 actions/*              ← action_messages + canonical modules
 browser/core.py        ← database + canonical modules
@@ -143,6 +150,7 @@ Submodules should import canonical modules directly. Only the compatibility shim
 ### UI Components (`widgets/` + `browser/` + `app.py`)
 
 - `ArxivBrowser` (`browser/core.py`, re-exported via `app.py`) - Main Textual App class
+- `OmniInput` (`widgets/omni_input.py`) - VS Code-style unified search (local `/`, API `@`, commands `>`)
 - `PaperListItem` (`widgets/listing.py`) - Custom ListItem with selection/metadata display
 - `PaperDetails` (`widgets/details.py`) - Rich-formatted paper detail view
 - `BookmarkTabBar` (`widgets/chrome.py`) - Horizontal bookmark tabs widget
@@ -153,12 +161,16 @@ Submodules should import canonical modules directly. Only the compatibility shim
 ### Modal Screens (`modals/`)
 
 16 ModalScreen subclasses organized by domain:
-- **common.py**: HelpScreen, ConfirmModal, ExportMenuModal, MetadataSnapshotPickerModal, WatchListModal, SectionToggleModal
+- **base.py**: ModalBase (shared CSS, action_cancel, _focus_widget)
+- **common.py**: ConfirmModal, ExportMenuModal, MetadataSnapshotPickerModal, SectionToggleModal
 - **editing.py**: PaperEditModal (unified notes + tags + auto-tag via TabbedContent)
-- **search.py**: ArxivSearchModal, CommandPaletteModal
+- **search.py**: ArxivSearchModal (deprecated — use OmniInput ``@`` prefix), CommandPaletteModal (deprecated — use OmniInput ``>`` prefix)
 - **collections.py**: CollectionsModal (manage/pick modes with inline detail view)
 - **citations.py**: RecommendationsScreen, CitationGraphScreen
 - **llm.py**: SummaryModeModal, ResearchInterestsModal, PaperChatScreen
+- **watchlist.py**: WatchListModal
+- **help.py**: HelpScreen (progressive tabs: Core/Standard/Power/All)
+- **welcome.py**: WelcomeScreen (first-run onboarding overlay)
 
 ### Performance Optimizations
 

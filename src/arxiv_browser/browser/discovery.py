@@ -134,12 +134,16 @@ class DiscoveryMixin:
         target_start = max(0, state.start + (direction * state.max_results))
         await self._run_arxiv_search(state.request, start=target_start)
 
-    def _show_recommendations(self, paper: Paper, source: str | None, *, s2_available: bool = False) -> None:
+    def _show_recommendations(
+        self, paper: Paper, source: str | None, *, s2_available: bool = False
+    ) -> None:
         """Dispatcher for local or S2 recommendations."""
         if not source:  # User cancelled
             return
         if source == "s2":
-            self._track_dataset_task(self._show_s2_recommendations(paper, s2_available=s2_available))
+            self._track_dataset_task(
+                self._show_s2_recommendations(paper, s2_available=s2_available)
+            )
         else:
             self._show_local_recommendations(paper, s2_available=s2_available)
 

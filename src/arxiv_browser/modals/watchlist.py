@@ -9,9 +9,9 @@ from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Input, Label, ListItem, ListView, Select, Static
 
+from arxiv_browser.modals.base import ModalBase
 from arxiv_browser.models import WATCH_MATCH_TYPES, WatchListEntry
 
 
@@ -24,7 +24,7 @@ class WatchListItem(ListItem):
         self.entry = entry
 
 
-class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
+class WatchListModal(ModalBase[list[WatchListEntry] | None]):
     """Modal dialog for managing watch list entries."""
 
     BINDINGS = [
@@ -170,7 +170,7 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
     def on_mount(self) -> None:
         """Populate the list view and focus the pattern input on mount."""
         self._refresh_list()
-        self.query_one("#watch-pattern", Input).focus()
+        self._focus_widget("#watch-pattern")
 
     def _refresh_list(self) -> None:
         """Rebuild the list view from the current entries and update the empty hint."""
@@ -226,10 +226,6 @@ class WatchListModal(ModalScreen[list[WatchListEntry] | None]):
     def action_save(self) -> None:
         """Dismiss the modal and return the current list of entries."""
         self.dismiss(self._entries)
-
-    def action_cancel(self) -> None:
-        """Dismiss the modal without saving changes."""
-        self.dismiss(None)
 
     @on(ListView.Highlighted, "#watch-list")
     def on_list_highlighted(self, event: ListView.Highlighted) -> None:

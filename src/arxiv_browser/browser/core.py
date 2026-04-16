@@ -20,7 +20,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.events import Key
 from textual.timer import Timer
-from textual.widgets import Header, Input, Label, OptionList, Static
+from textual.widgets import Header, Input, Label, OptionList
 
 from arxiv_browser.actions import constants as _action_constants
 from arxiv_browser.actions import external_io_actions as _external_io_actions
@@ -60,6 +60,7 @@ from arxiv_browser.widgets import (
     ContextFooter,
     DateNavigator,
     FilterPillBar,
+    OmniInput,
     PaperDetails,
 )
 from arxiv_browser.widgets import chrome as _widget_chrome
@@ -472,15 +473,7 @@ class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
                     active_search=bool(self._config.session.current_filter.strip()),
                 )
                 yield FilterPillBar()
-                with Vertical(id="search-container"):
-                    yield Input(
-                        placeholder=' Search papers (e.g., cat:cs.AI or "large language")',
-                        id="search-input",
-                    )
-                    yield Static(
-                        'Examples: cat:cs.AI  author:hinton  unread  "large language"  ? help  Ctrl+p commands',
-                        id="search-hint",
-                    )
+                yield OmniInput()
                 yield OptionList(id="paper-list")
                 yield Label("", id="status-bar")
             with Vertical(id="right-pane"):
@@ -633,16 +626,12 @@ class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
         return widget
 
     def _get_search_input_widget(self) -> Input:
-        """Return the cached search input widget."""
-        return self._get_cached_widget(
-            "search_input", lambda: self.query_one("#search-input", Input)
-        )
+        """Return the cached search input widget (inner Input inside OmniInput)."""
+        return self._get_cached_widget("search_input", lambda: self.query_one("#omni-input", Input))
 
-    def _get_search_container_widget(self) -> Any:
-        """Return the cached search container widget."""
-        return self._get_cached_widget(
-            "search_container", lambda: self.query_one("#search-container")
-        )
+    def _get_search_container_widget(self) -> OmniInput:
+        """Return the cached OmniInput widget (replaces old #search-container)."""
+        return self._get_cached_widget("search_container", lambda: self.query_one(OmniInput))
 
     def _get_paper_list_widget(self) -> OptionList:
         """Return the cached paper list OptionList widget."""
@@ -835,31 +824,48 @@ class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
                 self._debounced_detail_update,
             )
 
-    @on(Input.Submitted, "#search-input")
-    def on_search_submitted(self, event: Input.Submitted) -> None:
-        """Handle search submission."""
-        self._apply_filter(event.value)
-        # Hide search after submission
-        self._get_search_container_widget().remove_class("visible")
-        # Focus the list
-        self._get_paper_list_widget().focus()
-
-    @on(Input.Changed, "#search-input")
-    def on_search_changed(self, event: Input.Changed) -> None:
-        """Handle search input change with debouncing.
-        Uses atomic swap pattern to avoid race conditions with timer callbacks.
-        """
-        self._pending_query = event.value
-        # Atomic swap pattern: capture and clear before stopping
+    @on(OmniInput.LocalSearch)
+    def on_omni_local_search(self, event: OmniInput.LocalSearch) -> None:
+        """Handle live local search from OmniInput with debouncing."""
+        self._pending_query = event.query
         old_timer = self._search_timer
         self._search_timer = None
         if old_timer is not None:
             old_timer.stop()
-        # Set new timer for debounced filter
         self._search_timer = self.set_timer(
             SEARCH_DEBOUNCE_DELAY,
             self._debounced_filter,
         )
+
+    @on(OmniInput.LocalSearchSubmitted)
+    def on_omni_local_search_submitted(self, event: OmniInput.LocalSearchSubmitted) -> None:
+        """Handle Enter in local search mode — apply filter and close."""
+        self._apply_filter(event.query)
+        self._get_search_container_widget().hide()
+        self._get_paper_list_widget().focus()
+        self._update_footer()
+
+    @on(OmniInput.ApiSearch)
+    def on_omni_api_search(self, event: OmniInput.ApiSearch) -> None:
+        """Handle arXiv API search from OmniInput."""
+        from arxiv_browser.models import ArxivSearchRequest
+
+        request = ArxivSearchRequest(query=event.query, field="all", category="")
+        self._track_task(self._run_arxiv_search(request, start=0))
+
+    @on(OmniInput.CommandSelected)
+    def on_omni_command_selected(self, event: OmniInput.CommandSelected) -> None:
+        """Handle command selection from OmniInput inline results."""
+        self._get_search_container_widget().close()
+        self._update_footer()
+        method = getattr(self, f"action_{event.action}", None)
+        if method is not None:
+            try:
+                result = method()
+                if asyncio.iscoroutine(result):
+                    self._track_task(result)
+            except Exception:
+                logger.warning("OmniInput command failed: %s", event.action, exc_info=True)
 
     @on(DateNavigator.JumpToDate)
     def on_date_jump(self, event: DateNavigator.JumpToDate) -> None:

@@ -9,11 +9,11 @@ from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, OptionList, Select, Static
 from textual.widgets.option_list import Option
 
 from arxiv_browser.fuzzy import partial_fuzzy_score
+from arxiv_browser.modals.base import ModalBase
 from arxiv_browser.models import ArxivSearchRequest
 from arxiv_browser.parsing import ARXIV_QUERY_FIELDS, build_arxiv_search_query
 from arxiv_browser.query import escape_rich_text
@@ -49,8 +49,14 @@ class PaletteCommand:
     suggested: bool = False
 
 
-class ArxivSearchModal(ModalScreen[ArxivSearchRequest | None]):
-    """Modal dialog for searching the full arXiv API."""
+class ArxivSearchModal(ModalBase[ArxivSearchRequest | None]):
+    """Modal dialog for searching the full arXiv API.
+
+    .. deprecated::
+        Replaced by :class:`~arxiv_browser.widgets.omni_input.OmniInput` with
+        ``@`` prefix mode.  Retained for backward compatibility; will be removed
+        in a future release.
+    """
 
     BINDINGS = [
         Binding("enter", "search", "Search"),
@@ -152,7 +158,7 @@ class ArxivSearchModal(ModalScreen[ArxivSearchRequest | None]):
     def on_mount(self) -> None:
         """Set the initial field selection and focus the query input."""
         self.query_one("#arxiv-search-field", Select).value = self._initial_field
-        self.query_one("#arxiv-search-query", Input).focus()
+        self._focus_widget("#arxiv-search-query")
 
     def action_search(self) -> None:
         """Validate the query and dismiss the modal with an ArxivSearchRequest."""
@@ -168,10 +174,6 @@ class ArxivSearchModal(ModalScreen[ArxivSearchRequest | None]):
             return
 
         self.dismiss(ArxivSearchRequest(query=query, field=field, category=category))
-
-    def action_cancel(self) -> None:
-        """Dismiss the modal without performing a search."""
-        self.dismiss(None)
 
     @on(Button.Pressed, "#arxiv-search")
     def on_search_pressed(self) -> None:
@@ -194,8 +196,13 @@ class ArxivSearchModal(ModalScreen[ArxivSearchRequest | None]):
         self.action_search()
 
 
-class CommandPaletteModal(ModalScreen[str]):
+class CommandPaletteModal(ModalBase[str]):
     """Fuzzy-searchable command palette for discovering and executing actions.
+
+    .. deprecated::
+        Replaced by :class:`~arxiv_browser.widgets.omni_input.OmniInput` with
+        ``>`` prefix mode.  Retained for backward compatibility; will be removed
+        in a future release.
 
     Parameters
     ----------
@@ -268,7 +275,7 @@ class CommandPaletteModal(ModalScreen[str]):
     def on_mount(self) -> None:
         """Populate the initial unfiltered results and focus the search input."""
         self._populate_results("")
-        self.query_one("#palette-search", Input).focus()
+        self._focus_widget("#palette-search")
 
     @on(Input.Changed, "#palette-search")
     def _on_search_changed(self, event: Input.Changed) -> None:

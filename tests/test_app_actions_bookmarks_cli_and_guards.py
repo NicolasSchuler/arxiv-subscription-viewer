@@ -533,26 +533,32 @@ class TestBestEffortS2CacheWrite:
 
 class TestSearchActionCoverage:
     def test_toggle_cancel_and_date_navigation_edges(self):
-        class _Container:
+        class _OmniMock:
+            """Minimal mock for OmniInput widget."""
+
             def __init__(self) -> None:
-                self.classes: set[str] = set()
+                self._open = False
+                self.value = "graph transformers"
 
-            def add_class(self, class_name: str) -> None:
-                self.classes.add(class_name)
+            @property
+            def is_open(self) -> bool:
+                return self._open
 
-            def remove_class(self, class_name: str) -> None:
-                self.classes.discard(class_name)
+            def open(self, initial_text: str = "") -> None:
+                self._open = True
+                if initial_text:
+                    self.value = initial_text
+
+            def close(self) -> None:
+                self._open = False
+                self.value = ""
+
+            def hide(self) -> None:
+                self._open = False
 
         app = _new_app()
-        container = _Container()
-        search_input = SimpleNamespace(value="graph transformers", focused=False)
-
-        def _focus() -> None:
-            search_input.focused = True
-
-        search_input.focus = _focus
-        app._get_search_container_widget = MagicMock(return_value=container)
-        app._get_search_input_widget = MagicMock(return_value=search_input)
+        omni = _OmniMock()
+        app._get_search_container_widget = MagicMock(return_value=omni)
         app._update_footer = MagicMock()
         app._apply_filter = MagicMock()
         app.notify = MagicMock()
@@ -565,18 +571,17 @@ class TestSearchActionCoverage:
         app._change_arxiv_page = AsyncMock(return_value=None)
 
         app.action_toggle_search()
-        assert "visible" in container.classes
-        assert search_input.focused is True
+        assert omni.is_open is True
         assert "Search mode" in app.notify.call_args.args[0]
 
         app.notify.reset_mock()
         app.action_toggle_search()
-        assert "visible" not in container.classes
+        assert omni.is_open is False
         app.notify.assert_not_called()
 
-        container.add_class("visible")
+        omni.open()
         app.action_cancel_search()
-        assert search_input.value == ""
+        assert omni.value == ""
         app._apply_filter.assert_called_once_with("")
         app.action_exit_arxiv_search_mode.assert_called_once()
         assert app._cancel_batch_requested is True

@@ -24,7 +24,7 @@ from arxiv_browser.browser.empty_state import build_list_empty_message
 from arxiv_browser.export import format_paper_as_markdown
 from arxiv_browser.fuzzy import weighted_fuzzy_score
 from arxiv_browser.io_actions import resolve_target_papers
-from arxiv_browser.modals.editing import TagsModal
+from arxiv_browser.modals.editing import PaperEditModal, PaperEditResult
 from arxiv_browser.models import SORT_OPTIONS, LocalBrowseSnapshot, Paper, PaperMetadata
 from arxiv_browser.parsing import build_daily_digest, parse_arxiv_file
 from arxiv_browser.query import (
@@ -436,9 +436,10 @@ class BrowseMixin:
         all_tags = self._collect_all_tags()
         target_ids = set(self.selected_ids)
 
-        def on_bulk_tags_saved(tags: list[str] | None) -> None:
-            if tags is None:
+        def on_bulk_tags_saved(result: PaperEditResult | None) -> None:
+            if result is None:
                 return
+            tags = result.tags
             new_tag_set = set(tags)
             old_common = set(common_tags)
             added = new_tag_set - old_common
@@ -456,7 +457,9 @@ class BrowseMixin:
             self.notify(f"{msg} on {len(target_ids)} papers", title="Bulk Tags")
 
         self.push_screen(
-            TagsModal(f"bulk:{n}", common_tags, all_tags=all_tags),
+            PaperEditModal(
+                f"bulk:{n}", current_tags=common_tags, all_tags=all_tags, initial_tab="tags"
+            ),
             on_bulk_tags_saved,
         )
 

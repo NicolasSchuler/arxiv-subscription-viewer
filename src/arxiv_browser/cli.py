@@ -41,7 +41,7 @@ ARXIV_API_URL = _arxiv_api_service.ARXIV_API_URL
 ARXIV_API_TIMEOUT = _arxiv_api_service.ARXIV_API_TIMEOUT
 ARXIV_API_USER_AGENT = _arxiv_api_service.ARXIV_API_USER_AGENT
 ARXIV_API_MIN_INTERVAL_SECONDS = _arxiv_api_service.ARXIV_API_MIN_INTERVAL_SECONDS
-CLI_COMMANDS = ("browse", "search", "dates", "completions", "config-path", "doctor")
+CLI_COMMANDS = ("browse", "search", "dates", "completions", "config-path", "doctor", "keybindings")
 CLI_ROOT_DESCRIPTION = "Browse and search arXiv papers from your terminal."
 CLI_ROOT_EPILOG = """Examples:
   arxiv-viewer
@@ -52,6 +52,8 @@ CLI_ROOT_EPILOG = """Examples:
   arxiv-viewer dates
   arxiv-viewer config-path
   arxiv-viewer doctor
+  arxiv-viewer keybindings
+  arxiv-viewer keybindings --format markdown --tier core
   eval "$(arxiv-viewer completions bash)"
 
 Exit codes:
@@ -545,6 +547,56 @@ def _doctor_terminal_summary(*, ok_marker: str, info_marker: str) -> None:
         print(f"{info_marker} Terminal: not an interactive TTY (TUI will not start)")
 
 
+def _run_keybindings(args: argparse.Namespace) -> int:
+    """Print keyboard shortcuts to stdout in the requested format."""
+    import json as _json
+
+    from arxiv_browser.help_ui import build_help_sections
+    from arxiv_browser.ui_constants import APP_BINDINGS
+
+    sections = build_help_sections(APP_BINDINGS)
+
+    tier = getattr(args, "tier", "all")
+    if tier != "all":
+        tier_map: dict[str, set[str]] = {
+            "core": {"Getting Started", "Search Syntax", "Core Actions"},
+            "standard": {"Standard \u00b7 Organize", "Standard - Organize"},
+            "power": {
+                "Power \u00b7 Research Tools",
+                "Power \u00b7 Advanced",
+                "Power - Research Tools",
+                "Power - Advanced",
+            },
+        }
+        allowed = tier_map.get(tier, set())
+        sections = [(name, entries) for name, entries in sections if name in allowed]
+
+    kb_format = getattr(args, "kb_format", "table")
+
+    if kb_format == "json":
+        data = [
+            {"section": name, "bindings": [{"key": k, "description": d} for k, d in entries]}
+            for name, entries in sections
+        ]
+        print(_json.dumps(data, indent=2))
+    elif kb_format == "markdown":
+        for name, entries in sections:
+            print(f"## {name}\n")
+            print("| Key | Action |")
+            print("|-----|--------|")
+            for key, desc in entries:
+                print(f"| `{key}` | {desc} |")
+            print()
+    else:
+        for name, entries in sections:
+            print(f"\033[1m{name}\033[0m")
+            for key, desc in entries:
+                print(f"  \033[32m{key:<20}\033[0m {desc}")
+            print()
+
+    return 0
+
+
 def _run_doctor(config: UserConfig, history_files: list[tuple[date, Path]]) -> int:
     """Run diagnostic checks and print a summary report."""
     from arxiv_browser.config import get_config_path
@@ -732,6 +784,25 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         description="Run diagnostic checks and report potential issues.",
     )
 
+    keybindings_parser = subparsers.add_parser(
+        "keybindings",
+        help="Print keyboard shortcuts and exit",
+        description="Display all keyboard shortcuts grouped by category.",
+    )
+    keybindings_parser.add_argument(
+        "--format",
+        choices=("table", "json", "markdown"),
+        default="table",
+        dest="kb_format",
+        help="Output format (default: table)",
+    )
+    keybindings_parser.add_argument(
+        "--tier",
+        choices=("core", "standard", "power", "all"),
+        default="all",
+        help="Filter shortcuts by tier (default: all)",
+    )
+
     return parser
 
 
@@ -813,6 +884,10 @@ def main(
     # Handle `config-path` early (no config/history/TTY needed)
     if getattr(args, "command", None) == "config-path":
         return _print_config_path()
+
+    # Handle `keybindings` early (no config/history/TTY needed)
+    if getattr(args, "command", None) == "keybindings":
+        return _run_keybindings(args)
 
     color_flag_explicit = any(_is_color_flag(token) for token in normalized_argv)
     if args.no_color:
@@ -952,6 +1027,7 @@ __all__ = [
     "_resolve_legacy_fallback",
     "_resolve_papers",
     "_run_doctor",
+    "_run_keybindings",
     "_validate_interactive_tty",
     "main",
 ]

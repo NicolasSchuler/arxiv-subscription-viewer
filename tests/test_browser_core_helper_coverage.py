@@ -451,17 +451,18 @@ class TestAppHelperCoverage:
         assert second_client.aclose.await_count == 1
         app._ui_refs.reset.assert_called_once()
 
-        app._get_search_container_widget = MagicMock(
-            return_value=SimpleNamespace(remove_class=MagicMock())
-        )
+        app._get_search_container_widget = MagicMock(return_value=SimpleNamespace(hide=MagicMock()))
         app._get_paper_list_widget = MagicMock(return_value=SimpleNamespace(focus=MagicMock()))
         app._apply_filter = MagicMock()
-        browser_core.ArxivBrowser.on_search_submitted(app, SimpleNamespace(value="graph"))
+        app._update_footer = MagicMock()
+        browser_core.ArxivBrowser.on_omni_local_search_submitted(
+            app, SimpleNamespace(query="graph")
+        )
         app._apply_filter.assert_called_with("graph")
 
         app._search_timer = _DummyTimer()
         app.set_timer = MagicMock(return_value=_DummyTimer())
-        browser_core.ArxivBrowser.on_search_changed(app, SimpleNamespace(value="query"))
+        browser_core.ArxivBrowser.on_omni_local_search(app, SimpleNamespace(query="query"))
         assert app._search_timer is not None
 
         app._history_files = [Path("one"), Path("two")]

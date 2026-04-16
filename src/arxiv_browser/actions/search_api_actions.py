@@ -13,7 +13,6 @@ from arxiv_browser.action_messages import build_actionable_error, build_actionab
 from arxiv_browser.actions.constants import BOOKMARK_NAME_MAX_LEN, logger
 from arxiv_browser.cli import ARXIV_API_MIN_INTERVAL_SECONDS
 from arxiv_browser.config import _coerce_arxiv_api_max_results, save_config
-from arxiv_browser.modals import ArxivSearchModal
 from arxiv_browser.models import ArxivSearchModeState, ArxivSearchRequest, Paper, SearchBookmark
 from arxiv_browser.parsing import HISTORY_DATE_FORMAT
 from arxiv_browser.query import truncate_text
@@ -25,12 +24,11 @@ if TYPE_CHECKING:
 
 def action_toggle_search(app: "ArxivBrowser") -> None:
     """Toggle search input visibility."""
-    container = app._get_search_container_widget()
-    if "visible" in container.classes:
-        container.remove_class("visible")
+    omni = app._get_search_container_widget()
+    if omni.is_open:
+        omni.hide()
     else:
-        container.add_class("visible")
-        app._get_search_input_widget().focus()
+        omni.open()
         app.notify(
             'Search mode: try cat:cs.AI, author:hinton, unread, or "large language".',
             title="Search",
@@ -40,11 +38,9 @@ def action_toggle_search(app: "ArxivBrowser") -> None:
 
 def action_cancel_search(app: "ArxivBrowser") -> None:
     """Cancel search and hide input."""
-    container = app._get_search_container_widget()
-    if "visible" in container.classes:
-        container.remove_class("visible")
-        search_input = app._get_search_input_widget()
-        search_input.value = ""
+    omni = app._get_search_container_widget()
+    if omni.is_open:
+        omni.close()
         app._apply_filter("")
     if app._in_arxiv_api_mode:
         app.action_exit_arxiv_search_mode()
@@ -75,28 +71,12 @@ def action_exit_arxiv_search_mode(app: "ArxivBrowser") -> None:
 
 
 def action_arxiv_search(app: "ArxivBrowser") -> None:
-    """Open modal to search all arXiv."""
+    """Open OmniInput in arXiv API search mode."""
+    omni = app._get_search_container_widget()
     default_query = ""
-    default_field = "all"
-    default_category = ""
     if app._arxiv_search_state is not None:
         default_query = app._arxiv_search_state.request.query
-        default_field = app._arxiv_search_state.request.field
-        default_category = app._arxiv_search_state.request.category
-
-    def on_search(request: ArxivSearchRequest | None) -> None:
-        if request is None:
-            return
-        app._track_task(app._run_arxiv_search(request, start=0))
-
-    app.push_screen(
-        ArxivSearchModal(
-            initial_query=default_query,
-            initial_field=default_field,
-            initial_category=default_category,
-        ),
-        on_search,
-    )
+    omni.open(f"@{default_query}")
 
 
 def _format_arxiv_search_label(app: "ArxivBrowser", request: ArxivSearchRequest) -> str:
