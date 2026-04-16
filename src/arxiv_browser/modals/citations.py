@@ -16,7 +16,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Label, ListItem, ListView, Static
 
 from arxiv_browser.action_messages import build_actionable_error
-from arxiv_browser.browser.contracts import TaskTrackingApp
+from arxiv_browser.app_protocols import TaskTrackingApp
 from arxiv_browser.modals.base import ModalBase
 from arxiv_browser.models import Paper
 from arxiv_browser.query import escape_rich_text, truncate_text

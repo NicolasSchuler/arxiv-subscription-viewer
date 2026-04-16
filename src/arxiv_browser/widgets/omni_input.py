@@ -18,12 +18,12 @@ from textual.message import Message
 from textual.widgets import Input, OptionList, Static
 
 from arxiv_browser.fuzzy import partial_fuzzy_score
-from arxiv_browser.modals.search import (
+from arxiv_browser.palette import (
     PALETTE_DESC_MAX_LEN,
     PALETTE_KEY_MAX_LEN,
     PALETTE_NAME_MAX_LEN,
     PaletteCommand,
-    _truncate_palette_text,
+    truncate_palette_text,
 )
 from arxiv_browser.query import escape_rich_text
 from arxiv_browser.themes import theme_colors_for
@@ -249,9 +249,9 @@ class OmniInput(Vertical):
         from textual.widgets.option_list import Option
 
         for cmd in self._filtered_commands:
-            name = _truncate_palette_text(cmd.name, PALETTE_NAME_MAX_LEN)
-            desc = _truncate_palette_text(cmd.description, PALETTE_DESC_MAX_LEN)
-            hint = _truncate_palette_text(cmd.key_hint, PALETTE_KEY_MAX_LEN) if cmd.key_hint else ""
+            name = truncate_palette_text(cmd.name, PALETTE_NAME_MAX_LEN)
+            desc = truncate_palette_text(cmd.description, PALETTE_DESC_MAX_LEN)
+            hint = truncate_palette_text(cmd.key_hint, PALETTE_KEY_MAX_LEN) if cmd.key_hint else ""
             safe_name = escape_rich_text(name)
             safe_desc = escape_rich_text(desc)
             safe_hint = escape_rich_text(hint)

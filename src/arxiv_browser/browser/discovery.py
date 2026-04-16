@@ -177,6 +177,21 @@ class DiscoveryMixin:
             tfidf_index=tfidf_index,
         )
         if not similar_papers:
+            if s2_available:
+                self.push_screen(
+                    RecommendationsScreen(
+                        paper,
+                        [],
+                        source="local",
+                        s2_available=True,
+                    ),
+                    lambda result: self._on_recommendation_result(
+                        paper,
+                        result,
+                        s2_available=True,
+                    ),
+                )
+                return
             self.notify(
                 build_actionable_warning(
                     "No similar papers were found",

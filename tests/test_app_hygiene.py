@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import ast
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 
@@ -128,3 +131,21 @@ def test_src_tree_avoids_repo_local_import_star_and_dynamic_dunder_all() -> None
         "src/arxiv_browser must avoid repo-local wildcard imports and dynamic globals()-derived __all__. "
         f"Found violations in: {', '.join(bad_files)}"
     )
+
+
+def test_ui_packages_import_in_fresh_process() -> None:
+    """Public UI packages should import without entering modal cycles."""
+    repo_root = Path(__file__).resolve().parents[1]
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(repo_root / "src")
+
+    result = subprocess.run(
+        [sys.executable, "-c", "import arxiv_browser.widgets; import arxiv_browser.modals"],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr

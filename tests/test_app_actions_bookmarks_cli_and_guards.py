@@ -76,6 +76,26 @@ class TestBookmarkRelevanceAndCopyCoverage:
             assert save_mock.call_count == 2
 
     @pytest.mark.asyncio
+    async def test_bookmark_add_uses_active_query_when_palette_clears_input(self):
+        app = _new_app()
+        app._config = UserConfig()
+        app._config.bookmarks = []
+        app._active_bookmark_index = -1
+        app._applied_query = "graph transformers"
+        app._pending_query = "graph transformers"
+        app._get_search_input_widget = MagicMock(return_value=SimpleNamespace(value=""))
+        app._update_bookmark_bar = AsyncMock()
+        app.notify = MagicMock()
+
+        with patch_save_config(return_value=True):
+            await app.action_add_bookmark()
+
+        assert len(app._config.bookmarks) == 1
+        assert app._config.bookmarks[0].query == "graph transformers"
+        assert app._active_bookmark_index == 0
+        app.notify.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_goto_bookmark_relies_on_filter_refresh_for_bookmark_bar(self):
         app = _new_app()
         bookmark = SearchBookmark(name="graph transforme", query="graph transformers")

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from arxiv_browser.modals.search import PaletteCommand
+from arxiv_browser.palette import PaletteCommand
 from arxiv_browser.widgets.omni_input import (
     FUZZY_THRESHOLD,
     OMNI_HINT_API,

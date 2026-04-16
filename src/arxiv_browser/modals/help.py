@@ -235,7 +235,9 @@ class HelpScreen(ModalBase[None]):
                     with TabPane(tab_label, id=tab_id):
                         yield Vertical(id=f"help-tab-{tab_id}", classes="help-tab-body")
             # Flat container shown when filter is active (hidden by default)
-            yield Vertical(id="help-sections", classes="hidden")
+            flat = Vertical(id="help-sections", classes="hidden")
+            flat.display = False
+            yield flat
             yield Label(self._footer_note, id="help-footer")
 
     async def on_mount(self) -> None:
@@ -257,10 +259,15 @@ class HelpScreen(ModalBase[None]):
         if query:
             tabs.add_class("hidden")
             flat.remove_class("hidden")
+            tabs.display = False
+            flat.display = True
             await self._populate_flat_sections(query)
         else:
             flat.add_class("hidden")
             tabs.remove_class("hidden")
+            flat.display = False
+            tabs.display = True
+            await flat.remove_children()
 
     async def _populate_flat_sections(self, query: str) -> None:
         """Rebuild the flat filtered section widgets."""

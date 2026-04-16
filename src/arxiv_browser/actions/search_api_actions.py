@@ -119,6 +119,18 @@ async def _fetch_arxiv_api_page(
     )
 
 
+def _resolve_bookmark_query(app: "ArxivBrowser") -> str:
+    """Return the current local query, ignoring transient OmniInput modes."""
+    active_query = app._get_active_query()
+    try:
+        live_query = app._get_search_input_widget().value.strip()
+    except NoMatches:
+        live_query = ""
+    if live_query and not live_query.startswith(("@", ">")):
+        return live_query
+    return active_query
+
+
 def _apply_arxiv_search_results(
     app,
     request: ArxivSearchRequest,
@@ -293,7 +305,7 @@ async def action_goto_bookmark(app: "ArxivBrowser", index: int) -> None:
 
 async def action_add_bookmark(app: "ArxivBrowser") -> None:
     """Add current search query as a bookmark."""
-    query = app._get_search_input_widget().value.strip()
+    query = _resolve_bookmark_query(app)
 
     if not query:
         app.notify(

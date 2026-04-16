@@ -193,6 +193,8 @@ async def test_filter_input_switches_to_flat_view(make_paper):
             # Initially: tabs visible, flat hidden
             assert "hidden" not in tabs.classes
             assert "hidden" in flat.classes
+            assert tabs.display is True
+            assert flat.display is False
 
             # Apply filter
             filter_input = modal.query_one("#help-filter", Input)
@@ -202,6 +204,8 @@ async def test_filter_input_switches_to_flat_view(make_paper):
             # After filter: tabs hidden, flat visible with results
             assert "hidden" in tabs.classes
             assert "hidden" not in flat.classes
+            assert tabs.display is False
+            assert flat.display is True
             section_titles = flat.query(".help-section-title")
             assert len(section_titles) >= 1
 
@@ -210,6 +214,9 @@ async def test_filter_input_switches_to_flat_view(make_paper):
             await pilot.pause(0.1)
             assert "hidden" not in tabs.classes
             assert "hidden" in flat.classes
+            assert tabs.display is True
+            assert flat.display is False
+            assert len(flat.children) == 0
 
 
 @pytest.mark.asyncio

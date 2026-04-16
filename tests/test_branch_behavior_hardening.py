@@ -15,8 +15,9 @@ from arxiv_browser.browser.core import ArxivBrowser
 from arxiv_browser.browser.empty_state import build_list_empty_message
 from arxiv_browser.modals.collections import CollectionsModal
 from arxiv_browser.modals.editing import PaperEditResult
-from arxiv_browser.modals.search import CommandPaletteModal, _truncate_palette_text
+from arxiv_browser.modals.search import CommandPaletteModal
 from arxiv_browser.models import PaperCollection, PaperMetadata, WatchListEntry
+from arxiv_browser.palette import truncate_palette_text
 from arxiv_browser.semantic_scholar import S2RecommendationsCacheSnapshot, SemanticScholarPaper
 from arxiv_browser.services import enrichment_service as enrich
 from tests.support.app_stubs import (
@@ -259,9 +260,9 @@ class _FakeOptionList:
 
 class TestSearchModalBehavior:
     def test_truncate_palette_text_honors_short_max_len(self) -> None:
-        assert _truncate_palette_text("abcdef", 3) == "abc"
-        assert _truncate_palette_text("abcdef", 2) == "ab"
-        assert _truncate_palette_text("abcdef", 1) == "a"
+        assert truncate_palette_text("abcdef", 3) == "abc"
+        assert truncate_palette_text("abcdef", 2) == "ab"
+        assert truncate_palette_text("abcdef", 1) == "a"
 
     def test_highlight_first_enabled_handles_all_disabled(self) -> None:
         option_list = _FakeOptionList(

@@ -515,7 +515,7 @@ async def test_arxiv_search_modal_validation_and_submit(make_paper):
 
 @pytest.mark.asyncio
 async def test_command_palette_modal_filters_and_executes(make_paper):
-    from arxiv_browser.modals import PaletteCommand
+    from arxiv_browser.palette import PaletteCommand
 
     commands = [
         PaletteCommand("Open Paper", "Open selected paper", "o", "open", "Core"),
@@ -640,6 +640,8 @@ async def test_help_screen_has_filter_input_and_filters(make_paper):
             flat_container = modal.query_one("#help-sections", Vertical)
             assert "hidden" not in tabs.classes
             assert "hidden" in flat_container.classes
+            assert tabs.display is True
+            assert flat_container.display is False
 
             # The "All" tab has all sections
             all_body = modal.query_one("#help-tab-all", Vertical)
@@ -651,6 +653,8 @@ async def test_help_screen_has_filter_input_and_filters(make_paper):
             await pilot.pause(0.1)
             assert "hidden" in tabs.classes
             assert "hidden" not in flat_container.classes
+            assert tabs.display is False
+            assert flat_container.display is True
             section_titles = flat_container.query(".help-section-title")
             assert len(section_titles) >= 1
             keys_widgets = flat_container.query(".help-keys")
@@ -668,6 +672,9 @@ async def test_help_screen_has_filter_input_and_filters(make_paper):
             await pilot.pause(0.1)
             assert "hidden" not in tabs.classes
             assert "hidden" in flat_container.classes
+            assert tabs.display is True
+            assert flat_container.display is False
+            assert len(flat_container.children) == 0
 
 
 def test_help_ui_helper_branches_cover_binding_resolution_and_ascii_mode():

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 
 from textual import on
 from textual.app import ComposeResult
@@ -15,38 +14,20 @@ from textual.widgets.option_list import Option
 from arxiv_browser.fuzzy import partial_fuzzy_score
 from arxiv_browser.modals.base import ModalBase
 from arxiv_browser.models import ArxivSearchRequest
+from arxiv_browser.palette import (
+    PALETTE_DESC_MAX_LEN,
+    PALETTE_KEY_MAX_LEN,
+    PALETTE_NAME_MAX_LEN,
+    PaletteCommand,
+    truncate_palette_text,
+)
 from arxiv_browser.parsing import ARXIV_QUERY_FIELDS, build_arxiv_search_query
 from arxiv_browser.query import escape_rich_text
 from arxiv_browser.themes import theme_colors_for
 
 logger = logging.getLogger(__name__)
 
-PALETTE_NAME_MAX_LEN = 28
-PALETTE_DESC_MAX_LEN = 40
-PALETTE_KEY_MAX_LEN = 24
-
-
-def _truncate_palette_text(text: str, max_len: int) -> str:
-    """Clamp palette row text to a stable width-friendly length."""
-    if len(text) <= max_len:
-        return text
-    if max_len <= 3:
-        return text[:max_len]
-    return text[: max_len - 3] + "..."
-
-
-@dataclass(slots=True)
-class PaletteCommand:
-    """One command palette row prepared by the app layer."""
-
-    name: str
-    description: str
-    key_hint: str
-    action: str
-    group: str
-    enabled: bool = True
-    blocked_reason: str = ""
-    suggested: bool = False
+_truncate_palette_text = truncate_palette_text
 
 
 class ArxivSearchModal(ModalBase[ArxivSearchRequest | None]):

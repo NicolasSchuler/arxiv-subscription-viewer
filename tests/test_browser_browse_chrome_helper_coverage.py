@@ -110,6 +110,14 @@ class TestBrowserHelperCoverage:
         assert snapshot.list_index == 1
         assert snapshot.highlight_terms["title"] == ["graph"]
 
+        for transient_query in ("@transformers", ">add bookmark"):
+            app._get_search_input_widget = MagicMock(
+                return_value=SimpleNamespace(value=transient_query)
+            )
+            transient_snapshot = app._capture_local_browse_snapshot()
+            assert transient_snapshot is not None
+            assert transient_snapshot.search_query == "graph"
+
         app._get_paper_list_widget = MagicMock(side_effect=NoMatches())
         assert app._capture_local_browse_snapshot() is None
 

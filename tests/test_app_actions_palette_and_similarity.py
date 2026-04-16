@@ -376,6 +376,18 @@ class TestArxivApiAndSimilarityCoverage:
         assert "No similar papers were found." in app.notify.call_args[0][0]
 
         app.notify.reset_mock()
+        app.push_screen.reset_mock()
+        with (
+            patch("arxiv_browser.browser.discovery.find_similar_papers", return_value=[]),
+            patch("arxiv_browser.browser.discovery.RecommendationsScreen", return_value="screen"),
+        ):
+            app._show_local_recommendations(paper, s2_available=True)
+        app.notify.assert_not_called()
+        app.push_screen.assert_called_once()
+        assert app.push_screen.call_args.args[0] == "screen"
+
+        app.notify.reset_mock()
+        app.push_screen.reset_mock()
         with patch(
             "arxiv_browser.browser.discovery.find_similar_papers",
             return_value=[(make_paper(arxiv_id="2401.70005"), 0.9)],

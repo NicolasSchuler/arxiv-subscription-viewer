@@ -54,12 +54,15 @@ class BrowseMixin:
             list_view = self._get_paper_list_widget()
         except NoMatches:
             return None
+        search_query = self._get_live_query()
+        if search_query.startswith(("@", ">")):
+            search_query = self._get_active_query()
         return LocalBrowseSnapshot(
             all_papers=self.all_papers,
             papers_by_id=self._papers_by_id,
             selected_ids=set(self.selected_ids),
             sort_index=self._sort_index,
-            search_query=self._get_live_query(),
+            search_query=search_query,
             pending_query=self._pending_query,
             applied_query=self._applied_query,
             watch_filter_active=self._watch_filter_active,

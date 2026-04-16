@@ -19,8 +19,8 @@ from arxiv_browser.browser.constants import (
 from arxiv_browser.browser.contracts import COMMAND_PALETTE_COMMANDS, _PaletteAppState
 from arxiv_browser.config import save_config
 from arxiv_browser.help_ui import build_help_sections
-from arxiv_browser.modals import PaletteCommand
 from arxiv_browser.models import SORT_OPTIONS, Paper, SessionState, UserConfig
+from arxiv_browser.palette import PaletteCommand
 from arxiv_browser.parsing import HISTORY_DATE_FORMAT, clean_latex
 from arxiv_browser.query import format_categories, render_progress_bar, truncate_text
 from arxiv_browser.themes import _build_textual_theme, build_theme_runtime

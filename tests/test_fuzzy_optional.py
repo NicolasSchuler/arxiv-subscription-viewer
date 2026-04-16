@@ -7,7 +7,8 @@ from unittest.mock import MagicMock
 import arxiv_browser.fuzzy as fuzzy
 from arxiv_browser.browser.constants import FUZZY_SCORE_CUTOFF
 from arxiv_browser.browser.core import ArxivBrowser
-from arxiv_browser.modals.search import CommandPaletteModal, PaletteCommand
+from arxiv_browser.modals.search import CommandPaletteModal
+from arxiv_browser.palette import PaletteCommand
 
 
 class _PaletteListStub:

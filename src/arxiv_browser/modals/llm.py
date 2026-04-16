@@ -12,7 +12,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.widgets import Button, Input, Label, Static, TextArea
 
-from arxiv_browser.browser.contracts import TaskTrackingApp
+from arxiv_browser.app_protocols import TaskTrackingApp
 from arxiv_browser.llm import CHAT_SYSTEM_PROMPT, LLM_COMMAND_TIMEOUT
 from arxiv_browser.llm_providers import LLMProvider
 from arxiv_browser.modals.base import ModalBase
