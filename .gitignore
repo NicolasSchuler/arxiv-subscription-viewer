@@ -17,6 +17,9 @@ history/*
 docs/plans/
 docs/*-prompt.md
 
+# Claude Code local settings (user-specific)
+.claude/
+
 # Coverage
 htmlcov/
 coverage.xml

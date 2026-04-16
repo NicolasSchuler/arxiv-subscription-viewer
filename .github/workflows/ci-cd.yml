@@ -16,7 +16,7 @@ jobs:
       - name: Git hygiene guard
         run: |
           set -euo pipefail
-          forbidden="$(git ls-files | grep -E '^(docs/plans/|docs/.*-prompt\.md$|history/.*\.txt$|history/CLAUDE\.md$)' || true)"
+          forbidden="$(git ls-files | grep -E '^(docs/plans/|docs/.*-prompt\.md$|history/.*\.txt$|history/CLAUDE\.md$|dist/|htmlcov/|coverage\.(xml|json)$|\.coverage$|\.hypothesis/|\.mutmut-cache/|\.playwright-mcp/|\.DS_Store$|.*/\.DS_Store$)' || true)"
           if [ -n "${forbidden}" ]; then
             echo "Forbidden tracked files detected:"
             echo "${forbidden}"
@@ -24,7 +24,9 @@ jobs:
           fi
 
       - name: Docs sync check
-        run: python3 scripts/check_docs_sync.py
+        run: |
+          python3 scripts/check_docs_sync.py
+          python3 scripts/check_version_sync.py
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -76,7 +78,7 @@ jobs:
         run: uv run bandit -c pyproject.toml -r src/arxiv_browser
 
       - name: Dead code check
-        run: uv run vulture src/arxiv_browser vulture_whitelist.py --min-confidence 80
+        run: uv run vulture src/arxiv_browser --min-confidence 80
 
       - name: Dependency hygiene
         run: uv run deptry .

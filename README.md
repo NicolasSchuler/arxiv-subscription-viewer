@@ -133,7 +133,8 @@ If something looks off, run `arxiv-viewer doctor` to check config, history disco
 | `Ctrl+k` | Collections | | `Ctrl+g` | Auto-tag (LLM) |
 | `Ctrl+d` | Detail pane sections | | `Ctrl+h` | HuggingFace trending |
 | `v` | Detail mode | | `Ctrl+Shift+b` | Remove bookmark |
-| `Ctrl+e` | Toggle S2 / Exit API mode | | `?` | Help / shortcuts |
+| `Ctrl+r` | Mark visible as read | | `Ctrl+e` | Toggle S2 / Exit API mode |
+| | | | `?` | Help / shortcuts |
 
 ### Marks
 

@@ -45,6 +45,29 @@ REQUIRED_KEYBINDINGS: set[str] = {
     "]",
     "?",
     "q",
+    # Core navigation & selection
+    "j",
+    "k",
+    "Space",
+    "s",
+    "r",
+    "x",
+    "n",
+    "t",
+    "p",
+    "v",
+    "o",
+    "P",
+    "c",
+    "d",
+    "w",
+    "W",
+    "m",
+    "'",
+    "Ctrl+b",
+    "Ctrl+d",
+    "Ctrl+t",
+    "Ctrl+r",
 }
 
 KEY_ALIAS_MAP: dict[str, str] = {
@@ -318,18 +341,17 @@ def _check_llm_presets(readme_text: str, claude_text: str, llm_text: str) -> lis
 
 
 def _check_keybindings(readme_text: str, claude_text: str) -> list[str]:
+    # CLAUDE.md no longer duplicates the README key table — the README is the
+    # single source of truth for user-visible bindings. CLAUDE.md only carries
+    # AI-specific import/mock conventions. We intentionally ignore ``claude_text``
+    # here but keep the parameter to preserve the call signature.
+    del claude_text
+
     errors: list[str] = []
-
     readme_keys = _extract_readme_keys(readme_text)
-    claude_keys = _extract_claude_keys(claude_text)
-
     missing_readme = sorted(REQUIRED_KEYBINDINGS - readme_keys)
-    missing_claude = sorted(REQUIRED_KEYBINDINGS - claude_keys)
-
     if missing_readme:
         errors.append("README keyboard shortcuts missing keys: " + ", ".join(missing_readme))
-    if missing_claude:
-        errors.append("CLAUDE.md key bindings missing keys: " + ", ".join(missing_claude))
     return errors
 
 

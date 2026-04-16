@@ -5,3 +5,12 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: check-version-sync
+        name: check pyproject version matches CHANGELOG
+        entry: python3 scripts/check_version_sync.py
+        language: system
+        pass_filenames: false
+        files: '^(pyproject\.toml|CHANGELOG\.md)$'

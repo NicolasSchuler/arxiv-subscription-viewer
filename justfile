@@ -28,6 +28,7 @@ typecheck:
 # Verify docs are aligned with CLI flags, presets, and keybindings
 docs-check:
     python3 scripts/check_docs_sync.py
+    python3 scripts/check_version_sync.py
 
 # Run tests with coverage report
 test:
@@ -59,7 +60,7 @@ security:
 
 # Run vulture dead code detection
 dead-code:
-    uv run vulture {{ src }} vulture_whitelist.py --min-confidence 80
+    uv run vulture {{ src }} --min-confidence 80
 
 # Check dependency hygiene
 deps:
@@ -100,7 +101,7 @@ ci:
     @uv run pip-audit --strict
     @echo ""
     @echo "=== Dead Code ==="
-    @uv run vulture {{ src }} vulture_whitelist.py --min-confidence 80
+    @uv run vulture {{ src }} --min-confidence 80
     @echo ""
     @echo "=== Security ==="
     @uv run bandit -c pyproject.toml -r {{ src }}
@@ -175,7 +176,7 @@ report:
     echo ""
 
     echo "── Dead Code (vulture) ────────────────────────────────────────"
-    DEAD=$(uv run vulture {{ src }} vulture_whitelist.py --min-confidence 80 2>/dev/null | wc -l | tr -d ' ')
+    DEAD=$(uv run vulture {{ src }} --min-confidence 80 2>/dev/null | wc -l | tr -d ' ')
     echo "  Unused code items: $DEAD"
     echo ""
 
@@ -188,5 +189,11 @@ report:
 
 # Remove build artifacts and caches
 clean:
-    rm -rf .pytest_cache .ruff_cache .pyright htmlcov .coverage coverage.xml
+    rm -rf .pytest_cache .ruff_cache .pyright htmlcov .coverage coverage.xml coverage.json \
+           .hypothesis .mutmut-cache dist build .playwright-mcp
     find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+    find . -name ".DS_Store" -delete 2>/dev/null || true
+
+# Aggressive wipe — includes .venv (requires confirmation)
+clean-all: clean
+    @read -p "Also remove .venv? [y/N] " ans && [ "$ans" = "y" ] && rm -rf .venv || echo "Skipped .venv"
