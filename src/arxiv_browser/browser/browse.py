@@ -20,7 +20,7 @@ from arxiv_browser.browser.constants import (
     PDF_DOWNLOAD_TIMEOUT,
     logger,
 )
-from arxiv_browser.browser.empty_state import build_list_empty_message
+from arxiv_browser.empty_state import build_list_empty_message
 from arxiv_browser.export import format_paper_as_markdown
 from arxiv_browser.fuzzy import weighted_fuzzy_score
 from arxiv_browser.io_actions import resolve_target_papers

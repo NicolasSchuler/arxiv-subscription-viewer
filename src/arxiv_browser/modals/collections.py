@@ -13,10 +13,27 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Input, Label, ListItem, ListView
 
 from arxiv_browser.action_messages import build_actionable_warning
+from arxiv_browser.empty_state import (
+    COLLECTION_DETAIL_EMPTY,
+    COLLECTIONS_MANAGE_EMPTY,
+    COLLECTIONS_PICK_EMPTY,
+)
 from arxiv_browser.modals.base import ModalBase
 from arxiv_browser.models import MAX_COLLECTIONS, Paper, PaperCollection
 
 logger = logging.getLogger(__name__)
+
+
+def _build_empty_placeholder(message: str) -> ListItem:
+    """Build a disabled ListItem that communicates an empty-state hint.
+
+    The placeholder is disabled so that keyboard navigation skips it and
+    selection handlers bail out on the bounds check; the surrounding CSS
+    dims it further via the ``-empty`` class.
+    """
+    item = ListItem(Label(f"[dim italic]{message}[/]"), classes="-empty")
+    item.disabled = True
+    return item
 
 
 class CollectionsModal(ModalBase[str | None]):
@@ -248,6 +265,9 @@ class CollectionsModal(ModalBase[str | None]):
         """Clear and repopulate the manage-view collections list."""
         list_view = self.query_one("#col-list", ListView)
         list_view.clear()
+        if not self._collections:
+            list_view.mount(_build_empty_placeholder(COLLECTIONS_MANAGE_EMPTY))
+            return
         for col in self._collections:
             count = len(col.paper_ids)
             label = f"{col.name} ({count} paper{'s' if count != 1 else ''})"
@@ -406,6 +426,9 @@ class CollectionsModal(ModalBase[str | None]):
         assert self._viewing_collection is not None
         list_view = self.query_one("#detail-list", ListView)
         list_view.clear()
+        if not self._viewing_collection.paper_ids:
+            list_view.mount(_build_empty_placeholder(COLLECTION_DETAIL_EMPTY))
+            return
         for pid in self._viewing_collection.paper_ids:
             paper = self._papers_by_id.get(pid)
             label = paper.title if paper else pid
@@ -450,6 +473,9 @@ class CollectionsModal(ModalBase[str | None]):
         """Populate the pick-view collection list."""
         list_view = self.query_one("#pick-list", ListView)
         list_view.clear()
+        if not self._collections:
+            list_view.mount(_build_empty_placeholder(COLLECTIONS_PICK_EMPTY))
+            return
         for col in self._collections:
             count = len(col.paper_ids)
             label = f"{col.name} ({count} paper{'s' if count != 1 else ''})"

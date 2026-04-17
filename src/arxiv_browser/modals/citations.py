@@ -17,6 +17,10 @@ from textual.widgets import Button, Label, ListItem, ListView, Static
 
 from arxiv_browser.action_messages import build_actionable_error
 from arxiv_browser.app_protocols import TaskTrackingApp
+from arxiv_browser.empty_state import (
+    CITATIONS_CITES_EMPTY,
+    CITATIONS_REFS_EMPTY,
+)
 from arxiv_browser.modals.base import ModalBase
 from arxiv_browser.models import Paper
 from arxiv_browser.query import escape_rich_text, truncate_text
@@ -26,6 +30,13 @@ from arxiv_browser.themes import theme_colors_for
 logger = logging.getLogger(__name__)
 
 RECOMMENDATION_TITLE_MAX_LEN = 60  # Max title length in recommendations modal
+
+
+def _build_empty_placeholder(message: str) -> ListItem:
+    """Build a disabled ListItem that communicates an empty-state hint."""
+    item = ListItem(Label(f"[dim italic]{message}[/]"), classes="-empty")
+    item.disabled = True
+    return item
 
 
 class RecommendationListItem(ListItem):
@@ -463,14 +474,21 @@ class CitationGraphScreen(ModalBase[str | None]):
         refs_list.clear()
         cites_list.clear()
 
-        for entry in self._current_refs:
-            refs_list.mount(self._build_citation_item(entry))
-        for entry in self._current_cites:
-            cites_list.mount(self._build_citation_item(entry))
+        if self._current_refs:
+            for entry in self._current_refs:
+                refs_list.mount(self._build_citation_item(entry))
+        else:
+            refs_list.mount(_build_empty_placeholder(CITATIONS_REFS_EMPTY))
 
-        if refs_list.children:
+        if self._current_cites:
+            for entry in self._current_cites:
+                cites_list.mount(self._build_citation_item(entry))
+        else:
+            cites_list.mount(_build_empty_placeholder(CITATIONS_CITES_EMPTY))
+
+        if self._current_refs and refs_list.children:
             refs_list.index = 0
-        if cites_list.children:
+        if self._current_cites and cites_list.children:
             cites_list.index = 0
 
         # Update panel titles

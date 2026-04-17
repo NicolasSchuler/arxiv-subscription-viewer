@@ -20,6 +20,7 @@ from textual.events import Key
 from textual.timer import Timer
 from textual.widgets import Header, Input, Label, OptionList
 
+from arxiv_browser import empty_state as _empty_state
 from arxiv_browser.actions import constants as _action_constants
 from arxiv_browser.actions import external_io_actions as _external_io_actions
 from arxiv_browser.actions import library_actions as _library_actions
@@ -27,7 +28,6 @@ from arxiv_browser.actions import llm_actions as _llm_actions
 from arxiv_browser.actions import search_api_actions as _search_api_actions
 from arxiv_browser.actions import ui_actions as _ui_actions
 from arxiv_browser.browser import constants as _browser_constants
-from arxiv_browser.browser import empty_state as _empty_state
 from arxiv_browser.browser.browse import BrowseMixin
 from arxiv_browser.browser.content import (
     _fetch_paper_content_async,

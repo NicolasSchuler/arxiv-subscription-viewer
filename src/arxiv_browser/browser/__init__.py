@@ -8,7 +8,7 @@ from arxiv_browser.browser.core import (
     ArxivBrowserOptions,
     _coerce_browser_options,
 )
-from arxiv_browser.browser.empty_state import build_list_empty_message
+from arxiv_browser.empty_state import build_list_empty_message
 
 __all__ = [
     "ArxivBrowser",

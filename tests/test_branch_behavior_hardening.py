@@ -12,7 +12,7 @@ from textual.css.query import NoMatches
 from arxiv_browser.actions import library_actions, llm_actions
 from arxiv_browser.browser import discovery
 from arxiv_browser.browser.core import ArxivBrowser
-from arxiv_browser.browser.empty_state import build_list_empty_message
+from arxiv_browser.empty_state import build_list_empty_message
 from arxiv_browser.modals.collections import CollectionsModal
 from arxiv_browser.modals.editing import PaperEditResult
 from arxiv_browser.modals.search import CommandPaletteModal

@@ -1,4 +1,4 @@
-"""Shared empty-state copy for the paper list."""
+"""Shared empty-state copy for the paper list and secondary views."""
 
 from __future__ import annotations
 
@@ -43,4 +43,35 @@ def build_list_empty_message(
     )
 
 
-__all__ = ["build_list_empty_message"]
+# ── Secondary views ──────────────────────────────────────────────────────────
+#
+# These helpers centralize empty-state copy for modal list views so the same
+# phrasing and Try/Next cadence used by the main paper list flows through the
+# rest of the UI. Each returns a single plain-text line suitable for a
+# disabled ``ListItem`` placeholder.
+
+
+COLLECTIONS_MANAGE_EMPTY = "No collections yet. Try: type a name above and press Create."
+COLLECTIONS_PICK_EMPTY = (
+    "No collections yet. Try: press Ctrl+k in the main view to create one first."
+)
+COLLECTION_DETAIL_EMPTY = (
+    "No papers in this collection yet. "
+    "Try: select a paper in the main view and press Ctrl+k to add it."
+)
+CITATIONS_REFS_EMPTY = (
+    "No references recorded for this paper. Try: press e to refresh Semantic Scholar data."
+)
+CITATIONS_CITES_EMPTY = (
+    "No citing papers recorded yet. Try: press e to refresh Semantic Scholar data."
+)
+
+
+__all__ = [
+    "CITATIONS_CITES_EMPTY",
+    "CITATIONS_REFS_EMPTY",
+    "COLLECTIONS_MANAGE_EMPTY",
+    "COLLECTIONS_PICK_EMPTY",
+    "COLLECTION_DETAIL_EMPTY",
+    "build_list_empty_message",
+]
