@@ -55,6 +55,9 @@ from arxiv_browser.modals.watchlist import WatchListItem, WatchListModal
 # welcome.py — first-run tutorial overlay
 from arxiv_browser.modals.welcome import WelcomeScreen
 
+# whats_new.py — version-bump changelog overlay
+from arxiv_browser.modals.whats_new import WhatsNewScreen
+
 __all__ = [
     "ArxivSearchModal",
     "CitationGraphListItem",
@@ -78,4 +81,5 @@ __all__ = [
     "WatchListItem",
     "WatchListModal",
     "WelcomeScreen",
+    "WhatsNewScreen",
 ]

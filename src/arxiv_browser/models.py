@@ -293,6 +293,7 @@ class UserConfig:
     trusted_pdf_viewer_hashes: list[str] = field(default_factory=list)
     version: int = 1
     onboarding_seen: bool = False  # True after user has dismissed the first-run help overlay
+    last_seen_whats_new: str = ""  # Tag of the last What's New notes the user dismissed
     config_defaulted: bool = False  # True when config was corrupt and defaults were used
 
 

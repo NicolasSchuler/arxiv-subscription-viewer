@@ -54,12 +54,19 @@ def _skip_welcome_screen_in_tests(monkeypatch: pytest.MonkeyPatch) -> None:
 
     Tests that specifically verify onboarding behaviour should explicitly set
     ``config.onboarding_seen = False`` or pass ``onboarding_seen=False`` to UserConfig.
+
+    Also seeds ``last_seen_whats_new`` with the current release tag so the
+    version-bump overlay stays suppressed unless a test opts in explicitly.
     """
+    from arxiv_browser.whats_new import WHATS_NEW_VERSION
+
     _original_init = UserConfig.__init__
 
     def _patched_init(self: UserConfig, *args: Any, **kwargs: Any) -> None:
         if "onboarding_seen" not in kwargs:
             kwargs["onboarding_seen"] = True
+        if "last_seen_whats_new" not in kwargs:
+            kwargs["last_seen_whats_new"] = WHATS_NEW_VERSION
         _original_init(self, *args, **kwargs)
 
     monkeypatch.setattr(UserConfig, "__init__", _patched_init)

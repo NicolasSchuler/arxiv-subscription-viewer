@@ -227,6 +227,8 @@ APP_BINDINGS: list[BindingType] = [
     Binding("bracketright", "next_date", "Newer", show=False),
     # Help overlay
     Binding("question_mark", "show_help", "Help (?)", show=False),
+    # What's New overlay (version-bump release notes)
+    Binding("f1", "show_whats_new", "What's New", show=False),
     # Command palette
     Binding("ctrl+p", "command_palette", "Command palette (>cmd)", show=False),
     # Collections

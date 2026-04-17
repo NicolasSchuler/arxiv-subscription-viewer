@@ -497,16 +497,49 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
             self._get_paper_list_widget().focus()
         except NoMatches:
             pass
-        # Show first-run tutorial if user hasn't seen it
+        # Show first-run tutorial if user hasn't seen it; otherwise consider
+        # the version-bump "What's New" overlay. They are mutually exclusive on
+        # the same launch so a fresh install isn't bombarded with overlays.
         if not self._config.onboarding_seen:
             from arxiv_browser.modals.welcome import WelcomeScreen
 
             self.push_screen(WelcomeScreen(), callback=self._on_welcome_dismissed)
+        else:
+            self._maybe_show_whats_new()
 
     def _on_welcome_dismissed(self, result: None) -> None:
         """Mark onboarding as seen after the welcome screen is dismissed."""
         self._config.onboarding_seen = True
+        # Users who just finished onboarding have effectively seen the
+        # current release's notes; seed the tag so we don't show What's New
+        # on the very next launch.
+        from arxiv_browser.whats_new import WHATS_NEW_VERSION
+
+        self._config.last_seen_whats_new = WHATS_NEW_VERSION
         self._save_config_or_warn("onboarding status")
+
+    def _maybe_show_whats_new(self) -> None:
+        """Push the What's New overlay once per release bump."""
+        from arxiv_browser.whats_new import should_show_whats_new
+
+        if not should_show_whats_new(self._config.last_seen_whats_new):
+            return
+        from arxiv_browser.modals.whats_new import WhatsNewScreen
+
+        self.push_screen(WhatsNewScreen(), callback=self._on_whats_new_dismissed)
+
+    def _on_whats_new_dismissed(self, result: None) -> None:
+        """Persist the current release tag so the modal stays quiet next launch."""
+        from arxiv_browser.whats_new import WHATS_NEW_VERSION
+
+        self._config.last_seen_whats_new = WHATS_NEW_VERSION
+        self._save_config_or_warn("what's new status")
+
+    def action_show_whats_new(self) -> None:
+        """Open the What's New overlay on demand (F1)."""
+        from arxiv_browser.modals.whats_new import WhatsNewScreen
+
+        self.push_screen(WhatsNewScreen(), callback=self._on_whats_new_dismissed)
 
     async def on_unmount(self) -> None:
         """Called when app is unmounted. Saves session state and cleans up timers.

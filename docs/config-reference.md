@@ -21,6 +21,7 @@ The file is created on first run. If it becomes corrupt (invalid JSON), the app 
 | `version` | `int` | `1` | Config schema version. Managed by the app. |
 | `config_defaulted` | `bool` | `false` | Set to `true` when a corrupt config was replaced with defaults. Not persisted. |
 | `onboarding_seen` | `bool` | `false` | Tracks whether the first-run help overlay has been dismissed. Managed by the app. |
+| `last_seen_whats_new` | `string` | `""` | Tag of the last "What's New" release notes the user dismissed. Managed by the app. |
 | `show_abstract_preview` | `bool` | `false` | Show inline abstract preview in the paper list. Toggle with `p`. |
 | `detail_mode` | `string` | `"scan"` | Detail pane density. `"scan"` (compact) or `"full"` (expanded). |
 | `prefer_pdf_url` | `bool` | `false` | When `true`, `o` opens the PDF URL instead of the abstract page. |

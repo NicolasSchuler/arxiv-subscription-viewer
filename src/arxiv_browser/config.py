@@ -159,6 +159,7 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
         ],
         "marks": config.marks,
         "onboarding_seen": config.onboarding_seen,
+        "last_seen_whats_new": config.last_seen_whats_new,
     }
 
 
@@ -537,6 +538,7 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         trusted_pdf_viewer_hashes=_parse_str_list(data, "trusted_pdf_viewer_hashes"),
         version=_safe_get(data, "version", 1, int),
         onboarding_seen=_safe_get(data, "onboarding_seen", False, bool),
+        last_seen_whats_new=_safe_get(data, "last_seen_whats_new", "", str),
     )
 
 
