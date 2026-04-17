@@ -265,3 +265,32 @@ When adding a new keybinding:
 - Surface more contextual hints and enrichment states inline.
 - Keep advanced features visible in footer/status with short labels.
 - Tradeoff: Higher discoverability for power features, but denser visual load.
+
+## 13. User Theme Overrides (`user.tcss`)
+
+Power users can layer their own Textual CSS on top of the embedded stylesheet
+by creating a `user.tcss` file next to `config.json` in the platform-specific
+config directory:
+
+- Linux: `~/.config/arxiv-browser/user.tcss`
+- macOS: `~/Library/Application Support/arxiv-browser/user.tcss`
+- Windows: `%APPDATA%/arxiv-browser/user.tcss`
+
+The file is loaded after the app's embedded CSS, so any selectors defined
+there win over defaults. Only create it when present; the app starts with no
+overrides by default. Example:
+
+```tcss
+/* Make the detail pane background slightly darker */
+PaperDetails {
+    background: #181818;
+}
+
+/* Brighter accent for starred rows */
+.paper-starred {
+    color: #ffd75f;
+}
+```
+
+Invalid CSS is reported at startup but will not crash the app. Keep overrides
+minimal; relying on internal widget IDs is fragile across releases.

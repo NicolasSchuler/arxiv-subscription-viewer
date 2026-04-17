@@ -53,6 +53,7 @@ logger = logging.getLogger(__name__)
 # ensuring safety even when constructed directly (not via deserialization).
 #
 CONFIG_FILENAME = "config.json"
+USER_TCSS_FILENAME = "user.tcss"
 
 
 def get_config_path() -> Path:
@@ -65,6 +66,17 @@ def get_config_path() -> Path:
     """
     config_dir = Path(user_config_dir(CONFIG_APP_NAME))
     return config_dir / CONFIG_FILENAME
+
+
+def get_user_tcss_path() -> Path:
+    """Return the path to the optional user Textual CSS override file.
+
+    The file lives next to ``config.json`` in the platform-specific config
+    directory. When present, its contents are layered on top of the
+    application's embedded CSS at startup, letting users tweak colors,
+    spacing, and borders without editing package source.
+    """
+    return get_config_path().parent / USER_TCSS_FILENAME
 
 
 def _config_to_dict(config: UserConfig) -> dict[str, Any]:

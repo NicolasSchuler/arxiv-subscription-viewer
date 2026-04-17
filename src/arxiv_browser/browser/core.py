@@ -8,6 +8,7 @@ import logging
 import time
 from collections import deque
 from collections.abc import Callable, Coroutine
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -34,7 +35,7 @@ from arxiv_browser.browser.content import (
 from arxiv_browser.browser.detail_pane import DetailPaneMixin
 from arxiv_browser.browser.discovery import DiscoveryMixin
 from arxiv_browser.browser.options import ArxivBrowserOptions, _coerce_browser_options
-from arxiv_browser.config import _coerce_arxiv_api_max_results
+from arxiv_browser.config import _coerce_arxiv_api_max_results, get_user_tcss_path
 from arxiv_browser.database import get_cache_db_path, init_cache_db
 from arxiv_browser.huggingface import HuggingFacePaper
 from arxiv_browser.llm_providers import resolve_provider
@@ -94,6 +95,27 @@ AUTO_TAG_TIMEOUT = 30  # Seconds to wait for auto-tag LLM response
 SEARCH_DEBOUNCE_DELAY = 0.3
 # Detail pane update debounce delay in seconds (shorter — must feel responsive)
 DETAIL_PANE_DEBOUNCE_DELAY = 0.1
+
+
+def _resolve_user_css_path() -> Path | None:
+    """Return the user's ``user.tcss`` path when present and readable.
+
+    Returning ``None`` when the file is missing lets Textual skip stylesheet
+    loading entirely and keeps test environments untouched by stray config
+    directories. Any error (permissions, broken symlink) is logged and the
+    override is ignored so the app still starts.
+    """
+    try:
+        path = get_user_tcss_path()
+    except Exception:
+        logger.exception("Failed to resolve user.tcss path")
+        return None
+    try:
+        if path.is_file():
+            return path
+    except OSError:
+        logger.exception("Failed to stat user.tcss at %s", path)
+    return None
 
 
 class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
@@ -212,7 +234,7 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
         **legacy_kwargs: Any,
     ) -> None:
         """Initialize the app with papers, config, and optional history/service overrides."""
-        super().__init__()
+        super().__init__(css_path=_resolve_user_css_path())
         resolved_options = _coerce_browser_options(options, legacy_args, legacy_kwargs)
         self._register_textual_themes()
         self._init_dataset_state(papers, resolved_options.services)
