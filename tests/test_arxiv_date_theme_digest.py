@@ -679,6 +679,18 @@ class TestThemeSwitcher:
         assert app._theme_runtime.colors["accent"] == CATPPUCCIN_MOCHA_THEME["accent"]
         assert app._theme_runtime.colors["green"] == CATPPUCCIN_MOCHA_THEME["green"]
 
+    def test_runtime_theme_override_does_not_mutate_config(self):
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.themes import HIGH_CONTRAST_THEME
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._config = UserConfig(theme_name="monokai")
+        app._theme_override = "high-contrast"
+        app._http_client = None
+        app._apply_theme_overrides()
+        assert app._config.theme_name == "monokai"
+        assert app._theme_runtime.colors["accent"] == HIGH_CONTRAST_THEME["accent"]
+
     def test_per_key_override_layers(self):
         from arxiv_browser.browser.core import ArxivBrowser
         from arxiv_browser.themes import CATPPUCCIN_MOCHA_THEME

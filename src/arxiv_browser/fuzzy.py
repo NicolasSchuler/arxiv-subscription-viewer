@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """Optional fuzzy matching helpers."""
 
 from __future__ import annotations

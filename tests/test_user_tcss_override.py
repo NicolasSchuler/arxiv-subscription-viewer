@@ -9,6 +9,7 @@ import pytest
 from arxiv_browser import config as config_module
 from arxiv_browser.browser import core as browser_core
 from arxiv_browser.config import USER_TCSS_FILENAME, get_user_tcss_path
+from tests.support.patch_helpers import patch_save_config
 
 
 def test_user_tcss_path_lives_next_to_config(
@@ -54,3 +55,31 @@ def test_resolve_user_css_path_handles_lookup_errors(
 
     monkeypatch.setattr(browser_core, "get_user_tcss_path", _boom)
     assert browser_core._resolve_user_css_path() is None
+
+
+@pytest.mark.asyncio
+async def test_user_tcss_loads_as_final_stylesheet_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, make_paper
+) -> None:
+    override = tmp_path / "user.tcss"
+    override.write_text("Screen { background: #000000; }\n", encoding="utf-8")
+    monkeypatch.setattr(browser_core, "get_user_tcss_path", lambda: override)
+
+    app = browser_core.ArxivBrowser([make_paper()], restore_session=False)
+    with patch_save_config(return_value=True):
+        async with app.run_test():
+            assert list(app.stylesheet.source)[-1] == (str(override.resolve()), "")
+
+
+@pytest.mark.asyncio
+async def test_invalid_user_tcss_is_recoverable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, make_paper
+) -> None:
+    override = tmp_path / "user.tcss"
+    override.write_text("Screen { color: ; }\n", encoding="utf-8")
+    monkeypatch.setattr(browser_core, "get_user_tcss_path", lambda: override)
+
+    app = browser_core.ArxivBrowser([make_paper()], restore_session=False)
+    with patch_save_config(return_value=True):
+        async with app.run_test():
+            assert (str(override.resolve()), "") not in app.stylesheet.source

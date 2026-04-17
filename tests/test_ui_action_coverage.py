@@ -609,6 +609,30 @@ class TestUiActionCoverage:
         assert app._config.theme_name in ui_actions.THEME_NAMES
         assert app._save_config_or_warn.call_args.args[0] == "theme preference"
 
+    def test_theme_cycle_clears_runtime_override(self) -> None:
+        app = _new_app_stub()
+        app._config = _make_app_config(theme_name="monokai")
+        app._theme_override = "high-contrast"
+        app._apply_theme_overrides = MagicMock()
+        app._apply_category_overrides = MagicMock()
+        app._refresh_list_view = MagicMock()
+        app._refresh_detail_pane = MagicMock()
+        app._update_status_bar = MagicMock()
+        app._save_config_or_warn = MagicMock()
+        app._get_paper_details_widget = MagicMock(
+            return_value=SimpleNamespace(clear_cache=MagicMock())
+        )
+        app.notify = MagicMock()
+
+        ui_actions.action_cycle_theme(app)
+
+        expected_index = (ui_actions.THEME_NAMES.index("high-contrast") + 1) % len(
+            ui_actions.THEME_NAMES
+        )
+        assert app._theme_override is None
+        assert app._config.theme_name == ui_actions.THEME_NAMES[expected_index]
+        app._save_config_or_warn.assert_called_once_with("theme preference")
+
     @pytest.mark.asyncio
     async def test_cache_and_stale_epoch_suppression_edges(self, make_paper, tmp_path) -> None:
         app, paper, other, s2_paper = self._build_ui_action_app(make_paper, tmp_path)

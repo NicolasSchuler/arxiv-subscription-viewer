@@ -143,11 +143,13 @@ class TestAppHelperCoverage:
             current_date_index=2,
             ascii_icons=True,
             services=SimpleNamespace(marker="services"),
+            theme_override="high-contrast",
         )
         cloned = browser_core._coerce_browser_options(base_options, (), {})
         assert cloned is not base_options
         assert cloned.history_files == base_options.history_files
         assert cloned.history_files is not base_options.history_files
+        assert cloned.theme_override == "high-contrast"
 
         legacy = browser_core._coerce_browser_options(UserConfig(), (), {})
         assert isinstance(legacy, browser_core.ArxivBrowserOptions)
@@ -162,7 +164,7 @@ class TestAppHelperCoverage:
                 {"config": UserConfig()},
             )
         with pytest.raises(TypeError):
-            browser_core._coerce_browser_options(None, tuple(range(7)), {})
+            browser_core._coerce_browser_options(None, tuple(range(8)), {})
 
         class _Response:
             def __init__(self, status_code: int, text: str) -> None:

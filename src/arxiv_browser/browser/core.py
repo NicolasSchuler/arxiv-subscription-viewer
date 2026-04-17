@@ -100,10 +100,10 @@ DETAIL_PANE_DEBOUNCE_DELAY = 0.1
 def _resolve_user_css_path() -> Path | None:
     """Return the user's ``user.tcss`` path when present and readable.
 
-    Returning ``None`` when the file is missing lets Textual skip stylesheet
-    loading entirely and keeps test environments untouched by stray config
-    directories. Any error (permissions, broken symlink) is logged and the
-    override is ignored so the app still starts.
+    Returning ``None`` when the file is missing skips the later user stylesheet
+    overlay and keeps test environments untouched by stray config directories.
+    Any error (permissions, broken symlink) is logged and the override is
+    ignored so the app still starts.
     """
     try:
         path = get_user_tcss_path()
@@ -234,7 +234,8 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
         **legacy_kwargs: Any,
     ) -> None:
         """Initialize the app with papers, config, and optional history/service overrides."""
-        super().__init__(css_path=_resolve_user_css_path())
+        super().__init__()
+        self._user_css_path = _resolve_user_css_path()
         resolved_options = _coerce_browser_options(options, legacy_args, legacy_kwargs)
         self._register_textual_themes()
         self._init_dataset_state(papers, resolved_options.services)
@@ -284,6 +285,7 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
     def _init_config_state(self, options: ArxivBrowserOptions) -> None:
         """Initialize persisted config state and theme overrides."""
         self._config = options.config or UserConfig()
+        self._theme_override = options.theme_override
         self._config.arxiv_api_max_results = _coerce_arxiv_api_max_results(
             self._config.arxiv_api_max_results
         )
@@ -398,6 +400,12 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
             self._services = services
         return services
 
+    def _effective_theme_name(self) -> str:
+        """Return the runtime theme, honoring session-only CLI overrides."""
+        override = getattr(self, "_theme_override", None)
+        config = getattr(self, "_config", UserConfig())
+        return override or config.theme_name
+
     def _resolved_theme_runtime(self) -> ThemeRuntime:
         """Return app-owned runtime theme state, rebuilding a default when absent."""
         runtime = getattr(self, "_theme_runtime", None)
@@ -405,7 +413,7 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
             return runtime
         config = getattr(self, "_config", UserConfig())
         runtime = build_theme_runtime(
-            config.theme_name,
+            self._effective_theme_name(),
             theme_overrides=config.theme,
             category_overrides=config.category_colors,
         )
@@ -438,6 +446,7 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
         """Called when app is mounted. Restores session state if enabled."""
         # Create shared HTTP client for connection pooling
         self._http_client = httpx.AsyncClient()
+        self._apply_user_css_override()
         # Warn if config was corrupt and defaults were used
         if self._config.config_defaulted:
             self.notify(
@@ -506,6 +515,28 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
             self.push_screen(WelcomeScreen(), callback=self._on_welcome_dismissed)
         else:
             self._maybe_show_whats_new()
+
+    def _apply_user_css_override(self) -> None:
+        """Layer user.tcss after app CSS, falling back cleanly on errors."""
+        path = getattr(self, "_user_css_path", None)
+        if path is None:
+            return
+        stylesheet = self.stylesheet.copy()
+        try:
+            stylesheet.read(path)
+            stylesheet.parse()
+        except Exception as exc:
+            logger.warning("Ignoring invalid user.tcss at %s: %s", path, exc, exc_info=True)
+            self.notify(
+                "Ignoring invalid user.tcss; using built-in styles.",
+                severity="warning",
+                timeout=8,
+            )
+            return
+        self.stylesheet = stylesheet
+        self.stylesheet.update(self)
+        for screen in self.screen_stack:
+            self.stylesheet.update(screen)
 
     def _on_welcome_dismissed(self, result: None) -> None:
         """Mark onboarding as seen after the welcome screen is dismissed."""

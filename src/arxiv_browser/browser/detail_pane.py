@@ -42,8 +42,9 @@ class DetailPaneMixin:
         """Apply category color overrides from config.
         Layers: default → per-theme → user overrides.
         """
+        theme_name = self._effective_theme_name()
         theme_runtime = build_theme_runtime(
-            self._config.theme_name,
+            theme_name,
             theme_overrides=self._config.theme,
             category_overrides=self._config.category_colors,
         )
@@ -55,8 +56,9 @@ class DetailPaneMixin:
         Layers: named base theme → per-key overrides from config.
         Also refreshes app-owned runtime theme state for tag/category styling.
         """
+        theme_name = self._effective_theme_name()
         theme_runtime = build_theme_runtime(
-            self._config.theme_name,
+            theme_name,
             theme_overrides=self._config.theme,
             category_overrides=self._config.category_colors,
         )
@@ -64,13 +66,11 @@ class DetailPaneMixin:
         # Rebuild and activate Textual theme for CSS variable resolution
         if self._config.theme:
             try:
-                self.register_theme(
-                    _build_textual_theme(self._config.theme_name, theme_runtime.colors)
-                )
+                self.register_theme(_build_textual_theme(theme_name, theme_runtime.colors))
             except Exception as e:
                 logger.debug("Skipping theme registration in current context: %s", e, exc_info=True)
         try:
-            self.theme = self._config.theme_name
+            self.theme = theme_name
         except Exception as e:
             logger.debug("Skipping theme activation in current context: %s", e, exc_info=True)
 

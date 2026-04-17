@@ -33,6 +33,7 @@ class ArxivBrowserOptions:
     current_date_index: int = 0
     ascii_icons: bool = False
     services: AppServices | None = None
+    theme_override: str | None = None
 
 
 _LEGACY_BROWSER_OPTION_FIELDS = (
@@ -42,6 +43,7 @@ _LEGACY_BROWSER_OPTION_FIELDS = (
     "current_date_index",
     "ascii_icons",
     "services",
+    "theme_override",
 )
 
 
@@ -70,6 +72,7 @@ def _coerce_browser_options(
                 current_date_index=options.current_date_index,
                 ascii_icons=options.ascii_icons,
                 services=options.services,
+                theme_override=options.theme_override,
             )
         legacy_args = (options, *legacy_args)
     if legacy_args:

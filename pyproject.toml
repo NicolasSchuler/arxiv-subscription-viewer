@@ -62,6 +62,7 @@ dev = [
     "diff-cover>=9.2",
     "hypothesis>=6.100.0",
     "mutmut>=3.2",
+    "rapidfuzz>=3.0.0",
 ]
 
 [tool.hatch.build.targets.wheel]

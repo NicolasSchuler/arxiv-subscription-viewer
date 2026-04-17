@@ -567,13 +567,15 @@ async def _fetch_citation_graph(
 
 def action_cycle_theme(app: "ArxivBrowser") -> None:
     """Cycle through available color themes."""
-    current = app._config.theme_name
+    current = app._effective_theme_name()
     try:
         idx = THEME_NAMES.index(current)
     except ValueError:
         idx = 0
     next_idx = (idx + 1) % len(THEME_NAMES)
-    app._config.theme_name = THEME_NAMES[next_idx]
+    next_theme = THEME_NAMES[next_idx]
+    app._theme_override = None
+    app._config.theme_name = next_theme
     app._apply_theme_overrides()
     app._apply_category_overrides()
     try:
@@ -584,7 +586,7 @@ def action_cycle_theme(app: "ArxivBrowser") -> None:
     app._refresh_detail_pane()
     app._update_status_bar()
     app._save_config_or_warn("theme preference")
-    app.notify(f"Theme: {THEME_NAMES[next_idx]}", title="Theme")
+    app.notify(f"Theme: {next_theme}", title="Theme")
 
 
 def action_toggle_sections(app: "ArxivBrowser") -> None:

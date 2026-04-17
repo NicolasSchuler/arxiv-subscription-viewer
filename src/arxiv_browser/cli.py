@@ -23,6 +23,7 @@ import httpx
 from platformdirs import user_config_dir
 
 from arxiv_browser.action_messages import build_actionable_error
+from arxiv_browser.cli_keybindings import _run_keybindings
 from arxiv_browser.config import CONFIG_APP_NAME, _coerce_arxiv_api_max_results, load_config
 from arxiv_browser.models import ARXIV_API_MAX_RESULTS_LIMIT, ArxivSearchRequest, Paper, UserConfig
 from arxiv_browser.parsing import (
@@ -81,6 +82,7 @@ def _get_version() -> str:
 
 
 _ROOT_FLAG_OPTIONS = frozenset({"--debug", "--ascii", "--no-color", "-V", "--version"})
+_ROOT_VALUE_OPTIONS = frozenset({"--color", "--theme"})
 
 
 def _fetch_arxiv_api_papers(
@@ -548,56 +550,6 @@ def _doctor_terminal_summary(*, ok_marker: str, info_marker: str) -> None:
         print(f"{info_marker} Terminal: not an interactive TTY (TUI will not start)")
 
 
-def _run_keybindings(args: argparse.Namespace) -> int:
-    """Print keyboard shortcuts to stdout in the requested format."""
-    import json as _json
-
-    from arxiv_browser.help_ui import build_help_sections
-    from arxiv_browser.ui_constants import APP_BINDINGS
-
-    sections = build_help_sections(APP_BINDINGS)
-
-    tier = getattr(args, "tier", "all")
-    if tier != "all":
-        tier_map: dict[str, set[str]] = {
-            "core": {"Getting Started", "Search Syntax", "Core Actions"},
-            "standard": {"Standard \u00b7 Organize", "Standard - Organize"},
-            "power": {
-                "Power \u00b7 Research Tools",
-                "Power \u00b7 Advanced",
-                "Power - Research Tools",
-                "Power - Advanced",
-            },
-        }
-        allowed = tier_map.get(tier, set())
-        sections = [(name, entries) for name, entries in sections if name in allowed]
-
-    kb_format = getattr(args, "kb_format", "table")
-
-    if kb_format == "json":
-        data = [
-            {"section": name, "bindings": [{"key": k, "description": d} for k, d in entries]}
-            for name, entries in sections
-        ]
-        print(_json.dumps(data, indent=2))
-    elif kb_format == "markdown":
-        for name, entries in sections:
-            print(f"## {name}\n")
-            print("| Key | Action |")
-            print("|-----|--------|")
-            for key, desc in entries:
-                print(f"| `{key}` | {desc} |")
-            print()
-    else:
-        for name, entries in sections:
-            print(f"\033[1m{name}\033[0m")
-            for key, desc in entries:
-                print(f"  \033[32m{key:<20}\033[0m {desc}")
-            print()
-
-    return 0
-
-
 def _run_doctor(config: UserConfig, history_files: list[tuple[date, Path]]) -> int:
     """Run diagnostic checks and print a summary report."""
     from arxiv_browser.config import get_config_path
@@ -827,8 +779,8 @@ def _normalize_cli_argv(argv: list[str] | None) -> list[str]:
         if token in _ROOT_FLAG_OPTIONS:
             index += 1
             continue
-        if _is_color_flag(token):
-            if token.startswith("--color="):
+        if _is_root_value_flag(token):
+            if "=" in token:
                 index += 1
                 continue
             if index + 1 >= len(args):
@@ -843,6 +795,10 @@ def _normalize_cli_argv(argv: list[str] | None) -> list[str]:
 def _is_color_flag(token: str) -> bool:
     """Return whether a token spells the CLI color flag."""
     return token == "--color" or token.startswith("--color=")  # nosec B105
+
+
+def _is_root_value_flag(token: str) -> bool:
+    return any(token == option or token.startswith(f"{option}=") for option in _ROOT_VALUE_OPTIONS)
 
 
 @dataclass(slots=True)
@@ -914,19 +870,13 @@ def main(
     # Load user config early (needed for session restore)
     config = dependencies.load_config_fn()
 
-    # Session-only theme override (does not persist back to config.json)
     theme_override = getattr(args, "theme", None)
-    if theme_override:
-        config.theme_name = theme_override
 
-    # Discover history files
     history_files = dependencies.discover_history_files_fn(base_dir)
 
-    # Handle `doctor`
     if getattr(args, "command", None) == "doctor":
         return _run_doctor(config, history_files)
 
-    # Handle `dates`
     if getattr(args, "command", None) == "dates":
         if not history_files:
             print(
@@ -946,7 +896,6 @@ def main(
             print(f"  {d.strftime(HISTORY_DATE_FORMAT)}  ({path.name})")
         return 0
 
-    # Determine which file(s) to load
     result = dependencies.resolve_papers_fn(args, base_dir, config, history_files)
     if isinstance(result, int):
         return result
@@ -1000,6 +949,7 @@ def main(
         history_files=history_files,
         current_date_index=current_date_index,
         ascii_icons=args.ascii,
+        theme_override=theme_override,
     )
 
     supports_options = dependencies.app_factory_supports_options
