@@ -8,9 +8,6 @@ import logging
 import time
 from collections import deque
 from collections.abc import Callable, Coroutine
-from dataclasses import dataclass
-from datetime import date
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -36,6 +33,7 @@ from arxiv_browser.browser.content import (
 )
 from arxiv_browser.browser.detail_pane import DetailPaneMixin
 from arxiv_browser.browser.discovery import DiscoveryMixin
+from arxiv_browser.browser.options import ArxivBrowserOptions, _coerce_browser_options
 from arxiv_browser.config import _coerce_arxiv_api_max_results
 from arxiv_browser.database import get_cache_db_path, init_cache_db
 from arxiv_browser.huggingface import HuggingFacePaper
@@ -80,74 +78,6 @@ build_list_empty_message = _empty_state.build_list_empty_message
 MIN_LIST_WIDTH = 50
 MAX_LIST_WIDTH = 100
 CLIPBOARD_SEPARATOR = _action_constants.CLIPBOARD_SEPARATOR
-
-
-@dataclass(slots=True)
-class ArxivBrowserOptions:
-    """Normalized constructor inputs for ``ArxivBrowser``.
-    This is the forward-looking constructor shape. The browser still accepts a
-    legacy positional/keyword argument form, and those calls are coerced into
-    this dataclass before app initialization continues.
-    """
-
-    config: UserConfig | None = None
-    restore_session: bool = True
-    history_files: list[tuple[date, Path]] | None = None
-    current_date_index: int = 0
-    ascii_icons: bool = False
-    services: AppServices | None = None
-
-
-_LEGACY_BROWSER_OPTION_FIELDS = (
-    "config",
-    "restore_session",
-    "history_files",
-    "current_date_index",
-    "ascii_icons",
-    "services",
-)
-
-
-def _coerce_browser_options(
-    options: Any,
-    legacy_args: tuple[Any, ...],
-    legacy_kwargs: dict[str, Any],
-) -> ArxivBrowserOptions:
-    """Normalize new-style options plus the legacy constructor calling convention.
-    The compatibility goal is that existing callers can continue passing the
-    older positional/keyword shape while new code can pass one options object.
-    This helper rejects ambiguous mixed usage and always returns a fresh
-    ``ArxivBrowserOptions`` instance for downstream initialization.
-    """
-    if options is not None:
-        if isinstance(options, ArxivBrowserOptions):
-            if legacy_args or legacy_kwargs:
-                raise TypeError("ArxivBrowserOptions cannot be combined with legacy arguments")
-            return ArxivBrowserOptions(
-                config=options.config,
-                restore_session=options.restore_session,
-                history_files=list(options.history_files)
-                if options.history_files is not None
-                else None,
-                current_date_index=options.current_date_index,
-                ascii_icons=options.ascii_icons,
-                services=options.services,
-            )
-        legacy_args = (options, *legacy_args)
-    if legacy_args:
-        if len(legacy_args) > len(_LEGACY_BROWSER_OPTION_FIELDS):
-            raise TypeError(
-                "ArxivBrowser() accepts at most "
-                f"{len(_LEGACY_BROWSER_OPTION_FIELDS) + 1} positional arguments"
-            )
-        for field_name in _LEGACY_BROWSER_OPTION_FIELDS[: len(legacy_args)]:
-            if field_name in legacy_kwargs:
-                raise TypeError(f"ArxivBrowser() got multiple values for argument '{field_name}'")
-        legacy_kwargs = {
-            **dict(zip(_LEGACY_BROWSER_OPTION_FIELDS, legacy_args, strict=False)),
-            **legacy_kwargs,
-        }
-    return ArxivBrowserOptions(**legacy_kwargs)
 
 
 # History file discovery cap retained for custom callers/tests.
