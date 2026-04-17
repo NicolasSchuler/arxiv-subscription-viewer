@@ -32,6 +32,7 @@ from arxiv_browser.parsing import (
     parse_arxiv_file,
 )
 from arxiv_browser.services import arxiv_api_service as _arxiv_api_service
+from arxiv_browser.themes import THEME_NAMES
 
 logger = logging.getLogger(__name__)
 
@@ -673,6 +674,12 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Use ASCII-only status icons for compatibility with limited terminals",
     )
+    parser.add_argument(
+        "--theme",
+        choices=sorted(THEME_NAMES),
+        default=None,
+        help=("Override the UI color theme for this session (does not persist to config)"),
+    )
 
     subparsers = parser.add_subparsers(dest="command", metavar="command")
 
@@ -906,6 +913,11 @@ def main(
 
     # Load user config early (needed for session restore)
     config = dependencies.load_config_fn()
+
+    # Session-only theme override (does not persist back to config.json)
+    theme_override = getattr(args, "theme", None)
+    if theme_override:
+        config.theme_name = theme_override
 
     # Discover history files
     history_files = dependencies.discover_history_files_fn(base_dir)
