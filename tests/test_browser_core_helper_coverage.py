@@ -608,7 +608,7 @@ class TestAppHelperCoverage:
         app._schedule_abstract_load = MagicMock()
         assert app._get_abstract_text(queued, allow_async=True) is None
         app._schedule_abstract_load.assert_called_once_with(queued)
-        with patch("arxiv_browser.browser.chrome.clean_latex", return_value="alpha"):
+        with patch("arxiv_browser.browser.detail_pane.clean_latex", return_value="alpha"):
             assert app._get_abstract_text(latex, allow_async=False) == "alpha"
         assert app._get_abstract_text(latex, allow_async=True) == "alpha"
 
@@ -616,7 +616,8 @@ class TestAppHelperCoverage:
         app._is_current_dataset_epoch = MagicMock(return_value=True)
         app._update_abstract_display = MagicMock()
         with patch(
-            "arxiv_browser.browser.chrome.asyncio.to_thread", new=AsyncMock(return_value="beta")
+            "arxiv_browser.browser.detail_pane.asyncio.to_thread",
+            new=AsyncMock(return_value="beta"),
         ):
             await app._load_abstract_async(latex)
         assert app._abstract_cache[latex.arxiv_id] == "beta"
@@ -626,7 +627,7 @@ class TestAppHelperCoverage:
         app._is_current_dataset_epoch = MagicMock(return_value=True)
         with (
             patch(
-                "arxiv_browser.browser.chrome.asyncio.to_thread",
+                "arxiv_browser.browser.detail_pane.asyncio.to_thread",
                 new=AsyncMock(side_effect=asyncio.CancelledError()),
             ),
             pytest.raises(asyncio.CancelledError),
@@ -635,7 +636,7 @@ class TestAppHelperCoverage:
 
         app._update_abstract_display.reset_mock()
         with patch(
-            "arxiv_browser.browser.chrome.asyncio.to_thread",
+            "arxiv_browser.browser.detail_pane.asyncio.to_thread",
             new=AsyncMock(side_effect=RuntimeError("boom")),
         ):
             await app._load_abstract_async(other)

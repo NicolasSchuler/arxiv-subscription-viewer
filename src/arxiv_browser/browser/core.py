@@ -31,10 +31,10 @@ from arxiv_browser.actions import ui_actions as _ui_actions
 from arxiv_browser.browser import constants as _browser_constants
 from arxiv_browser.browser import empty_state as _empty_state
 from arxiv_browser.browser.browse import BrowseMixin
-from arxiv_browser.browser.chrome import ChromeMixin
 from arxiv_browser.browser.content import (
     _fetch_paper_content_async,
 )
+from arxiv_browser.browser.detail_pane import DetailPaneMixin
 from arxiv_browser.browser.discovery import DiscoveryMixin
 from arxiv_browser.config import _coerce_arxiv_api_max_results
 from arxiv_browser.database import get_cache_db_path, init_cache_db
@@ -166,7 +166,7 @@ SEARCH_DEBOUNCE_DELAY = 0.3
 DETAIL_PANE_DEBOUNCE_DELAY = 0.1
 
 
-class ArxivBrowser(ChromeMixin, BrowseMixin, DiscoveryMixin, App):
+class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
     """A TUI application to browse arXiv papers."""
 
     TITLE = "arXiv Paper Browser"

@@ -59,7 +59,7 @@ Do not import `arxiv_browser.app` from `src/` code. Do not recreate test-side ex
 The main package is organized by responsibility:
 
 - `cli.py`: argument parsing, non-interactive commands, startup/bootstrap
-- `browser/`: the Textual app, split into `core.py`, `browse.py`, `chrome.py`, and `discovery.py`
+- `browser/`: the Textual app, split into `core.py`, `browse.py`, `detail_pane.py`, and `discovery.py`
 - `actions/`: action handlers mixed into `ArxivBrowser`
 - `models.py`: data objects and shared constants
 - `config.py`: persisted user configuration and metadata import/export

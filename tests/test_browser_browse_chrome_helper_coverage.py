@@ -701,18 +701,24 @@ class TestBrowserHelperCoverage:
     def test_chrome_theme_and_state_builders(self, make_paper) -> None:
         app, paper1, _paper2, theme_runtime = self._build_chrome_state_app(make_paper)
         with (
-            patch("arxiv_browser.browser.chrome.build_theme_runtime", return_value=theme_runtime),
-            patch("arxiv_browser.browser.chrome.format_categories.cache_clear") as cache_clear,
+            patch(
+                "arxiv_browser.browser.detail_pane.build_theme_runtime", return_value=theme_runtime
+            ),
+            patch("arxiv_browser.browser.detail_pane.format_categories.cache_clear") as cache_clear,
         ):
             app._apply_category_overrides()
         assert app._theme_runtime is theme_runtime
         cache_clear.assert_called_once()
         app._config.theme = {}
-        with patch("arxiv_browser.browser.chrome.build_theme_runtime", return_value=theme_runtime):
+        with patch(
+            "arxiv_browser.browser.detail_pane.build_theme_runtime", return_value=theme_runtime
+        ):
             app._apply_theme_overrides()
         app._config.theme = {"accent": "#fff"}
         app.register_theme = MagicMock(side_effect=Exception("boom"))
-        with patch("arxiv_browser.browser.chrome.build_theme_runtime", return_value=theme_runtime):
+        with patch(
+            "arxiv_browser.browser.detail_pane.build_theme_runtime", return_value=theme_runtime
+        ):
             app._apply_theme_overrides()
         detail_state = app._build_detail_state(paper1.arxiv_id, paper1)
         assert detail_state.summary == "summary" and detail_state.tags == ("alpha",)
@@ -762,7 +768,7 @@ class TestBrowserHelperCoverage:
         app._detail_mode = "scan"
         app._history_files = []
         app._s2_cache = {}
-        with patch("arxiv_browser.browser.chrome._resolve_llm_command", return_value=""):
+        with patch("arxiv_browser.browser.detail_pane._resolve_llm_command", return_value=""):
             commands = app._build_command_palette_commands()
         assert (
             next(cmd for cmd in commands if cmd.action == "fetch_s2").blocked_reason == "selection"
@@ -792,7 +798,7 @@ class TestBrowserHelperCoverage:
         ]
         app._s2_cache = {paper1.arxiv_id: object()}
         with patch(
-            "arxiv_browser.browser.chrome._resolve_llm_command", return_value="llm {prompt}"
+            "arxiv_browser.browser.detail_pane._resolve_llm_command", return_value="llm {prompt}"
         ):
             commands = app._build_command_palette_commands()
         assert (
@@ -848,27 +854,27 @@ class TestBrowserHelperCoverage:
         app._auto_tag_active = False
         with (
             patch(
-                "arxiv_browser.browser.chrome._widget_chrome.build_search_footer_bindings",
+                "arxiv_browser.browser.detail_pane._widget_chrome.build_search_footer_bindings",
                 return_value=[("", "search")],
             ),
             patch(
-                "arxiv_browser.browser.chrome._widget_chrome.build_api_footer_bindings",
+                "arxiv_browser.browser.detail_pane._widget_chrome.build_api_footer_bindings",
                 return_value=[("", "api")],
             ),
             patch(
-                "arxiv_browser.browser.chrome._widget_chrome.build_selection_footer_bindings",
+                "arxiv_browser.browser.detail_pane._widget_chrome.build_selection_footer_bindings",
                 return_value=[("", "selection")],
             ),
             patch(
-                "arxiv_browser.browser.chrome._widget_chrome.build_browse_footer_bindings",
+                "arxiv_browser.browser.detail_pane._widget_chrome.build_browse_footer_bindings",
                 return_value=[("", "browse")],
             ),
             patch(
-                "arxiv_browser.browser.chrome._widget_chrome.build_footer_mode_badge",
+                "arxiv_browser.browser.detail_pane._widget_chrome.build_footer_mode_badge",
                 return_value="badge",
             ),
             patch(
-                "arxiv_browser.browser.chrome._widget_chrome.build_status_bar_text",
+                "arxiv_browser.browser.detail_pane._widget_chrome.build_status_bar_text",
                 return_value="status",
             ),
         ):
@@ -926,7 +932,7 @@ class TestBrowserHelperCoverage:
         app._is_current_dataset_epoch = MagicMock(return_value=False)
         app._update_abstract_display = MagicMock()
         with patch(
-            "arxiv_browser.browser.chrome.asyncio.to_thread",
+            "arxiv_browser.browser.detail_pane.asyncio.to_thread",
             new=AsyncMock(return_value="cleaned"),
         ):
             await app._load_abstract_async(paper)
@@ -935,7 +941,7 @@ class TestBrowserHelperCoverage:
         app._is_current_dataset_epoch = MagicMock(return_value=True)
         paper.abstract = None
         with patch(
-            "arxiv_browser.browser.chrome.asyncio.to_thread",
+            "arxiv_browser.browser.detail_pane.asyncio.to_thread",
             new=AsyncMock(return_value="cleaned"),
         ):
             await app._load_abstract_async(paper)
@@ -943,7 +949,7 @@ class TestBrowserHelperCoverage:
         assert paper.abstract == "cleaned"
 
         with patch(
-            "arxiv_browser.browser.chrome.asyncio.to_thread",
+            "arxiv_browser.browser.detail_pane.asyncio.to_thread",
             new=AsyncMock(side_effect=RuntimeError("boom")),
         ):
             await app._load_abstract_async(paper)

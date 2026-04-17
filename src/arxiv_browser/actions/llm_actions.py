@@ -1,22 +1,30 @@
-# ruff: noqa: UP037
 """LLM, Semantic Scholar, and command-trust action handlers for ArxivBrowser.
 
 Covers: AI summary generation, paper chat, relevance scoring, auto-tagging,
 research-interests editing, Semantic Scholar paper/recommendation/citation-graph
 fetching, and the security trust-gate for LLM and PDF-viewer commands.
+
+The command trust-gate (hashing, trusted-hash persistence, confirmation
+prompts) lives in :mod:`arxiv_browser.actions.trust_gate`; this module
+re-exports its public surface for backwards compatibility.
 """
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
-from collections.abc import Callable
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from textual.app import ScreenStackError
-
 from arxiv_browser.actions.constants import RECOVERABLE_ACTION_ERRORS, log_action_failure, logger
+from arxiv_browser.actions.trust_gate import (
+    CommandTrustRequest,
+    _ensure_command_trusted,
+    _ensure_llm_command_trusted,
+    _ensure_pdf_viewer_trusted,
+    _is_llm_command_trusted,
+    _is_pdf_viewer_trusted,
+    _remember_trusted_hash,
+    _trust_hash,
+)
 from arxiv_browser.config import get_config_path, save_config
 from arxiv_browser.llm import (
     LLM_PRESETS,
@@ -30,7 +38,6 @@ from arxiv_browser.llm import (
 )
 from arxiv_browser.llm_providers import LLMProvider, llm_command_requires_shell, resolve_provider
 from arxiv_browser.modals import (
-    ConfirmModal,
     PaperChatScreen,
     PaperEditModal,
     ResearchInterestsModal,
@@ -38,10 +45,44 @@ from arxiv_browser.modals import (
 )
 from arxiv_browser.modals.editing import PaperEditResult
 from arxiv_browser.models import Paper
-from arxiv_browser.query import truncate_text
 
 if TYPE_CHECKING:
     from arxiv_browser.browser.core import ArxivBrowser
+
+
+__all__ = [
+    "LLM_PRESETS",
+    "RECOVERABLE_ACTION_ERRORS",
+    "SUMMARY_MODES",
+    "CommandTrustRequest",
+    "LLMProvider",
+    "Paper",
+    "PaperChatScreen",
+    "PaperEditModal",
+    "PaperEditResult",
+    "ResearchInterestsModal",
+    "SummaryModeModal",
+    "_compute_command_hash",
+    "_ensure_command_trusted",
+    "_ensure_llm_command_trusted",
+    "_ensure_pdf_viewer_trusted",
+    "_is_llm_command_trusted",
+    "_is_pdf_viewer_trusted",
+    "_load_all_relevance_scores",
+    "_load_summary",
+    "_remember_trusted_hash",
+    "_resolve_llm_command",
+    "_save_relevance_score",
+    "_save_summary",
+    "_trust_hash",
+    "asyncio",
+    "get_config_path",
+    "llm_command_requires_shell",
+    "log_action_failure",
+    "logger",
+    "resolve_provider",
+    "save_config",
+]
 
 
 _RECOVERABLE_ACTION_ERRORS = RECOVERABLE_ACTION_ERRORS
@@ -54,221 +95,18 @@ _RELEVANCE_SCORING_CONCURRENCY = 3
 _RELEVANCE_PROGRESS_NOTIFY_INTERVAL = 5
 
 
-@dataclass(slots=True)
-class CommandTrustRequest:
-    """Deferred trust-prompt request for an external command."""
-
-    command_template: str
-    title: str
-    prompt_heading: str
-    trust_button_label: str
-    cancel_message: str
-    trusted_hashes: list[str]
-    on_trusted: Callable[[], None]
-
-
 def _log_action_failure(action: str, exc: Exception, *, unexpected: bool = False) -> None:
     return log_action_failure(action, exc, unexpected=unexpected)
 
 
-def _collect_all_tags(app: "ArxivBrowser") -> list[str]:
+def _collect_all_tags(app: ArxivBrowser) -> list[str]:
     """Collect all unique tags across all paper metadata."""
     return list(
         dict.fromkeys(tag for meta in app._config.paper_metadata.values() for tag in meta.tags)
     )
 
 
-def _trust_hash(command_template: str) -> str:
-    """Return a stable short hash for trusted command templates."""
-    return hashlib.sha256(command_template.encode("utf-8")).hexdigest()[:_TRUST_HASH_LENGTH]
-
-
-def _remember_trusted_hash(
-    app,
-    command_template: str,
-    trusted_hashes: list[str],
-    title: str,
-) -> bool:
-    """Add a command hash to the trusted list and persist it to disk.
-
-    The command is always trusted for the current session regardless of
-    whether the disk write succeeds.  When ``save_config`` fails, the user
-    is notified that the trust is session-only; the function still returns
-    ``True`` so the calling action can proceed.
-
-    Args:
-        app: The running ``ArxivBrowser`` application instance (used for
-            ``notify`` and ``_trust_hash``).
-        command_template: The raw LLM or PDF-viewer command string to trust.
-        trusted_hashes: The mutable list (from ``config``) to append the hash
-            to — mutated in-place.
-        title: Notification title shown if the config save fails.
-
-    Returns:
-        Always ``True``.  The command is trusted in-memory even when the
-        ``save_config`` call fails (e.g. read-only filesystem).
-    """
-    cmd_hash = app._trust_hash(command_template)
-    if cmd_hash in trusted_hashes:
-        return True
-    trusted_hashes.append(cmd_hash)
-    if save_config(app._config):
-        return True
-    app.notify(
-        "Could not save trust preference. Command trusted for this session only.",
-        title=title,
-        severity="warning",
-    )
-    return True
-
-
-def _is_llm_command_trusted(app: "ArxivBrowser", command_template: str) -> bool:
-    """Return whether an LLM command template is trusted."""
-    config = app._config
-    if not config.llm_command and not config.llm_preset:
-        return True
-    if not config.llm_command and command_template == LLM_PRESETS.get(config.llm_preset, ""):
-        return True
-    return app._trust_hash(command_template) in config.trusted_llm_command_hashes
-
-
-def _is_pdf_viewer_trusted(app: "ArxivBrowser", viewer_cmd: str) -> bool:
-    """Return whether a PDF viewer command is trusted."""
-    config = app._config
-    return app._trust_hash(viewer_cmd) in config.trusted_pdf_viewer_hashes
-
-
-def _ensure_command_trusted(
-    app,
-    request: CommandTrustRequest,
-) -> bool:
-    """Show a trust confirmation prompt for a custom shell command.
-
-    Pushes a ``ConfirmModal`` asking the user to approve execution.  If the
-    user confirms, ``_remember_trusted_hash`` is called to persist the
-    approval and then *on_trusted* is invoked to continue the action.
-
-    Args:
-        app: The running ``ArxivBrowser`` application instance.
-        command_template: The raw command string being evaluated for trust.
-        title: Short label used in notification titles (e.g. ``"LLM"``).
-        prompt_heading: First line of the confirmation dialog body.
-        trust_button_label: Short verb shown in the confirmation text
-            (e.g. ``"Run"`` or ``"Open"``).
-        cancel_message: Notification body shown when the user cancels.
-        trusted_hashes: Mutable list (from config) to persist the hash into.
-        on_trusted: Zero-argument callable invoked after the user approves
-            and the hash is persisted.
-
-    Returns:
-        Always ``False`` — the action is deferred to the modal callback.
-        The caller should not continue inline after this returns.
-    """
-    command_preview = truncate_text(request.command_template, _COMMAND_PREVIEW_MAX_LEN)
-
-    def _on_decision(confirmed: bool | None) -> None:
-        if not confirmed:
-            app.notify(request.cancel_message, title=request.title, severity="warning")
-            return
-        if app._remember_trusted_hash(
-            request.command_template,
-            request.trusted_hashes,
-            request.title,
-        ):
-            request.on_trusted()
-
-    try:
-        app.push_screen(
-            ConfirmModal(
-                f"{request.prompt_heading}\n"
-                f"{command_preview}\n\n"
-                "This command executes on your machine.\n"
-                f"Confirm to trust and {request.trust_button_label.lower()}."
-            ),
-            _on_decision,
-        )
-        return False
-    except ScreenStackError:
-        logger.debug("Unable to show %s trust prompt", request.title, exc_info=True)
-        app.notify(
-            f"Could not confirm {request.title.lower()} command trust; action cancelled.",
-            title=request.title,
-            severity="warning",
-        )
-        return False
-
-
-def _ensure_llm_command_trusted(
-    app,
-    command_template: str,
-    on_trusted: Callable[[], None],
-) -> bool:
-    """Ensure a custom LLM command is trusted before execution.
-
-    Short-circuits to ``True`` (proceed inline) when the command is already
-    trusted (preset match or hash on record).  Otherwise delegates to
-    ``_ensure_command_trusted``, which pushes a confirmation modal and returns
-    ``False`` — the caller must not continue inline.
-
-    Args:
-        app: The running ``ArxivBrowser`` application instance.
-        command_template: LLM command template to check.
-        on_trusted: Callback invoked after the user confirms trust.
-
-    Returns:
-        ``True`` if the command is already trusted (caller may proceed).
-        ``False`` if a trust prompt was pushed (caller must stop inline).
-    """
-    if app._is_llm_command_trusted(command_template):
-        return True
-    return app._ensure_command_trusted(
-        CommandTrustRequest(
-            command_template=command_template,
-            title="LLM",
-            prompt_heading="Run untrusted custom LLM command?",
-            trust_button_label="Run",
-            cancel_message="LLM command cancelled",
-            trusted_hashes=app._config.trusted_llm_command_hashes,
-            on_trusted=on_trusted,
-        )
-    )
-
-
-def _ensure_pdf_viewer_trusted(
-    app,
-    viewer_cmd: str,
-    on_trusted: Callable[[], None],
-) -> bool:
-    """Ensure a custom PDF viewer command is trusted before execution.
-
-    Mirrors ``_ensure_llm_command_trusted`` but for PDF viewer commands.
-    Short-circuits to ``True`` when the command hash is already on record.
-
-    Args:
-        app: The running ``ArxivBrowser`` application instance.
-        viewer_cmd: PDF viewer command string to check.
-        on_trusted: Callback invoked after the user confirms trust.
-
-    Returns:
-        ``True`` if the command is already trusted (caller may proceed).
-        ``False`` if a trust prompt was pushed (caller must stop inline).
-    """
-    if app._is_pdf_viewer_trusted(viewer_cmd):
-        return True
-    return app._ensure_command_trusted(
-        CommandTrustRequest(
-            command_template=viewer_cmd,
-            title="PDF",
-            prompt_heading="Run untrusted custom PDF viewer command?",
-            trust_button_label="Open",
-            cancel_message="PDF open cancelled",
-            trusted_hashes=app._config.trusted_pdf_viewer_hashes,
-            on_trusted=on_trusted,
-        )
-    )
-
-
-def _require_llm_command(app: "ArxivBrowser") -> str | None:
+def _require_llm_command(app: ArxivBrowser) -> str | None:
     """Resolve the LLM command template, notifying the user if not configured.
 
     Also refreshes ``app._llm_provider`` to stay in sync with config changes
@@ -306,7 +144,7 @@ def _require_llm_command(app: "ArxivBrowser") -> str | None:
     return command_template
 
 
-def action_generate_summary(app: "ArxivBrowser") -> None:
+def action_generate_summary(app: ArxivBrowser) -> None:
     """Generate an AI summary for the currently highlighted paper."""
     command_template = app._require_llm_command()
     if not command_template:
@@ -319,7 +157,7 @@ def action_generate_summary(app: "ArxivBrowser") -> None:
     app._start_summary_flow(command_template)
 
 
-def _start_summary_flow(app: "ArxivBrowser", command_template: str) -> None:
+def _start_summary_flow(app: ArxivBrowser, command_template: str) -> None:
     """Start the summary mode flow after command trust checks pass."""
 
     paper = app._get_current_paper()
@@ -457,7 +295,7 @@ async def _generate_summary_async(
             app._update_abstract_display(arxiv_id)
 
 
-def action_chat_with_paper(app: "ArxivBrowser") -> None:
+def action_chat_with_paper(app: ArxivBrowser) -> None:
     """Open an interactive chat session about the current paper."""
     command_template = app._require_llm_command()
     if not command_template:
@@ -470,7 +308,7 @@ def action_chat_with_paper(app: "ArxivBrowser") -> None:
     app._start_chat_with_paper()
 
 
-def _start_chat_with_paper(app: "ArxivBrowser") -> None:
+def _start_chat_with_paper(app: ArxivBrowser) -> None:
     """Start the chat flow after command trust checks pass."""
     paper = app._get_current_paper()
     if not paper:
@@ -483,7 +321,7 @@ def _start_chat_with_paper(app: "ArxivBrowser") -> None:
     app._track_dataset_task(app._open_chat_screen(paper, app._llm_provider))
 
 
-async def _open_chat_screen(app: "ArxivBrowser", paper: Paper, provider: LLMProvider) -> None:
+async def _open_chat_screen(app: ArxivBrowser, paper: Paper, provider: LLMProvider) -> None:
     """Fetch paper content and open the chat modal."""
     task_epoch = app._capture_dataset_epoch()
     paper_content = await app._fetch_paper_content_async(paper)
@@ -494,7 +332,7 @@ async def _open_chat_screen(app: "ArxivBrowser", paper: Paper, provider: LLMProv
     )
 
 
-def action_score_relevance(app: "ArxivBrowser") -> None:
+def action_score_relevance(app: ArxivBrowser) -> None:
     """Score all loaded papers for relevance using the configured LLM."""
     command_template = app._require_llm_command()
     if not command_template:
@@ -507,7 +345,7 @@ def action_score_relevance(app: "ArxivBrowser") -> None:
     app._start_score_relevance_flow(command_template)
 
 
-def _start_score_relevance_flow(app: "ArxivBrowser", command_template: str) -> None:
+def _start_score_relevance_flow(app: ArxivBrowser, command_template: str) -> None:
     """Start relevance scoring after command trust checks pass."""
 
     if app._relevance_scoring_active:
@@ -526,7 +364,7 @@ def _start_score_relevance_flow(app: "ArxivBrowser", command_template: str) -> N
 
 
 def _on_interests_saved_then_score(
-    app: "ArxivBrowser", interests: str | None, command_template: str
+    app: ArxivBrowser, interests: str | None, command_template: str
 ) -> None:
     """Callback after ResearchInterestsModal: save interests then start scoring."""
     if not interests:
@@ -540,7 +378,7 @@ def _on_interests_saved_then_score(
     app._start_relevance_scoring(command_template, interests)
 
 
-def _start_relevance_scoring(app: "ArxivBrowser", command_template: str, interests: str) -> None:
+def _start_relevance_scoring(app: ArxivBrowser, command_template: str, interests: str) -> None:
     """Begin batch relevance scoring for all loaded papers."""
     if app._relevance_scoring_active:
         app.notify("Relevance scoring already in progress", title="Relevance")
@@ -551,7 +389,7 @@ def _start_relevance_scoring(app: "ArxivBrowser", command_template: str, interes
     app._track_dataset_task(app._score_relevance_batch_async(papers, command_template, interests))
 
 
-def action_edit_interests(app: "ArxivBrowser") -> None:
+def action_edit_interests(app: ArxivBrowser) -> None:
     """Edit research interests and clear relevance cache."""
     app.push_screen(
         ResearchInterestsModal(app._config.research_interests),
@@ -559,7 +397,7 @@ def action_edit_interests(app: "ArxivBrowser") -> None:
     )
 
 
-def _on_interests_edited(app: "ArxivBrowser", interests: str | None) -> None:
+def _on_interests_edited(app: ArxivBrowser, interests: str | None) -> None:
     """Callback after editing interests: save and clear cache."""
     if not interests or interests == app._config.research_interests:
         return
@@ -749,7 +587,7 @@ async def _score_relevance_batch_async(
             app._update_footer()
 
 
-def _update_relevance_badge(app: "ArxivBrowser", arxiv_id: str) -> None:
+def _update_relevance_badge(app: ArxivBrowser, arxiv_id: str) -> None:
     """Update a single list item's relevance badge."""
     app._mark_badges_dirty("relevance")
     current = app._get_current_paper()
@@ -757,7 +595,7 @@ def _update_relevance_badge(app: "ArxivBrowser", arxiv_id: str) -> None:
         app._refresh_detail_pane()
 
 
-def action_auto_tag(app: "ArxivBrowser") -> None:
+def action_auto_tag(app: ArxivBrowser) -> None:
     """Auto-tag current or selected papers using the configured LLM."""
     command_template = app._require_llm_command()
     if not command_template:
@@ -770,7 +608,7 @@ def action_auto_tag(app: "ArxivBrowser") -> None:
     app._start_auto_tag_flow()
 
 
-def _start_auto_tag_flow(app: "ArxivBrowser") -> None:
+def _start_auto_tag_flow(app: ArxivBrowser) -> None:
     """Start auto-tagging after command trust checks pass."""
 
     if app._auto_tag_active:
@@ -800,7 +638,7 @@ def _start_auto_tag_flow(app: "ArxivBrowser") -> None:
 
 
 def _maybe_cancel_auto_tag_batch(
-    app: "ArxivBrowser",
+    app: ArxivBrowser,
     *,
     index: int,
     total: int,
@@ -819,7 +657,7 @@ def _maybe_cancel_auto_tag_batch(
 
 
 def _apply_auto_tag_batch_result(
-    app: "ArxivBrowser",
+    app: ArxivBrowser,
     *,
     paper: Paper,
     suggested: list[str],

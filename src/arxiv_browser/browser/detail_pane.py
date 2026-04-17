@@ -30,7 +30,7 @@ from arxiv_browser.widgets.details import DetailRenderState
 from arxiv_browser.widgets.listing import PaperHighlightTerms, PaperRowRenderState
 
 
-class ChromeMixin:
+class DetailPaneMixin:
     """Mixin providing detail-pane, status bar, footer, and command-palette behaviour.
 
     Intended to be composed into the main ArxivBrowser app class alongside other

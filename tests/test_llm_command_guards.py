@@ -107,7 +107,7 @@ class TestCommandTrustGuardrails:
         on_trusted = MagicMock()
         command_template = "custom-tool {prompt}"
 
-        monkeypatch.setattr("arxiv_browser.actions.llm_actions.save_config", lambda _config: True)
+        monkeypatch.setattr("arxiv_browser.actions.trust_gate.save_config", lambda _config: True)
 
         def fake_push_screen(_modal, callback):
             callback(True)
@@ -127,7 +127,7 @@ class TestCommandTrustGuardrails:
         viewer_cmd = "open -a Preview {path}"
         on_trusted = MagicMock()
 
-        monkeypatch.setattr("arxiv_browser.actions.llm_actions.save_config", lambda _config: True)
+        monkeypatch.setattr("arxiv_browser.actions.trust_gate.save_config", lambda _config: True)
 
         def fake_push_screen(_modal, callback):
             callback(True)
@@ -147,7 +147,7 @@ class TestCommandTrustGuardrails:
         on_trusted = MagicMock()
         command_template = "custom-tool {prompt}"
 
-        monkeypatch.setattr("arxiv_browser.actions.llm_actions.save_config", lambda _config: True)
+        monkeypatch.setattr("arxiv_browser.actions.trust_gate.save_config", lambda _config: True)
 
         def fake_push_screen(_modal, callback):
             callback(False)
@@ -167,7 +167,7 @@ class TestCommandTrustGuardrails:
         on_trusted = MagicMock()
         command_template = "custom-tool {prompt}"
 
-        monkeypatch.setattr("arxiv_browser.actions.llm_actions.save_config", lambda _config: False)
+        monkeypatch.setattr("arxiv_browser.actions.trust_gate.save_config", lambda _config: False)
 
         def fake_push_screen(_modal, callback):
             callback(True)
