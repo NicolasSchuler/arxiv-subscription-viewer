@@ -302,6 +302,33 @@ class TestMetadataSnapshotPickerModal:
         assert snapshot.name in label
         assert "modified" in label
 
+    def test_format_snapshot_label_handles_stat_errors(self, tmp_path, monkeypatch):
+        from arxiv_browser.modals.common import MetadataSnapshotPickerModal
+
+        snapshot = tmp_path / "arxiv-2026-03-07.json"
+        snapshot.write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(Path, "stat", lambda _self: (_ for _ in ()).throw(OSError("boom")))
+
+        label = MetadataSnapshotPickerModal._format_snapshot_label(snapshot)
+
+        assert snapshot.name in label
+        assert "unknown time" in label
+
+    def test_action_choose_empty_selection_dismisses_none(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser.modals.common import MetadataSnapshotPickerModal
+
+        modal = MetadataSnapshotPickerModal([tmp_path / "arxiv-2026-03-07.json"])
+        modal.dismiss = MagicMock()
+        modal.query_one = MagicMock(
+            return_value=type("ListViewStub", (), {"highlighted_child": None})()
+        )
+
+        modal.action_choose()
+
+        modal.dismiss.assert_called_once_with(None)
+
 
 class TestSummaryModeModalDismiss:
     """Tests that each SummaryModeModal action dismisses with the correct mode name."""

@@ -133,6 +133,33 @@ def test_src_tree_avoids_repo_local_import_star_and_dynamic_dunder_all() -> None
     )
 
 
+def test_browser_core_uses_service_interfaces_not_concrete_service_modules() -> None:
+    """The app shell should depend on the service aggregate seam."""
+    path = Path(__file__).resolve().parents[1] / "src" / "arxiv_browser" / "browser" / "core.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    bad_imports: list[str] = []
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            module_name = node.module or ""
+            if module_name.startswith("arxiv_browser.services.") and (
+                module_name != "arxiv_browser.services.interfaces"
+            ):
+                bad_imports.append(f"line {node.lineno}: from {module_name} import ...")
+        elif isinstance(node, ast.Import):
+            bad_imports.extend(
+                f"line {node.lineno}: import {alias.name}"
+                for alias in node.names
+                if alias.name.startswith("arxiv_browser.services.")
+                and alias.name != "arxiv_browser.services.interfaces"
+            )
+
+    assert bad_imports == [], (
+        "browser/core.py should consume AppServices from arxiv_browser.services.interfaces "
+        f"instead of concrete service modules. Found: {', '.join(bad_imports)}"
+    )
+
+
 def test_ui_packages_import_in_fresh_process() -> None:
     """Public UI packages should import without entering modal cycles."""
     repo_root = Path(__file__).resolve().parents[1]

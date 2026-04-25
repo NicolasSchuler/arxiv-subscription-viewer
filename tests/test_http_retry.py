@@ -11,6 +11,7 @@ from arxiv_browser.http_retry import (
     BACKOFF_BASE,
     MAX_RETRIES,
     RETRYABLE_STATUS_CODES,
+    retry_sync_with_backoff,
     retry_with_backoff,
 )
 
@@ -277,3 +278,68 @@ async def test_custom_max_retries_and_backoff() -> None:
     assert result == "ok"
     assert call_count == 2
     mock_sleep.assert_awaited_once_with(0.5)
+
+
+def test_sync_success_no_retry() -> None:
+    call_count = 0
+
+    def _fn() -> str:
+        nonlocal call_count
+        call_count += 1
+        return "ok"
+
+    assert retry_sync_with_backoff(_fn, operation="sync") == "ok"
+    assert call_count == 1
+
+
+def test_sync_retryable_status_uses_exponential_sleep() -> None:
+    call_count = 0
+
+    def _fn() -> str:
+        nonlocal call_count
+        call_count += 1
+        if call_count <= 2:
+            _raise_status_error(503)
+        return "ok"
+
+    with patch("arxiv_browser.http_retry.time.sleep") as sleep:
+        assert retry_sync_with_backoff(_fn, max_retries=2, operation="sync") == "ok"
+
+    assert call_count == 3
+    assert [call.args[0] for call in sleep.call_args_list] == [1.0, 2.0]
+
+
+def test_sync_non_retryable_status_raises_without_sleep() -> None:
+    def _fn() -> str:
+        _raise_status_error(404)
+        return "unreachable"  # pragma: no cover
+
+    with (
+        patch("arxiv_browser.http_retry.time.sleep") as sleep,
+        pytest.raises(httpx.HTTPStatusError) as exc_info,
+    ):
+        retry_sync_with_backoff(_fn, operation="sync")
+
+    assert exc_info.value.response.status_code == 404
+    sleep.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        httpx.ConnectError("connection refused"),
+        httpx.ReadError("read failed"),
+        httpx.ReadTimeout("timed out"),
+    ],
+)
+def test_sync_retryable_transport_errors_raise_last_exception(exc: Exception) -> None:
+    def _fn() -> str:
+        raise exc
+
+    with (
+        patch("arxiv_browser.http_retry.time.sleep") as sleep,
+        pytest.raises(type(exc)),
+    ):
+        retry_sync_with_backoff(_fn, max_retries=1, backoff_base=0.25, operation="sync")
+
+    sleep.assert_called_once_with(0.25)

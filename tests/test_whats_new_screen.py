@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from arxiv_browser.modals.whats_new import WhatsNewScreen
 from arxiv_browser.whats_new import (
     WHATS_NEW_ENTRIES,
@@ -59,6 +61,39 @@ class TestWhatsNewScreen:
         with patch.object(screen, "dismiss") as mock_dismiss:
             screen.action_dismiss_whats_new()
             mock_dismiss.assert_called_once_with(None)
+
+    @pytest.mark.asyncio
+    async def test_whats_new_screen_mounts_and_renders_release_entries(
+        self, tmp_path, monkeypatch, make_paper
+    ) -> None:
+        """The real modal mount should render the current release notes."""
+        from textual.widgets import Static
+
+        import arxiv_browser.browser.core as browser_core
+        from arxiv_browser.browser.core import ArxivBrowser, ArxivBrowserOptions
+        from arxiv_browser.models import UserConfig
+        from tests.support.patch_helpers import patch_save_config
+
+        monkeypatch.setattr(browser_core, "get_cache_db_path", lambda: tmp_path / "cache.db")
+        app = ArxivBrowser(
+            [make_paper()],
+            options=ArxivBrowserOptions(
+                config=UserConfig(onboarding_seen=True, last_seen_whats_new=WHATS_NEW_VERSION),
+                restore_session=False,
+            ),
+        )
+        with patch_save_config(return_value=True):
+            async with app.run_test() as pilot:
+                modal = WhatsNewScreen()
+                app.push_screen(modal)
+                await pilot.pause(0.05)
+                content = modal.query_one("#whats-new-content", Static)
+                rendered = str(content.content)
+                assert WHATS_NEW_ENTRIES[0][0] in rendered
+                assert WHATS_NEW_ENTRIES[0][1] in rendered
+                await pilot.press("q")
+                await pilot.pause()
+                assert modal not in pilot.app.screen_stack
 
 
 class TestWhatsNewContent:

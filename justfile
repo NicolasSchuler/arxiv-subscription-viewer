@@ -36,6 +36,10 @@ test:
     uv run python scripts/check_coverage_thresholds.py coverage.json --statements=95 --branches=85
     uv run coverage report --include="src/arxiv_browser/actions/*.py,src/arxiv_browser/browser/*.py,src/arxiv_browser/cli.py" --fail-under=85
 
+# Enforce measured coverage and source-size quality budgets
+quality-budget:
+    uv run python scripts/check_quality_budgets.py coverage.json
+
 # Run tests without coverage (faster, stop on first failure)
 test-quick:
     uv run pytest -x -q
@@ -73,7 +77,7 @@ deps-audit:
 # ── Composite targets ────────────────────────────────────────────────
 
 # Run all fast checks (lint + types + tests)
-check: lint typecheck test
+check: lint typecheck test quality-budget
 
 # Run all checks including quality tools
 quality: check complexity security dead-code deps
