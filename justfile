@@ -72,7 +72,8 @@ deps:
 
 # Dependency CVE audit (strict — fails on any known vulnerability)
 deps-audit:
-    uv run pip-audit --strict
+    uv export --format requirements.txt --all-groups --no-emit-project --no-emit-package pip --frozen \
+        | uv run pip-audit -r /dev/stdin --strict --require-hashes --disable-pip
 
 # ── Composite targets ────────────────────────────────────────────────
 
@@ -102,7 +103,8 @@ ci:
     @uv run deptry .
     @echo ""
     @echo "=== Dependency CVE Audit ==="
-    @uv run pip-audit --strict
+    @uv export --format requirements.txt --all-groups --no-emit-project --no-emit-package pip --frozen \
+        | uv run pip-audit -r /dev/stdin --strict --require-hashes --disable-pip
     @echo ""
     @echo "=== Dead Code ==="
     @uv run vulture {{ src }} --min-confidence 80

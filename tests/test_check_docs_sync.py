@@ -16,6 +16,16 @@ def _load_check_docs_sync_module():
     return module
 
 
+def _load_check_version_sync_module():
+    script_path = Path(__file__).resolve().parents[1] / "scripts" / "check_version_sync.py"
+    spec = importlib.util.spec_from_file_location("check_version_sync", script_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 class TestCheckCompletions:
     """Regression tests for per-shell completion drift detection."""
 
@@ -202,3 +212,65 @@ class TestCheckDocsIndexNavigation:
         assert module._check_docs_index_navigation(docs_readme_text, docs_index_text) == [
             "docs/index.html missing guide navigation link: config-reference.md"
         ]
+
+
+class TestCheckVersionSync:
+    """Regression tests for release metadata drift detection."""
+
+    def test_latest_released_version_ignores_unreleased_heading(self, tmp_path, monkeypatch):
+        module = _load_check_version_sync_module()
+        changelog = tmp_path / "CHANGELOG.md"
+        changelog.write_text(
+            """# Changelog
+
+## [Unreleased]
+
+## [0.1.3] - 2026-05-03
+
+## [0.1.2] - 2025-01-26
+""",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(module, "CHANGELOG", changelog)
+
+        assert module.latest_released_version() == "0.1.3"
+
+    def test_main_passes_when_pyproject_matches_latest_release(self, tmp_path, monkeypatch, capsys):
+        module = _load_check_version_sync_module()
+        pyproject = tmp_path / "pyproject.toml"
+        changelog = tmp_path / "CHANGELOG.md"
+        pyproject.write_text('[project]\nversion = "0.1.3"\n', encoding="utf-8")
+        changelog.write_text("# Changelog\n\n## [0.1.3] - 2026-05-03\n", encoding="utf-8")
+        monkeypatch.setattr(module, "PYPROJECT", pyproject)
+        monkeypatch.setattr(module, "CHANGELOG", changelog)
+
+        assert module.main() == 0
+        assert "matches latest CHANGELOG entry" in capsys.readouterr().out
+
+    def test_main_reports_how_to_fix_version_mismatch(self, tmp_path, monkeypatch, capsys):
+        module = _load_check_version_sync_module()
+        pyproject = tmp_path / "pyproject.toml"
+        changelog = tmp_path / "CHANGELOG.md"
+        pyproject.write_text('[project]\nversion = "0.1.3"\n', encoding="utf-8")
+        changelog.write_text("# Changelog\n\n## [0.1.2] - 2025-01-26\n", encoding="utf-8")
+        monkeypatch.setattr(module, "PYPROJECT", pyproject)
+        monkeypatch.setattr(module, "CHANGELOG", changelog)
+
+        assert module.main() == 1
+        err = capsys.readouterr().err
+        assert "cut a CHANGELOG release entry" in err
+        assert "revert pyproject.toml and uv.lock" in err
+
+    def test_main_accepts_projects_without_released_changelog_entries(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        module = _load_check_version_sync_module()
+        pyproject = tmp_path / "pyproject.toml"
+        changelog = tmp_path / "CHANGELOG.md"
+        pyproject.write_text('[project]\nversion = "0.1.3"\n', encoding="utf-8")
+        changelog.write_text("# Changelog\n\n## [Unreleased]\n", encoding="utf-8")
+        monkeypatch.setattr(module, "PYPROJECT", pyproject)
+        monkeypatch.setattr(module, "CHANGELOG", changelog)
+
+        assert module.main() == 0
+        assert "CHANGELOG has no released entries yet" in capsys.readouterr().out

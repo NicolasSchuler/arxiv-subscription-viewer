@@ -11,7 +11,7 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
 
       - name: Git hygiene guard
         run: |
@@ -29,15 +29,16 @@ jobs:
           python3 scripts/check_version_sync.py
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v8.1.0
         with:
+          version: "0.8.19"
           enable-cache: true
 
       - name: Set up Python
         run: uv python install 3.13
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --locked
 
       - name: Lint
         run: uv run ruff check .
@@ -49,27 +50,34 @@ jobs:
         run: uv run pyright
 
       - name: Tests with coverage
-        run: uv run pytest --cov --cov-report=term-missing
+        run: uv run pytest --cov --cov-branch --cov-fail-under=0 --cov-report=term-missing --cov-report=json
+
+      - name: Coverage thresholds
+        run: uv run python scripts/check_coverage_thresholds.py coverage.json --statements=95 --branches=85
 
       - name: Interactive modules coverage guardrail
         run: uv run coverage report --include="src/arxiv_browser/actions/*.py,src/arxiv_browser/browser/*.py,src/arxiv_browser/cli.py" --fail-under=85
+
+      - name: Quality budget
+        run: uv run python scripts/check_quality_budgets.py coverage.json
 
   quality:
     needs: ci
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v8.1.0
         with:
+          version: "0.8.19"
           enable-cache: true
 
       - name: Set up Python
         run: uv python install 3.13
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --locked
 
       - name: Complexity gate
         run: uv run xenon src/arxiv_browser/ --max-absolute C --max-modules C --max-average B
@@ -83,12 +91,10 @@ jobs:
       - name: Dependency hygiene
         run: uv run deptry .
 
-      - name: Dependency CVE audit (non-blocking)
-        run: uv run pip-audit
-        continue-on-error: true
-
       - name: Dependency CVE audit (block on known vulnerabilities)
-        run: uv run pip-audit --strict
+        run: |
+          uv export --format requirements.txt --all-groups --no-emit-project --no-emit-package pip --frozen \
+            | uv run pip-audit -r /dev/stdin --strict --require-hashes --disable-pip
 
       - name: Python file-size soft cap report
         run: |
@@ -113,11 +119,12 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v8.1.0
         with:
+          version: "0.8.19"
           enable-cache: true
 
       - name: Set up Python

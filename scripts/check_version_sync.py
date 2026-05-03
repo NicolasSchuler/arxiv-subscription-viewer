@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Verify that pyproject.toml version matches the latest non-Unreleased CHANGELOG entry.
+"""Verify that pyproject.toml version matches the latest released CHANGELOG entry.
 
 Rules:
 - `pyproject.toml` version must equal the most recent released version in CHANGELOG.md
-  (the first `## [X.Y.Z]` heading after `## [Unreleased]`), OR
+  (the first `## [X.Y.Z]` heading), OR
 - If CHANGELOG.md has no released version at all, `pyproject.toml` version is accepted as-is.
 
 Exits non-zero on mismatch with a helpful message.
@@ -50,7 +50,12 @@ def main() -> int:
         )
         print(
             "Either bump pyproject.toml to match, or add a new [Unreleased] section "
-            "describing the new version before releasing.",
+            "and cut a CHANGELOG release entry for the new version before tagging.",
+            file=sys.stderr,
+        )
+        print(
+            "If the version bump was accidental, revert pyproject.toml and uv.lock "
+            "to the latest documented release instead.",
             file=sys.stderr,
         )
         return 1
