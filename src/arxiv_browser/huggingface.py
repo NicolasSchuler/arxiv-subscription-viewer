@@ -92,46 +92,15 @@ def parse_hf_paper_response(item: dict) -> HuggingFacePaper | None:
     if not arxiv_id:
         return None
 
-    title = paper.get("title") or ""
-
-    # Upvotes are on the paper sub-object
-    upvotes = paper.get("upvotes") or 0
-    if not isinstance(upvotes, int):
-        upvotes = 0
-
-    # Comments count is a top-level field
-    num_comments = item.get("numComments") or 0
-    if not isinstance(num_comments, int):
-        num_comments = 0
-
-    # AI summary — may be absent or null
-    ai_summary = paper.get("ai_summary") or ""
-    if not isinstance(ai_summary, str):
-        ai_summary = ""
-
-    # AI keywords — array of strings
-    raw_keywords = paper.get("ai_keywords") or []
-    if not isinstance(raw_keywords, list):
-        raw_keywords = []
-    ai_keywords = tuple(kw for kw in raw_keywords if isinstance(kw, str))
-
-    # GitHub repo info (optional)
-    github_repo = paper.get("githubRepo") or ""
-    if not isinstance(github_repo, str):
-        github_repo = ""
-    github_stars = paper.get("githubStars") or 0
-    if not isinstance(github_stars, int):
-        github_stars = 0
-
     return HuggingFacePaper(
         arxiv_id=arxiv_id,
-        title=title,
-        upvotes=upvotes,
-        num_comments=num_comments,
-        ai_summary=ai_summary,
-        ai_keywords=ai_keywords,
-        github_repo=github_repo,
-        github_stars=github_stars,
+        title=_coerce_str(paper.get("title")),
+        upvotes=_coerce_int(paper.get("upvotes")),
+        num_comments=_coerce_int(item.get("numComments")),
+        ai_summary=_coerce_str(paper.get("ai_summary")),
+        ai_keywords=_coerce_str_tuple(paper.get("ai_keywords")),
+        github_repo=_coerce_str(paper.get("githubRepo")),
+        github_stars=_coerce_int(paper.get("githubStars")),
     )
 
 
@@ -182,26 +151,45 @@ async def fetch_hf_daily_papers(
             operation="HF daily papers",
         )
     except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == 404:
-            logger.info("HF daily papers endpoint not found")
-        else:
-            logger.warning("HF API returned %d", exc.response.status_code)
-        return ([], False) if include_status else []
+        _log_hf_status_error(exc)
+        return _hf_fetch_failure(include_status)
     except (httpx.ConnectError, httpx.TimeoutException, httpx.ReadError):
         logger.warning("HF API timeout/connection error after retries")
-        return ([], False) if include_status else []
+        return _hf_fetch_failure(include_status)
     except httpx.HTTPError:
         logger.warning("HF API HTTP error", exc_info=True)
-        return ([], False) if include_status else []
+        return _hf_fetch_failure(include_status)
 
+    papers = _parse_hf_daily_response(response)
+    if papers is None:
+        return _hf_fetch_failure(include_status)
+    if include_status:
+        return papers, True
+    return papers
+
+
+def _hf_fetch_failure(
+    include_status: bool,
+) -> list[HuggingFacePaper] | tuple[list[HuggingFacePaper], bool]:
+    return ([], False) if include_status else []
+
+
+def _log_hf_status_error(exc: httpx.HTTPStatusError) -> None:
+    if exc.response.status_code == 404:
+        logger.info("HF daily papers endpoint not found")
+        return
+    logger.warning("HF API returned %d", exc.response.status_code)
+
+
+def _parse_hf_daily_response(response: httpx.Response) -> list[HuggingFacePaper] | None:
     try:
         data = response.json()
     except ValueError:
         logger.warning("HF API returned invalid JSON", exc_info=True)
-        return ([], False) if include_status else []
+        return None
     if not isinstance(data, list):
         logger.warning("HF API returned non-list response")
-        return ([], False) if include_status else []
+        return None
     papers: list[HuggingFacePaper] = []
     for item in data:
         if not isinstance(item, dict):
@@ -209,8 +197,6 @@ async def fetch_hf_daily_papers(
         parsed = parse_hf_paper_response(item)
         if parsed is not None:
             papers.append(parsed)
-    if include_status:
-        return papers, True
     return papers
 
 
@@ -220,6 +206,12 @@ def _coerce_int(value: Any, default: int = 0) -> int:
 
 def _coerce_str(value: Any, default: str = "") -> str:
     return _safe_get({"v": value}, "v", default, str)
+
+
+def _coerce_str_tuple(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple(item for item in value if isinstance(item, str))
 
 
 # ============================================================================

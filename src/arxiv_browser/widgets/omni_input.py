@@ -16,6 +16,7 @@ from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.message import Message
 from textual.widgets import Input, OptionList, Static
+from textual.widgets.option_list import Option
 
 from arxiv_browser.fuzzy import partial_fuzzy_score
 from arxiv_browser.palette import (
@@ -39,6 +40,8 @@ OMNI_HINT_COMMAND = "↑↓ move · Enter run · Esc close"
 OMNI_HINT_API = "Enter to search arXiv · Esc cancel"
 
 FUZZY_THRESHOLD = 40
+
+CommandMatch = tuple[float, int, int, PaletteCommand]
 
 
 @dataclass(slots=True, frozen=True)
@@ -216,57 +219,67 @@ class OmniInput(Vertical):
         """Populate the inline results list with matching commands."""
         results = self.query_one("#omni-results", OptionList)
         results.clear_options()
-
-        if query:
-            q = query.lower()
-            scored: list[tuple[float, int, int, PaletteCommand]] = []
-            for cmd in self._commands:
-                score = max(
-                    partial_fuzzy_score(q, cmd.name),
-                    partial_fuzzy_score(q, cmd.description),
-                )
-                if score >= FUZZY_THRESHOLD:
-                    scored.append((score, int(cmd.enabled), int(cmd.suggested), cmd))
-            scored.sort(key=lambda item: (item[1], item[2], item[0]), reverse=True)
-            self._filtered_commands = [cmd for _, _, _, cmd in scored]
-        else:
-            self._filtered_commands = list(self._commands)
-
-        if not self._filtered_commands:
-            if query:
-                safe = escape_rich_text(query)
-                from textual.widgets.option_list import Option
-
-                results.add_option(Option(f'[dim]No matches for "{safe}"[/]', disabled=True))
-            self._show_results()
-            return
-
-        colors = theme_colors_for(self)
-        green = colors["green"]
-        accent = colors["accent"]
-        muted = colors["muted"]
-
-        from textual.widgets.option_list import Option
+        self._filtered_commands = self._filter_commands(query)
 
         for cmd in self._filtered_commands:
-            name = truncate_palette_text(cmd.name, PALETTE_NAME_MAX_LEN)
-            desc = truncate_palette_text(cmd.description, PALETTE_DESC_MAX_LEN)
-            hint = truncate_palette_text(cmd.key_hint, PALETTE_KEY_MAX_LEN) if cmd.key_hint else ""
-            safe_name = escape_rich_text(name)
-            safe_desc = escape_rich_text(desc)
-            safe_hint = escape_rich_text(hint)
-
-            if not cmd.enabled:
-                label = f"[dim]{safe_name}  {safe_desc}[/]"
-            else:
-                parts = [f"[bold {accent}]{safe_name}[/]", f"[{muted}]{safe_desc}[/]"]
-                if safe_hint:
-                    parts.append(f"[{green}]{safe_hint}[/]")
-                label = "  ".join(parts)
-
-            results.add_option(Option(label, disabled=not cmd.enabled))
+            results.add_option(self._command_option(cmd))
+        self._add_empty_command_result(results, query)
 
         self._show_results()
+
+    def _filter_commands(self, query: str) -> list[PaletteCommand]:
+        if not query:
+            return list(self._commands)
+
+        q = query.lower()
+        scored = [match for cmd in self._commands if (match := self._command_match(q, cmd))]
+        scored.sort(key=_command_match_sort_key, reverse=True)
+        return [cmd for _, _, _, cmd in scored]
+
+    def _command_match(self, query: str, command: PaletteCommand) -> CommandMatch | None:
+        score = max(
+            partial_fuzzy_score(query, command.name),
+            partial_fuzzy_score(query, command.description),
+        )
+        if score < FUZZY_THRESHOLD:
+            return None
+        return score, int(command.enabled), int(command.suggested), command
+
+    def _add_empty_command_result(self, results: OptionList, query: str) -> None:
+        if self._filtered_commands or not query:
+            return
+
+        safe = escape_rich_text(query)
+        results.add_option(Option(f'[dim]No matches for "{safe}"[/]', disabled=True))
+
+    def _command_option(self, command: PaletteCommand) -> Option:
+        return Option(self._command_option_label(command), disabled=not command.enabled)
+
+    def _command_option_label(self, command: PaletteCommand) -> str:
+        safe_name, safe_desc, safe_hint = self._safe_command_parts(command)
+        if not command.enabled:
+            return f"[dim]{safe_name}  {safe_desc}[/]"
+
+        colors = theme_colors_for(self)
+        parts = [
+            f"[bold {colors['accent']}]{safe_name}[/]",
+            f"[{colors['muted']}]{safe_desc}[/]",
+        ]
+        if safe_hint:
+            parts.append(f"[{colors['green']}]{safe_hint}[/]")
+        return "  ".join(parts)
+
+    def _safe_command_parts(self, command: PaletteCommand) -> tuple[str, str, str]:
+        name = truncate_palette_text(command.name, PALETTE_NAME_MAX_LEN)
+        desc = truncate_palette_text(command.description, PALETTE_DESC_MAX_LEN)
+        hint = (
+            truncate_palette_text(command.key_hint, PALETTE_KEY_MAX_LEN) if command.key_hint else ""
+        )
+        return (
+            escape_rich_text(name),
+            escape_rich_text(desc),
+            escape_rich_text(hint),
+        )
 
     # --- event handlers ---
 
@@ -318,6 +331,11 @@ class OmniInput(Vertical):
             cmd = self._filtered_commands[idx]
             if cmd.enabled:
                 self.post_message(self.CommandSelected(cmd.action))
+
+
+def _command_match_sort_key(match: CommandMatch) -> tuple[int, int, float]:
+    score, enabled, suggested, _command = match
+    return enabled, suggested, score
 
 
 __all__ = [

@@ -202,10 +202,10 @@ class TestCliCoverage:
         with patch("arxiv_browser.cli.os.access", return_value=False):
             assert cli._resolve_input_file(unreadable) == 1
 
-        with patch("arxiv_browser.cli.parse_arxiv_file", side_effect=OSError("boom")):
+        with patch("arxiv_browser.cli_resolver.parse_arxiv_file", side_effect=OSError("boom")):
             assert cli._resolve_input_file(unreadable) == 1
 
-        with patch("arxiv_browser.cli.parse_arxiv_file", return_value=[make_paper()]):
+        with patch("arxiv_browser.cli_resolver.parse_arxiv_file", return_value=[make_paper()]):
             assert len(cli._resolve_input_file(unreadable)) == 1
 
         history_files = [(date(2026, 1, 23), tmp_path / "2026-01-23.txt")]
@@ -222,12 +222,12 @@ class TestCliCoverage:
             assert cli._resolve_legacy_fallback(tmp_path) == 1
         with (
             patch("arxiv_browser.cli.os.access", return_value=True),
-            patch("arxiv_browser.cli.parse_arxiv_file", side_effect=OSError("boom")),
+            patch("arxiv_browser.cli_resolver.parse_arxiv_file", side_effect=OSError("boom")),
         ):
             assert cli._resolve_legacy_fallback(tmp_path) == 1
         with (
             patch("arxiv_browser.cli.os.access", return_value=True),
-            patch("arxiv_browser.cli.parse_arxiv_file", return_value=[make_paper()]),
+            patch("arxiv_browser.cli_resolver.parse_arxiv_file", return_value=[make_paper()]),
         ):
             assert len(cli._resolve_legacy_fallback(tmp_path)) == 1
 
@@ -241,18 +241,23 @@ class TestCliCoverage:
             max_results=5,
         )
         config = UserConfig(arxiv_api_max_results=7)
-        with patch("arxiv_browser.cli._fetch_arxiv_api_papers", return_value=[make_paper()]):
+        with patch(
+            "arxiv_browser.cli_resolver._fetch_arxiv_api_papers", return_value=[make_paper()]
+        ):
             result = cli._resolve_arxiv_api_mode(args, config)
         assert isinstance(result, tuple)
         assert result[0][0].arxiv_id == "2401.12345"
 
         args.mode = "latest"
-        with patch("arxiv_browser.cli._fetch_latest_arxiv_digest", return_value=[make_paper()]):
+        with patch(
+            "arxiv_browser.cli_resolver._fetch_latest_arxiv_digest", return_value=[make_paper()]
+        ):
             result = cli._resolve_arxiv_api_mode(args, config)
         assert isinstance(result, tuple)
 
         with patch(
-            "arxiv_browser.cli._fetch_arxiv_api_papers", side_effect=ValueError("bad query")
+            "arxiv_browser.cli_resolver._fetch_latest_arxiv_digest",
+            side_effect=ValueError("bad query"),
         ):
             assert cli._resolve_arxiv_api_mode(args, config) == 1
 
@@ -263,7 +268,7 @@ class TestCliCoverage:
             request=httpx.Request("GET", "https://example.com"),
             response=response_429,
         )
-        with patch("arxiv_browser.cli._fetch_latest_arxiv_digest", side_effect=exc_429):
+        with patch("arxiv_browser.cli_resolver._fetch_latest_arxiv_digest", side_effect=exc_429):
             assert cli._resolve_arxiv_api_mode(args, config) == 1
 
         response_503 = MagicMock(spec=httpx.Response)
@@ -273,7 +278,7 @@ class TestCliCoverage:
             request=httpx.Request("GET", "https://example.com"),
             response=response_503,
         )
-        with patch("arxiv_browser.cli._fetch_latest_arxiv_digest", side_effect=exc_503):
+        with patch("arxiv_browser.cli_resolver._fetch_latest_arxiv_digest", side_effect=exc_503):
             assert cli._resolve_arxiv_api_mode(args, config) == 1
 
         assert cli._resolve_arxiv_api_mode(argparse.Namespace(command="browse"), config) is None
@@ -341,10 +346,10 @@ class TestCliCoverage:
 
         with (
             patch(
-                "arxiv_browser.cli._fetch_arxiv_api_papers",
+                "arxiv_browser.cli_resolver._fetch_arxiv_api_papers",
                 side_effect=[[malformed_date, same_day, dup_same_day], []],
             ),
-            patch("arxiv_browser.cli.time.sleep") as sleep,
+            patch("arxiv_browser.cli_resolver.time.sleep") as sleep,
         ):
             digest = cli._fetch_latest_arxiv_digest(
                 query="graph",
@@ -357,10 +362,10 @@ class TestCliCoverage:
 
         with (
             patch(
-                "arxiv_browser.cli._fetch_arxiv_api_papers",
+                "arxiv_browser.cli_resolver._fetch_arxiv_api_papers",
                 side_effect=[[same_day, older_day]],
             ),
-            patch("arxiv_browser.cli.time.sleep") as sleep,
+            patch("arxiv_browser.cli_resolver.time.sleep") as sleep,
         ):
             digest = cli._fetch_latest_arxiv_digest(
                 query="graph",

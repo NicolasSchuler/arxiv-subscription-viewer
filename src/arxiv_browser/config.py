@@ -830,48 +830,41 @@ def _import_bookmarks(bk_data: Any, config: UserConfig, merge: bool) -> int:
 
 
 def _import_collections(col_data: Any, config: UserConfig, merge: bool) -> int:
-    """Import collections into config with dedup and capacity check.
-
-    Collections with a ``name`` that already exists are skipped.  Import
-    stops when ``config.collections`` reaches ``MAX_COLLECTIONS``.  Each
-    collection's ``paper_ids`` is capped at ``MAX_PAPERS_PER_COLLECTION``.
-
-    Args:
-        col_data: Raw ``"collections"`` value from the export dict.
-        config: The ``UserConfig`` to modify in-place.
-        merge: When ``False`` this function is a no-op (returns 0).
-
-    Returns:
-        The number of new collections added to ``config.collections``.
-    """
+    """Import collections into config with dedup and capacity checks."""
     if not isinstance(col_data, list) or not merge:
         return 0
     existing_names = {c.name for c in config.collections}
     count = 0
     for col_dict in col_data:
-        if not isinstance(col_dict, dict):
-            continue
-        name = str(col_dict.get("name", ""))
-        if not name or name in existing_names:
+        collection = _collection_from_import(col_dict, existing_names)
+        if collection is None:
             continue
         if len(config.collections) >= MAX_COLLECTIONS:
             break
-        paper_ids = col_dict.get("paper_ids", [])
-        safe_ids = (
-            [pid for pid in paper_ids if isinstance(pid, str)][:MAX_PAPERS_PER_COLLECTION]
-            if isinstance(paper_ids, list)
-            else []
-        )
-        config.collections.append(
-            PaperCollection(
-                name=name,
-                description=str(col_dict.get("description", "")),
-                paper_ids=safe_ids,
-                created=str(col_dict.get("created", "")),
-            )
-        )
+        config.collections.append(collection)
+        existing_names.add(collection.name)
         count += 1
     return count
+
+
+def _collection_from_import(col_dict: Any, existing_names: set[str]) -> PaperCollection | None:
+    if not isinstance(col_dict, dict):
+        return None
+    name = str(col_dict.get("name", ""))
+    if not name or name in existing_names:
+        return None
+    return PaperCollection(
+        name=name,
+        description=str(col_dict.get("description", "")),
+        paper_ids=_safe_collection_paper_ids(col_dict.get("paper_ids", [])),
+        created=str(col_dict.get("created", "")),
+    )
+
+
+def _safe_collection_paper_ids(paper_ids: Any) -> list[str]:
+    if not isinstance(paper_ids, list):
+        return []
+    return [pid for pid in paper_ids if isinstance(pid, str)][:MAX_PAPERS_PER_COLLECTION]
 
 
 def import_metadata(

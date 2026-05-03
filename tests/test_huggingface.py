@@ -162,6 +162,14 @@ class TestParseHfPaperResponse:
         assert result is not None
         assert result.num_comments == 0
 
+    def test_bool_counts_and_non_string_title_are_ignored(self) -> None:
+        item = _make_api_item(**{"paper.title": 123, "paper.upvotes": True, "numComments": False})
+        result = parse_hf_paper_response(item)
+        assert result is not None
+        assert result.title == ""
+        assert result.upvotes == 0
+        assert result.num_comments == 0
+
     def test_non_string_github_repo_ignored(self) -> None:
         item = _make_api_item()
         item["paper"]["githubRepo"] = 42

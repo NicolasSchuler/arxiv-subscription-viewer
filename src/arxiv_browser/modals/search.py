@@ -28,6 +28,8 @@ from arxiv_browser.themes import theme_colors_for
 logger = logging.getLogger(__name__)
 
 _truncate_palette_text = truncate_palette_text
+PALETTE_FUZZY_THRESHOLD = 40
+PaletteMatch = tuple[float, int, int, PaletteCommand]
 
 
 class ArxivSearchModal(ModalBase[ArxivSearchRequest | None]):
@@ -267,65 +269,74 @@ class CommandPaletteModal(ModalBase[str]):
         """Populate the results list, optionally filtered by fuzzy query."""
         option_list = self.query_one("#palette-results", OptionList)
         option_list.clear_options()
-
-        if query:
-            q = query.lower()
-            scored: list[tuple[float, int, int, PaletteCommand]] = []
-            for cmd in self._commands:
-                name = cmd.name
-                desc = cmd.description
-                score = max(
-                    partial_fuzzy_score(q, name),
-                    partial_fuzzy_score(q, desc),
-                )
-                if score >= 40:
-                    scored.append((score, int(cmd.enabled), int(cmd.suggested), cmd))
-            scored.sort(key=lambda item: (item[1], item[2], item[0]), reverse=True)
-            self._filtered = [cmd for _, _, _, cmd in scored]
-        else:
-            self._filtered = list(self._commands)
+        self._filtered = self._filter_commands(query)
 
         if not self._filtered:
-            if query:
-                safe_query = escape_rich_text(query)
-                option_list.add_option(
-                    Option(
-                        "[dim]No commands match "
-                        f'[bold]"{safe_query}"[/bold].[/]\n'
-                        "[dim]Try: use a shorter term.[/]\n"
-                        "[dim]Next: press [bold]Esc[/bold]/[bold]q[/bold] to close or [bold]?[/bold] for shortcuts.[/]",
-                        disabled=True,
-                    )
-                )
-            else:
-                option_list.add_option(
-                    Option(
-                        "[dim]No commands available.[/]\n"
-                        "[dim]Try: reopen with [bold]Ctrl+p[/bold].[/]\n"
-                        "[dim]Next: press [bold]?[/bold] for shortcuts.[/]",
-                        disabled=True,
-                    )
-                )
+            option_list.add_option(self._empty_results_option(query))
             return
 
         if not query:
-            suggested = [command for command in self._filtered if command.suggested]
-            remaining = [command for command in self._filtered if not command.suggested]
-            if suggested:
-                option_list.add_option(Option("[bold]Suggested now[/]", disabled=True))
-                for command in suggested:
-                    option_list.add_option(self._build_command_option(command))
-            if remaining:
-                option_list.add_option(Option("[bold]All commands[/]", disabled=True))
-                for command in remaining:
-                    option_list.add_option(self._build_command_option(command))
+            self._populate_grouped_results(option_list)
             self._highlight_first_enabled(option_list)
             return
 
-        for command in self._filtered:
-            option_list.add_option(self._build_command_option(command))
-
+        self._add_command_options(option_list, self._filtered)
         self._highlight_first_enabled(option_list)
+
+    def _filter_commands(self, query: str) -> list[PaletteCommand]:
+        if not query:
+            return list(self._commands)
+
+        normalized_query = query.lower()
+        scored = [
+            match
+            for command in self._commands
+            if (match := _palette_match(normalized_query, command))
+        ]
+        scored.sort(key=_palette_match_sort_key, reverse=True)
+        return [command for _, _, _, command in scored]
+
+    def _empty_results_option(self, query: str) -> Option:
+        if query:
+            safe_query = escape_rich_text(query)
+            return Option(
+                "[dim]No commands match "
+                f'[bold]"{safe_query}"[/bold].[/]\n'
+                "[dim]Try: use a shorter term.[/]\n"
+                "[dim]Next: press [bold]Esc[/bold]/[bold]q[/bold] to close or [bold]?[/bold] for shortcuts.[/]",
+                disabled=True,
+            )
+        return Option(
+            "[dim]No commands available.[/]\n"
+            "[dim]Try: reopen with [bold]Ctrl+p[/bold].[/]\n"
+            "[dim]Next: press [bold]?[/bold] for shortcuts.[/]",
+            disabled=True,
+        )
+
+    def _populate_grouped_results(self, option_list: OptionList) -> None:
+        suggested = [command for command in self._filtered if command.suggested]
+        remaining = [command for command in self._filtered if not command.suggested]
+        self._add_command_group(option_list, "Suggested now", suggested)
+        self._add_command_group(option_list, "All commands", remaining)
+
+    def _add_command_group(
+        self,
+        option_list: OptionList,
+        heading: str,
+        commands: list[PaletteCommand],
+    ) -> None:
+        if not commands:
+            return
+        option_list.add_option(Option(f"[bold]{heading}[/]", disabled=True))
+        self._add_command_options(option_list, commands)
+
+    def _add_command_options(
+        self,
+        option_list: OptionList,
+        commands: list[PaletteCommand],
+    ) -> None:
+        for command in commands:
+            option_list.add_option(self._build_command_option(command))
 
     def _build_command_option(self, command: PaletteCommand) -> Option:
         """Render one command palette row."""
@@ -377,3 +388,18 @@ class CommandPaletteModal(ModalBase[str]):
         if option.disabled or option.id is None:
             return
         self.dismiss(str(option.id))
+
+
+def _palette_match(query: str, command: PaletteCommand) -> PaletteMatch | None:
+    score = max(
+        partial_fuzzy_score(query, command.name),
+        partial_fuzzy_score(query, command.description),
+    )
+    if score < PALETTE_FUZZY_THRESHOLD:
+        return None
+    return score, int(command.enabled), int(command.suggested), command
+
+
+def _palette_match_sort_key(match: PaletteMatch) -> tuple[int, int, float]:
+    score, enabled, suggested, _command = match
+    return enabled, suggested, score

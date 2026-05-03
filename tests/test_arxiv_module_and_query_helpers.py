@@ -453,6 +453,21 @@ class TestHighlightText:
         result = highlight_text("[bold]text[/bold]", ["text"], "#ff0000")
         assert r"\[bold]" in result
 
+    def test_highlight_pattern_cache_is_lru_bounded(self):
+        from arxiv_browser.query import (
+            _HIGHLIGHT_PATTERN_CACHE,
+            _HIGHLIGHT_PATTERN_CACHE_MAX,
+            highlight_text,
+        )
+
+        _HIGHLIGHT_PATTERN_CACHE.clear()
+        for index in range(_HIGHLIGHT_PATTERN_CACHE_MAX + 1):
+            highlight_text(f"term-{index}", [f"term-{index}"], "#ff0000")
+
+        assert len(_HIGHLIGHT_PATTERN_CACHE) == _HIGHLIGHT_PATTERN_CACHE_MAX
+        assert ("term-0",) not in _HIGHLIGHT_PATTERN_CACHE
+        assert (f"term-{_HIGHLIGHT_PATTERN_CACHE_MAX}",) in _HIGHLIGHT_PATTERN_CACHE
+
 
 class TestEscapeRichText:
     """Tests for escape_rich_text()."""
@@ -850,6 +865,13 @@ class TestMatchQueryTerm:
         token = QueryToken(kind="term", value="attention")
         assert match_query_term(paper, token, None) is True
 
+    def test_unknown_field_does_not_match(self, make_paper):
+        from arxiv_browser.query import match_query_term
+
+        paper = make_paper(title="Attention Mechanism")
+        token = QueryToken(kind="term", value="attention", field="unknown")
+        assert match_query_term(paper, token, None) is False
+
 
 class TestMatchesAdvancedQuery:
     """Tests for matches_advanced_query()."""
@@ -896,6 +918,16 @@ class TestMatchesAdvancedQuery:
         rpn = [
             QueryToken(kind="term", value="quantum"),
             QueryToken(kind="op", value="NOT"),
+        ]
+        assert matches_advanced_query(paper, rpn, None) is True
+
+    def test_malformed_binary_operator_defaults_missing_operand_to_false(self, make_paper):
+        from arxiv_browser.query import matches_advanced_query
+
+        paper = make_paper(title="Deep Learning")
+        rpn = [
+            QueryToken(kind="term", value="deep"),
+            QueryToken(kind="op", value="OR"),
         ]
         assert matches_advanced_query(paper, rpn, None) is True
 

@@ -92,28 +92,16 @@ def parse_s2_paper_response(data: dict, arxiv_id: str = "") -> SemanticScholarPa
     if not paper_id:
         return None
 
-    # Extract arXiv ID from externalIds if not provided
     if not arxiv_id:
-        external_ids = data.get("externalIds") or {}
-        arxiv_id = external_ids.get("ArXiv", "")
-
-    # Parse TLDR — it's an object with a "text" field
-    tldr_obj = data.get("tldr")
-    tldr = ""
-    if isinstance(tldr_obj, dict):
-        tldr = tldr_obj.get("text", "")
-
-    # Parse fields of study
-    fos_raw = data.get("fieldsOfStudy") or []
-    fields_of_study = tuple(f for f in fos_raw if isinstance(f, str))
+        arxiv_id = _external_arxiv_id(data)
 
     return SemanticScholarPaper(
         arxiv_id=arxiv_id,
         s2_paper_id=paper_id,
         citation_count=data.get("citationCount") or 0,
         influential_citation_count=data.get("influentialCitationCount") or 0,
-        tldr=tldr,
-        fields_of_study=fields_of_study,
+        tldr=_parse_s2_tldr(data.get("tldr")),
+        fields_of_study=_parse_string_sequence(data.get("fieldsOfStudy")),
         year=data.get("year"),
         url=data.get("url") or "",
         title=data.get("title") or "",
@@ -130,23 +118,59 @@ def parse_citation_entry(data: dict[str, Any]) -> CitationEntry | None:
     paper_id = data.get("paperId")
     if not paper_id:
         return None
-    external_ids = data.get("externalIds")
-    if not isinstance(external_ids, dict):
-        external_ids = {}
-    arxiv_id = external_ids.get("ArXiv", "")
-    authors_raw = data.get("authors") or []
-    authors = ", ".join(
-        a.get("name", "")
-        for a in authors_raw
-        if isinstance(a, dict) and isinstance(a.get("name"), str) and a.get("name")
-    )
-    url = f"https://arxiv.org/abs/{arxiv_id}" if arxiv_id else data.get("url") or ""
+    arxiv_id = _external_arxiv_id(data)
     return CitationEntry(
         s2_paper_id=paper_id,
         arxiv_id=arxiv_id,
         title=data.get("title") or "Unknown Title",
-        authors=authors,
+        authors=_parse_author_names(data.get("authors")),
         year=data.get("year"),
         citation_count=data.get("citationCount") or 0,
-        url=url,
+        url=_citation_url(arxiv_id, data.get("url")),
     )
+
+
+def _external_arxiv_id(data: dict[str, Any]) -> str:
+    """Return an arXiv ID from an S2 externalIds payload when present."""
+    external_ids = data.get("externalIds")
+    if not isinstance(external_ids, dict):
+        return ""
+    arxiv_id = external_ids.get("ArXiv")
+    return arxiv_id if isinstance(arxiv_id, str) else ""
+
+
+def _parse_s2_tldr(tldr_obj: Any) -> str:
+    """Return TLDR text from S2's optional TLDR object."""
+    if not isinstance(tldr_obj, dict):
+        return ""
+    text = tldr_obj.get("text")
+    return text if isinstance(text, str) else ""
+
+
+def _parse_string_sequence(value: Any) -> tuple[str, ...]:
+    """Return only string items from a JSON sequence."""
+    if not isinstance(value, list):
+        return ()
+    return tuple(item for item in value if isinstance(item, str))
+
+
+def _parse_author_names(value: Any) -> str:
+    """Return comma-joined author names from an S2 authors payload."""
+    if not isinstance(value, list):
+        return ""
+    return ", ".join(_author_name(author) for author in value if _author_name(author))
+
+
+def _author_name(author: Any) -> str:
+    """Return one author name, ignoring malformed author entries."""
+    if not isinstance(author, dict):
+        return ""
+    name = author.get("name")
+    return name if isinstance(name, str) else ""
+
+
+def _citation_url(arxiv_id: str, s2_url: Any) -> str:
+    """Prefer arXiv URLs for citation entries when an arXiv ID is available."""
+    if arxiv_id:
+        return f"https://arxiv.org/abs/{arxiv_id}"
+    return s2_url if isinstance(s2_url, str) else ""

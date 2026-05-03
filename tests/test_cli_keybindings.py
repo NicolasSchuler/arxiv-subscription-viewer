@@ -19,6 +19,36 @@ class TestKeybindingsCommand:
         assert "Getting Started" in output
         assert "Core Actions" in output
 
+    def test_keybindings_table_honors_no_color(self, capsys: object) -> None:
+        """--no-color suppresses ANSI escapes for table output."""
+        from arxiv_browser.cli import main
+
+        exit_code = main(["--no-color", "keybindings"])
+        assert exit_code == 0
+        captured = capsys.readouterr()  # type: ignore[union-attr]
+        assert "\033[" not in captured.out
+
+    def test_keybindings_table_honors_color_never(self, capsys: object) -> None:
+        """--color never suppresses ANSI escapes for table output."""
+        from arxiv_browser.cli import main
+
+        exit_code = main(["--color", "never", "keybindings"])
+        assert exit_code == 0
+        captured = capsys.readouterr()  # type: ignore[union-attr]
+        assert "\033[" not in captured.out
+
+    def test_keybindings_table_color_always_overrides_no_color_env(
+        self, capsys: object, monkeypatch
+    ) -> None:
+        """--color always keeps ANSI table output even when NO_COLOR is set."""
+        from arxiv_browser.cli import main
+
+        monkeypatch.setenv("NO_COLOR", "1")
+        exit_code = main(["--color", "always", "keybindings"])
+        assert exit_code == 0
+        captured = capsys.readouterr()  # type: ignore[union-attr]
+        assert "\033[" in captured.out
+
     def test_keybindings_json_format(self, capsys: object) -> None:
         """JSON format produces valid JSON with sections."""
         from arxiv_browser.cli import main
@@ -48,6 +78,14 @@ class TestKeybindingsCommand:
         assert "## Getting Started" in output
         assert "| Key | Action |" in output
         assert "|-----|--------|" in output
+
+    def test_keybindings_markdown_escapes_table_cells(self, capsys: object) -> None:
+        """Markdown table cells escape pipes in keys and descriptions."""
+        from arxiv_browser.cli_keybindings import _render_markdown
+
+        _render_markdown([("Example", [("a|b", "Alpha | beta")])])
+        captured = capsys.readouterr()  # type: ignore[union-attr]
+        assert "| `a\\|b` | Alpha \\| beta |" in captured.out
 
     def test_keybindings_tier_filter_core(self, capsys: object) -> None:
         """Core tier restricts output to core sections only."""

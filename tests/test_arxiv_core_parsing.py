@@ -369,6 +369,41 @@ This is also not valid
         papers = parse_arxiv_file(file_path)
         assert papers == []
 
+    def test_parse_keeps_highest_version_for_duplicate_email_entries(self, tmp_path):
+        content = """------------------------------------------------------------------------------
+\\\\
+arXiv:2401.12345v1
+Date: Mon, 15 Jan 2024 00:00:00 GMT
+
+Title: Older Version
+Authors: Alice
+Categories: cs.AI
+\\\\
+Old abstract.
+\\\\
+------------------------------------------------------------------------------
+\\\\
+arXiv:2401.12345v3
+Date: Tue, 16 Jan 2024 00:00:00 GMT
+
+Title: Newer Version
+Authors: Bob
+Categories: cs.LG
+\\\\
+New abstract.
+\\\\
+------------------------------------------------------------------------------
+"""
+        file_path = tmp_path / "versions.txt"
+        file_path.write_text(content)
+
+        papers = parse_arxiv_file(file_path)
+
+        assert len(papers) == 1
+        assert papers[0].arxiv_id == "2401.12345"
+        assert papers[0].title == "Newer Version"
+        assert papers[0].authors == "Bob"
+
 
 class TestArxivApiSearchHelpers:
     """Tests for arXiv API query and parsing helpers."""
@@ -429,6 +464,29 @@ class TestArxivApiSearchHelpers:
         assert paper.abstract == "This is an abstract."
         assert paper.url == "https://arxiv.org/abs/2401.12345"
         assert paper.source == "api"
+
+    def test_parse_arxiv_api_feed_deduplicates_entries_and_categories(self):
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/2401.12345v1</id>
+    <updated>2026-02-09T00:00:00Z</updated>
+    <title>First</title>
+    <summary>Abstract</summary>
+    <category term="cs.AI"/>
+    <category term="cs.AI"/>
+    <category term="cs.LG"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2401.12345v2</id>
+    <title>Duplicate</title>
+    <summary>Duplicate abstract</summary>
+  </entry>
+</feed>"""
+        papers = parse_arxiv_api_feed(xml)
+        assert len(papers) == 1
+        assert papers[0].title == "First"
+        assert papers[0].categories == "cs.AI cs.LG"
 
     def test_parse_arxiv_api_feed_rejects_invalid_xml(self):
         with pytest.raises(ValueError, match="Invalid arXiv API XML response"):

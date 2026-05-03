@@ -29,6 +29,82 @@ from arxiv_browser.widgets.chrome import StatusBarState
 from arxiv_browser.widgets.details import DetailRenderState
 from arxiv_browser.widgets.listing import PaperHighlightTerms, PaperRowRenderState
 
+_BADGE_REFRESH_KINDS = frozenset({"s2", "hf", "version", "relevance"})
+_TARGET_PAPER_PALETTE_ACTIONS = frozenset(
+    {
+        "open_url",
+        "open_pdf",
+        "download_pdf",
+        "copy_selected",
+        "export_menu",
+        "toggle_read",
+        "toggle_star",
+        "edit_notes",
+        "edit_tags",
+        "show_similar",
+        "add_to_collection",
+        "start_mark",
+    }
+)
+
+
+def _palette_ctrl_e_copy(state: _PaletteAppState) -> tuple[str, str]:
+    if state.in_arxiv_api_mode:
+        return "Exit Search Results", "Return to your local or history papers"
+    return "Toggle Semantic Scholar", "Enable or disable Semantic Scholar enrichment"
+
+
+def _palette_hf_copy(state: _PaletteAppState) -> tuple[str, str]:
+    if state.hf_active:
+        return (
+            "Disable HuggingFace Trending",
+            "Hide HuggingFace badges and detail-pane matches",
+        )
+    return (
+        "Enable HuggingFace Trending",
+        "Show HuggingFace badges and detail-pane matches",
+    )
+
+
+def _palette_preview_copy(state: _PaletteAppState) -> tuple[str, str]:
+    if state.show_abstract_preview:
+        return "Hide Abstract Preview", "Return to a denser paper list without snippets"
+    return "Show Abstract Preview", "Reveal abstract snippets in the paper list"
+
+
+def _palette_detail_mode_copy(state: _PaletteAppState) -> tuple[str, str]:
+    if state.detail_mode == "scan":
+        return "Switch to Full Details", "Expand the detail pane for long-form reading"
+    return "Switch to Scan Details", "Return to a faster triage-focused detail view"
+
+
+def _first_failed_palette_requirement(
+    action_name: str,
+    requirements: tuple[tuple[set[str], bool, str], ...],
+) -> str:
+    for actions, available, reason in requirements:
+        if action_name in actions and not available:
+            return reason
+    return ""
+
+
+def _footer_progress_bindings(
+    label: str,
+    progress: tuple[int, int] | None,
+) -> list[tuple[str, str]] | None:
+    if progress is None:
+        return None
+    current, total = progress
+    bar = render_progress_bar(current, total)
+    return [("", f"{label} {bar} {current}/{total}"), ("?", "help")]
+
+
+def _footer_busy_bindings(label: str) -> list[tuple[str, str]]:
+    from arxiv_browser._ascii import is_ascii_mode
+
+    ellipsis = "..." if is_ascii_mode() else "\u2026"
+    return [("", f"{label}{ellipsis}"), ("?", "help")]
+
 
 class DetailPaneMixin:
     """Mixin providing detail-pane, status bar, footer, and command-palette behaviour.
@@ -406,37 +482,48 @@ class DetailPaneMixin:
         """Return visible list indices requiring badge redraw for dirty badge types."""
         if not self.filtered_papers:
             return []
-        refresh_all = False
-        dirty_ids: set[str] = set()
-        if "s2" in dirty:
-            if self._s2_active:
-                dirty_ids.update(self._s2_cache.keys())
-            else:
-                refresh_all = True
-        if "hf" in dirty:
-            if self._hf_active:
-                dirty_ids.update(self._hf_cache.keys())
-            else:
-                refresh_all = True
-        if "version" in dirty:
-            dirty_ids.update(self._version_updates.keys())
-        if "relevance" in dirty:
-            dirty_ids.update(self._relevance_scores.keys())
-        # Unknown badge type, or explicit full redraw request: fall back to full repaint.
-        if (
-            not dirty
-            or refresh_all
-            or any(kind not in {"s2", "hf", "version", "relevance"} for kind in dirty)
-        ):
-            return list(range(len(self.filtered_papers)))
+        dirty_ids, refresh_all = self._badge_refresh_plan(dirty)
+        if self._needs_full_badge_refresh(dirty, dirty_ids, refresh_all):
+            return self._all_visible_indices()
         if not dirty_ids:
-            return list(range(len(self.filtered_papers)))
+            return self._all_visible_indices()
         visible_index_by_id = self._get_visible_index_map()
         return sorted(
             visible_index_by_id[paper_id]
             for paper_id in dirty_ids
             if paper_id in visible_index_by_id
         )
+
+    def _badge_refresh_plan(self, dirty: set[str]) -> tuple[set[str], bool]:
+        dirty_ids: set[str] = set()
+        refresh_all = False
+        for kind in dirty:
+            ids, requires_full_refresh = self._badge_refresh_ids_for_kind(kind)
+            dirty_ids.update(ids)
+            refresh_all = refresh_all or requires_full_refresh
+        return dirty_ids, refresh_all
+
+    def _badge_refresh_ids_for_kind(self, kind: str) -> tuple[set[str], bool]:
+        if kind == "s2":
+            return (set(self._s2_cache), False) if self._s2_active else (set(), True)
+        if kind == "hf":
+            return (set(self._hf_cache), False) if self._hf_active else (set(), True)
+        if kind == "version":
+            return set(self._version_updates), False
+        if kind == "relevance":
+            return set(self._relevance_scores), False
+        return set(), True
+
+    def _needs_full_badge_refresh(
+        self,
+        dirty: set[str],
+        dirty_ids: set[str],
+        refresh_all: bool,
+    ) -> bool:
+        return not dirty or refresh_all or (not dirty_ids and not dirty <= _BADGE_REFRESH_KINDS)
+
+    def _all_visible_indices(self) -> list[int]:
+        return list(range(len(self.filtered_papers)))
 
     def _flush_badge_refresh(self) -> None:
         """Coalesced badge refresh for only affected visible papers."""
@@ -650,29 +737,15 @@ class DetailPaneMixin:
     ) -> tuple[str, str]:
         """Return the display copy for one palette command in the current state."""
         if action_name == "ctrl_e_dispatch":
-            if state.in_arxiv_api_mode:
-                return "Exit Search Results", "Return to your local or history papers"
-            return "Toggle Semantic Scholar", "Enable or disable Semantic Scholar enrichment"
+            return _palette_ctrl_e_copy(state)
         if action_name == "toggle_hf":
-            if state.hf_active:
-                return (
-                    "Disable HuggingFace Trending",
-                    "Hide HuggingFace badges and detail-pane matches",
-                )
-            return (
-                "Enable HuggingFace Trending",
-                "Show HuggingFace badges and detail-pane matches",
-            )
+            return _palette_hf_copy(state)
         if action_name == "toggle_watch_filter" and state.watch_filter_active:
             return "Show All Papers", "Return to the full paper list"
         if action_name == "toggle_preview":
-            if state.show_abstract_preview:
-                return "Hide Abstract Preview", "Return to a denser paper list without snippets"
-            return "Show Abstract Preview", "Reveal abstract snippets in the paper list"
+            return _palette_preview_copy(state)
         if action_name == "toggle_detail_mode":
-            if state.detail_mode == "scan":
-                return "Switch to Full Details", "Expand the detail pane for long-form reading"
-            return "Switch to Scan Details", "Return to a faster triage-focused detail view"
+            return _palette_detail_mode_copy(state)
         return name, description
 
     def _palette_action_availability(
@@ -698,40 +771,20 @@ class DetailPaneMixin:
         state: _PaletteAppState,
     ) -> str:
         """Return generic non-LLM, non-enrichment blockers for a palette action."""
-        if (
-            action_name
-            in {
-                "open_url",
-                "open_pdf",
-                "download_pdf",
-                "copy_selected",
-                "export_menu",
-                "toggle_read",
-                "toggle_star",
-                "edit_notes",
-                "edit_tags",
-                "show_similar",
-                "add_to_collection",
-                "start_mark",
-            }
-            and not state.has_target_papers
-        ):
+        if action_name in _TARGET_PAPER_PALETTE_ACTIONS and not state.has_target_papers:
             return "selection"
-        if action_name == "select_all" and not state.has_visible_papers:
-            return "visible papers"
-        if action_name == "clear_selection" and not state.has_selection:
-            return "selection"
-        if action_name == "add_bookmark" and not state.active_query:
-            return "an active search"
-        if action_name in {"prev_date", "next_date"} and not state.has_history_navigation:
-            return "history mode"
-        if action_name == "start_goto_mark" and not state.has_marks:
-            return "saved marks"
-        if action_name == "toggle_watch_filter" and not state.watch_list:
-            return "watch list entries"
-        if action_name == "check_versions" and not state.has_starred:
-            return "starred papers"
-        return ""
+        return _first_failed_palette_requirement(
+            action_name,
+            (
+                ({"select_all"}, state.has_visible_papers, "visible papers"),
+                ({"clear_selection"}, state.has_selection, "selection"),
+                ({"add_bookmark"}, bool(state.active_query), "an active search"),
+                ({"prev_date", "next_date"}, state.has_history_navigation, "history mode"),
+                ({"start_goto_mark"}, state.has_marks, "saved marks"),
+                ({"toggle_watch_filter"}, bool(state.watch_list), "watch list entries"),
+                ({"check_versions"}, state.has_starred, "starred papers"),
+            ),
+        )
 
     def _palette_enrichment_blocked_reason(
         self,
@@ -817,47 +870,77 @@ class DetailPaneMixin:
 
     def _get_footer_bindings(self) -> list[tuple[str, str]]:
         """Return context-sensitive binding hints for the footer."""
-        from arxiv_browser._ascii import is_ascii_mode
+        progress_bindings = self._progress_footer_bindings()
+        if progress_bindings is not None:
+            return progress_bindings
+        mode_bindings = self._mode_footer_bindings()
+        if mode_bindings is not None:
+            return mode_bindings
+        return self._browse_footer_bindings()
 
-        ellipsis = "..." if is_ascii_mode() else "\u2026"
-        # Progress operations take highest priority (visual progress bar)
-        if self._scoring_progress is not None:
-            current, total = self._scoring_progress
-            bar = render_progress_bar(current, total)
-            return [("", f"Scoring {bar} {current}/{total}"), ("?", "help")]
-        if self._relevance_scoring_active:
-            return [("", f"Scoring papers{ellipsis}"), ("?", "help")]
-        if self._version_progress is not None:
-            batch, total = self._version_progress
-            bar = render_progress_bar(batch, total)
-            return [("", f"Versions {bar} {batch}/{total}"), ("?", "help")]
-        if self._version_checking:
-            return [("", f"Checking versions{ellipsis}"), ("?", "help")]
-        if self._is_download_batch_active():
-            completed = len(self._download_results)
-            total = self._download_total
-            bar = render_progress_bar(completed, total)
-            return [("", f"Downloading {bar} {completed}/{total}"), ("?", "help")]
-        if self._auto_tag_progress is not None:
-            current, total = self._auto_tag_progress
-            bar = render_progress_bar(current, total)
-            return [("", f"Auto-tagging {bar} {current}/{total}"), ("?", "help")]
-        if self._auto_tag_active:
-            return [("", f"Auto-tagging{ellipsis}"), ("?", "help")]
-        # Search mode — OmniInput visible
-        try:
-            omni = self._get_search_container_widget()
-            if omni.is_open:
-                return _widget_chrome.build_search_footer_bindings()
-        except NoMatches:
-            pass
-        # arXiv API search mode
+    def _progress_footer_bindings(self) -> list[tuple[str, str]] | None:
+        for builder in (
+            self._scoring_progress_footer_bindings,
+            self._scoring_busy_footer_bindings,
+            self._version_progress_footer_bindings,
+            self._version_busy_footer_bindings,
+            self._download_progress_footer_bindings,
+            self._auto_tag_progress_footer_bindings,
+            self._auto_tag_busy_footer_bindings,
+        ):
+            bindings = builder()
+            if bindings is not None:
+                return bindings
+        return None
+
+    def _scoring_progress_footer_bindings(self) -> list[tuple[str, str]] | None:
+        return _footer_progress_bindings("Scoring", self._scoring_progress)
+
+    def _scoring_busy_footer_bindings(self) -> list[tuple[str, str]] | None:
+        if not self._relevance_scoring_active:
+            return None
+        return _footer_busy_bindings("Scoring papers")
+
+    def _version_progress_footer_bindings(self) -> list[tuple[str, str]] | None:
+        return _footer_progress_bindings("Versions", self._version_progress)
+
+    def _version_busy_footer_bindings(self) -> list[tuple[str, str]] | None:
+        if not self._version_checking:
+            return None
+        return _footer_busy_bindings("Checking versions")
+
+    def _download_progress_footer_bindings(self) -> list[tuple[str, str]] | None:
+        if not self._is_download_batch_active():
+            return None
+        return _footer_progress_bindings(
+            "Downloading",
+            (len(self._download_results), self._download_total),
+        )
+
+    def _auto_tag_progress_footer_bindings(self) -> list[tuple[str, str]] | None:
+        return _footer_progress_bindings("Auto-tagging", self._auto_tag_progress)
+
+    def _auto_tag_busy_footer_bindings(self) -> list[tuple[str, str]] | None:
+        if not self._auto_tag_active:
+            return None
+        return _footer_busy_bindings("Auto-tagging")
+
+    def _mode_footer_bindings(self) -> list[tuple[str, str]] | None:
+        if self._is_search_footer_active():
+            return _widget_chrome.build_search_footer_bindings()
         if self._in_arxiv_api_mode:
             return _widget_chrome.build_api_footer_bindings()
-        # Selection mode — papers selected
         if self.selected_ids:
             return _widget_chrome.build_selection_footer_bindings(len(self.selected_ids))
-        # Default browsing — dynamically show contextual hints
+        return None
+
+    def _is_search_footer_active(self) -> bool:
+        try:
+            return bool(self._get_search_container_widget().is_open)
+        except NoMatches:
+            return False
+
+    def _browse_footer_bindings(self) -> list[tuple[str, str]]:
         has_starred = any(m.starred for m in self._config.paper_metadata.values())
         llm_configured = bool(_resolve_llm_command(self._config))
         return _widget_chrome.build_browse_footer_bindings(

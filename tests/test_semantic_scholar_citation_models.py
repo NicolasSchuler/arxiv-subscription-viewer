@@ -88,6 +88,17 @@ class TestParseCitationEntry:
         assert result.arxiv_id == ""
         assert result.url == "https://www.semanticscholar.org/paper/s2id002"
 
+    def test_malformed_external_ids_and_url_are_ignored(self) -> None:
+        data = {
+            "paperId": "s2id-malformed",
+            "externalIds": "not-a-mapping",
+            "url": 42,
+        }
+        result = parse_citation_entry(data)
+        assert result is not None
+        assert result.arxiv_id == ""
+        assert result.url == ""
+
     def test_authors_joining(self) -> None:
         data = {
             "paperId": "s2id003",

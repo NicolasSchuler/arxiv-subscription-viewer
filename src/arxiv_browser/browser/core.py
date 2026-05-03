@@ -45,6 +45,7 @@ from arxiv_browser.models import (
     ArxivSearchModeState,
     LocalBrowseSnapshot,
     Paper,
+    SessionState,
     UserConfig,
 )
 from arxiv_browser.query import remove_query_token
@@ -444,50 +445,54 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
 
     def on_mount(self) -> None:
         """Called when app is mounted. Restores session state if enabled."""
-        # Create shared HTTP client for connection pooling
+        self._initialize_mount_runtime()
+        self._restore_initial_list_state()
+        self._finish_mount_ui()
+        self._show_startup_screen()
+
+    def _initialize_mount_runtime(self) -> None:
         self._http_client = httpx.AsyncClient()
         self._apply_user_css_override()
-        # Warn if config was corrupt and defaults were used
         if self._config.config_defaulted:
             self.notify(
                 "Config file was corrupt and has been backed up. Using defaults.",
                 severity="warning",
                 timeout=8,
             )
-        # Initialize S2 runtime state from config
         self._s2_active = self._config.s2_enabled
-        # Initialize HF runtime state from config
         self._hf_active = self._config.hf_enabled
         if self._hf_active:
             self._track_dataset_task(self._fetch_hf_daily())
-        # Initialize date navigator if in history mode
         if self._is_history_mode() and len(self._history_files) > 1:
             self.call_after_refresh(self._refresh_date_navigator)
-        # Restore session state if enabled
+
+    def _restore_initial_list_state(self) -> None:
         if self._restore_session and self._config.session:
-            session = self._config.session
-            self._sort_index = session.sort_index
-            self.selected_ids = set(session.selected_ids)
-            # Apply saved filter if any
-            if session.current_filter:
-                search_input = self._get_search_input_widget()
-                search_input.value = session.current_filter
-                self._apply_filter(session.current_filter)  # calls _refresh_list_view
-            else:
-                self._refresh_list_view()  # populate without filter
-            # Restore scroll position
-            option_list = self._get_paper_list_widget()
-            if option_list.option_count > 0:
-                # Clamp index to valid range
-                index = min(session.scroll_index, option_list.option_count - 1)
-                option_list.highlighted = max(0, index)
+            self._restore_session_list_state(self._config.session)
+            return
+        self._populate_default_list_state()
+
+    def _restore_session_list_state(self, session: SessionState) -> None:
+        self._sort_index = session.sort_index
+        self.selected_ids = set(session.selected_ids)
+        if session.current_filter:
+            self._get_search_input_widget().value = session.current_filter
+            self._apply_filter(session.current_filter)
         else:
-            # Populate list (deferred from compose for faster first paint)
             self._refresh_list_view()
-            # Default: select first item if available
-            option_list = self._get_paper_list_widget()
-            if option_list.option_count > 0:
-                option_list.highlighted = 0
+        self._restore_list_highlight(session.scroll_index)
+
+    def _populate_default_list_state(self) -> None:
+        self._refresh_list_view()
+        self._restore_list_highlight(0)
+
+    def _restore_list_highlight(self, index: int) -> None:
+        option_list = self._get_paper_list_widget()
+        if option_list.option_count <= 0:
+            return
+        option_list.highlighted = max(0, min(index, option_list.option_count - 1))
+
+    def _finish_mount_ui(self) -> None:
         self._update_header()
         self._update_subtitle()
         self._update_details_header()
@@ -501,14 +506,12 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
             self._hf_active,
         )
         self._prime_ui_refs()
-        # Focus the paper list so key bindings work
         try:
             self._get_paper_list_widget().focus()
         except NoMatches:
             pass
-        # Show first-run tutorial if user hasn't seen it; otherwise consider
-        # the version-bump "What's New" overlay. They are mutually exclusive on
-        # the same launch so a fresh install isn't bombarded with overlays.
+
+    def _show_startup_screen(self) -> None:
         if not self._config.onboarding_seen:
             from arxiv_browser.modals.welcome import WelcomeScreen
 
@@ -573,32 +576,27 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
         self.push_screen(WhatsNewScreen(), callback=self._on_whats_new_dismissed)
 
     async def on_unmount(self) -> None:
-        """Called when app is unmounted. Saves session state and cleans up timers.
-        Uses atomic swap pattern to avoid race conditions with timer callbacks.
-        """
+        """Save session state and clean up timers/tasks when unmounted."""
         self._shutting_down = True
-        # Clean up timers
-        timer = self._search_timer
-        self._search_timer = None
+        self._stop_shutdown_timers()
+        self._save_session_state()
+        self._cancel_dataset_tasks()
+        await self._cancel_background_tasks()
+        self._tfidf_build_task = None
+        await self._close_http_client()
+        self._reset_ui_refs()
+
+    def _stop_shutdown_timers(self) -> None:
+        for attr in ("_search_timer", "_detail_timer", "_badge_timer", "_sort_refresh_timer"):
+            self._stop_timer_attr(attr)
+
+    def _stop_timer_attr(self, attr: str) -> None:
+        timer = getattr(self, attr, None)
+        setattr(self, attr, None)
         if timer is not None:
             timer.stop()
-        detail_timer = self._detail_timer
-        self._detail_timer = None
-        if detail_timer is not None:
-            detail_timer.stop()
-        badge_timer = self._badge_timer
-        self._badge_timer = None
-        if badge_timer is not None:
-            badge_timer.stop()
-        sort_timer = getattr(self, "_sort_refresh_timer", None)
-        self._sort_refresh_timer = None
-        if sort_timer is not None:
-            sort_timer.stop()
-        # Save after timers are cancelled so a pending debounce cannot overwrite
-        # the last applied filter during teardown.
-        self._save_session_state()
-        # Cancel tracked background tasks to avoid leaks during teardown.
-        self._cancel_dataset_tasks()
+
+    async def _cancel_background_tasks(self) -> None:
         background_tasks = getattr(self, "_background_tasks", set())
         pending = [task for task in background_tasks if not task.done()]
         for task in pending:
@@ -609,8 +607,8 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
                 logger.debug("Background task did not cancel before shutdown: %r", task)
         if hasattr(self, "_background_tasks"):
             self._background_tasks.clear()
-        self._tfidf_build_task = None
-        # Close shared HTTP client
+
+    async def _close_http_client(self) -> None:
         client = self._http_client
         self._http_client = None
         if client is not None:
@@ -620,6 +618,8 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
                 logger.debug(
                     "Failed to close shared HTTP client during shutdown: %s", e, exc_info=True
                 )
+
+    def _reset_ui_refs(self) -> None:
         ui_refs = getattr(self, "_ui_refs", None)
         if ui_refs is not None:
             ui_refs.reset()

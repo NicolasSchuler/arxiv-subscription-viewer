@@ -76,6 +76,40 @@ def _relevance_symbol_for_mode(symbol: str) -> str:
     }.get(symbol, symbol)
 
 
+def _partition_tags(tags: list[str]) -> tuple[dict[str, list[str]], list[str]]:
+    namespaced: dict[str, list[str]] = {}
+    unnamespaced: list[str] = []
+    for tag in tags:
+        namespace, value = parse_tag_namespace(tag)
+        if namespace:
+            namespaced.setdefault(namespace, []).append(value)
+        else:
+            unnamespaced.append(value)
+    return namespaced, unnamespaced
+
+
+def _namespaced_tag_lines(
+    namespaced: Mapping[str, list[str]],
+    tag_namespace_colors: Mapping[str, str],
+) -> list[str]:
+    lines: list[str] = []
+    for namespace in sorted(namespaced):
+        color = get_tag_color(f"{namespace}:", tag_namespace_colors)
+        safe_namespace = escape_rich_text(namespace)
+        values = ", ".join(escape_rich_text(value) for value in namespaced[namespace])
+        lines.append(f"  [{color}]{safe_namespace}:[/] {values}")
+    return lines
+
+
+def _unnamespaced_tag_line(
+    tags: list[str],
+    tag_namespace_colors: Mapping[str, str],
+) -> str:
+    color = get_tag_color("", tag_namespace_colors)
+    safe_tags = ", ".join(escape_rich_text(tag) for tag in tags)
+    return f"  [{color}]{safe_tags}[/]"
+
+
 @dataclass(frozen=True, slots=True)
 class DetailRenderState:
     """Complete render state for the detail pane."""
@@ -483,23 +517,10 @@ class PaperDetails(Static):
         if is_collapsed:
             return f"[dim]{collapsed_glyph} Tags ({len(tags)})[/]"
         lines = [f"[bold {resolved_theme_colors['accent']}]{expanded_glyph} Tags[/]"]
-        namespaced: dict[str, list[str]] = {}
-        unnamespaced: list[str] = []
-        for tag in tags:
-            ns, val = parse_tag_namespace(tag)
-            if ns:
-                namespaced.setdefault(ns, []).append(val)
-            else:
-                unnamespaced.append(val)
-        for ns in sorted(namespaced):
-            color = get_tag_color(f"{ns}:", resolved_tag_namespace_colors)
-            safe_ns = escape_rich_text(ns)
-            vals = ", ".join(escape_rich_text(v) for v in namespaced[ns])
-            lines.append(f"  [{color}]{safe_ns}:[/] {vals}")
+        namespaced, unnamespaced = _partition_tags(tags)
+        lines.extend(_namespaced_tag_lines(namespaced, resolved_tag_namespace_colors))
         if unnamespaced:
-            color = get_tag_color("", resolved_tag_namespace_colors)
-            safe_unnamespaced = ", ".join(escape_rich_text(v) for v in unnamespaced)
-            lines.append(f"  [{color}]{safe_unnamespaced}[/]")
+            lines.append(_unnamespaced_tag_line(unnamespaced, resolved_tag_namespace_colors))
         return "\n".join(lines)
 
     def _render_relevance(
@@ -579,32 +600,58 @@ class PaperDetails(Static):
         collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
         expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
         if is_collapsed:
-            hint = ""
-            if s2_data:
-                hint = f" ({s2_data.citation_count} cites)"
-            return f"[dim]{collapsed_glyph} Semantic Scholar{hint}[/]"
+            return self._render_s2_collapsed(s2_data, collapsed_glyph)
         if s2_loading:
             return (
                 f"[bold {resolved_theme_colors['green']}]{expanded_glyph} Semantic Scholar[/]\n"
                 "  [dim italic]Fetching data...[/]"
             )
         if s2_data:
-            lines = [
-                f"[bold {resolved_theme_colors['green']}]{expanded_glyph} Semantic Scholar[/]",
-                f"  [bold {resolved_theme_colors['accent']}]Citations:[/] {s2_data.citation_count}",
-                f"  [bold {resolved_theme_colors['accent']}]Influential:[/] {s2_data.influential_citation_count}",
-            ]
-            if s2_data.fields_of_study:
-                fos = ", ".join(escape_rich_text(field) for field in s2_data.fields_of_study)
-                lines.append(f"  [bold {resolved_theme_colors['accent']}]Fields:[/] {fos}")
-            if s2_data.tldr:
-                safe_tldr = escape_rich_text(s2_data.tldr)
-                lines.append(
-                    f"  [bold {resolved_theme_colors['accent']}]TLDR:[/] "
-                    f"[{resolved_theme_colors['text']}]{safe_tldr}[/]"
-                )
-            return "\n".join(lines)
+            return "\n".join(
+                self._render_s2_data_lines(s2_data, expanded_glyph, resolved_theme_colors)
+            )
         return ""
+
+    def _render_s2_collapsed(
+        self,
+        s2_data: SemanticScholarPaper | None,
+        collapsed_glyph: str,
+    ) -> str:
+        hint = f" ({s2_data.citation_count} cites)" if s2_data else ""
+        return f"[dim]{collapsed_glyph} Semantic Scholar{hint}[/]"
+
+    def _render_s2_data_lines(
+        self,
+        s2_data: SemanticScholarPaper,
+        expanded_glyph: str,
+        theme_colors: Mapping[str, str],
+    ) -> list[str]:
+        lines = [
+            f"[bold {theme_colors['green']}]{expanded_glyph} Semantic Scholar[/]",
+            f"  [bold {theme_colors['accent']}]Citations:[/] {s2_data.citation_count}",
+            f"  [bold {theme_colors['accent']}]Influential:[/] {s2_data.influential_citation_count}",
+        ]
+        if s2_data.fields_of_study:
+            lines.append(self._render_s2_fields(s2_data, theme_colors))
+        if s2_data.tldr:
+            lines.append(self._render_s2_tldr(s2_data, theme_colors))
+        return lines
+
+    def _render_s2_fields(
+        self,
+        s2_data: SemanticScholarPaper,
+        theme_colors: Mapping[str, str],
+    ) -> str:
+        fields = ", ".join(escape_rich_text(field) for field in s2_data.fields_of_study)
+        return f"  [bold {theme_colors['accent']}]Fields:[/] {fields}"
+
+    def _render_s2_tldr(
+        self,
+        s2_data: SemanticScholarPaper,
+        theme_colors: Mapping[str, str],
+    ) -> str:
+        safe_tldr = escape_rich_text(s2_data.tldr)
+        return f"  [bold {theme_colors['accent']}]TLDR:[/] [{theme_colors['text']}]{safe_tldr}[/]"
 
     def _render_hf(
         self,

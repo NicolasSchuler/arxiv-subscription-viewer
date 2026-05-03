@@ -165,7 +165,7 @@ class TestMainCLI:
             "arxiv_browser.app.discover_history_files",
             lambda base_dir: [(datemod(2024, 1, 15), history_file)],
         )
-        monkeypatch.setattr("arxiv_browser.cli.parse_arxiv_file", raise_read_error)
+        monkeypatch.setattr("arxiv_browser.cli_resolver.parse_arxiv_file", raise_read_error)
         monkeypatch.setattr("arxiv_browser.app.load_config", lambda: UserConfig())
 
         result = main()
@@ -366,7 +366,7 @@ class TestMainCLI:
 
         monkeypatch.setattr("sys.argv", ["arxiv_browser", "search", "--category", "cs.AI"])
         monkeypatch.setattr("arxiv_browser.app.load_config", lambda: UserConfig())
-        monkeypatch.setattr("arxiv_browser.cli._fetch_latest_arxiv_digest", fake_fetch)
+        monkeypatch.setattr("arxiv_browser.cli_resolver._fetch_latest_arxiv_digest", fake_fetch)
         monkeypatch.setattr("sys.stdin.isatty", lambda: True)
         monkeypatch.setattr("sys.stdout.isatty", lambda: True)
         monkeypatch.setattr("arxiv_browser.app.ArxivBrowser", FakeApp)
@@ -507,8 +507,10 @@ class TestMainCLI:
             "sys.argv", ["arxiv_browser", "search", "--query", "transformer", "--mode", "page"]
         )
         monkeypatch.setattr("arxiv_browser.app.load_config", lambda: UserConfig())
-        monkeypatch.setattr("arxiv_browser.cli._fetch_latest_arxiv_digest", fail_digest_fetch)
-        monkeypatch.setattr("arxiv_browser.cli._fetch_arxiv_api_papers", fake_page_fetch)
+        monkeypatch.setattr(
+            "arxiv_browser.cli_resolver._fetch_latest_arxiv_digest", fail_digest_fetch
+        )
+        monkeypatch.setattr("arxiv_browser.cli_resolver._fetch_arxiv_api_papers", fake_page_fetch)
         monkeypatch.setattr("sys.stdin.isatty", lambda: True)
         monkeypatch.setattr("sys.stdout.isatty", lambda: True)
         monkeypatch.setattr("arxiv_browser.app.ArxivBrowser", FakeApp)
@@ -605,7 +607,7 @@ class TestResolvePapersHistoryRestore:
                 )
             ]
 
-        monkeypatch.setattr("arxiv_browser.cli.parse_arxiv_file", fake_parse)
+        monkeypatch.setattr("arxiv_browser.cli_resolver.parse_arxiv_file", fake_parse)
         args = argparse.Namespace(input=None, date=None, no_restore=False)
         result = _resolve_papers(args, tmp_path, config, history_files)
 
@@ -643,7 +645,7 @@ class TestResolvePapersHistoryRestore:
                 )
             ]
 
-        monkeypatch.setattr("arxiv_browser.cli.parse_arxiv_file", fake_parse)
+        monkeypatch.setattr("arxiv_browser.cli_resolver.parse_arxiv_file", fake_parse)
         args = argparse.Namespace(input=None, date=None, no_restore=False)
         result = _resolve_papers(args, tmp_path, config, history_files)
 
@@ -681,7 +683,7 @@ class TestResolvePapersHistoryRestore:
                 )
             ]
 
-        monkeypatch.setattr("arxiv_browser.cli.parse_arxiv_file", fake_parse)
+        monkeypatch.setattr("arxiv_browser.cli_resolver.parse_arxiv_file", fake_parse)
         args = argparse.Namespace(input=None, date="2024-01-15", no_restore=False)
         result = _resolve_papers(args, tmp_path, config, history_files)
 
@@ -714,8 +716,8 @@ class TestResolvePapersHistoryRestore:
             api_calls.append(kwargs)
             return [api_paper]
 
-        monkeypatch.setattr("arxiv_browser.cli.parse_arxiv_file", fail_parse)
-        monkeypatch.setattr("arxiv_browser.cli._fetch_latest_arxiv_digest", fake_fetch)
+        monkeypatch.setattr("arxiv_browser.cli_resolver.parse_arxiv_file", fail_parse)
+        monkeypatch.setattr("arxiv_browser.cli_resolver._fetch_latest_arxiv_digest", fake_fetch)
 
         args = argparse.Namespace(
             command="search",
@@ -758,8 +760,8 @@ class TestResolvePapersHistoryRestore:
             page_calls.append(int(kwargs["start"]))
             return pages.pop(0)
 
-        monkeypatch.setattr("arxiv_browser.cli._fetch_arxiv_api_papers", fake_fetch)
-        monkeypatch.setattr("arxiv_browser.cli.time.sleep", lambda _seconds: None)
+        monkeypatch.setattr("arxiv_browser.cli_resolver._fetch_arxiv_api_papers", fake_fetch)
+        monkeypatch.setattr("arxiv_browser.cli_resolver.time.sleep", lambda _seconds: None)
 
         papers = _fetch_latest_arxiv_digest(
             query="",
@@ -793,8 +795,8 @@ class TestResolvePapersHistoryRestore:
             page_calls.append(int(kwargs["start"]))
             return pages.pop(0)
 
-        monkeypatch.setattr("arxiv_browser.cli._fetch_arxiv_api_papers", fake_fetch)
-        monkeypatch.setattr("arxiv_browser.cli.time.sleep", lambda _seconds: None)
+        monkeypatch.setattr("arxiv_browser.cli_resolver._fetch_arxiv_api_papers", fake_fetch)
+        monkeypatch.setattr("arxiv_browser.cli_resolver.time.sleep", lambda _seconds: None)
 
         papers = _fetch_latest_arxiv_digest(
             query="",

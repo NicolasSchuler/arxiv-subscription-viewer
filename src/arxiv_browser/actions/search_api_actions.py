@@ -205,72 +205,24 @@ async def _run_arxiv_search(app: "ArxivBrowser", request: ArxivSearchRequest, st
         app.notify("Search already in progress", title="arXiv Search")
         return
 
-    max_results = _coerce_arxiv_api_max_results(app._config.arxiv_api_max_results)
-    app._config.arxiv_api_max_results = max_results
-    start = max(0, start)
-
-    # Increment the token before launching the fetch so any concurrent or
-    # previous in-flight response that checks the token will see a mismatch
-    # and self-discard.
-    app._arxiv_api_request_token += 1
-    request_token = app._arxiv_api_request_token
-    app._arxiv_api_fetch_inflight = True
-    app._arxiv_api_loading = True
-    app._update_status_bar()
+    start, max_results = _normalize_arxiv_search_page(app, start)
+    request_token = _begin_arxiv_search_request(app)
 
     try:
         papers = await app._fetch_arxiv_api_page(request, start, max_results)
     except ValueError as exc:
-        app.notify(str(exc), title="arXiv Search", severity="error")
+        _notify_arxiv_value_error(app, exc)
         return
     except httpx.HTTPStatusError as exc:
-        status_code = exc.response.status_code
-        if status_code == 429:
-            message = build_actionable_error(
-                "run arXiv API search",
-                why="arXiv API rate limit reached (HTTP 429)",
-                next_step="wait a few seconds and retry with A",
-            )
-        elif status_code >= 500:
-            message = build_actionable_error(
-                "run arXiv API search",
-                why=f"arXiv API is unavailable right now (HTTP {status_code})",
-                next_step="retry in a minute",
-            )
-        else:
-            message = build_actionable_error(
-                "run arXiv API search",
-                why=f"arXiv API rejected the request (HTTP {status_code})",
-                next_step="refine the query and retry with A",
-            )
-        app.notify(message, title="arXiv Search", severity="error", timeout=8)
+        _notify_arxiv_status_error(app, exc)
         return
     except (httpx.HTTPError, OSError) as exc:
-        app.notify(
-            build_actionable_error(
-                "run arXiv API search",
-                why="a network or I/O error occurred",
-                next_step="check connectivity and retry with A",
-            ),
-            title="arXiv Search",
-            severity="error",
-            timeout=8,
-        )
-        logger.warning("arXiv search failed: %s", exc, exc_info=True)
+        _notify_arxiv_network_error(app, exc)
         return
     finally:
-        # Only clear inflight/loading flags when our token is still current.
-        # If a newer request has already incremented the token, leave the flags
-        # set so the newer request can clear them itself when it finishes.
-        if request_token == app._arxiv_api_request_token:
-            app._arxiv_api_fetch_inflight = False
-            app._arxiv_api_loading = False
-            app._update_status_bar()
+        _finish_arxiv_search_request(app, request_token)
 
-    # Discard the response if the user exited API mode or started a newer
-    # search while this one was in flight.  _arxiv_api_request_token is
-    # incremented both here (at search start) and in action_exit_arxiv_search_mode.
-    if request_token != app._arxiv_api_request_token:
+    if _is_stale_arxiv_search_response(app, request_token):
         return
 
     if start > 0 and not papers:
@@ -278,6 +230,90 @@ async def _run_arxiv_search(app: "ArxivBrowser", request: ArxivSearchRequest, st
         return
 
     app._apply_arxiv_search_results(request, start, max_results, papers)
+    _notify_arxiv_search_success(app, start, max_results, papers)
+
+
+def _normalize_arxiv_search_page(app: "ArxivBrowser", start: int) -> tuple[int, int]:
+    max_results = _coerce_arxiv_api_max_results(app._config.arxiv_api_max_results)
+    app._config.arxiv_api_max_results = max_results
+    return max(0, start), max_results
+
+
+def _begin_arxiv_search_request(app: "ArxivBrowser") -> int:
+    """Mark an arXiv API request active and return its freshness token."""
+    app._arxiv_api_request_token += 1
+    request_token = app._arxiv_api_request_token
+    app._arxiv_api_fetch_inflight = True
+    app._arxiv_api_loading = True
+    app._update_status_bar()
+    return request_token
+
+
+def _finish_arxiv_search_request(app: "ArxivBrowser", request_token: int) -> None:
+    """Clear loading flags only when this request still owns them."""
+    if request_token != app._arxiv_api_request_token:
+        return
+    app._arxiv_api_fetch_inflight = False
+    app._arxiv_api_loading = False
+    app._update_status_bar()
+
+
+def _is_stale_arxiv_search_response(app: "ArxivBrowser", request_token: int) -> bool:
+    return request_token != app._arxiv_api_request_token
+
+
+def _notify_arxiv_value_error(app: "ArxivBrowser", exc: ValueError) -> None:
+    app.notify(str(exc), title="arXiv Search", severity="error")
+
+
+def _notify_arxiv_status_error(app: "ArxivBrowser", exc: httpx.HTTPStatusError) -> None:
+    message = _arxiv_status_error_message(exc.response.status_code)
+    app.notify(message, title="arXiv Search", severity="error", timeout=8)
+
+
+def _arxiv_status_error_message(status_code: int) -> str:
+    if status_code == 429:
+        return build_actionable_error(
+            "run arXiv API search",
+            why="arXiv API rate limit reached (HTTP 429)",
+            next_step="wait a few seconds and retry with A",
+        )
+    if status_code >= 500:
+        return build_actionable_error(
+            "run arXiv API search",
+            why=f"arXiv API is unavailable right now (HTTP {status_code})",
+            next_step="retry in a minute",
+        )
+    return build_actionable_error(
+        "run arXiv API search",
+        why=f"arXiv API rejected the request (HTTP {status_code})",
+        next_step="refine the query and retry with A",
+    )
+
+
+def _notify_arxiv_network_error(
+    app: "ArxivBrowser",
+    exc: httpx.HTTPError | OSError,
+) -> None:
+    app.notify(
+        build_actionable_error(
+            "run arXiv API search",
+            why="a network or I/O error occurred",
+            next_step="check connectivity and retry with A",
+        ),
+        title="arXiv Search",
+        severity="error",
+        timeout=8,
+    )
+    logger.warning("arXiv search failed: %s", exc, exc_info=True)
+
+
+def _notify_arxiv_search_success(
+    app: "ArxivBrowser",
+    start: int,
+    max_results: int,
+    papers: list[Paper],
+) -> None:
     page_number = (start // max_results) + 1
     if papers:
         app.notify(

@@ -117,6 +117,17 @@ class TestParseS2PaperResponse:
         assert result is not None
         assert result.arxiv_id == "2401.99999"
 
+    def test_malformed_external_ids_are_ignored(self) -> None:
+        data = {
+            "paperId": "abc123",
+            "externalIds": ["not", "a", "mapping"],
+            "tldr": {"text": 42},
+        }
+        result = parse_s2_paper_response(data)
+        assert result is not None
+        assert result.arxiv_id == ""
+        assert result.tldr == ""
+
     def test_missing_optional_fields_default_to_zero(self) -> None:
         data = {"paperId": "abc123"}
         result = parse_s2_paper_response(data, arxiv_id="2401.12345")

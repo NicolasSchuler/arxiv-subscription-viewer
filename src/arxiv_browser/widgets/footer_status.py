@@ -351,42 +351,81 @@ def _build_full_status_parts(state: StatusBarState) -> list[str]:
             f"[bold {state.theme_colors['green']}]{state.selected_count} selected[/]",
         )
     if state.in_arxiv_api_mode and state.api_page is not None:
-        parts.extend(
-            [
-                f"[{state.theme_colors['orange']}]API[/]",
-                f"[dim]Page: {state.api_page}[/]",
-            ]
-        )
-        if state.arxiv_api_loading:
-            parts.append(f"[{state.theme_colors['orange']}]Loading...[/]")
+        parts.extend(_full_api_segments(state))
     if state.show_abstract_preview:
         parts.append(f"[{state.theme_colors['purple']}]Preview[/]")
 
-    if state.s2_active:
-        if state.s2_api_error:
-            parts.append(f"[{state.theme_colors['orange']}]S2:err[/]")
-        elif state.s2_loading:
-            parts.append(f"[{state.theme_colors['green']}]S2 loading...[/]")
-        elif state.s2_count > 0:
-            parts.append(f"[{state.theme_colors['green']}]S2:{state.s2_count}[/]")
-        else:
-            parts.append(f"[{state.theme_colors['green']}]S2[/]")
-
-    if state.hf_active:
-        if state.hf_api_error:
-            parts.append(f"[{state.theme_colors['orange']}]HF:err[/]")
-        elif state.hf_loading:
-            parts.append(f"[{state.theme_colors['orange']}]HF loading...[/]")
-        elif state.hf_match_count > 0:
-            parts.append(f"[{state.theme_colors['orange']}]HF:{state.hf_match_count}[/]")
-        else:
-            parts.append(f"[{state.theme_colors['orange']}]HF[/]")
-
-    if state.version_checking:
-        parts.append(f"[{state.theme_colors['pink']}]Checking versions...[/]")
-    elif state.version_update_count > 0:
-        parts.append(f"[{state.theme_colors['pink']}]{state.version_update_count} updated[/]")
+    parts.extend(_full_flag_segments(state))
+    parts.extend(_full_version_segments(state))
     return parts
+
+
+def _full_api_segments(state: StatusBarState) -> list[str]:
+    """Return full-width arXiv API status segments."""
+    segments = [
+        f"[{state.theme_colors['orange']}]API[/]",
+        f"[dim]Page: {state.api_page}[/]",
+    ]
+    if state.arxiv_api_loading:
+        segments.append(f"[{state.theme_colors['orange']}]Loading...[/]")
+    return segments
+
+
+def _full_flag_segments(state: StatusBarState) -> list[str]:
+    """Return S2/HF full-width status segments."""
+    segments = []
+    if state.s2_active:
+        segments.append(
+            _rich_flag_segment(
+                loading=state.s2_loading,
+                count=state.s2_count,
+                label="S2",
+                color=state.theme_colors["green"],
+                error_color=state.theme_colors["orange"],
+                api_error=state.s2_api_error,
+            )
+        )
+    if state.hf_active:
+        segments.append(
+            _rich_flag_segment(
+                loading=state.hf_loading,
+                count=state.hf_match_count,
+                label="HF",
+                color=state.theme_colors["orange"],
+                error_color=state.theme_colors["orange"],
+                api_error=state.hf_api_error,
+            )
+        )
+    return segments
+
+
+def _rich_flag_segment(
+    *,
+    loading: bool,
+    count: int,
+    label: str,
+    color: str,
+    error_color: str,
+    api_error: bool = False,
+) -> str:
+    """Return a full-width Rich flag segment like S2/HF status."""
+    if api_error:
+        return f"[{error_color}]{label}:err[/]"
+    if loading:
+        return f"[{color}]{label} loading...[/]"
+    if count > 0:
+        return f"[{color}]{label}:{count}[/]"
+    return f"[{color}]{label}[/]"
+
+
+def _full_version_segments(state: StatusBarState) -> list[str]:
+    """Return full-width version-checking status segments."""
+    color = state.theme_colors["pink"]
+    if state.version_checking:
+        return [f"[{color}]Checking versions...[/]"]
+    if state.version_update_count > 0:
+        return [f"[{color}]{state.version_update_count} updated[/]"]
+    return []
 
 
 def _render_compact_status(parts: list[str], max_width: int) -> str:
@@ -410,9 +449,7 @@ def _truncate_rich_text(text: str, max_width: int | None) -> str:
     """
     if max_width is None or max_width <= 0:
         return text
-    stripped = re.sub(r"\\\[", "X", text)
-    stripped = re.sub(r"\[[^\]]*]", "", stripped)
-    if len(stripped) <= max_width:
+    if _rich_visible_width(text) <= max_width:
         return text
     target = max(0, max_width - 3)
     result: list[str] = []
@@ -420,21 +457,28 @@ def _truncate_rich_text(text: str, max_width: int | None) -> str:
     i = 0
     n = len(text)
     while i < n and visible_count < target:
-        if text[i] == "\\" and i + 1 < n and text[i + 1] == "[":
-            result.append(text[i : i + 2])
-            visible_count += 1
-            i += 2
-            continue
-        if text[i] == "[":
-            end = text.find("]", i)
-            if end != -1:
-                result.append(text[i : end + 1])
-                i = end + 1
-                continue
-        result.append(text[i])
-        visible_count += 1
-        i += 1
+        chunk, next_i, visible_delta = _next_rich_text_chunk(text, i)
+        result.append(chunk)
+        visible_count += visible_delta
+        i = next_i
     return "".join(result) + "..."
+
+
+def _rich_visible_width(text: str) -> int:
+    """Return visible width after ignoring Rich tags."""
+    escaped_brackets = re.sub(r"\\\[", "X", text)
+    return len(re.sub(r"\[[^\]]*]", "", escaped_brackets))
+
+
+def _next_rich_text_chunk(text: str, index: int) -> tuple[str, int, int]:
+    """Return the next Rich-aware chunk, next index, and visible width delta."""
+    if text[index] == "\\" and index + 1 < len(text) and text[index + 1] == "[":
+        return text[index : index + 2], index + 2, 1
+    if text[index] == "[":
+        end = text.find("]", index)
+        if end != -1:
+            return text[index : end + 1], end + 1, 0
+    return text[index], index + 1, 1
 
 
 __all__ = [

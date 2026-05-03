@@ -144,6 +144,39 @@ _HIGHLIGHT_PATTERN_CACHE_MAX = 256
 _HIGHLIGHT_PATTERN_CACHE: OrderedDict[tuple[str, ...], re.Pattern[str]] = OrderedDict()
 
 
+def _normalize_highlight_terms(terms: list[str]) -> list[str]:
+    """Return unique highlight terms, case-insensitive and longest first."""
+    normalized = []
+    seen: set[str] = set()
+    for term in terms:
+        cleaned = term.strip()
+        if len(cleaned) < 2:
+            continue
+        key = cleaned.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(cleaned)
+    normalized.sort(key=len, reverse=True)
+    return normalized
+
+
+def _highlight_pattern_for_terms(normalized_terms: list[str]) -> re.Pattern[str]:
+    """Return an LRU-cached regex pattern for normalized highlight terms."""
+    cache_key = tuple(normalized_terms)
+    pattern = _HIGHLIGHT_PATTERN_CACHE.get(cache_key)
+    if pattern is not None:
+        _HIGHLIGHT_PATTERN_CACHE.move_to_end(cache_key)
+        return pattern
+
+    escaped_terms = [escape_rich_text(term) for term in normalized_terms]
+    pattern = re.compile("|".join(re.escape(term) for term in escaped_terms), re.IGNORECASE)
+    if len(_HIGHLIGHT_PATTERN_CACHE) >= _HIGHLIGHT_PATTERN_CACHE_MAX:
+        _HIGHLIGHT_PATTERN_CACHE.popitem(last=False)
+    _HIGHLIGHT_PATTERN_CACHE[cache_key] = pattern
+    return pattern
+
+
 def highlight_text(text: str, terms: list[str], color: str) -> str:
     """Highlight terms inside text using Rich markup.
 
@@ -156,30 +189,10 @@ def highlight_text(text: str, terms: list[str], color: str) -> str:
     escaped_text = escape_rich_text(text)
     if not terms:
         return escaped_text
-    normalized = []
-    seen: set[str] = set()
-    for term in terms:
-        cleaned = term.strip()
-        if len(cleaned) < 2:
-            continue
-        key = cleaned.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        normalized.append(cleaned)
+    normalized = _normalize_highlight_terms(terms)
     if not normalized:
         return escaped_text
-    normalized.sort(key=len, reverse=True)
-    cache_key = tuple(normalized)
-    pattern = _HIGHLIGHT_PATTERN_CACHE.get(cache_key)
-    if pattern is not None:
-        _HIGHLIGHT_PATTERN_CACHE.move_to_end(cache_key)
-    else:
-        escaped_terms = [escape_rich_text(term) for term in normalized]
-        pattern = re.compile("|".join(re.escape(term) for term in escaped_terms), re.IGNORECASE)
-        if len(_HIGHLIGHT_PATTERN_CACHE) >= _HIGHLIGHT_PATTERN_CACHE_MAX:
-            _HIGHLIGHT_PATTERN_CACHE.popitem(last=False)
-        _HIGHLIGHT_PATTERN_CACHE[cache_key] = pattern
+    pattern = _highlight_pattern_for_terms(normalized)
     return pattern.sub(lambda match: f"[bold {color}]{match.group(0)}[/]", escaped_text)
 
 
@@ -282,20 +295,22 @@ def reconstruct_query(tokens: list[QueryToken], exclude_index: int) -> str:
         return " ".join(_token_to_str(t) for t in tokens)
 
     remaining = [t for i, t in enumerate(tokens) if i != exclude_index]
+    cleaned = _remove_orphaned_query_ops(remaining)
+    return " ".join(_token_to_str(t) for t in cleaned)
 
-    # Clean up orphaned operators: strip leading/trailing ops and adjacent ops
+
+def _remove_orphaned_query_ops(tokens: list[QueryToken]) -> list[QueryToken]:
+    """Drop leading, adjacent, and trailing Boolean operators after token removal."""
+
     cleaned: list[QueryToken] = []
-    for tok in remaining:
-        # Skip operators that would be leading or adjacent to another op
+    for tok in tokens:
         if tok.kind == "op" and (not cleaned or cleaned[-1].kind == "op"):
             continue
         cleaned.append(tok)
 
-    # Remove trailing operator
     if cleaned and cleaned[-1].kind == "op":
         cleaned.pop()
-
-    return " ".join(_token_to_str(t) for t in cleaned)
+    return cleaned
 
 
 def get_query_tokens(query: str) -> list[QueryToken]:
@@ -506,24 +521,53 @@ def match_query_term(
     if not value:
         return True
     value_lower = value.lower()
-    if token.field == "cat":
-        return value_lower in paper.categories.lower()
-    if token.field == "tag":
-        if not paper_metadata:
-            return False
-        return any(value_lower in tag.lower() for tag in paper_metadata.tags)
-    if token.field == "title":
-        return value_lower in paper.title.lower()
-    if token.field == "author":
-        return value_lower in paper.authors.lower()
-    if token.field == "abstract":
-        return value_lower in abstract_text.lower()
+    if token.field:
+        return _match_field_query_term(
+            paper, token.field, value_lower, paper_metadata, abstract_text
+        )
+    virtual_match = _match_virtual_query_term(value_lower, paper_metadata)
+    if virtual_match is not None:
+        return virtual_match
+    return value_lower in _default_query_haystack(paper)
+
+
+def _match_field_query_term(
+    paper: Paper,
+    field: str,
+    value_lower: str,
+    paper_metadata: PaperMetadata | None,
+    abstract_text: str,
+) -> bool:
+    """Match a lower-cased query value against one field scope."""
+    if field == "tag":
+        return bool(paper_metadata) and any(
+            value_lower in tag.lower() for tag in paper_metadata.tags
+        )
+
+    haystacks = {
+        "cat": paper.categories,
+        "title": paper.title,
+        "author": paper.authors,
+        "abstract": abstract_text,
+    }
+    haystack = haystacks.get(field)
+    return bool(haystack) and value_lower in haystack.lower()
+
+
+def _match_virtual_query_term(
+    value_lower: str, paper_metadata: PaperMetadata | None
+) -> bool | None:
+    """Return a virtual-term match, or None when the value is not virtual."""
     if value_lower == "unread":
         return not paper_metadata or not paper_metadata.is_read
     if value_lower == "starred":
         return bool(paper_metadata and paper_metadata.starred)
-    haystack = f"{paper.title} {paper.authors}".lower()
-    return value_lower in haystack
+    return None
+
+
+def _default_query_haystack(paper: Paper) -> str:
+    """Return the default lower-cased fields used by unscoped terms."""
+    return f"{paper.title} {paper.authors}".lower()
 
 
 def matches_advanced_query(
@@ -558,17 +602,32 @@ def matches_advanced_query(
         if token.kind == "term":
             stack.append(match_query_term(paper, token, paper_metadata, abstract_text))
             continue
-        if token.value == "NOT":
-            value = stack.pop() if stack else False  # Defensive: malformed RPN → False
-            stack.append(not value)
-        else:
-            right = stack.pop() if stack else False  # Defensive: malformed RPN → False
-            left = stack.pop() if stack else False  # Defensive: malformed RPN → False
-            if token.value == "AND":
-                stack.append(left and right)
-            else:
-                stack.append(left or right)
-    return stack[-1] if stack else True  # Empty stack = no filter: fail-open (match all)
+        _apply_rpn_operator(stack, token.value)
+    return _final_rpn_result(stack)
+
+
+def _pop_rpn_value(stack: list[bool]) -> bool:
+    """Pop a stack value, using False for malformed RPN."""
+    return stack.pop() if stack else False
+
+
+def _apply_rpn_operator(stack: list[bool], operator: str) -> None:
+    """Apply one Boolean RPN operator in place."""
+    if operator == "NOT":
+        stack.append(not _pop_rpn_value(stack))
+        return
+
+    right = _pop_rpn_value(stack)
+    left = _pop_rpn_value(stack)
+    if operator == "AND":
+        stack.append(left and right)
+        return
+    stack.append(left or right)
+
+
+def _final_rpn_result(stack: list[bool]) -> bool:
+    """Return the expression result; empty expressions fail open."""
+    return stack[-1] if stack else True
 
 
 def paper_matches_watch_entry(paper: Paper, entry: WatchListEntry) -> bool:

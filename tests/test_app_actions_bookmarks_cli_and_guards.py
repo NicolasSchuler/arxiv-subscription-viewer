@@ -347,14 +347,14 @@ class TestCliResolutionCoverage:
 
         with (
             patch("arxiv_browser.cli.os.access", return_value=True),
-            patch("arxiv_browser.cli.parse_arxiv_file", side_effect=OSError("read error")),
+            patch("arxiv_browser.cli_resolver.parse_arxiv_file", side_effect=OSError("read error")),
         ):
             read_error = _resolve_legacy_fallback(tmp_path)
         assert read_error == 1
 
         with (
             patch("arxiv_browser.cli.os.access", return_value=True),
-            patch("arxiv_browser.cli.parse_arxiv_file", return_value=[make_paper()]),
+            patch("arxiv_browser.cli_resolver.parse_arxiv_file", return_value=[make_paper()]),
         ):
             ok = _resolve_legacy_fallback(tmp_path)
         assert isinstance(ok, list) and len(ok) == 1
@@ -366,7 +366,7 @@ class TestCliResolutionCoverage:
             (date(2026, 1, 23), tmp_path / "2026-01-23.txt"),
             (date(2026, 1, 22), tmp_path / "2026-01-22.txt"),
         ]
-        with patch("arxiv_browser.cli.parse_arxiv_file", return_value=[make_paper()]):
+        with patch("arxiv_browser.cli_resolver.parse_arxiv_file", return_value=[make_paper()]):
             result = _resolve_papers(args, tmp_path, config, history_files)
         assert isinstance(result, tuple)
         assert result[2] == 1
@@ -379,7 +379,7 @@ class TestCliResolutionCoverage:
             (date(2026, 1, 23), tmp_path / "2026-01-23.txt"),
             (date(2026, 1, 22), tmp_path / "2026-01-22.txt"),
         ]
-        with patch("arxiv_browser.cli.parse_arxiv_file", return_value=[make_paper()]):
+        with patch("arxiv_browser.cli_resolver.parse_arxiv_file", return_value=[make_paper()]):
             result = _resolve_papers(args, tmp_path, config, history_files)
         assert isinstance(result, tuple)
         assert result[2] == 0
@@ -392,7 +392,7 @@ class TestCliResolutionCoverage:
             (date(2026, 1, 23), tmp_path / "2026-01-23.txt"),
             (date(2026, 1, 22), tmp_path / "2026-01-22.txt"),
         ]
-        with patch("arxiv_browser.cli.parse_arxiv_file", return_value=[make_paper()]):
+        with patch("arxiv_browser.cli_resolver.parse_arxiv_file", return_value=[make_paper()]):
             result = _resolve_papers(args, tmp_path, config, history_files)
         assert isinstance(result, tuple)
         assert result[2] == 0

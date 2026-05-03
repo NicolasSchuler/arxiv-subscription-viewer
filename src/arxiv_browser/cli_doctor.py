@@ -8,6 +8,8 @@ import re
 import shlex
 import shutil
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
@@ -20,6 +22,15 @@ _DOCTOR_WARN_MARKER = "  WARN "
 _DOCTOR_INFO_MARKER = "  info "
 
 
+@dataclass(frozen=True, slots=True)
+class _LlmDiagnosticTarget:
+    """Resolved LLM command target to validate for doctor output."""
+
+    label: str
+    command: str
+    preset_name: str | None = None
+
+
 def _get_version() -> str:
     """Return the installed package version, or 'dev' if not installed."""
     try:
@@ -28,22 +39,38 @@ def _get_version() -> str:
         return "dev"
 
 
-def _extract_command_binary(command_template: str) -> str | None:
-    """Extract the executable token from a command template for diagnostics."""
+def _split_command_template(command_template: str) -> list[str] | None:
     try:
-        argv = shlex.split(command_template, posix=os.name != "nt")
+        return shlex.split(command_template, posix=os.name != "nt")
     except ValueError:
         return None
+
+
+def _drop_posix_env_assignments(argv: list[str]) -> list[str]:
+    """Drop leading VAR=value assignments that precede a POSIX command."""
+    index = 0
+    while index < len(argv) - 1 and _POSIX_ENV_ASSIGNMENT_RE.match(argv[index]):
+        index += 1
+    return argv[index:]
+
+
+def _strip_windows_wrapping_quotes(binary: str) -> str:
+    if len(binary) >= 2 and binary.startswith('"') and binary.endswith('"'):
+        return binary[1:-1]
+    return binary
+
+
+def _extract_command_binary(command_template: str) -> str | None:
+    """Extract the executable token from a command template for diagnostics."""
+    argv = _split_command_template(command_template)
     if not argv:
         return None
     if os.name != "nt":
-        while len(argv) > 1 and _POSIX_ENV_ASSIGNMENT_RE.match(argv[0]):
-            argv.pop(0)
-        if not argv:
-            return None
-    if os.name == "nt" and len(argv[0]) >= 2 and argv[0].startswith('"') and argv[0].endswith('"'):
-        return argv[0][1:-1]
-    return argv[0]
+        argv = _drop_posix_env_assignments(argv)
+    if not argv:
+        return None
+    binary = argv[0]
+    return _strip_windows_wrapping_quotes(binary) if os.name == "nt" else binary
 
 
 def _print_doctor_header() -> None:
@@ -94,51 +121,106 @@ def _doctor_llm_issue_count(
     from arxiv_browser.llm_providers import llm_command_requires_shell
 
     resolved_llm_command = _resolve_llm_command(config)
-    if config.llm_command and resolved_llm_command:
-        if "{prompt}" not in resolved_llm_command:
-            print(f"{warn_marker} LLM command: missing required {{prompt}} placeholder")
-            return 1
-        if not config.allow_llm_shell_fallback and llm_command_requires_shell(resolved_llm_command):
-            print(
-                f"{warn_marker} LLM command: requires shell execution, "
-                "but allow_llm_shell_fallback is disabled"
-            )
-            return 1
-        cmd_binary = _extract_command_binary(resolved_llm_command)
-        if cmd_binary and shutil.which(cmd_binary):
-            print(f"{ok_marker} LLM command: {cmd_binary} found on PATH")
-            return 0
-        print(
-            f"{warn_marker} LLM command: "
-            f"{cmd_binary or 'unable to parse command'} NOT found on PATH"
-        )
+    target = _resolve_llm_diagnostic_target(
+        config,
+        resolved_llm_command,
+        LLM_PRESETS,
+        warn_marker=warn_marker,
+        info_marker=info_marker,
+    )
+    if isinstance(target, int):
+        return target
+    if target is None:
+        return 0
+    if not _llm_command_has_prompt(target, warn_marker=warn_marker):
         return 1
+    if not _llm_shell_policy_allows(
+        target,
+        allow_shell=config.allow_llm_shell_fallback,
+        requires_shell_fn=llm_command_requires_shell,
+        warn_marker=warn_marker,
+    ):
+        return 1
+    return _report_llm_binary_status(target, ok_marker=ok_marker, warn_marker=warn_marker)
 
+
+def _resolve_llm_diagnostic_target(
+    config: UserConfig,
+    resolved_llm_command: str,
+    presets: dict[str, str],
+    *,
+    warn_marker: str,
+    info_marker: str,
+) -> _LlmDiagnosticTarget | int | None:
+    """Return the LLM target to diagnose, printing non-target status messages."""
+    if config.llm_command and resolved_llm_command:
+        return _LlmDiagnosticTarget("LLM command", resolved_llm_command)
     if not config.llm_preset:
         print(f"{info_marker} LLM: not configured (set llm_preset or llm_command in config)")
-        return 0
-
-    preset_cmd_name = config.llm_preset
-    if preset_cmd_name not in LLM_PRESETS:
-        print(f"{warn_marker} LLM preset: unknown preset '{preset_cmd_name}'")
+        return None
+    if config.llm_preset not in presets:
+        print(f"{warn_marker} LLM preset: unknown preset '{config.llm_preset}'")
         return 1
-    if "{prompt}" not in resolved_llm_command:
-        print(f"{warn_marker} LLM preset: missing required {{prompt}} placeholder")
-        return 1
-    if not config.allow_llm_shell_fallback and llm_command_requires_shell(resolved_llm_command):
-        print(
-            f"{warn_marker} LLM preset: {preset_cmd_name} requires shell execution, "
-            "but allow_llm_shell_fallback is disabled"
-        )
-        return 1
-    cmd_binary = _extract_command_binary(resolved_llm_command)
-    if cmd_binary and shutil.which(cmd_binary):
-        print(f"{ok_marker} LLM preset: {preset_cmd_name} ({cmd_binary} found on PATH)")
-        return 0
-    print(
-        f"{warn_marker} LLM preset: {preset_cmd_name} "
-        f"({cmd_binary or 'unable to parse command'} NOT found on PATH)"
+    return _LlmDiagnosticTarget(
+        "LLM preset",
+        resolved_llm_command,
+        preset_name=config.llm_preset,
     )
+
+
+def _llm_target_name(target: _LlmDiagnosticTarget) -> str:
+    if target.preset_name:
+        return f"{target.label}: {target.preset_name}"
+    return target.label
+
+
+def _llm_command_has_prompt(target: _LlmDiagnosticTarget, *, warn_marker: str) -> bool:
+    if "{prompt}" in target.command:
+        return True
+    print(f"{warn_marker} {_llm_target_name(target)}: missing required {{prompt}} placeholder")
+    return False
+
+
+def _llm_shell_policy_allows(
+    target: _LlmDiagnosticTarget,
+    *,
+    allow_shell: bool,
+    requires_shell_fn: Callable[[str], bool],
+    warn_marker: str,
+) -> bool:
+    if allow_shell or not requires_shell_fn(target.command):
+        return True
+    if target.preset_name:
+        target_description = f"LLM preset: {target.preset_name} requires"
+    else:
+        target_description = "LLM command: requires"
+    print(
+        f"{warn_marker} {target_description} shell execution, "
+        "but allow_llm_shell_fallback is disabled"
+    )
+    return False
+
+
+def _report_llm_binary_status(
+    target: _LlmDiagnosticTarget,
+    *,
+    ok_marker: str,
+    warn_marker: str,
+) -> int:
+    cmd_binary = _extract_command_binary(target.command)
+    if cmd_binary and shutil.which(cmd_binary):
+        if target.preset_name:
+            print(f"{ok_marker} LLM preset: {target.preset_name} ({cmd_binary} found on PATH)")
+        else:
+            print(f"{ok_marker} LLM command: {cmd_binary} found on PATH")
+        return 0
+    missing_binary = cmd_binary or "unable to parse command"
+    if target.preset_name:
+        print(
+            f"{warn_marker} LLM preset: {target.preset_name} ({missing_binary} NOT found on PATH)"
+        )
+    else:
+        print(f"{warn_marker} LLM command: {missing_binary} NOT found on PATH")
     return 1
 
 

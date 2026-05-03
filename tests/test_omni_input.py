@@ -219,6 +219,37 @@ class TestOmniInputTUI:
             assert results.has_class("visible")
             assert results.option_count > 0
 
+    async def test_command_mode_no_matches_shows_disabled_empty_result(self):
+        from textual.app import App
+        from textual.widgets import Input, OptionList
+
+        class TestApp(App):
+            def compose(self):
+                yield OmniInput()
+
+        async with TestApp().run_test() as pilot:
+            omni = pilot.app.query_one(OmniInput)
+            omni.set_commands(
+                [
+                    PaletteCommand(
+                        name="Open",
+                        description="Open paper",
+                        key_hint="o",
+                        action="open_url",
+                        group="Core",
+                    ),
+                ]
+            )
+            omni.open(">zzzzzz")
+            inp = omni.query_one("#omni-input", Input)
+            inp.value = ">zzzzzz"
+            await pilot.pause()
+
+            results = omni.query_one("#omni-results", OptionList)
+            assert results.has_class("visible")
+            assert results.option_count == 1
+            assert omni._filtered_commands == []
+
     async def test_api_mode_emits_on_enter(self):
         from textual.app import App
         from textual.widgets import Input

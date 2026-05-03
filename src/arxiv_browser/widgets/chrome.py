@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
@@ -50,6 +51,15 @@ DATE_NAV_LABEL_MODES: tuple[str, ...] = (
     DATE_NAV_LABEL_MONTH_DAY,
     DATE_NAV_LABEL_NUMERIC,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class FilterPillSpec:
+    """Renderable state for one active filter pill."""
+
+    item_id: str
+    text: str
+    class_name: str
 
 
 class ContextFooter(Static):
@@ -558,48 +568,67 @@ class FilterPillBar(Horizontal):
 
     async def update_pills(self, tokens: list[QueryToken], watch_active: bool) -> None:
         """Update the displayed filter pills."""
-        pill_remove = get_filter_pill_remove_glyph()
-        desired: list[tuple[str, str, str]] = []
-        for i, token in enumerate(tokens):
-            if token.kind == "op":
-                continue
-            label_text = escape_rich_text(pill_label_for_token(token))
-            desired.append((f"pill-{i}", f"{label_text} {pill_remove}", "filter-pill"))
-        if watch_active:
-            desired.append(("pill-watch", f"watched {pill_remove}", "filter-pill-watch"))
+        desired = self._desired_filter_pills(tokens, watch_active)
+        existing_items = self._existing_filter_pills()
 
-        existing_items = [
+        if _pill_order(existing_items) == [pill.item_id for pill in desired]:
+            self._update_existing_filter_pills(existing_items, desired)
+        else:
+            await self._rebuild_filter_pills(existing_items, desired)
+
+        if desired:
+            self.add_class("visible")
+        else:
+            self.remove_class("visible")
+
+    def _desired_filter_pills(
+        self,
+        tokens: list[QueryToken],
+        watch_active: bool,
+    ) -> list[FilterPillSpec]:
+        desired = [self._filter_pill_spec(index, token) for index, token in enumerate(tokens)]
+        desired = [pill for pill in desired if pill is not None]
+        if watch_active:
+            desired.append(_watch_filter_pill_spec())
+        return desired
+
+    def _filter_pill_spec(self, index: int, token: QueryToken) -> FilterPillSpec | None:
+        if token.kind == "op":
+            return None
+        label_text = escape_rich_text(pill_label_for_token(token))
+        return FilterPillSpec(
+            item_id=f"pill-{index}",
+            text=f"{label_text} {get_filter_pill_remove_glyph()}",
+            class_name="filter-pill",
+        )
+
+    def _existing_filter_pills(self) -> list[Label]:
+        return [
             child
             for child in self.children
             if isinstance(child, Label) and child.id is not None and child.id.startswith("pill-")
         ]
-        existing_order = [child.id for child in existing_items]
-        desired_order = [item_id for item_id, _, _ in desired]
 
-        if existing_order == desired_order:
-            existing_by_id = {child.id: child for child in existing_items}
-            for item_id, text, class_name in desired:
-                child = existing_by_id.get(item_id)
-                if child is None:
-                    continue
-                child.update(text)
-                if class_name == "filter-pill-watch":
-                    child.remove_class("filter-pill")
-                    child.add_class("filter-pill-watch")
-                else:
-                    child.remove_class("filter-pill-watch")
-                    child.add_class("filter-pill")
-        else:
-            for child in existing_items:
-                await child.remove()
-            for item_id, text, class_name in desired:
-                self.mount(Label(text, classes=class_name, id=item_id))
+    def _update_existing_filter_pills(
+        self,
+        existing_items: list[Label],
+        desired: list[FilterPillSpec],
+    ) -> None:
+        existing_by_id = {child.id: child for child in existing_items}
+        for pill in desired:
+            child = existing_by_id.get(pill.item_id)
+            if child is not None:
+                _update_filter_pill(child, pill)
 
-        has_pills = bool(desired)
-        if has_pills:
-            self.add_class("visible")
-        else:
-            self.remove_class("visible")
+    async def _rebuild_filter_pills(
+        self,
+        existing_items: list[Label],
+        desired: list[FilterPillSpec],
+    ) -> None:
+        for child in existing_items:
+            await child.remove()
+        for pill in desired:
+            self.mount(Label(pill.text, classes=pill.class_name, id=pill.item_id))
 
     def on_click(self, event: object) -> None:
         """Handle click on a filter pill to remove it."""
@@ -619,6 +648,25 @@ class FilterPillBar(Horizontal):
                 self.post_message(self.RemoveFilter(index))
             except (ValueError, IndexError):
                 pass
+
+
+def _pill_order(pills: list[Label]) -> list[str | None]:
+    return [pill.id for pill in pills]
+
+
+def _update_filter_pill(label: Label, pill: FilterPillSpec) -> None:
+    label.update(pill.text)
+    label.remove_class("filter-pill-watch")
+    label.remove_class("filter-pill")
+    label.add_class(pill.class_name)
+
+
+def _watch_filter_pill_spec() -> FilterPillSpec:
+    return FilterPillSpec(
+        item_id="pill-watch",
+        text=f"watched {get_filter_pill_remove_glyph()}",
+        class_name="filter-pill-watch",
+    )
 
 
 __all__ = [

@@ -328,6 +328,32 @@ def test_config_import_export_and_disk_error_paths(tmp_path, monkeypatch) -> Non
         assert config_mod.save_config(UserConfig()) is False
 
 
+def test_import_collections_skips_duplicates_and_malformed_ids() -> None:
+    config = UserConfig(collections=[PaperCollection(name="existing", paper_ids=["keep"])])
+
+    added = config_mod._import_collections(
+        [
+            {"name": "existing", "paper_ids": ["skip"]},
+            {"name": "new", "description": 123, "paper_ids": "not-a-list", "created": 456},
+            {"name": "new", "paper_ids": ["duplicate"]},
+            {"name": "with-ids", "paper_ids": ["p1", 2, "p2"]},
+        ],
+        config,
+        merge=True,
+    )
+
+    assert added == 2
+    assert [collection.name for collection in config.collections] == [
+        "existing",
+        "new",
+        "with-ids",
+    ]
+    assert config.collections[1].description == "123"
+    assert config.collections[1].paper_ids == []
+    assert config.collections[1].created == "456"
+    assert config.collections[2].paper_ids == ["p1", "p2"]
+
+
 def test_load_config_oserror_returns_plain_defaults(tmp_path, monkeypatch) -> None:
     config_file = tmp_path / "config.json"
     config_file.write_text("{}", encoding="utf-8")

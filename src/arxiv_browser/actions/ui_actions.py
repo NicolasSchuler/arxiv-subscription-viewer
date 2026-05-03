@@ -41,9 +41,11 @@ from arxiv_browser.themes import THEME_NAMES
 
 if TYPE_CHECKING:
     from arxiv_browser.browser.core import ArxivBrowser
+    from arxiv_browser.services.enrichment_service import HFDailyFetchResult, S2PaperFetchResult
 
 
 _RECOVERABLE_ACTION_ERRORS = RECOVERABLE_ACTION_ERRORS
+_ENRICHMENT_FETCH_ERRORS = (httpx.HTTPError, OSError, RuntimeError, ValueError, TypeError)
 
 
 def _log_action_failure(action: str, exc: Exception, *, unexpected: bool = False) -> None:
@@ -153,68 +155,80 @@ async def _fetch_s2_paper_async(app: "ArxivBrowser", arxiv_id: str) -> None:
         )
         if not app._is_current_dataset_epoch(task_epoch):
             return
-        if not result.complete or result.state == "unavailable":
-            app._s2_api_error = True
-            app.notify(
-                build_actionable_error(
-                    "fetch Semantic Scholar data",
-                    why="an API or network error occurred",
-                    next_step="press e to retry after a moment",
-                ),
-                title="S2",
-                severity="error",
-            )
-            return
-        if result.state == "not_found" or result.paper is None:
-            app._s2_api_error = False
-            if not result.from_cache:
-                app.notify(
-                    build_actionable_warning(
-                        "No Semantic Scholar data was found for this paper",
-                        next_step="press e to retry later or continue with local metadata",
-                    ),
-                    title="S2",
-                    severity="warning",
-                )
-            return
-        app._s2_cache[arxiv_id] = result.paper
-        app._s2_api_error = False
-        app._get_ui_refresh_coordinator().refresh_detail_pane()
-        app._mark_badges_dirty("s2")
+        _apply_s2_paper_result(app, arxiv_id, result)
     except asyncio.CancelledError:
         raise
-    except (httpx.HTTPError, OSError, RuntimeError, ValueError, TypeError) as exc:
-        if not app._is_current_dataset_epoch(task_epoch):
-            return
-        _log_action_failure(f"S2 fetch for {arxiv_id}", exc)
-        app._s2_api_error = True
-        app.notify(
-            build_actionable_error(
-                "fetch Semantic Scholar data",
-                why="an API or network error occurred",
-                next_step="press e to retry after a moment",
-            ),
-            title="S2",
-            severity="error",
-        )
+    except _ENRICHMENT_FETCH_ERRORS as exc:
+        _handle_s2_fetch_exception(app, arxiv_id, task_epoch, exc)
     except Exception as exc:
-        if not app._is_current_dataset_epoch(task_epoch):
-            return
-        _log_action_failure(f"S2 fetch for {arxiv_id}", exc, unexpected=True)
-        app._s2_api_error = True
-        app.notify(
-            build_actionable_error(
-                "fetch Semantic Scholar data",
-                why="an API or network error occurred",
-                next_step="press e to retry after a moment",
-            ),
-            title="S2",
-            severity="error",
-        )
+        _handle_s2_fetch_exception(app, arxiv_id, task_epoch, exc, unexpected=True)
     finally:
-        if app._is_current_dataset_epoch(task_epoch):
-            app._s2_loading.discard(arxiv_id)
-            app._update_status_bar()
+        _finish_s2_fetch(app, arxiv_id, task_epoch)
+
+
+def _apply_s2_paper_result(
+    app: "ArxivBrowser",
+    arxiv_id: str,
+    result: "S2PaperFetchResult",
+) -> None:
+    if not result.complete or result.state == "unavailable":
+        _notify_s2_fetch_error(app)
+        return
+    if result.state == "not_found" or result.paper is None:
+        _notify_s2_not_found(app, result)
+        return
+    app._s2_cache[arxiv_id] = result.paper
+    app._s2_api_error = False
+    app._get_ui_refresh_coordinator().refresh_detail_pane()
+    app._mark_badges_dirty("s2")
+
+
+def _notify_s2_fetch_error(app: "ArxivBrowser") -> None:
+    app._s2_api_error = True
+    app.notify(
+        build_actionable_error(
+            "fetch Semantic Scholar data",
+            why="an API or network error occurred",
+            next_step="press e to retry after a moment",
+        ),
+        title="S2",
+        severity="error",
+    )
+
+
+def _notify_s2_not_found(app: "ArxivBrowser", result: "S2PaperFetchResult") -> None:
+    app._s2_api_error = False
+    if result.from_cache:
+        return
+    app.notify(
+        build_actionable_warning(
+            "No Semantic Scholar data was found for this paper",
+            next_step="press e to retry later or continue with local metadata",
+        ),
+        title="S2",
+        severity="warning",
+    )
+
+
+def _handle_s2_fetch_exception(
+    app: "ArxivBrowser",
+    arxiv_id: str,
+    task_epoch: int,
+    exc: Exception,
+    *,
+    unexpected: bool = False,
+) -> None:
+    if not app._is_current_dataset_epoch(task_epoch):
+        return
+    _log_action_failure(f"S2 fetch for {arxiv_id}", exc, unexpected=unexpected)
+    _notify_s2_fetch_error(app)
+
+
+def _finish_s2_fetch(app: "ArxivBrowser", arxiv_id: str, task_epoch: int) -> None:
+    if not app._is_current_dataset_epoch(task_epoch):
+        return
+    app._s2_loading.discard(arxiv_id)
+    app._update_status_bar()
 
 
 async def action_toggle_hf(app: "ArxivBrowser") -> None:
@@ -303,70 +317,77 @@ async def _fetch_hf_daily_async(app: "ArxivBrowser") -> None:
         )
         if not app._is_current_dataset_epoch(task_epoch):
             return
-        if not result.complete or result.state == "unavailable":
-            app._hf_api_error = True
-            app.notify(
-                build_actionable_error(
-                    "fetch HuggingFace trending data",
-                    why="an API or network error occurred",
-                    next_step="retry later or press Ctrl+h to disable HF",
-                ),
-                title="HF",
-                severity="error",
-            )
-            return
-        if result.state == "empty":
-            app._hf_api_error = False
-            if not result.from_cache:
-                app.notify(
-                    build_actionable_warning(
-                        "No HuggingFace trending data was returned",
-                        next_step="retry later or press Ctrl+h to disable HF",
-                    ),
-                    title="HF",
-                    severity="warning",
-                )
-            return
-        app._hf_cache = {p.arxiv_id: p for p in result.papers}
-        app._hf_api_error = False
-        app._get_ui_refresh_coordinator().refresh_detail_pane()
-        app._mark_badges_dirty("hf")
-        matched = count_hf_matches(app._hf_cache, app._papers_by_id)
-        _notify_hf_matches(app, matched)
+        _apply_hf_daily_result(app, result)
     except asyncio.CancelledError:
         raise
-    except (httpx.HTTPError, OSError, RuntimeError, ValueError, TypeError) as exc:
-        if not app._is_current_dataset_epoch(task_epoch):
-            return
-        _log_action_failure("HF daily fetch", exc)
-        app._hf_api_error = True
-        app.notify(
-            build_actionable_error(
-                "fetch HuggingFace trending data",
-                why="an API or network error occurred",
-                next_step="retry later or press Ctrl+h to disable HF",
-            ),
-            title="HF",
-            severity="error",
-        )
+    except _ENRICHMENT_FETCH_ERRORS as exc:
+        _handle_hf_fetch_exception(app, task_epoch, exc)
     except Exception as exc:
-        if not app._is_current_dataset_epoch(task_epoch):
-            return
-        _log_action_failure("HF daily fetch", exc, unexpected=True)
-        app._hf_api_error = True
-        app.notify(
-            build_actionable_error(
-                "fetch HuggingFace trending data",
-                why="an API or network error occurred",
-                next_step="retry later or press Ctrl+h to disable HF",
-            ),
-            title="HF",
-            severity="error",
-        )
+        _handle_hf_fetch_exception(app, task_epoch, exc, unexpected=True)
     finally:
-        if app._is_current_dataset_epoch(task_epoch):
-            app._hf_loading = False
-            app._update_status_bar()
+        _finish_hf_fetch(app, task_epoch)
+
+
+def _apply_hf_daily_result(app: "ArxivBrowser", result: "HFDailyFetchResult") -> None:
+    if not result.complete or result.state == "unavailable":
+        _notify_hf_fetch_error(app)
+        return
+    if result.state == "empty":
+        _notify_hf_empty(app, result)
+        return
+    app._hf_cache = {paper.arxiv_id: paper for paper in result.papers}
+    app._hf_api_error = False
+    app._get_ui_refresh_coordinator().refresh_detail_pane()
+    app._mark_badges_dirty("hf")
+    matched = count_hf_matches(app._hf_cache, app._papers_by_id)
+    _notify_hf_matches(app, matched)
+
+
+def _notify_hf_fetch_error(app: "ArxivBrowser") -> None:
+    app._hf_api_error = True
+    app.notify(
+        build_actionable_error(
+            "fetch HuggingFace trending data",
+            why="an API or network error occurred",
+            next_step="retry later or press Ctrl+h to disable HF",
+        ),
+        title="HF",
+        severity="error",
+    )
+
+
+def _notify_hf_empty(app: "ArxivBrowser", result: "HFDailyFetchResult") -> None:
+    app._hf_api_error = False
+    if result.from_cache:
+        return
+    app.notify(
+        build_actionable_warning(
+            "No HuggingFace trending data was returned",
+            next_step="retry later or press Ctrl+h to disable HF",
+        ),
+        title="HF",
+        severity="warning",
+    )
+
+
+def _handle_hf_fetch_exception(
+    app: "ArxivBrowser",
+    task_epoch: int,
+    exc: Exception,
+    *,
+    unexpected: bool = False,
+) -> None:
+    if not app._is_current_dataset_epoch(task_epoch):
+        return
+    _log_action_failure("HF daily fetch", exc, unexpected=unexpected)
+    _notify_hf_fetch_error(app)
+
+
+def _finish_hf_fetch(app: "ArxivBrowser", task_epoch: int) -> None:
+    if not app._is_current_dataset_epoch(task_epoch):
+        return
+    app._hf_loading = False
+    app._update_status_bar()
 
 
 async def action_check_versions(app: "ArxivBrowser") -> None:

@@ -155,62 +155,11 @@ def parse_arxiv_file(filepath: Path) -> list[Paper]:
     entries = _ENTRY_SEPARATOR.split(content)
 
     for entry in entries:
-        entry = entry.strip()
-        if not entry:
+        parsed = _parse_arxiv_email_entry(entry)
+        if parsed is None:
             continue
-
-        # Extract arXiv ID
-        arxiv_match = _ARXIV_ID_PATTERN.search(entry)
-        if not arxiv_match:
-            continue
-        arxiv_id_raw = arxiv_match.group(1)
-        bare_arxiv_id = normalize_arxiv_id(arxiv_id_raw)
-        if not bare_arxiv_id:
-            continue
-        version_match = _ARXIV_VERSION_SUFFIX.search(arxiv_id_raw)
-        # Default to version 1 when no suffix is present (e.g. "2401.12345")
-        version = int(version_match.group(0)[1:]) if version_match else 1
-
-        # Extract date
-        date_match = _DATE_PATTERN.search(entry)
-        date_val = date_match.group(1).strip() if date_match else ""
-
-        # Extract title (may span multiple lines)
-        title_match = _TITLE_PATTERN.search(entry)
-        title = " ".join(title_match.group(1).split()) if title_match else ""
-
-        # Extract authors (may span multiple lines)
-        authors_match = _AUTHORS_PATTERN.search(entry)
-        authors = " ".join(authors_match.group(1).split()) if authors_match else ""
-
-        # Extract categories
-        categories_match = _CATEGORIES_PATTERN.search(entry)
-        categories = categories_match.group(1).strip() if categories_match else ""
-
-        # Extract comments (optional)
-        comments_match = _COMMENTS_PATTERN.search(entry)
-        comments = comments_match.group(1).strip() if comments_match else None
-
-        # Extract abstract (text between \\ markers)
-        abstract_match = _ABSTRACT_PATTERN.search(entry)
-        abstract_raw = " ".join(abstract_match.group(1).split()) if abstract_match else ""
-
-        # Extract URL
-        url_match = _URL_PATTERN.search(entry)
-        url = url_match.group(1) if url_match else f"https://arxiv.org/abs/{bare_arxiv_id}"
-
-        paper = Paper(
-            arxiv_id=bare_arxiv_id,
-            date=date_val,
-            title=clean_latex(title),
-            authors=clean_latex(authors),
-            categories=categories,
-            comments=clean_latex(comments) if comments else None,
-            abstract=None,
-            abstract_raw=abstract_raw,
-            url=url,
-        )
-        existing = papers_by_id.get(bare_arxiv_id)
+        bare_arxiv_id, version, paper = parsed
+        existing = papers_by_id.get(paper.arxiv_id)
         if existing is None or version > existing[0]:
             papers_by_id[bare_arxiv_id] = (version, paper)
 
@@ -218,6 +167,53 @@ def parse_arxiv_file(filepath: Path) -> list[Paper]:
     papers = [paper for _, paper in papers_by_id.values()]
     logger.debug("Parsed %d papers from %s in %.3fs", len(papers), filepath.name, elapsed)
     return papers
+
+
+def _parse_arxiv_email_entry(entry: str) -> tuple[str, int, Paper] | None:
+    """Parse one arXiv email digest entry into its dedupe key and Paper."""
+    entry = entry.strip()
+    if not entry:
+        return None
+
+    id_match = _ARXIV_ID_PATTERN.search(entry)
+    if not id_match:
+        return None
+    arxiv_id_raw = id_match.group(1)
+    bare_arxiv_id = normalize_arxiv_id(arxiv_id_raw)
+    if not bare_arxiv_id:
+        return None
+
+    comments = _entry_match_text(entry, _COMMENTS_PATTERN) or None
+    paper = Paper(
+        arxiv_id=bare_arxiv_id,
+        date=_entry_match_text(entry, _DATE_PATTERN),
+        title=clean_latex(_entry_match_text(entry, _TITLE_PATTERN)),
+        authors=clean_latex(_entry_match_text(entry, _AUTHORS_PATTERN)),
+        categories=_entry_match_text(entry, _CATEGORIES_PATTERN),
+        comments=clean_latex(comments) if comments else None,
+        abstract=None,
+        abstract_raw=_entry_match_text(entry, _ABSTRACT_PATTERN),
+        url=_entry_url(entry, bare_arxiv_id),
+    )
+    return bare_arxiv_id, _arxiv_id_version(arxiv_id_raw), paper
+
+
+def _entry_match_text(entry: str, pattern: re.Pattern[str]) -> str:
+    """Return normalized first capture text for an email entry regex."""
+    match = pattern.search(entry)
+    return " ".join(match.group(1).split()) if match else ""
+
+
+def _entry_url(entry: str, arxiv_id: str) -> str:
+    """Return explicit arXiv URL from an email entry, or the canonical fallback."""
+    match = _URL_PATTERN.search(entry)
+    return match.group(1) if match else f"https://arxiv.org/abs/{arxiv_id}"
+
+
+def _arxiv_id_version(arxiv_id_raw: str) -> int:
+    """Return explicit arXiv version, defaulting to v1 when absent."""
+    version_match = _ARXIV_VERSION_SUFFIX.search(arxiv_id_raw)
+    return int(version_match.group(0)[1:]) if version_match else 1
 
 
 def normalize_arxiv_id(raw: str) -> str:
@@ -343,63 +339,84 @@ def parse_arxiv_api_feed(xml_text: str) -> list[Paper]:
         ValueError: If ``xml_text`` is not valid XML (wraps
             ``ET.ParseError`` or ``DefusedXmlException``).
     """
-    if not xml_text.strip():
+    root = _parse_arxiv_api_root(xml_text)
+    if root is None:
         return []
-
-    try:
-        root = ET.fromstring(xml_text)
-    except (ET.ParseError, DefusedXmlException) as exc:
-        raise ValueError("Invalid arXiv API XML response") from exc
 
     papers: list[Paper] = []
     seen_ids: set[str] = set()
 
     for entry in root.findall("atom:entry", ATOM_NS):
-        raw_id = _atom_text(entry, "atom:id")
-        arxiv_id = normalize_arxiv_id(raw_id)
-        if not arxiv_id or arxiv_id in seen_ids:
+        paper = _parse_arxiv_api_entry(entry)
+        if paper is None or paper.arxiv_id in seen_ids:
             continue
-        seen_ids.add(arxiv_id)
-
-        raw_title = _atom_text(entry, "atom:title")
-        raw_summary = _atom_text(entry, "atom:summary")
-        raw_published = _atom_text(entry, "atom:published")
-        raw_updated = _atom_text(entry, "atom:updated")
-
-        author_names = [
-            " ".join(author.text.split())
-            for author in entry.findall("atom:author/atom:name", ATOM_NS)
-            if author.text
-        ]
-
-        categories: list[str] = []
-        for category in entry.findall("atom:category", ATOM_NS):
-            term = (category.get("term") or "").strip()
-            if term and term not in categories:
-                categories.append(term)
-
-        comments_node = entry.find("arxiv:comment", ATOM_NS)
-        comments_text = ""
-        if comments_node is not None and comments_node.text:
-            comments_text = " ".join(comments_node.text.split())
-
-        cleaned_summary = clean_latex(raw_summary) if raw_summary else ""
-        papers.append(
-            Paper(
-                arxiv_id=arxiv_id,
-                date=_format_arxiv_api_date(raw_published or raw_updated),
-                title=clean_latex(raw_title),
-                authors=clean_latex(", ".join(author_names)),
-                categories=" ".join(categories),
-                comments=clean_latex(comments_text) if comments_text else None,
-                abstract=cleaned_summary,
-                abstract_raw=raw_summary,
-                url=f"https://arxiv.org/abs/{arxiv_id}",
-                source="api",
-            )
-        )
+        seen_ids.add(paper.arxiv_id)
+        papers.append(paper)
 
     return papers
+
+
+def _parse_arxiv_api_root(xml_text: str) -> Any | None:
+    """Parse an arXiv API XML document, returning None for blank input."""
+    if not xml_text.strip():
+        return None
+    try:
+        return ET.fromstring(xml_text)
+    except (ET.ParseError, DefusedXmlException) as exc:
+        raise ValueError("Invalid arXiv API XML response") from exc
+
+
+def _parse_arxiv_api_entry(entry: Any) -> Paper | None:
+    """Parse one Atom entry into a Paper, or None when no usable ID exists."""
+    arxiv_id = normalize_arxiv_id(_atom_text(entry, "atom:id"))
+    if not arxiv_id:
+        return None
+
+    raw_title = _atom_text(entry, "atom:title")
+    raw_summary = _atom_text(entry, "atom:summary")
+    raw_published = _atom_text(entry, "atom:published")
+    raw_updated = _atom_text(entry, "atom:updated")
+    comments_text = _atom_comment_text(entry)
+
+    return Paper(
+        arxiv_id=arxiv_id,
+        date=_format_arxiv_api_date(raw_published or raw_updated),
+        title=clean_latex(raw_title),
+        authors=clean_latex(", ".join(_atom_author_names(entry))),
+        categories=" ".join(_atom_categories(entry)),
+        comments=clean_latex(comments_text) if comments_text else None,
+        abstract=clean_latex(raw_summary) if raw_summary else "",
+        abstract_raw=raw_summary,
+        url=f"https://arxiv.org/abs/{arxiv_id}",
+        source="api",
+    )
+
+
+def _atom_author_names(entry: Any) -> list[str]:
+    """Return normalized author names for an Atom entry."""
+    return [
+        " ".join(author.text.split())
+        for author in entry.findall("atom:author/atom:name", ATOM_NS)
+        if author.text
+    ]
+
+
+def _atom_categories(entry: Any) -> list[str]:
+    """Return unique category terms for an Atom entry in feed order."""
+    categories: list[str] = []
+    for category in entry.findall("atom:category", ATOM_NS):
+        term = (category.get("term") or "").strip()
+        if term and term not in categories:
+            categories.append(term)
+    return categories
+
+
+def _atom_comment_text(entry: Any) -> str:
+    """Return normalized arXiv comment text for an Atom entry."""
+    comments_node = entry.find("arxiv:comment", ATOM_NS)
+    if comments_node is None or not comments_node.text:
+        return ""
+    return " ".join(comments_node.text.split())
 
 
 def parse_arxiv_version_map(xml_text: str) -> dict[str, int]:
@@ -578,37 +595,52 @@ def build_daily_digest(
 
     sep = " | " if is_ascii_mode() else " \u00b7 "
 
-    # Category breakdown (top 5)
+    lines = [f"{len(papers)} papers"]
+    lines.extend(_daily_digest_category_segments(papers))
+    lines.extend(_daily_digest_watch_segments(watched_ids))
+    lines.extend(_daily_digest_metadata_segments(papers, metadata))
+    return sep.join(lines)
+
+
+def _daily_digest_category_segments(papers: list[Paper]) -> list[str]:
+    """Return category summary segments for a daily digest."""
     cat_counts: dict[str, int] = {}
     for paper in papers:
         primary = paper.categories.split()[0] if paper.categories else "unknown"
         cat_counts[primary] = cat_counts.get(primary, 0) + 1
     top_cats = sorted(cat_counts.items(), key=lambda x: x[1], reverse=True)[:5]
     cat_parts = [f"{cat} ({n})" for cat, n in top_cats]
+    return ["Top: " + ", ".join(cat_parts)] if cat_parts else []
 
-    lines = [f"{len(papers)} papers"]
 
-    if cat_parts:
-        lines.append("Top: " + ", ".join(cat_parts))
+def _daily_digest_watch_segments(watched_ids: set[str] | None) -> list[str]:
+    """Return watch-list summary segments for a daily digest."""
+    if not watched_ids:
+        return []
+    n = len(watched_ids)
+    return [f"{n} match{'es' if n != 1 else ''} your watch list"]
 
-    # Watch list matches
-    if watched_ids:
-        n = len(watched_ids)
-        lines.append(f"{n} match{'es' if n != 1 else ''} your watch list")
 
-    # Read/starred stats
-    if metadata:
-        read = sum(1 for p in papers if (m := metadata.get(p.arxiv_id)) and m.is_read)
-        starred = sum(1 for p in papers if (m := metadata.get(p.arxiv_id)) and m.starred)
-        if read or starred:
-            parts = []
-            if read:
-                parts.append(f"{read} read")
-            if starred:
-                parts.append(f"{starred} starred")
-            lines.append(", ".join(parts))
+def _daily_digest_metadata_segments(
+    papers: list[Paper], metadata: dict[str, PaperMetadata] | None
+) -> list[str]:
+    """Return read/starred summary segments for a daily digest."""
+    if not metadata:
+        return []
+    read = sum(1 for p in papers if (m := metadata.get(p.arxiv_id)) and m.is_read)
+    starred = sum(1 for p in papers if (m := metadata.get(p.arxiv_id)) and m.starred)
+    parts = _daily_digest_count_parts(read, starred)
+    return [", ".join(parts)] if parts else []
 
-    return sep.join(lines)
+
+def _daily_digest_count_parts(read: int, starred: int) -> list[str]:
+    """Return non-empty read/starred count labels."""
+    parts = []
+    if read:
+        parts.append(f"{read} read")
+    if starred:
+        parts.append(f"{starred} starred")
+    return parts
 
 
 __all__ = [

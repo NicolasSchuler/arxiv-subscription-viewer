@@ -179,6 +179,56 @@ def _parse_json_object(response: httpx.Response, label: str) -> dict[str, Any] |
     return payload
 
 
+def _s2_list_result[T](
+    items: list[T], complete: bool, include_status: bool
+) -> list[T] | tuple[list[T], bool]:
+    return (items, complete) if include_status else items
+
+
+def _payload_list(payload: dict[str, Any], key: str, label: str) -> list[Any] | None:
+    data = payload.get(key)
+    if not isinstance(data, list):
+        logger.warning("%s returned non-list %s", label, key)
+        return None
+    return data
+
+
+def _parse_recommended_papers(
+    payload: dict[str, Any], arxiv_id: str
+) -> list[SemanticScholarPaper] | None:
+    papers_data = _payload_list(payload, "recommendedPapers", f"S2 recs arXiv:{arxiv_id}")
+    if papers_data is None:
+        return None
+    papers: list[SemanticScholarPaper] = []
+    for item in papers_data:
+        if not isinstance(item, dict):
+            continue
+        parsed = parse_s2_paper_response(item)
+        if parsed is not None:
+            papers.append(parsed)
+    return papers
+
+
+def _parse_citation_entries(
+    payload: dict[str, Any], label: str, paper_key: str
+) -> list[CitationEntry] | None:
+    data = _payload_list(payload, "data", label)
+    if data is None:
+        return None
+    entries: list[CitationEntry] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        entry = parse_citation_entry(item.get(paper_key) or {})
+        if entry:
+            entries.append(entry)
+    return entries
+
+
+def _sort_citation_entries(entries: list[CitationEntry]) -> list[CitationEntry]:
+    return sorted(entries, key=lambda entry: entry.citation_count, reverse=True)
+
+
 @overload
 async def fetch_s2_paper(
     arxiv_id: str,
@@ -297,22 +347,14 @@ async def fetch_s2_recommendations_with_status(
         ),
     )
     if response is None:
-        return ([], complete) if include_status else []
+        return _s2_list_result([], complete, include_status)
     payload = _parse_json_object(response, f"S2 recs arXiv:{arxiv_id}")
     if payload is None:
-        return ([], False) if include_status else []
-    papers_data = payload.get("recommendedPapers")
-    if not isinstance(papers_data, list):
-        logger.warning("S2 recs arXiv:%s returned non-list recommendedPapers", arxiv_id)
-        return ([], False) if include_status else []
-    papers: list[SemanticScholarPaper] = []
-    for item in papers_data:
-        if not isinstance(item, dict):
-            continue
-        parsed = parse_s2_paper_response(item)
-        if parsed is not None:
-            papers.append(parsed)
-    return (papers, True) if include_status else papers
+        return _s2_list_result([], False, include_status)
+    papers = _parse_recommended_papers(payload, arxiv_id)
+    if papers is None:
+        return _s2_list_result([], False, include_status)
+    return _s2_list_result(papers, True, include_status)
 
 
 @overload
@@ -365,25 +407,14 @@ async def fetch_s2_references(
         ),
     )
     if response is None:
-        return ([], False) if include_status else []
+        return _s2_list_result([], False, include_status)
     payload = _parse_json_object(response, f"S2 refs {paper_id}")
     if payload is None:
-        return ([], False) if include_status else []
-    data = payload.get("data")
-    if not isinstance(data, list):
-        logger.warning("S2 refs %s returned non-list data", paper_id)
-        return ([], False) if include_status else []
-    entries: list[CitationEntry] = []
-    for item in data:
-        if not isinstance(item, dict):
-            continue
-        entry = parse_citation_entry(item.get("citedPaper") or {})
-        if entry:
-            entries.append(entry)
-    entries.sort(key=lambda e: e.citation_count, reverse=True)
-    if include_status:
-        return entries, True
-    return entries
+        return _s2_list_result([], False, include_status)
+    entries = _parse_citation_entries(payload, f"S2 refs {paper_id}", "citedPaper")
+    if entries is None:
+        return _s2_list_result([], False, include_status)
+    return _s2_list_result(_sort_citation_entries(entries), True, include_status)
 
 
 @overload
@@ -432,59 +463,61 @@ async def fetch_s2_citations(
 
     entries: list[CitationEntry] = []
     offset = 0
-    scan_cap = min(
-        S2_CITATIONS_SCAN_CAP,
-        max(S2_CITATIONS_PAGE_SIZE * 2, limit * 4),
-    )
+    scan_cap = _citation_scan_cap(limit)
     complete = True
     while offset < scan_cap:
-        remaining = scan_cap - offset
-        page_limit = min(S2_CITATIONS_PAGE_SIZE, remaining)
-        label = f"S2 cites {paper_id}"
-        response = await _s2_get_with_retry(
-            client,
-            S2Request(
-                url=f"{S2_API_BASE}/paper/{paper_id}/citations",
-                params={
-                    "fields": S2_CITATION_FIELDS,
-                    "limit": str(page_limit),
-                    "offset": str(offset),
-                },
-                api_key=api_key,
-                timeout=timeout,
-                label=label,
-            ),
+        page_entries, page_complete, page_size, page_limit = await _fetch_s2_citation_page(
+            client, paper_id, offset, scan_cap, api_key, timeout
         )
-        if response is None:
+        if not page_complete:
             complete = False
             break
-
-        payload = _parse_json_object(response, label)
-        if payload is None:
-            complete = False
+        if not page_entries:
             break
-
-        data = payload.get("data")
-        if not isinstance(data, list):
-            logger.warning("S2 cites %s returned non-list data", paper_id)
-            complete = False
-            break
-        if not data:
-            break
-
-        for item in data:
-            if not isinstance(item, dict):
-                continue
-            entry = parse_citation_entry(item.get("citingPaper") or {})
-            if entry:
-                entries.append(entry)
-
-        if len(data) < page_limit:
+        entries.extend(page_entries)
+        if page_size < page_limit:
             break
         offset += page_limit
 
-    entries.sort(key=lambda e: e.citation_count, reverse=True)
-    trimmed = entries[:limit]
-    if include_status:
-        return trimmed, complete
-    return trimmed
+    trimmed = _sort_citation_entries(entries)[:limit]
+    return _s2_list_result(trimmed, complete, include_status)
+
+
+def _citation_scan_cap(limit: int) -> int:
+    return min(S2_CITATIONS_SCAN_CAP, max(S2_CITATIONS_PAGE_SIZE * 2, limit * 4))
+
+
+async def _fetch_s2_citation_page(
+    client: httpx.AsyncClient,
+    paper_id: str,
+    offset: int,
+    scan_cap: int,
+    api_key: str,
+    timeout: int,
+) -> tuple[list[CitationEntry], bool, int, int]:
+    page_limit = min(S2_CITATIONS_PAGE_SIZE, scan_cap - offset)
+    label = f"S2 cites {paper_id}"
+    response = await _s2_get_with_retry(
+        client,
+        S2Request(
+            url=f"{S2_API_BASE}/paper/{paper_id}/citations",
+            params={
+                "fields": S2_CITATION_FIELDS,
+                "limit": str(page_limit),
+                "offset": str(offset),
+            },
+            api_key=api_key,
+            timeout=timeout,
+            label=label,
+        ),
+    )
+    if response is None:
+        return [], False, 0, page_limit
+    payload = _parse_json_object(response, label)
+    if payload is None:
+        return [], False, 0, page_limit
+    data = _payload_list(payload, "data", label)
+    if data is None:
+        return [], False, 0, page_limit
+    entries = _parse_citation_entries(payload, label, "citingPaper") or []
+    return entries, True, len(data), page_limit
