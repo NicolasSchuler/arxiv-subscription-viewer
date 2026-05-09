@@ -77,8 +77,8 @@ deps-audit:
 
 # ── Composite targets ────────────────────────────────────────────────
 
-# Run all fast checks (lint + types + tests)
-check: lint typecheck test quality-budget
+# Run all fast checks (docs drift + lint + types + tests)
+check: docs-check lint typecheck test quality-budget
 
 # Run all checks including quality tools
 quality: check complexity security dead-code deps
@@ -87,6 +87,10 @@ quality: check complexity security dead-code deps
 
 # Run CI-equivalent checks locally
 ci:
+    @echo "=== Docs Sync ==="
+    @python3 scripts/check_docs_sync.py
+    @python3 scripts/check_version_sync.py
+    @echo ""
     @echo "=== Lint ==="
     @uv run ruff check .
     @uv run ruff format --check .

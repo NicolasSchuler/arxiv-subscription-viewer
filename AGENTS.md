@@ -4,7 +4,7 @@ Quick-reference for AI agents. See `docs/architecture.md` for the human-facing a
 
 ## Task Runner
 
-- **Pre-commit**: `just check` (lint + types + tests)
+- **Pre-commit**: `just check` (docs drift + lint + types + tests)
 - **Full suite**: `just quality`
 - **Auto-fix**: `just format`
 - **Docs drift**: `just docs-check`

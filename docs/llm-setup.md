@@ -1,6 +1,6 @@
 # 🤖 AI Summary, Chat, Relevance & Auto-Tag
 
-Generate paper summaries, chat with papers, score relevance, and auto-suggest tags — all powered by any LLM CLI tool you have installed.
+Generate paper summaries, chat with papers, score relevance, and auto-suggest tags using either an LLM CLI tool or an OpenAI-compatible HTTP endpoint.
 
 ## Setup
 
@@ -42,6 +42,44 @@ If both `llm_command` and `llm_preset` are set, `llm_command` wins.
 
 The `{paper_content}` placeholder is replaced with the full paper text (fetched from arXiv HTML), falling back to the abstract if unavailable. Set `"allow_llm_shell_fallback": false` to block commands that require shell parsing.
 
+## HTTP / OpenAI-Compatible Provider
+
+Use this path for hosted APIs or local servers that expose `/v1/chat/completions`.
+
+```json
+{
+  "llm_provider_type": "http",
+  "llm_api_base_url": "https://api.openai.com",
+  "llm_api_key": "YOUR_API_KEY",
+  "llm_api_model": "gpt-4o-mini",
+  "llm_timeout": 120,
+  "llm_max_retries": 1
+}
+```
+
+Local examples:
+
+```json
+{
+  "llm_provider_type": "http",
+  "llm_api_base_url": "http://localhost:11434",
+  "llm_api_model": "llama3.1"
+}
+```
+
+```json
+{
+  "llm_provider_type": "http",
+  "llm_api_base_url": "http://localhost:1234",
+  "llm_api_model": "local-model"
+}
+```
+
+- OpenAI and compatible hosted APIs usually require `llm_api_key`.
+- Ollama, LM Studio, vLLM, and other local servers often leave `llm_api_key` empty.
+- `llm_api_base_url` should not include `/v1/chat/completions`; the app appends that path.
+- `arxiv-viewer doctor` checks that the base URL and model are present for HTTP mode.
+
 ## Timeout & Retry Tuning
 
 LLM calls default to a `120` second timeout and `1` retry for transient failures. Tune them in `config.json`:
@@ -56,7 +94,7 @@ LLM calls default to a `120` second timeout and `1` retry for transient failures
 - `llm_timeout`: seconds per attempt (`10..600`)
 - `llm_max_retries`: retry budget for timeouts or non-zero exits (`0..5`)
 
-If an LLM action fails unexpectedly, run `arxiv-viewer doctor` to confirm the resolved preset/command is valid, includes `{prompt}`, and the CLI binary is available on your `PATH`.
+If an LLM action fails unexpectedly, run `arxiv-viewer doctor` to confirm the resolved CLI preset/command or HTTP provider settings.
 
 ## Trust Flow
 

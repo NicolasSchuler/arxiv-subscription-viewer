@@ -22,6 +22,7 @@ HELP_SECTION_ACTIONS: list[tuple[str, list[str]]] = [
             "open_url",
             "open_pdf",
             "cycle_sort",
+            "toggle_focus_pane",
             "copy_selected",
             "export_menu",
             "download_pdf",
@@ -94,6 +95,7 @@ HELP_GETTING_STARTED: list[tuple[str, str]] = [
     ("Space", "Select current paper"),
     ("o", "Open selected paper(s)"),
     ("r / x", "Read or star the current paper"),
+    ("Tab", "Focus the detail pane"),
     ("E", "Export current or selected papers"),
     ("Ctrl+p", "Open commands"),
     ("[ / ]", "Change dates (history mode)"),
@@ -108,6 +110,7 @@ HELP_DESCRIPTION_OVERRIDES: dict[str, str] = {
     "open_url": "Open in Browser",
     "open_pdf": "Open PDF",
     "toggle_detail_mode": "Toggle detail density (scan/full)",
+    "toggle_focus_pane": "Focus details / paper list",
 }
 
 

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from textual import on
 from textual.app import ComposeResult
 from textual.containers import Vertical
+from textual.events import Key
 from textual.message import Message
 from textual.widgets import Input, OptionList, Static
 from textual.widgets.option_list import Option
@@ -141,9 +142,12 @@ class OmniInput(Vertical):
     def compose(self) -> ComposeResult:
         """Build the omni input: text field, hint line, and results panel."""
         yield Input(
-            placeholder=OMNI_PLACEHOLDER, id="omni-input", disabled=True, select_on_focus=False
+            placeholder=_mode_safe_hint(OMNI_PLACEHOLDER),
+            id="omni-input",
+            disabled=True,
+            select_on_focus=False,
         )
-        yield Static(OMNI_HINT_LOCAL, id="omni-hint")
+        yield Static(_hint_for_mode("local"), id="omni-hint")
         yield OptionList(id="omni-results", disabled=True)
 
     def set_commands(self, commands: list[PaletteCommand]) -> None:
@@ -208,12 +212,7 @@ class OmniInput(Vertical):
 
     def _update_hint(self, mode: str) -> None:
         hint = self.query_one("#omni-hint", Static)
-        if mode == "command":
-            hint.update(OMNI_HINT_COMMAND)
-        elif mode == "api":
-            hint.update(OMNI_HINT_API)
-        else:
-            hint.update(OMNI_HINT_LOCAL)
+        hint.update(_hint_for_mode(mode))
 
     def _populate_command_results(self, query: str) -> None:
         """Populate the inline results list with matching commands."""
@@ -250,15 +249,21 @@ class OmniInput(Vertical):
             return
 
         safe = escape_rich_text(query)
-        results.add_option(Option(f'[dim]No matches for "{safe}"[/]', disabled=True))
+        results.add_option(
+            Option(
+                f'[dim]No matches for "{safe}". Try: a shorter command. Next: Esc closes.[/]',
+                disabled=True,
+            )
+        )
 
     def _command_option(self, command: PaletteCommand) -> Option:
         return Option(self._command_option_label(command), disabled=not command.enabled)
 
     def _command_option_label(self, command: PaletteCommand) -> str:
-        safe_name, safe_desc, safe_hint = self._safe_command_parts(command)
+        safe_name, safe_desc, safe_hint, safe_blocked = self._safe_command_parts(command)
         if not command.enabled:
-            return f"[dim]{safe_name}  {safe_desc}[/]"
+            blocked = f"  Requires: {safe_blocked}" if safe_blocked else ""
+            return f"[dim]{safe_name}  {safe_desc}{blocked}[/]"
 
         colors = theme_colors_for(self)
         parts = [
@@ -269,17 +274,47 @@ class OmniInput(Vertical):
             parts.append(f"[{colors['green']}]{safe_hint}[/]")
         return "  ".join(parts)
 
-    def _safe_command_parts(self, command: PaletteCommand) -> tuple[str, str, str]:
+    def _safe_command_parts(self, command: PaletteCommand) -> tuple[str, str, str, str]:
         name = truncate_palette_text(command.name, PALETTE_NAME_MAX_LEN)
         desc = truncate_palette_text(command.description, PALETTE_DESC_MAX_LEN)
         hint = (
             truncate_palette_text(command.key_hint, PALETTE_KEY_MAX_LEN) if command.key_hint else ""
         )
+        blocked = (
+            truncate_palette_text(command.blocked_reason, PALETTE_DESC_MAX_LEN)
+            if command.blocked_reason
+            else ""
+        )
         return (
             escape_rich_text(name),
             escape_rich_text(desc),
             escape_rich_text(hint),
+            escape_rich_text(blocked),
         )
+
+    def on_key(self, event: Key) -> None:
+        """Let the focused input move through command results with arrow keys."""
+        if self._current_mode != "command" or event.key not in {"up", "down"}:
+            return
+        if not self._filtered_commands:
+            return
+        self._move_command_highlight(1 if event.key == "down" else -1)
+        event.prevent_default()
+        event.stop()
+
+    def _move_command_highlight(self, direction: int) -> None:
+        """Move the command-result highlight to the next enabled command."""
+        results = self.query_one("#omni-results", OptionList)
+        count = len(self._filtered_commands)
+        if count == 0:
+            return
+        start = results.highlighted
+        index = (-1 if direction > 0 else count) if start is None else start
+        for _ in range(count):
+            index = (index + direction) % count
+            if self._filtered_commands[index].enabled:
+                results.highlighted = index
+                return
 
     # --- event handlers ---
 
@@ -336,6 +371,22 @@ class OmniInput(Vertical):
 def _command_match_sort_key(match: CommandMatch) -> tuple[int, int, float]:
     score, enabled, suggested, _command = match
     return enabled, suggested, score
+
+
+def _mode_safe_hint(text: str) -> str:
+    from arxiv_browser._ascii import is_ascii_mode
+
+    if not is_ascii_mode():
+        return text
+    return text.replace("·", "-").replace("↑↓", "^v")
+
+
+def _hint_for_mode(mode: str) -> str:
+    if mode == "command":
+        return _mode_safe_hint(OMNI_HINT_COMMAND)
+    if mode == "api":
+        return _mode_safe_hint(OMNI_HINT_API)
+    return _mode_safe_hint(OMNI_HINT_LOCAL)
 
 
 __all__ = [

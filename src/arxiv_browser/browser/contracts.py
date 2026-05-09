@@ -154,6 +154,12 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
     ),
     ("Cycle Theme", "Switch between Monokai/Catppuccin/Solarized", "Ctrl+t", "cycle_theme"),
     ("Toggle Sections", "Show/hide detail pane sections", "Ctrl+d", "toggle_sections"),
+    (
+        "Focus Details",
+        "Move focus between the paper list and detail pane",
+        "Tab",
+        "toggle_focus_pane",
+    ),
     ("Help", "Show all keyboard shortcuts", "?", "show_help"),
     ("Set Mark", "Set a named mark (a-z) at current position", "m", "start_mark"),
     ("Jump to Mark", "Jump to a named mark (a-z)", "'", "start_goto_mark"),

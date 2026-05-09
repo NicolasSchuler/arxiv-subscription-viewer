@@ -133,7 +133,7 @@ VerticalScroll {
 # Core (~12 keys) - shown in the default footer.
 #   /  search          j/k  navigate       Space  select
 #   o  open            r    read           x      star
-#   E  export          s    sort           ?      help
+#   E  export          s    sort           Tab    focus details
 #   Ctrl+p  commands   q    quit           [/]    dates (history)
 #
 # Standard (~15-20 keys) - prominent in help overlay.
@@ -166,6 +166,7 @@ APP_BINDINGS: list[BindingType] = [
     Binding("P", "open_pdf", "Open PDF", show=False),
     Binding("c", "copy_selected", "Copy", show=False),
     Binding("s", "cycle_sort", "Sort", show=False),
+    Binding("tab", "toggle_focus_pane", "Focus Details", show=False),
     Binding("space", "toggle_select", "Select", show=False),
     Binding("a", "select_all", "Select All", show=False),
     Binding("u", "clear_selection", "Clear Selection", show=False),

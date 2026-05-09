@@ -95,6 +95,39 @@ class TestWhatsNewScreen:
                 await pilot.pause()
                 assert modal not in pilot.app.screen_stack
 
+    @pytest.mark.asyncio
+    async def test_whats_new_uses_ascii_bullets_in_ascii_mode(
+        self, tmp_path, monkeypatch, make_paper
+    ) -> None:
+        """ASCII mode should not render Unicode bullets in release notes."""
+        from textual.widgets import Static
+
+        import arxiv_browser.browser.core as browser_core
+        from arxiv_browser.browser.core import ArxivBrowser, ArxivBrowserOptions
+        from arxiv_browser.models import UserConfig
+        from tests.support.patch_helpers import patch_save_config
+
+        monkeypatch.setattr(browser_core, "get_cache_db_path", lambda: tmp_path / "cache.db")
+        app = ArxivBrowser(
+            [make_paper()],
+            options=ArxivBrowserOptions(
+                config=UserConfig(onboarding_seen=True, last_seen_whats_new=WHATS_NEW_VERSION),
+                restore_session=False,
+            ),
+        )
+        with (
+            patch("arxiv_browser.modals.whats_new.is_ascii_mode", return_value=True),
+            patch_save_config(return_value=True),
+        ):
+            async with app.run_test() as pilot:
+                modal = WhatsNewScreen()
+                app.push_screen(modal)
+                await pilot.pause(0.05)
+                content = modal.query_one("#whats-new-content", Static)
+                rendered = str(content.content)
+                assert "•" not in rendered
+                assert "- " in rendered
+
 
 class TestWhatsNewContent:
     """Sanity checks for the curated release-notes content."""

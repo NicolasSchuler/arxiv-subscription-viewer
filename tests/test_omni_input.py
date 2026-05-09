@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from arxiv_browser.palette import PaletteCommand
@@ -248,7 +250,84 @@ class TestOmniInputTUI:
             results = omni.query_one("#omni-results", OptionList)
             assert results.has_class("visible")
             assert results.option_count == 1
+            empty_prompt = str(results.get_option_at_index(0).prompt)
+            assert "Try:" in empty_prompt
+            assert "Next:" in empty_prompt
             assert omni._filtered_commands == []
+
+    async def test_disabled_command_explains_blocker(self):
+        from textual.app import App
+        from textual.widgets import Input, OptionList
+
+        class TestApp(App):
+            def compose(self):
+                yield OmniInput()
+
+        async with TestApp().run_test() as pilot:
+            omni = pilot.app.query_one(OmniInput)
+            omni.set_commands(
+                [
+                    PaletteCommand(
+                        name="Export",
+                        description="Export papers",
+                        key_hint="E",
+                        action="export_menu",
+                        group="Core",
+                        enabled=False,
+                        blocked_reason="No papers loaded",
+                    ),
+                ]
+            )
+            omni.open(">export")
+            inp = omni.query_one("#omni-input", Input)
+            inp.value = ">export"
+            await pilot.pause()
+
+            results = omni.query_one("#omni-results", OptionList)
+            prompt = str(results.get_option_at_index(0).prompt)
+            assert "Requires: No papers loaded" in prompt
+
+    async def test_command_mode_arrow_keys_move_highlight(self):
+        from textual.app import App
+        from textual.widgets import Input, OptionList
+
+        class TestApp(App):
+            def compose(self):
+                yield OmniInput()
+
+        async with TestApp().run_test() as pilot:
+            omni = pilot.app.query_one(OmniInput)
+            omni.set_commands(
+                [
+                    PaletteCommand(
+                        name="Open",
+                        description="Open paper",
+                        key_hint="o",
+                        action="open_url",
+                        group="Core",
+                    ),
+                    PaletteCommand(
+                        name="Toggle Star",
+                        description="Star paper",
+                        key_hint="x",
+                        action="toggle_star",
+                        group="Core",
+                    ),
+                ]
+            )
+            omni.open(">")
+            inp = omni.query_one("#omni-input", Input)
+            inp.value = ">"
+            await pilot.pause()
+            results = omni.query_one("#omni-results", OptionList)
+            results.highlighted = None
+
+            await pilot.press("down")
+            assert results.highlighted == 0
+            await pilot.press("down")
+            assert results.highlighted == 1
+            await pilot.press("up")
+            assert results.highlighted == 0
 
     async def test_api_mode_emits_on_enter(self):
         from textual.app import App
@@ -340,6 +419,24 @@ class TestOmniInputTUI:
             inp.value = "plain"
             await pilot.pause()
             assert omni._current_mode == "local"
+
+    async def test_ascii_mode_uses_ascii_safe_hints(self):
+        from textual.app import App
+        from textual.widgets import Input, Static
+
+        class TestApp(App):
+            def compose(self):
+                yield OmniInput()
+
+        with patch("arxiv_browser._ascii.is_ascii_mode", return_value=True):
+            async with TestApp().run_test() as pilot:
+                omni = pilot.app.query_one(OmniInput)
+                omni.open(">")
+                inp = omni.query_one("#omni-input", Input)
+                hint = omni.query_one("#omni-hint", Static)
+
+                assert all(ord(ch) < 128 for ch in inp.placeholder)
+                assert all(ord(ch) < 128 for ch in str(hint.content))
 
     async def test_close_clears_input(self):
         from textual.app import App

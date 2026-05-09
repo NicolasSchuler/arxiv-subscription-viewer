@@ -12,6 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from urllib.parse import urlparse
 
 from arxiv_browser.models import UserConfig
 
@@ -120,6 +121,14 @@ def _doctor_llm_issue_count(
     from arxiv_browser.llm import LLM_PRESETS, _resolve_llm_command
     from arxiv_browser.llm_providers import llm_command_requires_shell
 
+    if config.llm_provider_type.lower() == "http":
+        return _doctor_http_llm_issue_count(
+            config,
+            ok_marker=ok_marker,
+            warn_marker=warn_marker,
+            info_marker=info_marker,
+        )
+
     resolved_llm_command = _resolve_llm_command(config)
     target = _resolve_llm_diagnostic_target(
         config,
@@ -142,6 +151,48 @@ def _doctor_llm_issue_count(
     ):
         return 1
     return _report_llm_binary_status(target, ok_marker=ok_marker, warn_marker=warn_marker)
+
+
+def _doctor_http_llm_issue_count(
+    config: UserConfig,
+    *,
+    ok_marker: str,
+    warn_marker: str,
+    info_marker: str,
+) -> int:
+    """Report OpenAI-compatible HTTP LLM provider diagnostics."""
+    issues = 0
+    base_url = config.llm_api_base_url.strip()
+    model = config.llm_api_model.strip()
+    if not base_url:
+        print(f"{warn_marker} LLM HTTP provider: llm_api_base_url is required")
+        issues += 1
+    else:
+        parsed = urlparse(base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            print(f"{warn_marker} LLM HTTP provider: invalid base URL '{base_url}'")
+            issues += 1
+        elif base_url.rstrip("/").endswith("/v1/chat/completions"):
+            print(f"{warn_marker} LLM HTTP provider: use the API root, not /v1/chat/completions")
+            issues += 1
+        else:
+            print(f"{ok_marker} LLM HTTP provider: {base_url.rstrip('/')}")
+
+    if not model:
+        print(f"{warn_marker} LLM HTTP provider: llm_api_model is required")
+        issues += 1
+    else:
+        print(f"{ok_marker} LLM HTTP model: {model}")
+
+    if base_url and "api.openai.com" in base_url and not config.llm_api_key:
+        print(f"{warn_marker} LLM HTTP provider: llm_api_key is usually required for OpenAI")
+        issues += 1
+    elif config.llm_api_key:
+        print(f"{ok_marker} LLM HTTP API key: configured")
+    else:
+        print(f"{info_marker} LLM HTTP API key: not set (common for local servers)")
+
+    return issues
 
 
 def _resolve_llm_diagnostic_target(
@@ -310,6 +361,7 @@ __all__ = [
     "_doctor_export_dirs",
     "_doctor_feature_summary",
     "_doctor_history_issue_count",
+    "_doctor_http_llm_issue_count",
     "_doctor_llm_issue_count",
     "_doctor_terminal_summary",
     "_extract_command_binary",

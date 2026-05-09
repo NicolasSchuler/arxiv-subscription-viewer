@@ -84,26 +84,26 @@ CATPPUCCIN_MOCHA_THEME: dict[str, str] = {
 SOLARIZED_DARK_THEME: dict[str, str] = {
     "background": "#002b36",
     "panel": "#073642",
-    "panel_alt": "#586e75",
+    "panel_alt": "#214e59",
     "border": "#657b83",
-    "text": "#839496",
-    "muted": "#7c9098",  # lightened for WCAG AA (4.5:1)
-    "accent": "#3c9be2",  # lightened for WCAG AA (5.0:1)
-    "accent_alt": "#b58900",
+    "text": "#b7c5c5",
+    "muted": "#93a1a1",
+    "accent": "#74c7ec",
+    "accent_alt": "#d6b94d",
     "green": "#859900",
     "yellow": "#b58900",
     "orange": "#e87d3e",  # lightened for WCAG AA (5.2:1)
     "pink": "#e85da0",  # lightened for WCAG AA (5.0:1)
     "purple": "#8b8fd6",  # lightened for WCAG AA (5.0:1)
     "highlight": "#073642",
-    "highlight_focus": "#586e75",
+    "highlight_focus": "#214e59",
     "selection": "#073642",
-    "selection_highlight": "#586e75",
+    "selection_highlight": "#214e59",
     "scrollbar_background": "#073642",
-    "scrollbar_background_hover": "#586e75",
+    "scrollbar_background_hover": "#214e59",
     "scrollbar_background_active": "#657b83",
     "scrollbar": "#657b83",
-    "scrollbar_active": "#3c9be2",  # match accent
+    "scrollbar_active": "#74c7ec",  # match accent
     "scrollbar_hover": "#93a1a1",
     "scrollbar_corner_color": "#073642",
 }

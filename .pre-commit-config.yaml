@@ -8,6 +8,12 @@ repos:
 
   - repo: local
     hooks:
+      - id: check-docs-sync
+        name: check docs stay aligned with CLI/config/keybindings
+        entry: python3 scripts/check_docs_sync.py
+        language: system
+        pass_filenames: false
+        files: '^(README\.md|CLAUDE\.md|docs/.*|src/arxiv_browser/(cli|completions|config|llm|models|ui_constants)\.py)$'
       - id: check-version-sync
         name: check pyproject version matches CHANGELOG
         entry: python3 scripts/check_version_sync.py

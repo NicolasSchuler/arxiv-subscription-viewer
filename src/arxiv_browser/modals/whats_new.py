@@ -13,6 +13,7 @@ from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.widgets import Label, Static
 
+from arxiv_browser._ascii import is_ascii_mode
 from arxiv_browser.modals.base import ModalBase
 from arxiv_browser.themes import theme_colors_for
 from arxiv_browser.whats_new import (
@@ -81,10 +82,11 @@ class WhatsNewScreen(ModalBase[None]):
         """Render themed bullet list for the current release entries."""
         colors = theme_colors_for(self)
         accent = colors["accent"]
+        bullet = "-" if is_ascii_mode() else "•"
 
         lines: list[str] = []
         for title, description in WHATS_NEW_ENTRIES:
-            lines.append(f"[{accent}]• {title}[/]")
+            lines.append(f"[{accent}]{bullet} {title}[/]")
             lines.append(f"  {description}")
             lines.append("")
 

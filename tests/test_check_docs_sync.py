@@ -214,6 +214,45 @@ class TestCheckDocsIndexNavigation:
         ]
 
 
+class TestTrackedLocalLinks:
+    """Regression tests for local docs links that point outside tracked files."""
+
+    def test_check_tracked_local_links_reports_untracked_target(self, tmp_path, monkeypatch):
+        module = _load_check_docs_sync_module()
+        monkeypatch.setattr(module, "ROOT", tmp_path)
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        source = docs / "README.md"
+        source.write_text(
+            "[Good](tracked.md)\n[Scratch](code-quality-pipeline-prompt.md)\n",
+            encoding="utf-8",
+        )
+
+        assert module._check_tracked_local_links(
+            [source],
+            {"docs/README.md", "docs/tracked.md"},
+        ) == ["docs/README.md links to untracked or missing file: code-quality-pipeline-prompt.md"]
+
+    def test_check_tracked_local_links_ignores_external_and_anchor_targets(
+        self, tmp_path, monkeypatch
+    ):
+        module = _load_check_docs_sync_module()
+        monkeypatch.setattr(module, "ROOT", tmp_path)
+        source = tmp_path / "README.md"
+        source.write_text(
+            "[External](https://example.com)\n[Anchor](#setup)\n[Dir](docs/)\n",
+            encoding="utf-8",
+        )
+
+        assert (
+            module._check_tracked_local_links(
+                [source],
+                {"README.md", "docs/README.md"},
+            )
+            == []
+        )
+
+
 class TestCheckVersionSync:
     """Regression tests for release metadata drift detection."""
 

@@ -581,6 +581,8 @@ class TestSearchActionCoverage:
         app._get_search_container_widget = MagicMock(return_value=omni)
         app._update_footer = MagicMock()
         app._apply_filter = MagicMock()
+        paper_list = MagicMock()
+        app._get_paper_list_widget = MagicMock(return_value=paper_list)
         app.notify = MagicMock()
         app._in_arxiv_api_mode = True
         app.action_exit_arxiv_search_mode = MagicMock()
@@ -603,6 +605,8 @@ class TestSearchActionCoverage:
         app.action_cancel_search()
         assert omni.value == ""
         app._apply_filter.assert_called_once_with("")
+        paper_list.focus.assert_called_once()
+        assert app._update_footer.call_count >= 3
         app.action_exit_arxiv_search_mode.assert_called_once()
         assert app._cancel_batch_requested is True
         assert "Cancelling batch operation" in app.notify.call_args.args[0]

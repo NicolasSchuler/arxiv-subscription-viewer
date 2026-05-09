@@ -631,6 +631,25 @@ def action_show_help(app: "ArxivBrowser") -> None:
     )
 
 
+def action_toggle_focus_pane(app: "ArxivBrowser") -> None:
+    """Move keyboard focus between the paper list and the detail scroller."""
+    try:
+        paper_list = app._get_paper_list_widget()
+        details = app.query_one("#details-scroll")
+    except NoMatches:
+        return
+
+    try:
+        details.can_focus = True
+        if getattr(details, "has_focus", False):
+            paper_list.focus()
+        else:
+            details.focus()
+        app._update_footer()
+    except _RECOVERABLE_ACTION_ERRORS as exc:
+        _log_action_failure("toggle pane focus", exc)
+
+
 def action_command_palette(app: "ArxivBrowser") -> None:
     """Open the OmniInput in command palette mode."""
     omni = app._get_search_container_widget()

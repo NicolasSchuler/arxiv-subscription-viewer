@@ -572,6 +572,20 @@ class TestUiActionCoverage:
         ui_actions.action_show_help(app)
         assert app.push_screen.called
 
+        app._update_footer = MagicMock()
+        paper_list = SimpleNamespace(focus=MagicMock())
+        details = SimpleNamespace(has_focus=False, focus=MagicMock(), can_focus=False)
+        app._get_paper_list_widget = MagicMock(return_value=paper_list)
+        app.query_one = MagicMock(return_value=details)
+        ui_actions.action_toggle_focus_pane(app)
+        assert details.can_focus is True
+        details.focus.assert_called_once()
+        app._update_footer.assert_called_once()
+
+        details.has_focus = True
+        ui_actions.action_toggle_focus_pane(app)
+        paper_list.focus.assert_called_once()
+
         app._build_command_palette_commands = MagicMock(
             return_value=[
                 SimpleNamespace(action="sample", name="Sample"),

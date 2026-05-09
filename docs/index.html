@@ -18,64 +18,42 @@
   </style>
 </head>
 <body class="bg-monokai-bg text-gray-100 min-h-screen">
+  <a href="#main" class="skip-link">Skip to content</a>
+
+  <main id="main">
 
   <!-- Hero Section -->
   <section class="hero-shell relative overflow-hidden">
-    <div class="hero-grid max-w-6xl mx-auto px-6 py-20 md:py-32">
+    <div class="hero-grid max-w-6xl mx-auto px-6 py-16 md:py-24">
       <div class="hero-copy">
         <div class="hero-badge">
-          <img src="logo.png" alt="arXiv Subscription Viewer logo" class="hero-badge-logo">
-          <span class="hero-badge-text mono">keyboard-first paper triage</span>
+          <img src="logo.png" width="34" height="34" alt="" class="hero-badge-logo">
+          <span class="hero-badge-text mono">arXiv Subscription Viewer</span>
         </div>
         <h1 class="hero-title">
-          Triage daily arXiv papers without leaving the terminal.
+          A terminal inbox for daily arXiv.
         </h1>
         <p class="hero-summary text-xl text-gray-400">
-          Load your local <code class="mono text-gray-100">history/</code> archive or search arXiv live, then move from scan to summary, citations, tags, and export without breaking flow.
+          Review saved digest archives or live arXiv search results, then tag, summarize, cite-check, and export papers without leaving the TUI.
         </p>
-
-        <div class="hero-proof-grid">
-          <div class="hero-proof-card">
-            <p class="hero-proof-title mono">Path 1</p>
-            <p class="hero-proof-copy">Review archived digests with persistent state, date navigation, bookmarks, and watch lists.</p>
-          </div>
-          <div class="hero-proof-card">
-            <p class="hero-proof-title mono">Path 2</p>
-            <p class="hero-proof-copy">Search arXiv directly by category, title, author, or abstract when you want the newest results now.</p>
-          </div>
-          <div class="hero-proof-card">
-            <p class="hero-proof-title mono">Layer on later</p>
-            <p class="hero-proof-copy">Enable Semantic Scholar, HuggingFace, and LLM workflows only when you want richer context.</p>
-          </div>
-        </div>
-
-        <div class="hero-install-panel">
-          <p class="hero-install-label">Install once</p>
-          <div class="hero-install-command">
-            <span class="text-gray-500">$</span>
-            <code class="text-monokai-green" id="install-cmd">uv tool install arxiv-subscription-viewer</code>
-            <button onclick="copyInstall()" aria-label="Copy install command to clipboard" class="hero-copy-button" title="Copy to clipboard">
-              <svg id="copy-icon" class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
-              </svg>
-              <svg id="check-icon" class="w-5 h-5 text-monokai-green hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-              </svg>
-            </button>
-          </div>
-          <p class="hero-install-alt mono">Alternative: <span class="text-gray-400">pip install arxiv-subscription-viewer</span></p>
-        </div>
 
         <div class="hero-cta-row">
           <a href="#quick-start" class="hero-cta-primary">
-            Start with both workflows
+            Quick start
           </a>
           <a href="#guide-hub" class="hero-cta-secondary">
-            Open guide hub
+            Guide hub
           </a>
           <a href="https://github.com/NicolasSchuler/arxiv-subscription-viewer" class="hero-cta-tertiary">
-            View on GitHub
+            GitHub
           </a>
+        </div>
+
+        <div class="hero-proof-strip" aria-label="Core capabilities">
+          <span class="hero-proof-chip mono">history/ archive</span>
+          <span class="hero-proof-chip mono">live arXiv search</span>
+          <span class="hero-proof-chip mono">local notes + tags</span>
+          <span class="hero-proof-chip mono">optional S2 / HF / LLM</span>
         </div>
       </div>
 
@@ -94,35 +72,30 @@
             <div class="hero-meta-chip mono">Ctrl+p commands</div>
             <div class="hero-meta-chip mono">Ctrl+s summary</div>
           </div>
-          <img src="screenshot_preview.png" alt="arXiv Subscription Viewer interface showing terminal paper triage" class="hero-shot">
+          <img src="screenshot_preview.png" width="1200" height="760" alt="arXiv Subscription Viewer terminal interface showing a paper list, filters, and detail pane" class="hero-shot">
         </div>
-        <div class="hero-annotation hero-annotation-left">
-          <p class="hero-annotation-label mono">local-first</p>
-          <p class="hero-annotation-copy">Keep notes, tags, bookmarks, and exports under your control.</p>
-        </div>
-        <div class="hero-annotation hero-annotation-right">
-          <p class="hero-annotation-label mono">optional enrichment</p>
-          <p class="hero-annotation-copy">Citations, trending signals, summaries, and relevance only when you enable them.</p>
+        <div class="hero-caption-row">
+          <p><span class="mono">local-first</span> notes, tags, bookmarks, and exports</p>
+          <p><span class="mono">on-demand</span> citations, trending signals, summaries, and relevance</p>
         </div>
       </div>
-    </div>
-  </section>
 
-  <!-- Demo Section -->
-  <section id="demo" class="bg-black/30 py-20">
-    <div class="max-w-5xl mx-auto px-6">
-      <h2 class="text-3xl font-bold text-center mb-4">See it in action</h2>
-      <p class="text-gray-400 text-center mb-10">A full-featured TUI for navigating the world of academic papers</p>
-      <div class="rounded-xl overflow-hidden border border-gray-700 shadow-2xl shadow-black/50">
-        <div class="bg-gray-900 px-4 py-2 flex items-center gap-2 border-b border-gray-700">
-          <div class="flex gap-2">
-            <div class="w-3 h-3 rounded-full bg-red-500/80"></div>
-            <div class="w-3 h-3 rounded-full bg-yellow-500/80"></div>
-            <div class="w-3 h-3 rounded-full bg-green-500/80"></div>
-          </div>
-          <span class="text-gray-500 text-sm ml-2 mono">arxiv-viewer</span>
+      <div class="hero-install-panel">
+        <p class="hero-install-label">Install</p>
+        <div class="hero-install-command">
+          <span class="text-gray-500">$</span>
+          <code class="text-monokai-green" id="install-cmd">uv tool install arxiv-subscription-viewer</code>
+          <button type="button" onclick="copyInstall()" aria-label="Copy install command to clipboard" class="hero-copy-button" title="Copy to clipboard">
+            <svg id="copy-icon" class="w-5 h-5 text-gray-400" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+            </svg>
+            <svg id="check-icon" class="w-5 h-5 text-monokai-green hidden" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            </svg>
+          </button>
         </div>
-        <img src="screenshot_preview.png" alt="Demo of arXiv Subscription Viewer TUI" class="w-full">
+        <p class="hero-install-alt mono">Alternative: <span class="text-gray-400">pip install arxiv-subscription-viewer</span></p>
+        <p id="copy-status" class="sr-only" aria-live="polite"></p>
       </div>
     </div>
   </section>
@@ -376,12 +349,14 @@
     </div>
   </section>
 
+  </main>
+
   <!-- Footer -->
   <footer class="border-t border-gray-800 py-12">
     <div class="max-w-6xl mx-auto px-6">
       <div class="flex flex-col md:flex-row justify-between items-center gap-6">
         <div class="flex items-center gap-3">
-          <img src="logo.png" alt="Logo" class="w-10 h-10 rounded-lg bg-white">
+          <img src="logo.png" width="40" height="40" alt="" class="w-10 h-10 rounded-lg bg-white">
           <span class="font-semibold">arXiv Subscription Viewer</span>
         </div>
         <div class="flex items-center gap-6 text-gray-400">
@@ -403,15 +378,18 @@
       const cmdElement = document.getElementById('install-cmd');
       const copyIcon = document.getElementById('copy-icon');
       const checkIcon = document.getElementById('check-icon');
-      if (!cmdElement || !copyIcon || !checkIcon) {
+      const status = document.getElementById('copy-status');
+      if (!cmdElement || !copyIcon || !checkIcon || !status) {
         return;
       }
       if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+        status.textContent = 'Clipboard API unavailable.';
         console.error('Clipboard API unavailable.');
         return;
       }
       navigator.clipboard.writeText(cmdElement.textContent || '')
         .then(() => {
+          status.textContent = 'Install command copied.';
           copyIcon.classList.add('hidden');
           checkIcon.classList.remove('hidden');
           setTimeout(() => {
@@ -420,6 +398,7 @@
           }, 2000);
         })
         .catch((error) => {
+          status.textContent = 'Could not copy install command.';
           console.error('Failed to copy install command:', error);
         });
     }

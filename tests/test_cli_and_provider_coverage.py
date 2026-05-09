@@ -336,6 +336,26 @@ class TestCliCoverage:
             == 0
         )
 
+        cfg = UserConfig(
+            llm_provider_type="http",
+            llm_api_base_url="http://localhost:11434",
+            llm_api_model="llama3.1",
+        )
+        assert (
+            cli._doctor_llm_issue_count(cfg, ok_marker="OK", warn_marker="WARN", info_marker="INFO")
+            == 0
+        )
+
+        cfg = UserConfig(
+            llm_provider_type="http",
+            llm_api_base_url="https://api.openai.com/v1/chat/completions",
+            llm_api_model="",
+        )
+        assert (
+            cli._doctor_llm_issue_count(cfg, ok_marker="OK", warn_marker="WARN", info_marker="INFO")
+            == 3
+        )
+
     def test_fetch_latest_digest_and_config_logging_branches(
         self, make_paper, tmp_path, monkeypatch
     ) -> None:

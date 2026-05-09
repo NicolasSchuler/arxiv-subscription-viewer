@@ -176,3 +176,33 @@ def test_ui_packages_import_in_fresh_process() -> None:
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def _action_name(raw_action: str) -> str:
+    """Return the method suffix for a Textual binding/palette action string."""
+    return raw_action.split("(", 1)[0]
+
+
+def test_browser_bindings_and_palette_actions_resolve_to_methods() -> None:
+    """Keep keyboard/palette action names aligned with ArxivBrowser methods."""
+    from arxiv_browser.browser.contracts import COMMAND_PALETTE_COMMANDS
+    from arxiv_browser.browser.core import ArxivBrowser
+    from arxiv_browser.ui_constants import APP_BINDINGS
+
+    skipped = {"quit"}
+    actions = {_action_name(binding.action) for binding in APP_BINDINGS}
+    actions.update(action for *_prefix, action in COMMAND_PALETTE_COMMANDS if action)
+    missing = sorted(
+        action
+        for action in actions
+        if action not in skipped and not hasattr(ArxivBrowser, f"action_{action}")
+    )
+
+    assert missing == []
+
+
+def test_actions_package_does_not_expose_parallel_registry() -> None:
+    """Action registration should stay centralized in browser.core."""
+    import arxiv_browser.actions as actions
+
+    assert "build_action_registry" not in dir(actions)

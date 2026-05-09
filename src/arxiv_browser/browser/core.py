@@ -81,7 +81,6 @@ MIN_LIST_WIDTH = 50
 MAX_LIST_WIDTH = 100
 CLIPBOARD_SEPARATOR = _action_constants.CLIPBOARD_SEPARATOR
 
-
 # History file discovery cap retained for custom callers/tests.
 MAX_HISTORY_FILES = 365
 SUBPROCESS_TIMEOUT = _action_constants.SUBPROCESS_TIMEOUT
@@ -181,6 +180,7 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
     action_cycle_theme = _ui_actions.action_cycle_theme
     action_toggle_sections = _ui_actions.action_toggle_sections
     action_show_help = _ui_actions.action_show_help
+    action_toggle_focus_pane = _ui_actions.action_toggle_focus_pane
     action_command_palette = _ui_actions.action_command_palette
     action_collections = _ui_actions.action_collections
     action_add_to_collection = _ui_actions.action_add_to_collection

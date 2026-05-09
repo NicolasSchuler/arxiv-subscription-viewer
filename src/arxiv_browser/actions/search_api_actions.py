@@ -42,6 +42,11 @@ def action_cancel_search(app: "ArxivBrowser") -> None:
     if omni.is_open:
         omni.close()
         app._apply_filter("")
+        try:
+            app._get_paper_list_widget().focus()
+        except NoMatches:
+            pass
+        app._update_footer()
     if app._in_arxiv_api_mode:
         app.action_exit_arxiv_search_mode()
 

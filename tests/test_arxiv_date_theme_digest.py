@@ -999,7 +999,7 @@ class TestSolarizedDarkTheme:
         from arxiv_browser.themes import SOLARIZED_DARK_THEME
 
         assert SOLARIZED_DARK_THEME["background"] == "#002b36"
-        assert SOLARIZED_DARK_THEME["accent"] == "#3c9be2"  # WCAG AA adjusted
+        assert SOLARIZED_DARK_THEME["accent"] == "#74c7ec"  # WCAG AA adjusted
         assert SOLARIZED_DARK_THEME["green"] == "#859900"
         assert SOLARIZED_DARK_THEME["pink"] == "#e85da0"  # WCAG AA adjusted
 

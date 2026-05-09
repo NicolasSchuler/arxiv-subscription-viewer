@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import ast
 import re
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -261,12 +262,84 @@ def _extract_feature_guide_links(docs_readme_text: str) -> set[str]:
     }
 
 
+def _extract_html_href_targets(html_text: str) -> list[str]:
+    """Extract raw ``href`` targets from an HTML document."""
+    return [target for _, target in re.findall(r"""(href)\s*=\s*["']([^"']+)["']""", html_text)]
+
+
 def _extract_html_links(html_text: str) -> set[str]:
     """Extract normalized link targets from an HTML document."""
-    return {
-        _normalize_doc_href(target)
-        for _, target in re.findall(r"""(href)\s*=\s*["']([^"']+)["']""", html_text)
-    }
+    return {_normalize_doc_href(target) for target in _extract_html_href_targets(html_text)}
+
+
+def _is_external_or_anchor(target: str) -> bool:
+    stripped = target.strip()
+    return (
+        not stripped
+        or stripped.startswith("#")
+        or stripped.startswith(("http://", "https://", "mailto:"))
+    )
+
+
+def _resolve_repo_link(source: Path, target: str) -> str | None:
+    """Resolve a relative markdown/html link to a repo-relative path."""
+    if _is_external_or_anchor(target):
+        return None
+    path_part = target.split("#", 1)[0].split("?", 1)[0]
+    if not path_part:
+        return None
+    candidate = (source.parent / path_part).resolve()
+    try:
+        rel = candidate.relative_to(ROOT).as_posix()
+    except ValueError:
+        return None
+    if path_part.endswith("/") or candidate.is_dir():
+        rel = f"{rel.rstrip('/')}/README.md"
+    return rel
+
+
+def _extract_markdown_links(text: str) -> list[str]:
+    """Extract markdown link and image targets."""
+    return re.findall(r"!?\[[^\]]*\]\(([^)]+)\)", text)
+
+
+def _tracked_files() -> set[str]:
+    """Return git-tracked repo paths, or an empty set outside git."""
+    try:
+        result = subprocess.run(
+            ["git", "ls-files"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return set()
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
+def _check_tracked_local_links(
+    files: list[Path],
+    tracked_files: set[str],
+) -> list[str]:
+    """Verify local docs links point at tracked files."""
+    if not tracked_files:
+        return []
+
+    errors: list[str] = []
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        targets = (
+            _extract_html_href_targets(text)
+            if path.suffix == ".html"
+            else _extract_markdown_links(text)
+        )
+        for target in targets:
+            resolved = _resolve_repo_link(path, target)
+            if resolved and resolved not in tracked_files:
+                source = path.relative_to(ROOT).as_posix()
+                errors.append(f"{source} links to untracked or missing file: {target}")
+    return errors
 
 
 def _extract_readme_keys(readme_text: str) -> set[str]:
@@ -492,6 +565,12 @@ def main() -> int:
     errors.extend(_check_config_reference(models_text, config_text, config_reference_text))
     errors.extend(_check_completions(cli_text, completions_text))
     errors.extend(_check_docs_index_navigation(docs_readme_text, docs_index_text))
+    errors.extend(
+        _check_tracked_local_links(
+            [README_PATH, DOCS_README_PATH, *sorted(DOCS_DIR.glob("*.md")), DOCS_INDEX_PATH],
+            _tracked_files(),
+        )
+    )
 
     if errors:
         print("Documentation sync check failed:")

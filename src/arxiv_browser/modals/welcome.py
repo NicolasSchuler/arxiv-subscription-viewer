@@ -18,7 +18,7 @@ class WelcomeScreen(ModalBase[None]):
         Binding("escape", "dismiss_welcome", "Close", show=False),
         Binding("enter", "dismiss_welcome", "Close", show=False),
         Binding("space", "dismiss_welcome", "Close", show=False),
-        Binding("question_mark", "dismiss_welcome", "Close", show=False),
+        Binding("question_mark", "show_help", "Help", show=False),
     ]
 
     CSS = """
@@ -70,7 +70,7 @@ class WelcomeScreen(ModalBase[None]):
             )
             yield Static(id="welcome-content")
             yield Label(
-                "Press any key to start browsing",
+                "Press Enter / Space / Esc to start, or ? for full help",
                 id="welcome-footer",
             )
 
@@ -124,3 +124,14 @@ class WelcomeScreen(ModalBase[None]):
     def action_dismiss_welcome(self) -> None:
         """Close the welcome screen."""
         self.dismiss(None)
+
+    def action_show_help(self) -> None:
+        """Close onboarding and open the full help overlay."""
+
+        def _open_help() -> None:
+            action = getattr(self.app, "action_show_help", None)
+            if callable(action):
+                action()
+
+        self.dismiss(None)
+        self.app.call_later(_open_help)

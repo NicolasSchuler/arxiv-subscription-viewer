@@ -277,6 +277,41 @@ class TestTextualThemes:
                     f"Theme '{name}' variable '{var_name}' has non-hex value: {value}"
                 )
 
+    def test_theme_core_text_pairs_meet_contrast_floor(self):
+        def _relative_luminance(hex_color: str) -> float:
+            channels = [int(hex_color.lstrip("#")[idx : idx + 2], 16) / 255 for idx in (0, 2, 4)]
+            linear = [
+                channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
+                for channel in channels
+            ]
+            return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+        def _contrast_ratio(foreground: str, background: str) -> float:
+            fg_lum = _relative_luminance(foreground)
+            bg_lum = _relative_luminance(background)
+            lighter, darker = max(fg_lum, bg_lum), min(fg_lum, bg_lum)
+            return (lighter + 0.05) / (darker + 0.05)
+
+        pairs = [
+            ("text", "background"),
+            ("text", "panel"),
+            ("text", "panel_alt"),
+            ("text", "highlight_focus"),
+            ("muted", "background"),
+            ("muted", "panel"),
+            ("accent", "background"),
+            ("accent", "panel"),
+            ("accent_alt", "background"),
+            ("accent_alt", "panel"),
+        ]
+        failures = [
+            f"{theme_name}:{fg}/{bg}={_contrast_ratio(colors[fg], colors[bg]):.2f}"
+            for theme_name, colors in THEMES.items()
+            for fg, bg in pairs
+            if _contrast_ratio(colors[fg], colors[bg]) < 4.5
+        ]
+        assert failures == []
+
 
 class TestFooterContrast:
     """Tests for footer rendering with accent-colored keys."""

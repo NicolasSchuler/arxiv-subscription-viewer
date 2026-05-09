@@ -36,9 +36,18 @@ Use whichever entry path matches how you already follow papers:
 - **Live arXiv search**: start directly from the API when you want the newest matching papers without preparing local files first.
 
 ```bash
-# Install
-pip install arxiv-subscription-viewer
-# or: uv tool install arxiv-subscription-viewer
+# Confirm Python support
+python3.13 --version
+
+# Install as a CLI tool
+uv tool install arxiv-subscription-viewer
+# or: python3.13 -m pip install --user arxiv-subscription-viewer
+
+# Optional faster fuzzy matching
+uv tool install "arxiv-subscription-viewer[fuzzy]"
+
+# Check environment & config health
+arxiv-viewer doctor
 
 # Search arXiv API directly
 arxiv-viewer search --category cs.AI
@@ -58,11 +67,11 @@ arxiv-viewer dates
 # Show version
 arxiv-viewer --version
 
-# Check environment & config health
-arxiv-viewer doctor
-
 # Print config file path
 arxiv-viewer config-path
+
+# Module entrypoint, equivalent to arxiv-viewer
+python -m arxiv_browser --version
 ```
 
 > **Requires Python 3.13+** · Press `?` in-app for help · `Ctrl+p` opens commands
@@ -180,12 +189,27 @@ eval "$(arxiv-viewer completions zsh)"
 arxiv-viewer completions fish | source
 ```
 
+## 🔄 Upgrade / Uninstall
+
+```bash
+uv tool upgrade arxiv-subscription-viewer
+uv tool uninstall arxiv-subscription-viewer
+
+# pip-installed users
+python3.13 -m pip install --user --upgrade arxiv-subscription-viewer
+python3.13 -m pip uninstall arxiv-subscription-viewer
+```
+
 ## 🛠️ Development
 
 ```bash
 git clone https://github.com/NicolasSchuler/arxiv-subscription-viewer.git
-cd arxiv-subscription-viewer && uv sync
-just check   # lint + typecheck + tests
+cd arxiv-subscription-viewer
+uv python install 3.13
+uv sync --locked
+pre-commit install
+just check   # docs drift + lint + typecheck + tests
+just quality # full local quality suite
 ```
 
 For contributor-oriented architecture and import-boundary guidance, start with [docs/architecture.md](docs/architecture.md).

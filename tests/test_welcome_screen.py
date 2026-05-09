@@ -32,6 +32,11 @@ class TestWelcomeScreen:
             screen.action_dismiss_welcome()
             mock_dismiss.assert_called_once_with(None)
 
+    def test_welcome_question_mark_binding_opens_help(self) -> None:
+        """The help key should not be described as a plain dismiss action."""
+        binding_by_key = {b.key: b.action for b in WelcomeScreen.BINDINGS}
+        assert binding_by_key["question_mark"] == "show_help"
+
     @pytest.mark.asyncio
     async def test_welcome_screen_mounts_and_renders_key_sections(
         self, tmp_path, monkeypatch, make_paper
@@ -62,6 +67,9 @@ class TestWelcomeScreen:
                 assert "Navigate" in rendered
                 assert "Search" in rendered
                 assert "Actions" in rendered
+                footer = str(modal.query_one("#welcome-footer", Static).content)
+                assert "Enter / Space / Esc" in footer
+                assert "full help" in footer
                 await pilot.press("enter")
                 await pilot.pause()
                 assert modal not in pilot.app.screen_stack

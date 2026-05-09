@@ -6,6 +6,17 @@ Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before contributing. To re
 
 Start with [docs/architecture.md](docs/architecture.md). It is the primary human-oriented reference for package boundaries, canonical imports, and test patch rules.
 
+## Local setup
+
+```bash
+uv python install 3.13
+uv sync --locked
+pre-commit install
+just check
+```
+
+Use `just quality` before release or when a change touches shared architecture, packaging, security-sensitive IO, or dependency boundaries.
+
 ## Docs map
 
 - `README.md` — top-level install, usage, and quick-start material
@@ -29,3 +40,12 @@ Start with [docs/architecture.md](docs/architecture.md). It is the primary human
   - `just check`
 
 For doc-only edits like this guide or `AGENTS.md`, keep validation targeted instead of running the full suite unless the change depends on code behavior updates.
+
+## Release checklist
+
+1. Update `CHANGELOG.md` under `[Unreleased]` while developing.
+2. For a release, move entries to `## [X.Y.Z] - YYYY-MM-DD`.
+3. Bump `version` in `pyproject.toml` and refresh `uv.lock` if needed.
+4. Run `just docs-check`, `just check`, and `just quality`.
+5. Tag with `vX.Y.Z` and push the tag; CI publishes tagged releases to PyPI.
+6. Verify the GitHub Actions publish job and the PyPI package page.

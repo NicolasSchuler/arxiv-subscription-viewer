@@ -21,6 +21,48 @@ body{
     linear-gradient(180deg, #22241f 0%, #161815 48%, #111310 100%);
 }
 
+.py-16{
+  padding-top:4rem;
+  padding-bottom:4rem;
+}
+
+.sr-only{
+  position:absolute;
+  width:1px;
+  height:1px;
+  padding:0;
+  margin:-1px;
+  overflow:hidden;
+  clip:rect(0,0,0,0);
+  white-space:nowrap;
+  border:0;
+}
+
+.skip-link{
+  position:absolute;
+  left:1rem;
+  top:1rem;
+  z-index:50;
+  transform:translateY(-150%);
+  padding:.7rem 1rem;
+  border-radius:.5rem;
+  background:#f8f8f2;
+  color:#111310;
+  font-weight:700;
+}
+
+.skip-link:focus-visible{
+  transform:translateY(0);
+  outline:3px solid var(--hero-accent);
+  outline-offset:3px;
+}
+
+a:focus-visible,
+button:focus-visible{
+  outline:3px solid var(--hero-accent-warm);
+  outline-offset:3px;
+}
+
 .hero-shell{
   background:
     linear-gradient(180deg, rgba(249,38,114,.08), rgba(249,38,114,0) 30%),
@@ -32,13 +74,18 @@ body{
 
 .hero-grid{
   display:grid;
-  gap:2.75rem;
+  gap:2rem;
   align-items:center;
+  grid-template-areas:
+    "copy"
+    "visual"
+    "install";
 }
 
 .hero-copy{
   position:relative;
   z-index:1;
+  grid-area:copy;
 }
 
 .hero-badge{
@@ -69,10 +116,10 @@ body{
 }
 
 .hero-title{
-  max-width:12ch;
-  font-size:clamp(2.8rem,5.4vw,5rem);
-  line-height:.95;
-  letter-spacing:-.05em;
+  max-width:11ch;
+  font-size:2.75rem;
+  line-height:1;
+  letter-spacing:0;
   margin-bottom:1.25rem;
   color:#fbfbf7;
 }
@@ -83,40 +130,13 @@ body{
   color:var(--hero-copy);
 }
 
-.hero-proof-grid{
-  display:grid;
-  gap:1rem;
-  margin-bottom:1.75rem;
-}
-
-.hero-proof-card{
-  padding:1rem 1.1rem;
-  border:1px solid var(--hero-border);
-  border-radius:1rem;
-  background:linear-gradient(180deg, rgba(0,0,0,.34), rgba(0,0,0,.18));
-  backdrop-filter:blur(10px);
-}
-
-.hero-proof-title{
-  color:var(--hero-accent-warm);
-  font-size:.75rem;
-  text-transform:uppercase;
-  letter-spacing:.12em;
-  margin-bottom:.35rem;
-}
-
-.hero-proof-copy{
-  color:#d0d5da;
-  font-size:.95rem;
-}
-
 .hero-install-panel{
   padding:1rem 1.1rem;
   border:1px solid var(--hero-border-strong);
-  border-radius:1rem;
+  border-radius:.5rem;
   background:linear-gradient(180deg, rgba(10,12,10,.94), rgba(14,16,13,.84));
   box-shadow:0 24px 70px rgba(0,0,0,.28);
-  margin-bottom:1.5rem;
+  grid-area:install;
 }
 
 .hero-install-label{
@@ -169,7 +189,7 @@ body{
   align-items:center;
   justify-content:center;
   font-weight:700;
-  border-radius:.85rem;
+  border-radius:.5rem;
   padding:.95rem 1.25rem;
   transition:transform .15s ease,border-color .15s ease,background-color .15s ease,color .15s ease;
 }
@@ -199,14 +219,31 @@ body{
   border:1px solid transparent;
 }
 
+.hero-proof-strip{
+  display:flex;
+  flex-wrap:wrap;
+  gap:.6rem;
+  margin-top:1rem;
+}
+
+.hero-proof-chip{
+  padding:.45rem .7rem;
+  border:1px solid var(--hero-border);
+  border-radius:.5rem;
+  background:rgba(255,255,255,.04);
+  color:#d2d7dc;
+  font-size:.78rem;
+}
+
 .hero-visual{
   position:relative;
+  grid-area:visual;
 }
 
 .hero-terminal-frame{
   position:relative;
   overflow:hidden;
-  border-radius:1.4rem;
+  border-radius:.5rem;
   border:1px solid rgba(255,255,255,.09);
   background:linear-gradient(180deg, rgba(17,19,15,.98), rgba(6,7,6,.98));
   box-shadow:0 40px 120px rgba(0,0,0,.45);
@@ -267,62 +304,51 @@ body{
   width:100%;
 }
 
-.hero-annotation{
-  margin-top:1rem;
-  padding:.95rem 1rem;
-  border-radius:1rem;
-  border:1px solid rgba(255,255,255,.08);
-  background:rgba(0,0,0,.34);
-}
-
-.hero-annotation-label{
-  color:#66d9ef;
-  font-size:.75rem;
-  text-transform:uppercase;
-  letter-spacing:.12em;
-  margin-bottom:.35rem;
-}
-
-.hero-annotation-copy{
+.hero-caption-row{
+  display:grid;
+  gap:.75rem;
+  margin-top:.85rem;
   color:#d1d5db;
-  font-size:.92rem;
+  font-size:.88rem;
+}
+
+.hero-caption-row span{
+  color:#66d9ef;
+  text-transform:uppercase;
+  letter-spacing:.08em;
 }
 
 @media (min-width:768px){
-  .hero-grid{
-    gap:2.2rem;
-    grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  .md\:py-24{
+    padding-top:6rem;
+    padding-bottom:6rem;
   }
 
-  .hero-proof-grid{
-    grid-template-columns:repeat(3,minmax(0,1fr));
+  .hero-grid{
+    gap:2.5rem;
+    grid-template-columns:minmax(0,.82fr) minmax(0,1.18fr);
+    grid-template-areas:
+      "copy visual"
+      "install visual";
+  }
+
+  .hero-title{
+    font-size:4.5rem;
+  }
+
+  .hero-caption-row{
+    grid-template-columns:repeat(2,minmax(0,1fr));
   }
 }
 
 @media (min-width:1024px){
-  .hero-visual{
-    min-height:42rem;
+  .hero-grid{
+    min-height:calc(100vh - 5rem);
   }
 
   .hero-terminal-frame{
-    transform:perspective(1200px) rotateY(-8deg) rotateX(2deg);
+    transform:perspective(1400px) rotateY(-3deg) rotateX(1deg);
     transform-origin:right center;
-  }
-
-  .hero-annotation{
-    position:absolute;
-    width:15rem;
-    backdrop-filter:blur(10px);
-  }
-
-  .hero-annotation-left{
-    left:-2.5rem;
-    bottom:3rem;
-  }
-
-  .hero-annotation-right{
-    right:-1.5rem;
-    top:3rem;
   }
 }
 
