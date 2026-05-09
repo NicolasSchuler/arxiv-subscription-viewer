@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-05-09
+
+### Added
+- Published-docs hero redesign with product-first copy, stronger screenshot placement, skip-link support, and live copy feedback.
+- Documentation link hygiene checks for tracked local docs links.
+- HTTP/OpenAI-compatible LLM provider diagnostics in `arxiv-viewer doctor`.
+- Keyboard affordances for detail-pane focus toggling and inline command-palette result navigation.
+- Theme contrast regression tests for core foreground/background pairs.
+
+### Changed
+- Folded docs drift checks into local quality gates and pre-commit.
+- Expanded install, contributor, release, and LLM setup documentation.
+- Clarified command-palette disabled-state and no-match guidance.
+- Improved Solarized Dark contrast for selected and header states.
+- Centralized action registration expectations by removing the unused parallel registry.
+
+### Fixed
+- Search cancel now returns focus to the paper list.
+- Welcome-screen `?` now opens full help instead of only dismissing onboarding.
+- ASCII mode now avoids Unicode hints in the command palette and release-notes modal.
+- Removed a broken docs link to an ignored local prompt file.
+
 ## [0.1.3] - 2026-05-03
 
 ### Added
@@ -82,7 +104,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ASCII mode for terminals without Unicode support (`--ascii`)
 - Session persistence: scroll position, active filters, sort order
 
-[Unreleased]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.0...v0.1.1
