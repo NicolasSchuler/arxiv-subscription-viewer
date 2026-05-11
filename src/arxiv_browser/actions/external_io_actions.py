@@ -49,8 +49,14 @@ from arxiv_browser.io_actions import (
     get_clipboard_command_plan,
     write_timestamped_export_file,
 )
-from arxiv_browser.modals import ConfirmModal, ExportMenuModal, MetadataSnapshotPickerModal
+from arxiv_browser.modals import (
+    ConfirmModal,
+    ExportMenuModal,
+    MetadataSnapshotPickerModal,
+    PdfPreviewScreen,
+)
 from arxiv_browser.models import Paper
+from arxiv_browser.pdf_preview import PdfPreviewError, build_pdf_preview_pages
 
 # Compatibility patch surface for tests and callers that monkeypatch browser opening.
 webbrowser = _webbrowser
@@ -441,6 +447,52 @@ def _do_open_pdfs(app: "ArxivBrowser", papers: list[Paper]) -> None:
             app._safe_browser_open(url)
     count = len(papers)
     app.notify(build_open_pdfs_notification(count), title="PDF")
+
+
+def action_preview_pdf(app: "ArxivBrowser") -> None:
+    """Render a terminal preview of the current paper's PDF."""
+    paper = app._get_current_paper()
+    if not paper:
+        app.notify("No paper selected", title="PDF Preview", severity="warning")
+        return
+    app._track_dataset_task(app._preview_pdf_async(paper))
+
+
+async def _preview_pdf_async(app: "ArxivBrowser", paper: Paper) -> None:
+    """Download if needed, render pages, and open the PDF preview modal."""
+    task_epoch = app._capture_dataset_epoch()
+    pdf_path = get_pdf_download_path(paper, app._config)
+    if not pdf_path.is_file():
+        if app._http_client is None:
+            app.notify(
+                "PDF preview needs a downloaded PDF or active network client",
+                title="PDF Preview",
+                severity="warning",
+            )
+            return
+        app.notify("Downloading PDF for preview...", title="PDF Preview")
+        success = await app._download_pdf_async(paper, app._http_client)
+        if not app._is_current_dataset_epoch(task_epoch):
+            return
+        if not success:
+            app.notify("PDF download failed", title="PDF Preview", severity="error")
+            return
+
+    try:
+        pages = await asyncio.to_thread(
+            build_pdf_preview_pages,
+            pdf_path=pdf_path,
+            paper=paper,
+            config=app._config,
+            max_pages=app._config.pdf_preview_max_pages,
+        )
+    except PdfPreviewError as exc:
+        if app._is_current_dataset_epoch(task_epoch):
+            app.notify(str(exc)[:200], title="PDF Preview", severity="error", timeout=8)
+        return
+    if not app._is_current_dataset_epoch(task_epoch):
+        return
+    app.push_screen(PdfPreviewScreen(paper, pages))
 
 
 def _open_with_viewer(app: "ArxivBrowser", viewer_cmd: str, url_or_path: str) -> bool:

@@ -22,8 +22,10 @@ import arxiv_browser.llm_providers as llm_providers
 import arxiv_browser.semantic_scholar as s2
 from arxiv_browser.actions import external_io_actions as io_actions
 from arxiv_browser.actions import llm_actions as llm_actions
+from arxiv_browser.export import get_pdf_download_path
 from arxiv_browser.modals.collections import CollectionsModal
 from arxiv_browser.models import MAX_COLLECTIONS, PaperCollection, UserConfig
+from arxiv_browser.pdf_preview import PdfPreviewError, PdfPreviewPage
 from arxiv_browser.services import enrichment_service as enrich
 from tests.support.app_stubs import (
     _DummyInput,
@@ -450,3 +452,53 @@ class TestExternalIoCoverage:
             ),
         ):
             assert io_actions._copy_to_clipboard(app, "test text") is False
+
+    @pytest.mark.asyncio
+    async def test_preview_pdf_opens_modal_and_reports_render_failure(self, make_paper, tmp_path):
+        app = _new_app_stub()
+        paper = make_paper(arxiv_id="2401.54444")
+        app._config = UserConfig(pdf_download_dir=str(tmp_path), pdf_preview_max_pages=1)
+        app._http_client = None
+        app.notify = MagicMock()
+        app.push_screen = MagicMock()
+        app._capture_dataset_epoch = MagicMock(return_value=1)
+        app._is_current_dataset_epoch = MagicMock(return_value=True)
+
+        app._get_current_paper = MagicMock(return_value=None)
+        io_actions.action_preview_pdf(app)
+        assert "No paper selected" in app.notify.call_args[0][0]
+
+        missing_paper = make_paper(arxiv_id="2401.54445")
+        app.notify.reset_mock()
+        await io_actions._preview_pdf_async(app, missing_paper)
+        assert "needs a downloaded PDF" in app.notify.call_args[0][0]
+
+        app._http_client = object()
+        app._download_pdf_async = AsyncMock(return_value=False)
+        app.notify.reset_mock()
+        await io_actions._preview_pdf_async(app, missing_paper)
+        assert "PDF download failed" in app.notify.call_args[0][0]
+
+        pdf_path = get_pdf_download_path(paper, app._config)
+        pdf_path.parent.mkdir(parents=True, exist_ok=True)
+        pdf_path.write_bytes(b"%PDF fake")
+
+        page = PdfPreviewPage(page_number=1, image_path=tmp_path / "p1.png", markup="preview")
+        with patch(
+            "arxiv_browser.actions.external_io_actions.build_pdf_preview_pages",
+            return_value=[page],
+        ):
+            await io_actions._preview_pdf_async(app, paper)
+
+        app.push_screen.assert_called_once()
+        assert app.push_screen.call_args.args[0].__class__.__name__ == "PdfPreviewScreen"
+
+        app.push_screen.reset_mock()
+        with patch(
+            "arxiv_browser.actions.external_io_actions.build_pdf_preview_pages",
+            side_effect=PdfPreviewError("render failed"),
+        ):
+            await io_actions._preview_pdf_async(app, paper)
+
+        app.push_screen.assert_not_called()
+        assert "render failed" in app.notify.call_args[0][0]

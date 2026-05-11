@@ -274,10 +274,14 @@ class UserConfig:
     allow_llm_shell_fallback: bool = True  # False = reject shell-only command templates
     llm_max_retries: int = 1  # Retries for transient LLM failures (timeout, non-zero exit)
     llm_timeout: int = 120  # Seconds to wait for LLM CLI response
+    llm_streaming_enabled: bool = False  # Opt-in incremental LLM output updates
     llm_provider_type: str = "cli"  # "cli" | "http" — selects LLM execution backend
     llm_api_base_url: str = ""  # Base URL for HTTP providers (e.g. https://api.openai.com)
     llm_api_key: str = ""  # API key for HTTP providers
     llm_api_model: str = ""  # Model name for HTTP providers (e.g. "gpt-4o")
+    paper_content_cache_ttl_days: int = 7  # Days to cache extracted full-paper text
+    paper_content_pdf_fallback: bool = True  # Use PDF text when arXiv HTML is unavailable
+    pdf_preview_max_pages: int = 3  # Pages to render for terminal PDF preview
     arxiv_api_max_results: int = ARXIV_API_DEFAULT_MAX_RESULTS
     s2_enabled: bool = False  # Semantic Scholar enrichment (opt-in)
     s2_api_key: str = ""  # Optional S2 API key for higher rate limits

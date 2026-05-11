@@ -43,6 +43,14 @@ _CREATE_TABLE_SQL: tuple[str, ...] = (
     "  created_at TEXT NOT NULL,"
     "  PRIMARY KEY (arxiv_id, interests_hash)"
     ")",
+    # browser/content.py — extracted full-paper text
+    "CREATE TABLE IF NOT EXISTS paper_content ("
+    "  arxiv_id TEXT PRIMARY KEY,"
+    "  source TEXT NOT NULL,"
+    "  content_hash TEXT NOT NULL,"
+    "  fetched_at TEXT NOT NULL,"
+    "  content TEXT NOT NULL"
+    ")",
     # semantic_scholar_cache.py — s2_papers
     "CREATE TABLE IF NOT EXISTS s2_papers ("
     "  arxiv_id TEXT PRIMARY KEY,"

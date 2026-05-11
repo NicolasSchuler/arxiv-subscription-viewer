@@ -79,6 +79,7 @@ class TestInitCacheDb:
             "s2_citation_graph_fetches",
             "hf_daily_papers",
             "hf_daily_fetch_state",
+            "paper_content",
         }
         assert expected_tables.issubset(tables)
 
@@ -98,7 +99,7 @@ class TestInitCacheDb:
 
         with closing(sqlite3.connect(str(db_path))) as conn:
             tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-        assert len(tables) >= 10
+        assert len(tables) >= 11
 
     def test_creates_parent_directory(self, tmp_path: Path):
         db_path = tmp_path / "sub" / "dir" / "test_cache.db"
@@ -118,7 +119,16 @@ class TestInitCacheDb:
             row = conn.execute(
                 "SELECT summary FROM summaries WHERE arxiv_id = '2401.12345'"
             ).fetchone()
+            conn.execute(
+                "INSERT INTO paper_content "
+                "(arxiv_id, source, content_hash, fetched_at, content) "
+                "VALUES ('2401.12345', 'html', 'hash', '2026-01-01T00:00:00+00:00', 'Body')"
+            )
+            content_row = conn.execute(
+                "SELECT source, content FROM paper_content WHERE arxiv_id = '2401.12345'"
+            ).fetchone()
         assert row[0] == "Test summary"
+        assert content_row == ("html", "Body")
 
 
 class TestLegacyModuleIntegration:

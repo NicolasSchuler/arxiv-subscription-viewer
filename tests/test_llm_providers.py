@@ -5,8 +5,11 @@ from __future__ import annotations
 from arxiv_browser.llm_providers import (
     CLIProvider,
     HTTPProvider,
+    LLMChunk,
     LLMProvider,
     LLMResult,
+    _extract_stream_delta,
+    _parse_sse_line,
     get_provider_class,
     llm_command_requires_shell,
     register_provider,
@@ -30,6 +33,12 @@ class TestLLMResult:
         assert result.output == "text"
         assert result.success is False
         assert result.error == "boom"
+
+    def test_chunk_defaults(self):
+        chunk = LLMChunk(delta="hi")
+        assert chunk.delta == "hi"
+        assert chunk.error == ""
+        assert chunk.done is False
 
 
 # ============================================================================
@@ -178,6 +187,125 @@ class TestCLIProvider:
         shell_mock.assert_called_once()
         assert shell_mock.call_args.args[0] == 'echo "safe ^& prompt" | cat'
 
+    async def test_execute_stream_yields_stdout_chunks(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        provider = CLIProvider("llm {prompt}")
+        stdout = MagicMock()
+        stdout.read = AsyncMock(side_effect=[b"hello ", b"world", b""])
+        stderr = MagicMock()
+        stderr.read = AsyncMock(return_value=b"")
+        proc = MagicMock()
+        proc.stdout = stdout
+        proc.stderr = stderr
+        proc.wait = AsyncMock(return_value=0)
+        proc.returncode = 0
+
+        with patch(
+            "arxiv_browser.llm_providers.asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            return_value=proc,
+        ):
+            chunks = [chunk async for chunk in provider.execute_stream("test", timeout=5)]
+
+        assert [chunk.delta for chunk in chunks if chunk.delta] == ["hello ", "world"]
+        assert chunks[-1].done is True
+
+    async def test_execute_stream_timeout_kills_process(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        class _SlowStdout:
+            async def read(self, _size: int) -> bytes:
+                import asyncio
+
+                await asyncio.sleep(1)
+                return b""
+
+        provider = CLIProvider("llm {prompt}")
+        proc = MagicMock()
+        proc.stdout = _SlowStdout()
+        proc.stderr = None
+        proc.wait = AsyncMock(return_value=0)
+        proc.returncode = None
+
+        with patch(
+            "arxiv_browser.llm_providers.asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            return_value=proc,
+        ):
+            chunks = [chunk async for chunk in provider.execute_stream("test", timeout=0)]
+
+        assert chunks[-1].done is True
+        assert "Timed out" in chunks[-1].error
+        proc.kill.assert_called_once()
+
+    async def test_execute_stream_nonzero_exit_truncates_stderr(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        provider = CLIProvider("llm {prompt}")
+        stdout = MagicMock()
+        stdout.read = AsyncMock(side_effect=[b"", b""])
+        stderr = MagicMock()
+        stderr.read = AsyncMock(return_value=b"x" * 300)
+        proc = MagicMock()
+        proc.stdout = stdout
+        proc.stderr = stderr
+        proc.wait = AsyncMock(return_value=0)
+        proc.returncode = 2
+
+        with patch(
+            "arxiv_browser.llm_providers.asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            return_value=proc,
+        ):
+            chunks = [chunk async for chunk in provider.execute_stream("test", timeout=5)]
+
+        assert chunks[-1].done is True
+        assert chunks[-1].error.startswith("Exit 2:")
+        assert len(chunks[-1].error) < 230
+
+    async def test_execute_stream_invalid_template_and_start_failure(self):
+        from unittest.mock import AsyncMock, patch
+
+        invalid = CLIProvider("llm {missing}")
+        invalid_chunks = [chunk async for chunk in invalid.execute_stream("test", timeout=5)]
+        assert invalid_chunks[-1].done is True
+        assert "{prompt}" in invalid_chunks[-1].error
+
+        provider = CLIProvider("llm {prompt}")
+        with patch(
+            "arxiv_browser.llm_providers.asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            side_effect=OSError("no llm"),
+        ):
+            chunks = [chunk async for chunk in provider.execute_stream("test", timeout=5)]
+        assert chunks[-1].done is True
+        assert "no llm" in chunks[-1].error
+
+    async def test_execute_stream_empty_output(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        provider = CLIProvider("llm {prompt}")
+        stdout = MagicMock()
+        stdout.read = AsyncMock(return_value=b"")
+        stderr = MagicMock()
+        stderr.read = AsyncMock(return_value=b"")
+        proc = MagicMock()
+        proc.stdout = stdout
+        proc.stderr = stderr
+        proc.wait = AsyncMock(return_value=0)
+        proc.returncode = 0
+
+        with patch(
+            "arxiv_browser.llm_providers.asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            return_value=proc,
+        ):
+            chunks = [chunk async for chunk in provider.execute_stream("test", timeout=5)]
+
+        assert chunks[-1].done is True
+        assert chunks[-1].error == "Empty output"
+
 
 # ============================================================================
 # resolve_provider
@@ -255,6 +383,42 @@ class TestLLMProviderProtocol:
 # ============================================================================
 # HTTPProvider
 # ============================================================================
+
+
+class _StreamingResponse:
+    def __init__(self, status_code: int, lines: list[str], body: bytes = b"") -> None:
+        self.status_code = status_code
+        self._lines = lines
+        self._body = body
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def aiter_lines(self):
+        for line in self._lines:
+            yield line
+
+    async def aread(self) -> bytes:
+        return self._body
+
+
+class _StreamingClient:
+    def __init__(self, response: _StreamingResponse) -> None:
+        self._response = response
+        self.calls: list[dict[str, object]] = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    def stream(self, method: str, url: str, **kwargs):
+        self.calls.append({"method": method, "url": url, **kwargs})
+        return self._response
 
 
 class TestHTTPProvider:
@@ -486,6 +650,84 @@ class TestHTTPProvider:
 
         assert result.success is False
         assert "Connection refused" in result.error
+
+    def test_sse_parsing_helpers(self):
+        assert _parse_sse_line("") is None
+        assert _parse_sse_line(": keep-alive") is None
+        assert _parse_sse_line("event: message") is None
+        assert _parse_sse_line("data: [DONE]") == "[DONE]"
+        assert _extract_stream_delta({"choices": [{"delta": {"content": "hello"}}]}) == "hello"
+        assert _extract_stream_delta({"choices": [{"delta": {}}]}) == ""
+
+    async def test_execute_stream_success(self):
+        from unittest.mock import patch
+
+        provider = HTTPProvider("http://api.example.com", "sk-secret", "model-1")
+        client = _StreamingClient(
+            _StreamingResponse(
+                200,
+                [
+                    'data: {"choices":[{"delta":{"content":"Hel"}}]}',
+                    'data: {"choices":[{"delta":{"content":"lo"}}]}',
+                    "data: [DONE]",
+                ],
+            )
+        )
+
+        with patch("httpx.AsyncClient", side_effect=lambda **_kwargs: client):
+            chunks = [chunk async for chunk in provider.execute_stream("Say hello", timeout=30)]
+
+        assert [chunk.delta for chunk in chunks if chunk.delta] == ["Hel", "lo"]
+        assert chunks[-1].done is True
+        assert client.calls[0]["headers"]["Authorization"] == "Bearer sk-secret"
+        assert client.calls[0]["json"]["stream"] is True
+
+    async def test_execute_stream_non_200_error(self):
+        from unittest.mock import patch
+
+        provider = HTTPProvider("http://api.example.com", "", "model-1")
+        client = _StreamingClient(_StreamingResponse(429, [], body=b"rate limited"))
+
+        with patch("httpx.AsyncClient", side_effect=lambda **_kwargs: client):
+            chunks = [chunk async for chunk in provider.execute_stream("test", timeout=30)]
+
+        assert chunks[-1].done is True
+        assert "HTTP 429" in chunks[-1].error
+        assert "rate limited" in chunks[-1].error
+
+    async def test_execute_stream_malformed_chunk(self):
+        from unittest.mock import patch
+
+        provider = HTTPProvider("http://api.example.com", "", "model-1")
+        client = _StreamingClient(_StreamingResponse(200, ["data: {not-json"]))
+
+        with patch("httpx.AsyncClient", side_effect=lambda **_kwargs: client):
+            chunks = [chunk async for chunk in provider.execute_stream("test", timeout=30)]
+
+        assert chunks[-1].done is True
+        assert "Invalid stream JSON" in chunks[-1].error
+
+    async def test_execute_stream_empty_and_timeout_errors(self):
+        from unittest.mock import patch
+
+        import httpx
+
+        provider = HTTPProvider("http://api.example.com", "", "model-1")
+        empty_client = _StreamingClient(_StreamingResponse(200, []))
+        with patch("httpx.AsyncClient", side_effect=lambda **_kwargs: empty_client):
+            empty_chunks = [chunk async for chunk in provider.execute_stream("test", timeout=30)]
+        assert empty_chunks[-1].done is True
+        assert empty_chunks[-1].error == "Empty response content"
+
+        class _TimeoutClient(_StreamingClient):
+            def stream(self, method: str, url: str, **kwargs):
+                raise httpx.TimeoutException("slow")
+
+        timeout_client = _TimeoutClient(_StreamingResponse(200, []))
+        with patch("httpx.AsyncClient", side_effect=lambda **_kwargs: timeout_client):
+            timeout_chunks = [chunk async for chunk in provider.execute_stream("test", timeout=30)]
+        assert timeout_chunks[-1].done is True
+        assert "Timed out" in timeout_chunks[-1].error
 
 
 # ============================================================================

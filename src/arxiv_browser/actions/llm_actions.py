@@ -1,13 +1,4 @@
-"""LLM, Semantic Scholar, and command-trust action handlers for ArxivBrowser.
-
-Covers: AI summary generation, paper chat, relevance scoring, auto-tagging,
-research-interests editing, Semantic Scholar paper/recommendation/citation-graph
-fetching, and the security trust-gate for LLM and PDF-viewer commands.
-
-The command trust-gate (hashing, trusted-hash persistence, confirmation
-prompts) lives in :mod:`arxiv_browser.actions.trust_gate`; this module
-re-exports its public surface for backwards compatibility.
-"""
+"""LLM, enrichment, auto-tag, and command-trust action handlers."""
 
 from __future__ import annotations
 
@@ -17,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from arxiv_browser.actions.constants import RECOVERABLE_ACTION_ERRORS, log_action_failure, logger
+from arxiv_browser.actions.llm_streaming import request_summary_streaming, should_stream_summary
 from arxiv_browser.actions.trust_gate import (
     CommandTrustRequest,
     _ensure_command_trusted,
@@ -273,16 +265,26 @@ async def _generate_summary_async(
         if use_full_paper_content:
             app.notify("Fetching paper content...", title="AI Summary")
 
-        summary, error = await _request_summary(
-            app,
-            paper=paper,
-            prompt_template=prompt_template,
-            provider=provider,
-            use_full_paper_content=use_full_paper_content,
-        )
+        if should_stream_summary(app, provider):
+            summary, error = await request_summary_streaming(
+                app,
+                paper=paper,
+                prompt_template=prompt_template,
+                provider=provider,
+                use_full_paper_content=use_full_paper_content,
+            )
+        else:
+            summary, error = await _request_summary(
+                app,
+                paper=paper,
+                prompt_template=prompt_template,
+                provider=provider,
+                use_full_paper_content=use_full_paper_content,
+            )
         if not app._is_current_dataset_epoch(task_epoch):
             return
         if summary is None:
+            app._paper_summaries.pop(arxiv_id, None)
             _notify_summary_error(app, error)
             return
 
@@ -419,7 +421,13 @@ async def _open_chat_screen(app: ArxivBrowser, paper: Paper, provider: LLMProvid
     if not app._is_current_dataset_epoch(task_epoch):
         return
     app.push_screen(
-        PaperChatScreen(paper, provider, paper_content, timeout=app._config.llm_timeout)
+        PaperChatScreen(
+            paper,
+            provider,
+            paper_content,
+            timeout=app._config.llm_timeout,
+            streaming_enabled=app._config.llm_streaming_enabled,
+        )
     )
 
 

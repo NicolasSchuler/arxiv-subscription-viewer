@@ -40,7 +40,7 @@ If both `llm_command` and `llm_preset` are set, `llm_command` wins.
 
 **Prompt placeholders:** `{title}`, `{authors}`, `{categories}`, `{abstract}`, `{arxiv_id}`, `{paper_content}`.
 
-The `{paper_content}` placeholder is replaced with the full paper text (fetched from arXiv HTML), falling back to the abstract if unavailable. Set `"allow_llm_shell_fallback": false` to block commands that require shell parsing.
+The `{paper_content}` placeholder is replaced with full-paper text when available. The app tries arXiv HTML first, then PDF text extraction, then falls back to the abstract. Extracted full-paper text is cached in `cache.db` for `paper_content_cache_ttl_days` days (default `7`). Set `"paper_content_pdf_fallback": false` to disable PDF text fallback, or `"allow_llm_shell_fallback": false` to block commands that require shell parsing.
 
 ## HTTP / OpenAI-Compatible Provider
 
@@ -79,6 +79,18 @@ Local examples:
 - Ollama, LM Studio, vLLM, and other local servers often leave `llm_api_key` empty.
 - `llm_api_base_url` should not include `/v1/chat/completions`; the app appends that path.
 - `arxiv-viewer doctor` checks that the base URL and model are present for HTTP mode.
+
+## Streaming Output
+
+Streaming is opt-in so existing CLI and HTTP behavior stays single-shot by default:
+
+```json
+{
+  "llm_streaming_enabled": true
+}
+```
+
+When enabled, summaries and chat update incrementally if the provider supports streaming. The HTTP provider uses OpenAI-compatible chat-completions Server-Sent Events with `stream: true`; the CLI provider streams stdout chunks as the subprocess writes them. Summary cache writes still happen only after a stream completes successfully.
 
 ## Timeout & Retry Tuning
 

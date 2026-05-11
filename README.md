@@ -116,7 +116,7 @@ If something looks off, run `arxiv-viewer doctor` to check config, history disco
 | 🔥 | **HuggingFace trending** — upvotes, keywords, GitHub links | `Ctrl+h` |
 | 🏷️ | **Tags, notes, stars** — organize your reading | `t` / `n` / `x` |
 | 📁 | **Collections** — curate reading lists | `Ctrl+k` |
-| 📥 | **Export** — BibTeX, Markdown, RIS, CSV, PDF download | `E` / `d` |
+| 📥 | **Export** — BibTeX, Markdown, RIS, CSV, PDF download/preview | `E` / `d` / `F` |
 | 🎯 | **Relevance scoring** — LLM scores papers against your interests | `L` |
 | 📅 | **History mode** — navigate daily email digests with `[` / `]` | |
 | ⌨️ | **Command palette** — quick access to all commands | `Ctrl+p` |
@@ -129,20 +129,21 @@ If something looks off, run `arxiv-viewer doctor` to check config, history disco
 | `/` | Search | | `o` | Open in browser |
 | `A` | Search arXiv API | | `P` | Open PDF |
 | `j` / `k` | Navigate | | `d` | Download PDF |
-| `Space` | Select | | `E` | Export menu |
-| `s` | Cycle sort | | `c` | Copy to clipboard |
-| `r` | Toggle read | | `Ctrl+s` | AI summary |
-| `x` | Toggle star | | `C` | Chat with paper |
-| `n` | Notes | | `L` | Relevance score |
-| `p` | Abstract preview | | `Ctrl+p` | Command palette |
-| `t` | Tags | | `G` | Citation graph |
-| `V` | Check versions | | `R` | Recommendations |
-| `Ctrl+b` | Save bookmark | | `1-9` | Jump to bookmark |
-| `m` / `'` | Set / jump to mark | | `w` / `W` | Watch list |
-| `Ctrl+k` | Collections | | `Ctrl+g` | Auto-tag (LLM) |
-| `Ctrl+d` | Detail pane sections | | `Ctrl+h` | HuggingFace trending |
-| `v` | Detail mode | | `Ctrl+Shift+b` | Remove bookmark |
-| `Ctrl+r` | Mark visible as read | | `Ctrl+e` | Toggle S2 / Exit API mode |
+| `Space` | Select | | `F` | Preview PDF |
+| `s` | Cycle sort | | `E` | Export menu |
+| `r` | Toggle read | | `c` | Copy to clipboard |
+| `x` | Toggle star | | `Ctrl+s` | AI summary |
+| `n` | Notes | | `C` | Chat with paper |
+| `p` | Abstract preview | | `L` | Relevance score |
+| `t` | Tags | | `Ctrl+p` | Command palette |
+| `V` | Check versions | | `G` | Citation graph |
+| `Ctrl+b` | Save bookmark | | `R` | Recommendations |
+| `m` / `'` | Set / jump to mark | | `1-9` | Jump to bookmark |
+| `Ctrl+k` | Collections | | `w` / `W` | Watch list |
+| `Ctrl+d` | Detail pane sections | | `Ctrl+g` | Auto-tag (LLM) |
+| `v` | Detail mode | | `Ctrl+h` | HuggingFace trending |
+| `Ctrl+r` | Mark visible as read | | `Ctrl+Shift+b` | Remove bookmark |
+| | | | `Ctrl+e` | Toggle S2 / Exit API mode |
 | | | | `?` | Help / shortcuts |
 
 ### Marks

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-05-11
+
+### Added
+- Default MIT-compatible PDF support with `pypdf`, `pypdfium2`, and `Pillow`.
+- Full-paper content caching with arXiv HTML first, PDF text fallback, then abstract fallback.
+- Terminal PDF preview on `F` with cached PNG renders and half-block/ASCII display.
+- Opt-in streaming LLM summaries and chat for CLI and OpenAI-compatible HTTP providers.
+
+### Changed
+- Documented PDF preview, full-paper content caching, and `llm_streaming_enabled`.
+- Hardened LLM CLI timeout handling for shell-backed commands.
+
+### Fixed
+- Avoided repeated full-paper network fetches for summary/chat workflows.
+
 ## [0.1.4] - 2026-05-09
 
 ### Added

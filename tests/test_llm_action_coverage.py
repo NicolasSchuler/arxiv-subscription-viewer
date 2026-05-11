@@ -238,6 +238,59 @@ class TestLlmActionCoverage:
         assert app._paper_summaries[paper.arxiv_id] == "summary"
         assert "Summary generated" in app.notify.call_args[0][0]
 
+        stream_paper = make_paper(arxiv_id="2401.51111", title="Streaming Paper")
+
+        class _StreamingProvider:
+            async def execute_stream(self, prompt: str, timeout: int):
+                assert "Streaming Paper" in prompt
+                assert timeout == 8
+                yield llm_providers.LLMChunk(delta="first ")
+                yield llm_providers.LLMChunk(delta="second")
+                yield llm_providers.LLMChunk(done=True)
+
+            async def execute(self, _prompt: str, _timeout: int):
+                raise AssertionError("single-shot execute should not be used")
+
+        stream_app = _new_app_stub()
+        stream_app._config = UserConfig(llm_timeout=8, llm_streaming_enabled=True)
+        stream_app._llm_provider = _StreamingProvider()
+        stream_app._summary_db_path = tmp_path / "stream-summary.db"
+        stream_app._summary_loading = {stream_paper.arxiv_id}
+        stream_app._paper_summaries = {}
+        stream_app._summary_mode_label = {}
+        stream_app._summary_command_hash = {}
+        stream_app._fetch_paper_content_async = AsyncMock(return_value="full content")
+        stream_app._update_abstract_display = MagicMock()
+        stream_app.notify = MagicMock()
+        stream_app._capture_dataset_epoch = MagicMock(return_value=1)
+        stream_app._is_current_dataset_epoch = MagicMock(return_value=True)
+        service_generate = AsyncMock(return_value=("single shot", None))
+        stream_app._get_services = MagicMock(
+            return_value=SimpleNamespace(llm=SimpleNamespace(generate_summary=service_generate))
+        )
+
+        await llm_actions._generate_summary_async(
+            stream_app,
+            stream_paper,
+            "{title}\n{paper_content}",
+            "cmd-hash",
+            mode_label="Streaming",
+            use_full_paper_content=True,
+        )
+
+        service_generate.assert_not_awaited()
+        assert stream_app._paper_summaries[stream_paper.arxiv_id] == "first second"
+        assert stream_app._summary_mode_label[stream_paper.arxiv_id] == "Streaming"
+        assert stream_app._summary_command_hash[stream_paper.arxiv_id] == "cmd-hash"
+        assert stream_app._summary_loading == set()
+        assert stream_app._update_abstract_display.call_count >= 3
+        with closing(sqlite3.connect(str(stream_app._summary_db_path))) as conn:
+            row = conn.execute(
+                "SELECT summary FROM summaries WHERE arxiv_id = ?",
+                (stream_paper.arxiv_id,),
+            ).fetchone()
+        assert row == ("first second",)
+
         app._start_chat_with_paper = MagicMock()
         app._ensure_llm_command_trusted = MagicMock(return_value=True)
         llm_actions.action_chat_with_paper(app)

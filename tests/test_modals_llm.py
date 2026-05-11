@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from arxiv_browser.browser.core import ArxivBrowser
-from arxiv_browser.llm_providers import LLMResult
+from arxiv_browser.llm_providers import LLMChunk, LLMResult
 from arxiv_browser.modals import (
     PaperChatScreen,
     ResearchInterestsModal,
@@ -239,6 +239,49 @@ async def test_chat_screen_empty_response(make_paper):
         status = screen.query_one("#chat-status", Static)
         rendered = status.render()
         assert "Thinking" not in str(rendered)
+
+
+@pytest.mark.asyncio
+async def test_chat_screen_streaming_updates_single_assistant_message(make_paper):
+    app = ArxivBrowser([make_paper()], restore_session=False)
+
+    class _StreamingProvider:
+        def __init__(self) -> None:
+            self.execute = AsyncMock()
+            self.prompt = ""
+
+        async def execute_stream(self, prompt: str, timeout: int):
+            self.prompt = prompt
+            assert timeout == 120
+            yield LLMChunk(delta="Hello ")
+            yield LLMChunk(delta="there")
+            yield LLMChunk(done=True)
+
+    provider = _StreamingProvider()
+    screen = PaperChatScreen(
+        make_paper(title="Streaming chat"),
+        provider,
+        "content",
+        streaming_enabled=True,
+    )
+
+    async with app.run_test() as pilot:
+        app.push_screen(screen)
+        await pilot.pause(0.05)
+
+        screen._add_message("user", "Explain")
+        screen._waiting = True
+        await screen._ask_llm("Explain")
+        await pilot.pause(0)
+
+        provider.execute.assert_not_awaited()
+        assert "Streaming chat" in provider.prompt
+        assert screen._history[-1] == ("assistant", "Hello there")
+        assert screen._waiting is False
+
+        messages = screen.query_one("#chat-messages")
+        assert len(messages.children) >= 3
+        assert "Hello there" in str(messages.children[-1].render())
 
 
 @pytest.mark.asyncio

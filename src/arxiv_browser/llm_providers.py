@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
 import shlex
+import signal
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
@@ -152,6 +155,21 @@ def _build_invocation_plan(
     )
 
 
+def _shell_session_kwargs(use_shell: bool) -> dict[str, Any]:
+    if use_shell and os.name != "nt":
+        return {"start_new_session": True}
+    return {}
+
+
+def _terminate_process(proc: Any, *, use_shell: bool) -> None:
+    pid = getattr(proc, "pid", None)
+    if use_shell and os.name != "nt" and isinstance(pid, int):
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(pid, signal.SIGTERM)
+            return
+    proc.kill()
+
+
 @dataclass(slots=True)
 class LLMResult:
     """Result from an LLM provider call."""
@@ -161,12 +179,25 @@ class LLMResult:
     error: str = ""
 
 
+@dataclass(slots=True)
+class LLMChunk:
+    """Incremental output from a streaming LLM provider call."""
+
+    delta: str = ""
+    error: str = ""
+    done: bool = False
+
+
 @runtime_checkable
 class LLMProvider(Protocol):
     """Protocol for LLM providers — any class with this signature is compatible."""
 
     async def execute(self, prompt: str, timeout: int) -> LLMResult:
         """Execute a prompt and return the LLM result."""
+        ...
+
+    def execute_stream(self, prompt: str, timeout: int) -> AsyncIterator[LLMChunk]:
+        """Execute a prompt and yield incremental output chunks."""
         ...
 
 
@@ -249,6 +280,7 @@ class CLIProvider:
                     plan.shell_command,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
+                    **_shell_session_kwargs(plan.use_shell),
                 )
             else:
                 argv = plan.argv or []
@@ -260,7 +292,7 @@ class CLIProvider:
             try:
                 stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             except TimeoutError:
-                proc.kill()
+                _terminate_process(proc, use_shell=plan.use_shell)
                 await proc.wait()
                 return LLMResult(output="", success=False, error=f"Timed out after {timeout}s")
 
@@ -281,6 +313,82 @@ class CLIProvider:
         except Exception as e:
             logger.warning("LLM subprocess failed: %s", e, exc_info=True)
             return LLMResult(output="", success=False, error=str(e))
+
+    async def execute_stream(self, prompt: str, timeout: int) -> AsyncIterator[LLMChunk]:
+        """Execute the LLM command and yield stdout chunks as they arrive."""
+        try:
+            plan = _build_invocation_plan(
+                self._command_template,
+                prompt,
+                allow_shell=self._allow_shell,
+            )
+        except ValueError as e:
+            yield LLMChunk(error=str(e), done=True)
+            return
+
+        try:
+            if plan.use_shell:
+                proc = await asyncio.create_subprocess_shell(
+                    plan.shell_command,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    **_shell_session_kwargs(plan.use_shell),
+                )
+            else:
+                proc = await asyncio.create_subprocess_exec(
+                    *(plan.argv or []),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+        except Exception as e:
+            logger.warning("LLM streaming subprocess failed to start: %s", e, exc_info=True)
+            yield LLMChunk(error=str(e), done=True)
+            return
+
+        emitted = False
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        try:
+            stdout = proc.stdout
+            if stdout is not None:
+                while True:
+                    remaining = max(0.01, deadline - loop.time())
+                    try:
+                        chunk = await asyncio.wait_for(stdout.read(1024), timeout=remaining)
+                    except TimeoutError:
+                        _terminate_process(proc, use_shell=plan.use_shell)
+                        await proc.wait()
+                        yield LLMChunk(error=f"Timed out after {timeout}s", done=True)
+                        return
+                    if not chunk:
+                        break
+                    emitted = True
+                    yield LLMChunk(delta=chunk.decode("utf-8", errors="replace"))
+
+            remaining = max(0.01, deadline - loop.time())
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=remaining)
+            except TimeoutError:
+                _terminate_process(proc, use_shell=plan.use_shell)
+                await proc.wait()
+                yield LLMChunk(error=f"Timed out after {timeout}s", done=True)
+                return
+
+            stderr = b""
+            if proc.stderr is not None:
+                with contextlib.suppress(Exception):
+                    stderr = await proc.stderr.read()
+            if proc.returncode != 0:
+                err_msg = stderr.decode("utf-8", errors="replace").strip()
+                yield LLMChunk(error=f"Exit {proc.returncode}: {err_msg[:200]}", done=True)
+                return
+            if not emitted:
+                yield LLMChunk(error="Empty output", done=True)
+                return
+            yield LLMChunk(done=True)
+        except Exception as e:
+            logger.warning("LLM streaming subprocess failed: %s", e, exc_info=True)
+            yield LLMChunk(error=str(e), done=True)
 
 
 class HTTPProvider:
@@ -400,6 +508,106 @@ class HTTPProvider:
             return LLMResult(output="", success=False, error="Empty response content")
         return LLMResult(output=output, success=True)
 
+    async def execute_stream(self, prompt: str, timeout: int) -> AsyncIterator[LLMChunk]:
+        """Send a streaming chat completion request and yield content deltas."""
+        try:
+            import httpx
+        except ModuleNotFoundError:
+            yield LLMChunk(error="httpx is not installed", done=True)
+            return
+
+        url = f"{self._base_url}/v1/chat/completions"
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        body: dict[str, object] = {
+            "model": self._model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": True,
+        }
+        async for chunk in self._stream_request_once(httpx, url, headers, body, timeout):
+            yield chunk
+
+    async def _stream_request_once(
+        self,
+        httpx: object,
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, object],
+        timeout: int,
+    ) -> AsyncIterator[LLMChunk]:
+        """Execute a single streaming HTTP request."""
+        httpx_mod: Any = httpx
+        emitted = False
+        try:
+            async with (
+                httpx_mod.AsyncClient(timeout=timeout) as client,
+                client.stream("POST", url, headers=headers, json=body) as response,
+            ):
+                if response.status_code != 200:
+                    err_body = (await response.aread()).decode("utf-8", errors="replace")[:200]
+                    yield LLMChunk(
+                        error=f"HTTP {response.status_code}: {err_body}",
+                        done=True,
+                    )
+                    return
+                async for line in response.aiter_lines():
+                    parsed = _parse_sse_line(line)
+                    if parsed is None:
+                        continue
+                    if parsed == "[DONE]":
+                        yield LLMChunk(done=True)
+                        return
+                    try:
+                        data = json.loads(parsed)
+                    except (json.JSONDecodeError, ValueError) as e:
+                        yield LLMChunk(error=f"Invalid stream JSON: {e}", done=True)
+                        return
+                    delta = _extract_stream_delta(data)
+                    if delta:
+                        emitted = True
+                        yield LLMChunk(delta=delta)
+                if not emitted:
+                    yield LLMChunk(error="Empty response content", done=True)
+                    return
+                yield LLMChunk(done=True)
+        except httpx_mod.TimeoutException:
+            yield LLMChunk(error=f"Timed out after {timeout}s", done=True)
+        except Exception as e:
+            logger.warning("HTTP streaming request failed: %s", e, exc_info=True)
+            yield LLMChunk(error=str(e), done=True)
+
+
+def _parse_sse_line(line: str) -> str | None:
+    """Return SSE data payload for a chat-completions stream line."""
+    stripped = line.strip()
+    if not stripped or stripped.startswith(":"):
+        return None
+    if not stripped.startswith("data:"):
+        return None
+    return stripped.removeprefix("data:").strip()
+
+
+def _extract_stream_delta(data: object) -> str:
+    """Extract an OpenAI-compatible content delta from a stream payload."""
+    if not isinstance(data, dict):
+        return ""
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return ""
+    first = choices[0]
+    if not isinstance(first, dict):
+        return ""
+    delta = first.get("delta")
+    if isinstance(delta, dict):
+        content = delta.get("content")
+        return content if isinstance(content, str) else ""
+    message = first.get("message")
+    if isinstance(message, dict):
+        content = message.get("content")
+        return content if isinstance(content, str) else ""
+    return ""
+
 
 # ---------------------------------------------------------------------------
 # Provider Registry
@@ -455,8 +663,11 @@ def resolve_provider(config: UserConfig) -> LLMProvider | None:
 __all__ = [
     "CLIProvider",
     "HTTPProvider",
+    "LLMChunk",
     "LLMProvider",
     "LLMResult",
+    "_extract_stream_delta",
+    "_parse_sse_line",
     "get_provider_class",
     "llm_command_requires_shell",
     "register_provider",

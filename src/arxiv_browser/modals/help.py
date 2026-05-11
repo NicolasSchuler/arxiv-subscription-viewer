@@ -72,6 +72,7 @@ class HelpScreen(ModalBase[None]):
                 ("u", "Clear selection"),
                 ("o", "Open in Browser"),
                 ("P", "Open as PDF"),
+                ("F", "Preview PDF"),
                 ("E", "Export menu"),
                 ("d", "Download PDFs"),
                 ("v", "Toggle detail density (scan/full)"),

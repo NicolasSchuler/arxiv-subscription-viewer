@@ -28,10 +28,8 @@ from arxiv_browser.actions import llm_actions as _llm_actions
 from arxiv_browser.actions import search_api_actions as _search_api_actions
 from arxiv_browser.actions import ui_actions as _ui_actions
 from arxiv_browser.browser import constants as _browser_constants
+from arxiv_browser.browser import content as _browser_content
 from arxiv_browser.browser.browse import BrowseMixin
-from arxiv_browser.browser.content import (
-    _fetch_paper_content_async,
-)
 from arxiv_browser.browser.detail_pane import DetailPaneMixin
 from arxiv_browser.browser.discovery import DiscoveryMixin
 from arxiv_browser.browser.options import ArxivBrowserOptions, _coerce_browser_options
@@ -73,6 +71,7 @@ FUZZY_LIMIT = _browser_constants.FUZZY_LIMIT
 FUZZY_SCORE_CUTOFF = _browser_constants.FUZZY_SCORE_CUTOFF
 MAX_ABSTRACT_LOADS = _browser_constants.MAX_ABSTRACT_LOADS
 build_list_empty_message = _empty_state.build_list_empty_message
+_fetch_paper_content_async = _browser_content._fetch_paper_content_async
 # ============================================================================
 # Constants
 # ============================================================================
@@ -87,8 +86,6 @@ SUBPROCESS_TIMEOUT = _action_constants.SUBPROCESS_TIMEOUT
 BOOKMARK_NAME_MAX_LEN = _action_constants.BOOKMARK_NAME_MAX_LEN
 MAX_CONCURRENT_DOWNLOADS = _action_constants.MAX_CONCURRENT_DOWNLOADS
 BATCH_CONFIRM_THRESHOLD = _action_constants.BATCH_CONFIRM_THRESHOLD
-# LLM summary settings
-SUMMARY_HTML_TIMEOUT = 10  # Faster timeout for summary generation path
 RELEVANCE_SCORE_TIMEOUT = 30  # Seconds to wait for relevance scoring LLM response
 AUTO_TAG_TIMEOUT = 30  # Seconds to wait for auto-tag LLM response
 # Search debounce delay in seconds
@@ -220,6 +217,9 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
     _do_open_pdfs = _external_io_actions._do_open_pdfs
     _open_with_viewer = _external_io_actions._open_with_viewer
     action_download_pdf = _external_io_actions.action_download_pdf
+    action_preview_pdf = _external_io_actions.action_preview_pdf
+    _preview_pdf_async = _external_io_actions._preview_pdf_async
+    _fetch_paper_content_async = _browser_content.fetch_browser_paper_content
     _do_start_downloads = _external_io_actions._do_start_downloads
     _format_paper_for_clipboard = _external_io_actions._format_paper_for_clipboard
     _copy_to_clipboard = _external_io_actions._copy_to_clipboard
@@ -924,14 +924,6 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
             event.stop()
         # Cancel mark mode on any other key
         self._pending_mark_action = None
-
-    async def _fetch_paper_content_async(self, paper: Paper) -> str:
-        """Fetch canonical paper content for LLM workflows."""
-        return await _fetch_paper_content_async(
-            paper,
-            client=self._http_client,
-            timeout=SUMMARY_HTML_TIMEOUT,
-        )
 
     def action_show_search_syntax(self) -> None:
         """Open the help overlay with search syntax prioritized."""

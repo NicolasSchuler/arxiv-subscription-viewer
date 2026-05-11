@@ -33,10 +33,6 @@ from arxiv_browser.models import (
 
 logger = logging.getLogger(__name__)
 
-# ============================================================================
-# Configuration Persistence
-# ============================================================================
-#
 # Validation contract — _dict_to_config() guarantees valid output for any input:
 #
 #   Field                  Rule                            Handler
@@ -107,10 +103,14 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
         "allow_llm_shell_fallback": config.allow_llm_shell_fallback,
         "llm_max_retries": config.llm_max_retries,
         "llm_timeout": config.llm_timeout,
+        "llm_streaming_enabled": config.llm_streaming_enabled,
         "llm_provider_type": config.llm_provider_type,
         "llm_api_base_url": config.llm_api_base_url,
         "llm_api_key": config.llm_api_key,
         "llm_api_model": config.llm_api_model,
+        "paper_content_cache_ttl_days": config.paper_content_cache_ttl_days,
+        "paper_content_pdf_fallback": config.paper_content_pdf_fallback,
+        "pdf_preview_max_pages": config.pdf_preview_max_pages,
         "arxiv_api_max_results": max_results,
         "s2_enabled": config.s2_enabled,
         "s2_api_key": config.s2_api_key,
@@ -519,10 +519,16 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         allow_llm_shell_fallback=_safe_get(data, "allow_llm_shell_fallback", True, bool),
         llm_max_retries=max(0, min(5, _safe_get(data, "llm_max_retries", 1, int))),
         llm_timeout=max(10, min(600, _safe_get(data, "llm_timeout", 120, int))),
+        llm_streaming_enabled=_safe_get(data, "llm_streaming_enabled", False, bool),
         llm_provider_type=_safe_get(data, "llm_provider_type", "cli", str),
         llm_api_base_url=_safe_get(data, "llm_api_base_url", "", str),
         llm_api_key=_safe_get(data, "llm_api_key", "", str),
         llm_api_model=_safe_get(data, "llm_api_model", "", str),
+        paper_content_cache_ttl_days=max(
+            1, min(365, _safe_get(data, "paper_content_cache_ttl_days", 7, int))
+        ),
+        paper_content_pdf_fallback=_safe_get(data, "paper_content_pdf_fallback", True, bool),
+        pdf_preview_max_pages=max(1, min(20, _safe_get(data, "pdf_preview_max_pages", 3, int))),
         arxiv_api_max_results=_coerce_arxiv_api_max_results(
             data.get("arxiv_api_max_results", ARXIV_API_DEFAULT_MAX_RESULTS)
         ),

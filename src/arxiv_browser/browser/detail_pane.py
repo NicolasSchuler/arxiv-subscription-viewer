@@ -34,6 +34,7 @@ _TARGET_PAPER_PALETTE_ACTIONS = frozenset(
     {
         "open_url",
         "open_pdf",
+        "preview_pdf",
         "download_pdf",
         "copy_selected",
         "export_menu",

@@ -289,6 +289,7 @@ class PaperChatScreen(ModalBase[None]):
         paper_content: str = "",
         *,
         timeout: int = 0,
+        streaming_enabled: bool = False,
     ) -> None:
         """Initialize with a paper, LLM provider, and optional full paper content."""
         super().__init__()
@@ -298,6 +299,7 @@ class PaperChatScreen(ModalBase[None]):
         self._history: list[tuple[str, str]] = []  # (role, text)
         self._waiting = False
         self._timeout = timeout or LLM_COMMAND_TIMEOUT
+        self._streaming_enabled = streaming_enabled
 
     def compose(self) -> ComposeResult:
         """Yield the chat dialog with a message scroll area, status bar, and input field."""
@@ -366,12 +368,17 @@ class PaperChatScreen(ModalBase[None]):
                 context += "\n\nConversation so far:\n" + "\n".join(history_lines)
             context += f"\n\nUser: {question}\nAssistant:"
 
-            result = await self._provider.execute(context, self._timeout)
-            if not result.success:
-                err = escape_rich_text(result.error[:200])
-                self._add_message("assistant", f"[red]Error: {err}[/]", markup=True)
-                return
-            self._add_message("assistant", result.output)
+            if self._streaming_enabled and callable(
+                getattr(self._provider, "execute_stream", None)
+            ):
+                await self._ask_llm_streaming(context)
+            else:
+                result = await self._provider.execute(context, self._timeout)
+                if not result.success:
+                    err = escape_rich_text(result.error[:200])
+                    self._add_message("assistant", f"[red]Error: {err}[/]", markup=True)
+                    return
+                self._add_message("assistant", result.output)
         except Exception as e:
             logger.warning("Chat LLM call failed: %s", e, exc_info=True)
             self._add_message(
@@ -383,6 +390,32 @@ class PaperChatScreen(ModalBase[None]):
                 self.query_one("#chat-status", Static).update("")
             except NoMatches:
                 pass
+
+    async def _ask_llm_streaming(self, prompt: str) -> None:
+        """Stream assistant output into a single message widget."""
+        messages = self.query_one("#chat-messages", VerticalScroll)
+        assistant_widget = Static("[bold cyan]AI:[/] ", classes="chat-assistant")
+        messages.mount(assistant_widget)
+        messages.scroll_end(animate=False)
+        parts: list[str] = []
+        async for chunk in self._provider.execute_stream(prompt, self._timeout):
+            if chunk.error:
+                err = escape_rich_text(chunk.error[:200])
+                assistant_widget.update(f"[bold cyan]AI:[/] [red]Error: {err}[/]")
+                self._history.append(("assistant", f"Error: {chunk.error}"))
+                return
+            if chunk.delta:
+                parts.append(chunk.delta)
+                assistant_widget.update(f"[bold cyan]AI:[/] {escape_rich_text(''.join(parts))}")
+                messages.scroll_end(animate=False)
+            if chunk.done:
+                break
+        output = "".join(parts).strip()
+        if not output:
+            assistant_widget.update("[bold cyan]AI:[/] [red]Error: Empty response content[/]")
+            self._history.append(("assistant", "Error: Empty response content"))
+            return
+        self._history.append(("assistant", output))
 
     def action_close(self) -> None:
         """Close the chat screen and return to the previous screen."""

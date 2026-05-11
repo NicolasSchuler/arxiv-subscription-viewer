@@ -21,6 +21,7 @@ HELP_SECTION_ACTIONS: list[tuple[str, list[str]]] = [
             "clear_selection",
             "open_url",
             "open_pdf",
+            "preview_pdf",
             "cycle_sort",
             "toggle_focus_pane",
             "copy_selected",
@@ -109,6 +110,7 @@ HELP_DESCRIPTION_OVERRIDES: dict[str, str] = {
     "show_search_syntax": "Search examples & operators",
     "open_url": "Open in Browser",
     "open_pdf": "Open PDF",
+    "preview_pdf": "Preview PDF in terminal",
     "toggle_detail_mode": "Toggle detail density (scan/full)",
     "toggle_focus_pane": "Focus details / paper list",
 }

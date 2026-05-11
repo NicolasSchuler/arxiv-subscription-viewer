@@ -130,6 +130,29 @@ Each LLM attempt uses `llm_timeout` (default `120`, range `10..600`). Transient 
 
 If you're not sure which command the app is actually using, run `arxiv-viewer doctor`.
 
+**Streaming behavior:**
+
+LLM streaming is disabled by default. Enable it only if you want summaries and chat to update incrementally:
+
+```json
+{ "llm_streaming_enabled": true }
+```
+
+If streamed output looks partial or your provider does not support OpenAI-compatible streaming, set it back to `false`.
+
+**Full-paper content looks abstract-only:**
+
+The app tries arXiv HTML first, then PDF text extraction, then the abstract. If many papers still use abstract-only context, check that PDF downloads are reachable and that PDF fallback is enabled:
+
+```json
+{
+  "paper_content_pdf_fallback": true,
+  "paper_content_cache_ttl_days": 7
+}
+```
+
+Set `paper_content_cache_ttl_days` lower if you need fresh extraction sooner, or delete `cache.db` only if you intentionally want to clear all cached summaries/enrichment/content.
+
 **Invalid prompt template:**
 
 ```
@@ -290,6 +313,28 @@ The viewer command supports `{url}` and `{path}` placeholders. If neither is pre
 **Trust prompt:**
 
 Custom viewer commands require trust approval on first use (same flow as LLM commands). If you dismiss the prompt, the action is cancelled.
+
+---
+
+## PDF Preview Issues
+
+**Symptom:** `F` fails to open a preview or shows a render error.
+
+**PDF not downloaded and no network client:**
+
+The preview action uses an existing downloaded PDF when present. If the file is missing and the app cannot download it in the current session, press `d` first or open a view with network access.
+
+**Render cache:**
+
+Preview PNGs are cached in `.preview-cache/` under the configured PDF download directory. If previews look stale or corrupt, delete that subdirectory; it will be recreated on the next preview.
+
+**Large or slow previews:**
+
+Lower the page limit:
+
+```json
+{ "pdf_preview_max_pages": 1 }
+```
 
 ---
 

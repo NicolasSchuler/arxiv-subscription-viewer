@@ -1,0 +1,93 @@
+"""PDF preview modal."""
+
+from __future__ import annotations
+
+from textual.app import ComposeResult
+from textual.binding import Binding
+from textual.containers import Vertical, VerticalScroll
+from textual.widgets import Static
+
+from arxiv_browser.modals.base import ModalBase
+from arxiv_browser.models import Paper
+from arxiv_browser.pdf_preview import PdfPreviewPage
+from arxiv_browser.query import escape_rich_text, truncate_text
+
+
+class PdfPreviewScreen(ModalBase[None]):
+    """Full-screen PDF page preview using terminal-safe block rendering."""
+
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+        Binding("q", "close", "Close", show=False),
+    ]
+
+    CSS = """
+    PdfPreviewScreen {
+        align: center middle;
+    }
+
+    #pdf-preview-dialog {
+        width: 92%;
+        height: 92%;
+        min-width: 60;
+        min-height: 20;
+        background: $th-background;
+        border: tall $th-accent-alt;
+        padding: 0 1;
+    }
+
+    #pdf-preview-title {
+        text-style: bold;
+        color: $th-accent-alt;
+        margin-bottom: 1;
+        height: auto;
+    }
+
+    #pdf-preview-pages {
+        height: 1fr;
+        background: $th-panel;
+        padding: 1;
+    }
+
+    .pdf-preview-page-title {
+        color: $th-accent;
+        text-style: bold;
+        margin: 1 0 0 0;
+    }
+
+    .pdf-preview-page {
+        margin-bottom: 1;
+    }
+
+    #pdf-preview-footer {
+        color: $th-muted;
+        text-align: center;
+        height: auto;
+    }
+    """
+
+    def __init__(self, paper: Paper, pages: list[PdfPreviewPage]) -> None:
+        super().__init__()
+        self._paper = paper
+        self._pages = pages
+
+    def compose(self) -> ComposeResult:
+        """Yield title, rendered pages, and footer."""
+        title = escape_rich_text(truncate_text(self._paper.title, 90))
+        with Vertical(id="pdf-preview-dialog"):
+            yield Static(f"PDF Preview: {title}", id="pdf-preview-title")
+            with VerticalScroll(id="pdf-preview-pages"):
+                for page in self._pages:
+                    yield Static(
+                        f"Page {page.page_number}",
+                        classes="pdf-preview-page-title",
+                    )
+                    yield Static(page.markup, classes="pdf-preview-page")
+            yield Static("[dim]Close: Esc / q[/dim]", id="pdf-preview-footer")
+
+    def action_close(self) -> None:
+        """Close the preview."""
+        self.dismiss(None)
+
+
+__all__ = ["PdfPreviewScreen"]

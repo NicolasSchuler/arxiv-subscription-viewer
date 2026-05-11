@@ -138,7 +138,7 @@ VerticalScroll {
 #
 # Standard (~15-20 keys) - prominent in help overlay.
 #   a  select all      u  clear selection  n  notes       t  tags
-#   c  copy            d  download         P  PDF         p  preview
+#   c  copy            d  download         P  PDF         F  preview PDF
 #   v  detail mode     w  watch filter     W  watch list  A  API search
 #   1-9  bookmarks     Ctrl+b  add bookmark
 #
@@ -164,6 +164,7 @@ APP_BINDINGS: list[BindingType] = [
     Binding("escape", "cancel_search", "Cancel", show=False),
     Binding("o", "open_url", "Open in Browser", show=False),
     Binding("P", "open_pdf", "Open PDF", show=False),
+    Binding("F", "preview_pdf", "Preview PDF", show=False),
     Binding("c", "copy_selected", "Copy", show=False),
     Binding("s", "cycle_sort", "Sort", show=False),
     Binding("tab", "toggle_focus_pane", "Focus Details", show=False),

@@ -140,6 +140,10 @@ def test_config_parsing_helpers_cover_validation_and_bounds() -> None:
                 "allow_llm_shell_fallback": "no",
                 "llm_max_retries": 9,
                 "llm_timeout": 3,
+                "llm_streaming_enabled": True,
+                "paper_content_cache_ttl_days": 999,
+                "paper_content_pdf_fallback": False,
+                "pdf_preview_max_pages": 99,
                 "arxiv_api_max_results": True,
                 "s2_enabled": True,
                 "s2_api_key": 123,
@@ -185,6 +189,10 @@ def test_config_parsing_helpers_cover_validation_and_bounds() -> None:
     assert config.allow_llm_shell_fallback is True
     assert config.llm_max_retries == 5
     assert config.llm_timeout == 10
+    assert config.llm_streaming_enabled is True
+    assert config.paper_content_cache_ttl_days == 365
+    assert config.paper_content_pdf_fallback is False
+    assert config.pdf_preview_max_pages == 20
     assert config.arxiv_api_max_results == config_mod.ARXIV_API_DEFAULT_MAX_RESULTS
     assert config.s2_enabled is True
     assert config.s2_api_key == ""
@@ -211,6 +219,27 @@ def test_config_parsing_helpers_cover_validation_and_bounds() -> None:
     with patch("arxiv_browser.llm.validate_prompt_template", return_value=[]):
         assert config_mod._validate_llm_prompt_template("prompt") == "prompt"
     assert config_mod._validate_llm_prompt_template("") == ""
+
+
+def test_config_roundtrip_includes_pdf_and_streaming_keys() -> None:
+    config = UserConfig(
+        llm_streaming_enabled=True,
+        paper_content_cache_ttl_days=12,
+        paper_content_pdf_fallback=False,
+        pdf_preview_max_pages=5,
+    )
+
+    data = config_mod._config_to_dict(config)
+    loaded = config_mod._dict_to_config(data)
+
+    assert data["llm_streaming_enabled"] is True
+    assert data["paper_content_cache_ttl_days"] == 12
+    assert data["paper_content_pdf_fallback"] is False
+    assert data["pdf_preview_max_pages"] == 5
+    assert loaded.llm_streaming_enabled is True
+    assert loaded.paper_content_cache_ttl_days == 12
+    assert loaded.paper_content_pdf_fallback is False
+    assert loaded.pdf_preview_max_pages == 5
 
 
 def test_config_import_export_and_disk_error_paths(tmp_path, monkeypatch) -> None:

@@ -55,6 +55,7 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
     ("Next Date", "Navigate to newer date file", "]", "next_date"),
     ("Open in Browser", "Open selected paper(s) in web browser", "o", "open_url"),
     ("Open PDF", "Open selected paper(s) as PDF", "P", "open_pdf"),
+    ("Preview PDF", "Render a terminal preview of the current paper PDF", "F", "preview_pdf"),
     ("Download PDF", "Download PDF(s) to local folder", "d", "download_pdf"),
     ("Copy to Clipboard", "Copy paper info to clipboard", "c", "copy_selected"),
     ("Toggle Read", "Mark paper(s) as read/unread", "r", "toggle_read"),

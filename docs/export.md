@@ -34,6 +34,21 @@ Press `d` to download PDFs for selected papers (or current paper):
 }
 ```
 
+## PDF Preview (`F`)
+
+Press `F` to render a terminal preview of the current paper's PDF. If the PDF is not already downloaded, the app downloads it first when an HTTP client is active.
+
+- Renders with default MIT-compatible/permissive dependencies (`pypdfium2` and `Pillow`)
+- Displays with an in-app half-block renderer, with ASCII fallback under `--ascii` / no-color modes
+- Caches preview PNGs next to the configured PDF directory in `.preview-cache/`
+- Limits preview length with `pdf_preview_max_pages` (default `3`)
+
+```json
+{
+  "pdf_preview_max_pages": 5
+}
+```
+
 ## PDF Viewer (`P`)
 
 By default, `P` opens PDFs in your browser. Configure a custom viewer:

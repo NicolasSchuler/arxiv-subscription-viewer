@@ -42,6 +42,9 @@ from arxiv_browser.modals.llm import (
     SummaryModeModal,
 )
 
+# pdf.py — terminal PDF preview
+from arxiv_browser.modals.pdf import PdfPreviewScreen
+
 # search.py — arXiv search form, command palette
 from arxiv_browser.modals.search import (
     ArxivSearchModal,
@@ -73,6 +76,7 @@ __all__ = [
     "PaperChatScreen",
     "PaperEditModal",
     "PaperEditResult",
+    "PdfPreviewScreen",
     "RecommendationListItem",
     "RecommendationsScreen",
     "ResearchInterestsModal",
