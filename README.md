@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshot.svg" alt="Screenshot" width="800">
+  <img src="docs/screenshot_preview.png" alt="Screenshot" width="800">
 </p>
 
 <p align="center">
