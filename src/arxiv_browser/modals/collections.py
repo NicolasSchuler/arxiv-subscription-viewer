@@ -10,6 +10,7 @@ from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.widgets import Button, Input, Label, ListItem, ListView, Static
 
 from arxiv_browser.action_messages import build_actionable_warning
@@ -318,8 +319,8 @@ class CollectionsModal(ModalBase[str | None]):
         for selector in ("#col-help", "#detail-help"):
             try:
                 self.query_one(selector, Static).update(message)
-            except Exception:
-                pass
+            except NoMatches:
+                continue
 
     # ── manage-view event handlers ───────────────────────────────────
 

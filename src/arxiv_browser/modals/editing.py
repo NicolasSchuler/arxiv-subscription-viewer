@@ -9,6 +9,7 @@ from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.widgets import Button, Input, Label, Static, TabbedContent, TabPane, TextArea
 
 from arxiv_browser.modals.base import ModalBase
@@ -248,7 +249,7 @@ class PaperEditModal(ModalBase["PaperEditResult | None"]):
             tc = self.query_one(TabbedContent)
             if tc.active:
                 return tc.active
-        except Exception:  # DOM may not be ready
+        except NoMatches:  # DOM may not be ready
             return self._initial_tab
         return self._initial_tab
 
@@ -261,8 +262,8 @@ class PaperEditModal(ModalBase["PaperEditResult | None"]):
         if active == "ai-tags":
             try:
                 return self.query_one("#autotag-input", Input)
-            except Exception:
-                pass
+            except NoMatches:
+                return self.query_one("#tags-input", Input)
         return self.query_one("#tags-input", Input)
 
     def _set_tags_value(self, tags: list[str]) -> None:

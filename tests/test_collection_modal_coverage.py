@@ -41,6 +41,8 @@ class TestCollectionsCoverage:
         list_view = _DummyListView(index=0)
         name_input = _DummyInput("")
         desc_input = _DummyInput("notes")
+        col_help = _DummyLabel()
+        detail_help = _DummyLabel()
         modal.notify = MagicMock()
         modal.dismiss = MagicMock()
         modal._collections = [
@@ -51,6 +53,8 @@ class TestCollectionsCoverage:
                 "#col-list": list_view,
                 "#col-name": name_input,
                 "#col-desc": desc_input,
+                "#col-help": col_help,
+                "#detail-help": detail_help,
             }[selector]
         )
         modal._refresh_manage_list = MagicMock()
@@ -75,6 +79,7 @@ class TestCollectionsCoverage:
         modal._refresh_manage_list.reset_mock()
         modal.on_create_pressed()
         modal._refresh_manage_list.assert_called_once()
+        assert "Unsaved" in col_help.content
 
         modal._get_selected_index = MagicMock(return_value=None)
         modal.on_rename_pressed()
@@ -114,6 +119,8 @@ class TestCollectionsCoverage:
         col_list = _DummyListView(index=0)
         name_input = _DummyInput("Reading")
         desc_input = _DummyInput("desc")
+        col_help = _DummyLabel()
+        detail_help = _DummyLabel()
 
         modal.notify = MagicMock()
         modal.dismiss = MagicMock()
@@ -128,6 +135,8 @@ class TestCollectionsCoverage:
                 "#col-list": col_list,
                 "#col-name": name_input,
                 "#col-desc": desc_input,
+                "#col-help": col_help,
+                "#detail-help": detail_help,
             }[selector]
         )
 
@@ -142,6 +151,7 @@ class TestCollectionsCoverage:
         detail_list.index = 0
         modal.on_detail_remove_pressed()
         assert len(modal._viewing_collection.paper_ids) == 0
+        assert "Unsaved" in detail_help.content
         # Back to manage
         modal.on_detail_back_pressed()
         assert modal._viewing_collection is None

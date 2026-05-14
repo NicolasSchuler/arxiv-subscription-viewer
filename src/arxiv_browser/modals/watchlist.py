@@ -9,6 +9,7 @@ from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.widgets import Button, Checkbox, Input, Label, ListItem, ListView, Select, Static
 
 from arxiv_browser.modals.base import ModalBase
@@ -232,8 +233,8 @@ class WatchListModal(ModalBase[list[WatchListEntry] | None]):
             self.query_one("#watch-help", Static).update(
                 "[bold]Unsaved[/bold] | Ctrl+S save | Esc cancel"
             )
-        except Exception:
-            pass
+        except NoMatches:
+            return
 
     def action_save(self) -> None:
         """Dismiss the modal and return the current list of entries."""
