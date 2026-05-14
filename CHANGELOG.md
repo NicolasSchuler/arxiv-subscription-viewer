@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-05-14
+
+### Changed
+- Updated the GitHub Pages deployment workflow to use `actions/configure-pages@v6` and `actions/deploy-pages@v5`.
+
 ## [0.1.6] - 2026-05-14
 
 ### Changed
@@ -128,7 +133,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ASCII mode for terminals without Unicode support (`--ascii`)
 - Session persistence: scroll position, active filters, sort order
 
-[Unreleased]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.3...v0.1.4
