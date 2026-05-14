@@ -107,6 +107,13 @@ The LLM subsystem uses a `LLMProvider` protocol (`llm_providers.py`) with two im
 
 Providers are registered in a simple registry (`register_provider` / `get_provider_class`). `resolve_provider(config)` reads `config.llm_provider_type` to select the appropriate implementation.
 
+Streaming is deliberately separated from the large action module:
+
+- `actions/llm_streaming.py` owns incremental summary prompt assembly and partial-summary UI updates.
+- `modals/llm.py` owns incremental paper-chat updates.
+- Providers expose streaming through `LLMProvider.execute_stream(...)`, yielding `LLMChunk` values; providers should not mutate app/UI state directly.
+- Summary persistence still belongs to `actions/llm_actions.py` after a stream completes successfully, so partial output does not become durable cache state on failure.
+
 ## Follow-Up Extraction Plan
 
 The next safe architecture moves are:

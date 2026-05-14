@@ -13,10 +13,30 @@ if TYPE_CHECKING:
 
 
 def should_stream_summary(app: ArxivBrowser, provider: LLMProvider) -> bool:
+    """Return whether summary generation should use incremental provider output."""
     return bool(
         getattr(app._config, "llm_streaming_enabled", False)
         and callable(getattr(provider, "execute_stream", None))
     )
+
+
+async def _summary_prompt_content(
+    app: ArxivBrowser,
+    paper: Paper,
+    *,
+    use_full_paper_content: bool,
+) -> str:
+    """Resolve the paper content slot for a streaming summary prompt."""
+    if use_full_paper_content:
+        return await app._fetch_paper_content_async(paper)
+
+    abstract = paper.abstract or paper.abstract_raw or ""
+    return f"Abstract:\n{abstract}" if abstract else ""
+
+
+def _publish_partial_summary(app: ArxivBrowser, paper: Paper, parts: list[str]) -> None:
+    app._paper_summaries[paper.arxiv_id] = "".join(parts)
+    app._update_abstract_display(paper.arxiv_id)
 
 
 async def request_summary_streaming(
@@ -27,12 +47,11 @@ async def request_summary_streaming(
     provider: LLMProvider,
     use_full_paper_content: bool,
 ) -> tuple[str | None, str | None]:
-    if use_full_paper_content:
-        paper_content = await app._fetch_paper_content_async(paper)
-    else:
-        abstract = paper.abstract or paper.abstract_raw or ""
-        paper_content = f"Abstract:\n{abstract}" if abstract else ""
-
+    paper_content = await _summary_prompt_content(
+        app,
+        paper,
+        use_full_paper_content=use_full_paper_content,
+    )
     prompt = build_llm_prompt(paper, prompt_template, paper_content)
     parts: list[str] = []
     async for chunk in provider.execute_stream(prompt, app._config.llm_timeout):
@@ -40,8 +59,7 @@ async def request_summary_streaming(
             return None, chunk.error
         if chunk.delta:
             parts.append(chunk.delta)
-            app._paper_summaries[paper.arxiv_id] = "".join(parts)
-            app._update_abstract_display(paper.arxiv_id)
+            _publish_partial_summary(app, paper, parts)
         if chunk.done:
             break
     summary = "".join(parts).strip()
