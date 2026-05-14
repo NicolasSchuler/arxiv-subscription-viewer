@@ -19,6 +19,7 @@ from arxiv_browser.themes import theme_colors_for
 from arxiv_browser.widgets import footer_status as _footer_status
 
 DEFAULT_THEME = _footer_status.DEFAULT_THEME
+FooterModeBadgeState = _footer_status.FooterModeBadgeState
 StatusBarState = _footer_status.StatusBarState
 _build_compact_status_parts = _footer_status._build_compact_status_parts
 _build_full_status_parts = _footer_status._build_full_status_parts
@@ -30,6 +31,7 @@ _render_compact_status = _footer_status._render_compact_status
 _truncate_rich_text = _footer_status._truncate_rich_text
 build_api_footer_bindings = _footer_status.build_api_footer_bindings
 build_browse_footer_bindings = _footer_status.build_browse_footer_bindings
+build_detail_focus_footer_bindings = _footer_status.build_detail_focus_footer_bindings
 build_footer_mode_badge = _footer_status.build_footer_mode_badge
 build_search_footer_bindings = _footer_status.build_search_footer_bindings
 build_selection_footer_base_bindings = _footer_status.build_selection_footer_base_bindings
@@ -675,9 +677,11 @@ __all__ = [
     "ContextFooter",
     "DateNavigator",
     "FilterPillBar",
+    "FooterModeBadgeState",
     "StatusBarState",
     "build_api_footer_bindings",
     "build_browse_footer_bindings",
+    "build_detail_focus_footer_bindings",
     "build_footer_mode_badge",
     "build_search_footer_bindings",
     "build_selection_footer_base_bindings",

@@ -142,9 +142,21 @@ class BrowseMixin:
 
     def _format_header_text(self, query: str = "") -> str:
         """Format the left-pane header text."""
+        from arxiv_browser._ascii import is_ascii_mode
+
+        sep = " - " if is_ascii_mode() else " \u00b7 "
+        if getattr(self, "_in_arxiv_api_mode", False) and self._arxiv_search_state is not None:
+            page = (self._arxiv_search_state.start // self._arxiv_search_state.max_results) + 1
+            return f" [bold]Papers[/]{sep}API results{sep}page {page}"
+        if self.selected_ids:
+            return f" [bold]Papers[/]{sep}{len(self.selected_ids)} selected"
+        if getattr(self, "_watch_filter_active", False):
+            return (
+                f" [bold]Papers[/]{sep}Watched {len(self.filtered_papers)}/{len(self.all_papers)}"
+            )
         if query:
-            return f" [bold]Papers[/] ({len(self.filtered_papers)}/{len(self.all_papers)})"
-        return " [bold]Papers[/]"
+            return f" [bold]Papers[/]{sep}Filtered ({len(self.filtered_papers)}/{len(self.all_papers)})"
+        return f" [bold]Papers[/]{sep}Browse {len(self.all_papers)}"
 
     def _matches_advanced_query(self, paper: Paper, rpn: list[QueryToken]) -> bool:
         """Test whether a paper matches an advanced RPN query with metadata context."""

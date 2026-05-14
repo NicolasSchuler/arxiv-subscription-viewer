@@ -641,11 +641,22 @@ def action_toggle_focus_pane(app: "ArxivBrowser") -> None:
 
     try:
         details.can_focus = True
-        if getattr(details, "has_focus", False):
+        detail_active = bool(
+            getattr(app, "_detail_focus_active", False)
+            or getattr(details, "has_focus", False)
+            or getattr(details, "has_focus_within", False)
+        )
+        if detail_active:
+            app._detail_focus_active = False
             paper_list.focus()
         else:
+            app._detail_focus_active = True
             details.focus()
         app._update_footer()
+        try:
+            app._update_status_bar()
+        except AttributeError:
+            pass
     except _RECOVERABLE_ACTION_ERRORS as exc:
         _log_action_failure("toggle pane focus", exc)
 

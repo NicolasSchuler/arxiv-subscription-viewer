@@ -127,6 +127,8 @@ class DetailRenderState:
     summary_mode: str = ""
     tags: tuple[str, ...] = ()
     relevance: tuple[int, str] | None = None
+    is_read: bool = False
+    starred: bool = False
     collapsed_sections: tuple[str, ...] = ()
     detail_mode: str = "full"
     theme_colors: Mapping[str, str] = field(default_factory=lambda: dict(DEFAULT_THEME))
@@ -154,6 +156,8 @@ def _normalize_detail_state(state: DetailRenderState) -> DetailRenderState:
         summary_mode=state.summary_mode,
         tags=tuple(state.tags or ()),
         relevance=state.relevance,
+        is_read=state.is_read,
+        starred=state.starred,
         collapsed_sections=tuple(state.collapsed_sections or ()),
         detail_mode=state.detail_mode,
         theme_colors=dict(state.theme_colors or DEFAULT_THEME),
@@ -259,6 +263,8 @@ def _detail_cache_key_for_state(state: DetailRenderState) -> tuple:
         state.summary_mode,
         state.tags,
         state.relevance,
+        state.is_read,
+        state.starred,
         state.collapsed_sections,
         state.detail_mode,
         tuple(sorted(state.theme_colors.items())),
@@ -327,6 +333,8 @@ class PaperDetails(Static):
             summary_mode=resolved_state.summary_mode,
             tags=resolved_state.tags,
             relevance=resolved_state.relevance,
+            is_read=resolved_state.is_read,
+            starred=resolved_state.starred,
             collapsed_sections=resolved_state.collapsed_sections,
             detail_mode=resolved_state.detail_mode,
             theme_colors=theme_colors_for(self, resolved_state.theme_colors),
@@ -348,6 +356,7 @@ class PaperDetails(Static):
 
         sections = [
             self._render_title(paper),
+            self._render_decision_strip(state),
             self._render_metadata(paper, state.category_colors),
             self._render_abstract(
                 state.abstract_text,
@@ -431,6 +440,34 @@ class PaperDetails(Static):
         if paper.comments:
             lines.append(f"  [bold {colors['accent']}]Comments:[/] [dim]{safe_comments}[/]")
         return "\n".join(lines)
+
+    def _render_decision_strip(self, state: DetailRenderState) -> str:
+        """Return a compact triage strip with the current decision signals."""
+        colors = theme_colors_for(self, self._theme_colors)
+        parts = [
+            f"[bold {colors['accent']}]Read:[/] {'yes' if state.is_read else 'no'}",
+            f"[bold {colors['accent']}]Star:[/] {'yes' if state.starred else 'no'}",
+            f"[bold {colors['accent']}]Tags:[/] {len(state.tags) if state.tags else 'none'}",
+        ]
+        if state.relevance is not None:
+            score, _reason = state.relevance
+            score_color, score_sym = _relevance_badge_parts(score, theme_colors=colors)
+            score_sym = _relevance_symbol_for_mode(score_sym)
+            parts.append(
+                f"[bold {colors['accent']}]Rel:[/] [{score_color}]{score_sym}{score}/10[/]"
+            )
+        if state.s2_loading:
+            parts.append(f"[{colors['green']}]S2:loading[/]")
+        elif state.s2_data is not None:
+            parts.append(f"[{colors['green']}]S2:{state.s2_data.citation_count}[/]")
+        if state.hf_data is not None:
+            hf_upvotes = _ACTIVE_DETAIL_GLYPHS["hf_upvotes"]
+            parts.append(f"[{colors['orange']}]HF:{hf_upvotes}{state.hf_data.upvotes}[/]")
+        if state.version_update is not None:
+            old_v, new_v = state.version_update
+            version_arrow = _ACTIVE_DETAIL_GLYPHS["version_arrow"]
+            parts.append(f"[{colors['pink']}]v{old_v}{version_arrow}v{new_v}[/]")
+        return "  ".join(parts)
 
     def _render_abstract(
         self,

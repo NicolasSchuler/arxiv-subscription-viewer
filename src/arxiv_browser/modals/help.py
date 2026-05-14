@@ -28,7 +28,11 @@ _HELP_TABS: list[tuple[str, str]] = [
 def _classify_section(name: str) -> str:
     """Map a section name to a tab ID."""
     lower = name.lower()
-    if lower.startswith("getting started") or lower.startswith("search syntax"):
+    if (
+        lower.startswith("getting started")
+        or lower.startswith("search syntax")
+        or lower.startswith("badge legend")
+    ):
         return "getting-started"
     if lower.startswith("core"):
         return "core"
@@ -62,6 +66,19 @@ class HelpScreen(ModalBase[None]):
                 ("author:hinton", "Author filter"),
                 ("unread / starred", "State filters"),
                 ("AND / OR / NOT", "Boolean operators"),
+            ],
+        ),
+        (
+            "Badge Legend",
+            [
+                ("selected / [x]", "Paper is in the current selection"),
+                ("watched / [w]", "Paper matches the watch list"),
+                ("star / *", "Paper is starred"),
+                ("read / v", "Paper is marked read"),
+                ("S2:n", "Semantic Scholar citation count"),
+                ("HF:^n", "HuggingFace upvotes"),
+                ("Rel:*n/10", "Relevance score"),
+                ("v1->v2", "Available arXiv version update"),
             ],
         ),
         (

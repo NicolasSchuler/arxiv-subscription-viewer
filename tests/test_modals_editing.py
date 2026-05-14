@@ -6,13 +6,13 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from textual.widgets import Button
+from textual.widgets import Button, Static
 
 from arxiv_browser.browser.core import ArxivBrowser
 from arxiv_browser.modals import (
     PaperEditModal,
 )
-from arxiv_browser.modals.editing import PaperEditResult
+from arxiv_browser.modals.editing import PaperEditResult, TagChip
 
 
 @pytest.mark.asyncio
@@ -94,6 +94,16 @@ async def test_paper_edit_modal_tags_tab(make_paper):
         assert modal.query_one("#edit-dialog") is not None
         assert modal.query_one("#tags-input").value == "topic:ml"
         assert modal.query_one("#tags-suggestions") is not None
+        chips = [widget for widget in modal.query(".tag-chip") if isinstance(widget, TagChip)]
+        assert {chip.tag for chip in chips} == {"topic:ml", "topic:nlp", "status:todo"}
+        nlp_chip = next(chip for chip in chips if chip.tag == "topic:nlp")
+        modal.on_tag_chip_pressed(SimpleNamespace(button=nlp_chip))
+        await pilot.pause(0.05)
+        assert modal.query_one("#tags-input").value == "topic:ml, topic:nlp"
+        assert "Unsaved" in str(modal.query_one("#edit-help", Static).content)
+        modal.query_one("#tag-filter").value = "status"
+        modal.on_tag_filter_changed(SimpleNamespace(value="status"))
+        assert nlp_chip.display is False
 
     assert modal._parse_tags(" a, b ,, c ") == ["a", "b", "c"]
 

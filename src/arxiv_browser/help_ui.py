@@ -89,6 +89,17 @@ HELP_SEARCH_SYNTAX: list[tuple[str, str]] = [
     ("AND / OR / NOT", "Boolean operators"),
 ]
 
+HELP_BADGE_LEGEND: list[tuple[str, str]] = [
+    ("selected / [x]", "Paper is in the current selection"),
+    ("watched / [w]", "Paper matches the watch list"),
+    ("star / *", "Paper is starred"),
+    ("read / v", "Paper is marked read"),
+    ("S2:n", "Semantic Scholar citation count"),
+    ("HF:^n", "HuggingFace upvotes"),
+    ("Rel:*n/10", "Relevance score"),
+    ("v1->v2", "Available arXiv version update"),
+]
+
 HELP_GETTING_STARTED: list[tuple[str, str]] = [
     ("/", "Search papers"),
     ("A", "Search all arXiv"),
@@ -182,6 +193,7 @@ def build_help_sections(
     ]
     if search_first:
         sections.append(("Search Syntax", HELP_SEARCH_SYNTAX))
+        sections.append(("Badge Legend", HELP_BADGE_LEGEND))
     for section_name, actions in HELP_SECTION_ACTIONS:
         # Replace middle-dot separator with ASCII dash when in ASCII mode
         display_name = section_name.replace("\u00b7", "-") if is_ascii_mode() else section_name
@@ -204,6 +216,7 @@ def build_help_sections(
 
     if not search_first:
         sections.insert(1, ("Search Syntax", HELP_SEARCH_SYNTAX))
+        sections.insert(2, ("Badge Legend", HELP_BADGE_LEGEND))
     return sections
 
 

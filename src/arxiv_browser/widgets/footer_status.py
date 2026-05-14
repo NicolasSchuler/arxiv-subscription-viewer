@@ -65,6 +65,14 @@ _API_FOOTER_BINDINGS: tuple[tuple[str, str], ...] = (
     ("?", "help"),
 )
 
+_DETAIL_FOCUS_FOOTER_BINDINGS: tuple[tuple[str, str], ...] = (
+    ("Tab", "list"),
+    ("j/k", "scroll"),
+    ("v", "density"),
+    ("Ctrl+d", "sections"),
+    ("?", "help"),
+)
+
 
 def build_selection_footer_base_bindings() -> list[tuple[str, str]]:
     """Return canonical selection-mode footer hints."""
@@ -82,6 +90,23 @@ def build_search_footer_bindings() -> list[tuple[str, str]]:
 def build_api_footer_bindings() -> list[tuple[str, str]]:
     """Return canonical API-mode footer hints."""
     return list(_API_FOOTER_BINDINGS)
+
+
+def build_detail_focus_footer_bindings() -> list[tuple[str, str]]:
+    """Return canonical detail-pane focus footer hints."""
+    return list(_DETAIL_FOCUS_FOOTER_BINDINGS)
+
+
+@dataclass(frozen=True, slots=True)
+class FooterModeBadgeState:
+    """Semantic mode state for the compact footer badge."""
+
+    relevance_scoring_active: bool
+    version_checking: bool
+    search_visible: bool
+    in_arxiv_api_mode: bool
+    selected_count: int
+    detail_focus: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +133,7 @@ class StatusBarState:
     hf_api_error: bool = False
     version_checking: bool = False
     version_update_count: int = 0
+    detail_focus: bool = False
     max_width: int | None = None
     theme_colors: Mapping[str, str] = field(default_factory=lambda: dict(DEFAULT_THEME))
 
@@ -141,6 +167,7 @@ def _coerce_status_bar_state(
             hf_api_error=state.hf_api_error,
             version_checking=state.version_checking,
             version_update_count=state.version_update_count,
+            detail_focus=state.detail_focus,
             max_width=state.max_width,
             theme_colors=dict(state.theme_colors or DEFAULT_THEME),
         )
@@ -164,48 +191,52 @@ def build_browse_footer_bindings(
     llm_configured: bool,
     has_history_navigation: bool,
 ) -> list[tuple[str, str]]:
-    """Build a capped default browsing footer with deterministic priority."""
+    """Build the default browsing footer with deterministic priority."""
     _ = (s2_active, has_starred, llm_configured)
     slot_a = ("[/]", "dates") if has_history_navigation else ("n", "notes")
     return [
         ("/", "search"),
+        ("Space", "select"),
         ("o", "open"),
-        ("r", "read"),
-        ("x", "star"),
-        ("t", "tags"),
-        slot_a,
         ("s", "sort"),
+        ("r", "read"),
+        slot_a,
         ("E", "export"),
+        ("Ctrl+p", "commands"),
         ("?", "help"),
     ]
 
 
 def build_footer_mode_badge(
-    *,
-    relevance_scoring_active: bool,
-    version_checking: bool,
-    search_visible: bool,
-    in_arxiv_api_mode: bool,
-    selected_count: int,
+    state: FooterModeBadgeState | None = None,
     theme_colors: Mapping[str, str] | None = None,
+    **legacy_kwargs: Any,
 ) -> str:
     """Build Rich-markup mode badge text for footer state."""
+    if state is not None:
+        if legacy_kwargs:
+            raise TypeError("FooterModeBadgeState cannot be combined with legacy kwargs")
+        resolved_state = state
+    else:
+        resolved_state = FooterModeBadgeState(**legacy_kwargs)
     colors = theme_colors or DEFAULT_THEME
     pink = colors["pink"]
     accent = colors["accent"]
     orange = colors["orange"]
     green = colors["green"]
     panel_alt = colors["panel_alt"]
-    if relevance_scoring_active:
+    if resolved_state.relevance_scoring_active:
         return f"[bold {pink} on {panel_alt}] SCORING [/]"
-    if version_checking:
+    if resolved_state.version_checking:
         return f"[bold {pink} on {panel_alt}] VERSIONS [/]"
-    if search_visible:
+    if resolved_state.search_visible:
         return f"[bold {accent} on {panel_alt}] SEARCH [/]"
-    if in_arxiv_api_mode:
+    if resolved_state.in_arxiv_api_mode:
         return f"[bold {orange} on {panel_alt}] API [/]"
-    if selected_count > 0:
-        return f"[bold {green} on {panel_alt}] {selected_count} SEL [/]"
+    if resolved_state.detail_focus:
+        return f"[bold {accent} on {panel_alt}] DETAILS [/]"
+    if resolved_state.selected_count > 0:
+        return f"[bold {green} on {panel_alt}] {resolved_state.selected_count} SEL [/]"
     return ""
 
 
@@ -301,6 +332,8 @@ def _build_compact_status_parts(state: StatusBarState) -> list[str]:
 
     if state.selected_count > 0:
         parts.append(f"{state.selected_count} sel")
+    if state.detail_focus:
+        parts.append("details")
 
     parts.append(f"sort:{state.sort_label}")
 
@@ -350,6 +383,8 @@ def _build_full_status_parts(state: StatusBarState) -> list[str]:
             1,
             f"[bold {state.theme_colors['green']}]{state.selected_count} selected[/]",
         )
+    if state.detail_focus:
+        parts.insert(1, f"[{state.theme_colors['accent_alt']}]Details focus[/]")
     if state.in_arxiv_api_mode and state.api_page is not None:
         parts.extend(_full_api_segments(state))
     if state.show_abstract_preview:
@@ -482,12 +517,14 @@ def _next_rich_text_chunk(text: str, index: int) -> tuple[str, int, int]:
 
 
 __all__ = [
+    "FooterModeBadgeState",
     "StatusBarState",
     "_build_compact_status_parts",
     "_build_full_status_parts",
     "_truncate_rich_text",
     "build_api_footer_bindings",
     "build_browse_footer_bindings",
+    "build_detail_focus_footer_bindings",
     "build_footer_mode_badge",
     "build_selection_footer_base_bindings",
     "build_selection_footer_bindings",

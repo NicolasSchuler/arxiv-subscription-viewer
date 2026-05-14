@@ -239,6 +239,9 @@ class OmniInput(Vertical):
         score = max(
             partial_fuzzy_score(query, command.name),
             partial_fuzzy_score(query, command.description),
+            partial_fuzzy_score(query, command.group),
+            partial_fuzzy_score(query, command.key_hint),
+            partial_fuzzy_score(query, command.action),
         )
         if score < FUZZY_THRESHOLD:
             return None
@@ -260,26 +263,32 @@ class OmniInput(Vertical):
         return Option(self._command_option_label(command), disabled=not command.enabled)
 
     def _command_option_label(self, command: PaletteCommand) -> str:
-        safe_name, safe_desc, safe_hint, safe_blocked = self._safe_command_parts(command)
+        safe_name, safe_desc, safe_hint, safe_group, safe_blocked = self._safe_command_parts(
+            command
+        )
         if not command.enabled:
             blocked = f"  Requires: {safe_blocked}" if safe_blocked else ""
-            return f"[dim]{safe_name}  {safe_desc}{blocked}[/]"
+            return f"[dim]{safe_name}  [{safe_group}]  {safe_desc}{blocked}[/]"
 
         colors = theme_colors_for(self)
         parts = [
             f"[bold {colors['accent']}]{safe_name}[/]",
+            f"[{colors['purple']}]{safe_group}[/]",
             f"[{colors['muted']}]{safe_desc}[/]",
         ]
+        if command.suggested:
+            parts.append(f"[{colors['green']}]* suggested[/]")
         if safe_hint:
             parts.append(f"[{colors['green']}]{safe_hint}[/]")
         return "  ".join(parts)
 
-    def _safe_command_parts(self, command: PaletteCommand) -> tuple[str, str, str, str]:
+    def _safe_command_parts(self, command: PaletteCommand) -> tuple[str, str, str, str, str]:
         name = truncate_palette_text(command.name, PALETTE_NAME_MAX_LEN)
         desc = truncate_palette_text(command.description, PALETTE_DESC_MAX_LEN)
         hint = (
             truncate_palette_text(command.key_hint, PALETTE_KEY_MAX_LEN) if command.key_hint else ""
         )
+        group = truncate_palette_text(command.group, PALETTE_KEY_MAX_LEN)
         blocked = (
             truncate_palette_text(command.blocked_reason, PALETTE_DESC_MAX_LEN)
             if command.blocked_reason
@@ -289,6 +298,7 @@ class OmniInput(Vertical):
             escape_rich_text(name),
             escape_rich_text(desc),
             escape_rich_text(hint),
+            escape_rich_text(group),
             escape_rich_text(blocked),
         )
 

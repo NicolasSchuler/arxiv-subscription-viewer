@@ -100,6 +100,7 @@ class PaperRowRenderState:
     hf_data: HuggingFacePaper | None = None
     version_update: tuple[int, int] | None = None
     relevance_score: tuple[int, str] | None = None
+    meta_line_budget: int = META_LINE_BUDGET
     theme_colors: Mapping[str, str] = field(default_factory=lambda: dict(DEFAULT_THEME))
     category_colors: Mapping[str, str] = field(
         default_factory=lambda: dict(category_colors_for(None))
@@ -214,10 +215,10 @@ def _build_meta_parts(state: PaperRowRenderState) -> list[str]:
         )
         parts.append(tag_str)
     if state.s2_data is not None:
-        parts.append(f"[{state.theme_colors['green']}]C{state.s2_data.citation_count}[/]")
+        parts.append(f"[{state.theme_colors['green']}]S2:{state.s2_data.citation_count}[/]")
     if state.hf_data is not None:
         hf_upvotes = _ACTIVE_META_GLYPHS["hf_upvotes"]
-        parts.append(f"[{state.theme_colors['orange']}]{hf_upvotes}{state.hf_data.upvotes}[/]")
+        parts.append(f"[{state.theme_colors['orange']}]HF:{hf_upvotes}{state.hf_data.upvotes}[/]")
     if state.version_update is not None:
         old_v, new_v = state.version_update
         version_arrow = _ACTIVE_META_GLYPHS["version_arrow"]
@@ -225,7 +226,7 @@ def _build_meta_parts(state: PaperRowRenderState) -> list[str]:
     if state.relevance_score is not None:
         score, _ = state.relevance_score
         color, sym = _relevance_badge_parts(score, theme_colors=state.theme_colors)
-        parts.append(f"[{color}]{sym}{score}/10[/]")
+        parts.append(f"[{color}]Rel:{sym}{score}/10[/]")
     return parts
 
 
@@ -271,7 +272,7 @@ def _relevance_badge_parts(
 
 def _render_meta_badges(state: PaperRowRenderState) -> str:
     """Build the meta line with arxiv_id, categories, and badges."""
-    return _compress_meta_parts(_build_meta_parts(state))
+    return _compress_meta_parts(_build_meta_parts(state), budget=state.meta_line_budget)
 
 
 def _render_abstract_preview(state: PaperRowRenderState) -> str:

@@ -141,11 +141,11 @@ class TestStatusFilterRegressions:
         assert entries["toggle_detail_mode"].name == "Switch to Full Details"
         assert entries["fetch_s2"].enabled is True
         assert entries["citation_graph"].enabled is False
-        assert entries["citation_graph"].blocked_reason == "S2 data"
+        assert entries["citation_graph"].blocked_reason == "Fetch S2 data for this paper first"
         assert entries["generate_summary"].enabled is False
-        assert entries["generate_summary"].blocked_reason == "LLM configuration"
-        assert entries["chat_with_paper"].blocked_reason == "LLM configuration"
-        assert entries["score_relevance"].blocked_reason == "LLM configuration"
+        assert entries["generate_summary"].blocked_reason == "Configure an LLM command first"
+        assert entries["chat_with_paper"].blocked_reason == "Configure an LLM command first"
+        assert entries["score_relevance"].blocked_reason == "Configure an LLM command first"
 
     def test_help_sections_include_getting_started_shortcuts(self):
         """Help content should lead with a concise getting-started flow."""

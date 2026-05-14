@@ -45,6 +45,65 @@ class _PaletteAppState:
     s2_data_loaded: bool
 
 
+_PALETTE_BLOCKED_COPY = {
+    "selection": "Select a paper first",
+    "visible papers": "Show at least one visible paper first",
+    "an active search": "Run a search first",
+    "history mode": "Open a history-backed digest first",
+    "saved marks": "Set a mark first",
+    "watch list entries": "Create a watch-list entry first",
+    "starred papers": "Star at least one paper first",
+    "Semantic Scholar enabled": "Enable Semantic Scholar first",
+    "S2 data": "Fetch S2 data for this paper first",
+    "LLM configuration": "Configure an LLM command first",
+}
+
+
+def _palette_ctrl_e_copy(state: _PaletteAppState) -> tuple[str, str]:
+    if state.in_arxiv_api_mode:
+        return "Exit Search Results", "Return to your local or history papers"
+    return "Toggle Semantic Scholar", "Enable or disable Semantic Scholar enrichment"
+
+
+def _palette_hf_copy(state: _PaletteAppState) -> tuple[str, str]:
+    if state.hf_active:
+        return (
+            "Disable HuggingFace Trending",
+            "Hide HuggingFace badges and detail-pane matches",
+        )
+    return (
+        "Enable HuggingFace Trending",
+        "Show HuggingFace badges and detail-pane matches",
+    )
+
+
+def _palette_preview_copy(state: _PaletteAppState) -> tuple[str, str]:
+    if state.show_abstract_preview:
+        return "Hide Abstract Preview", "Return to a denser paper list without snippets"
+    return "Show Abstract Preview", "Reveal abstract snippets in the paper list"
+
+
+def _palette_detail_mode_copy(state: _PaletteAppState) -> tuple[str, str]:
+    if state.detail_mode == "scan":
+        return "Switch to Full Details", "Expand the detail pane for long-form reading"
+    return "Switch to Scan Details", "Return to a faster triage-focused detail view"
+
+
+def _first_failed_palette_requirement(
+    action_name: str,
+    requirements: tuple[tuple[set[str], bool, str], ...],
+) -> str:
+    for actions, available, reason in requirements:
+        if action_name in actions and not available:
+            return reason
+    return ""
+
+
+def _palette_blocked_copy(reason: str) -> str:
+    """Return actionable disabled-command copy for terse internal blockers."""
+    return _PALETTE_BLOCKED_COPY.get(reason, reason)
+
+
 # Command palette registry: (name, description, key_hint, action_name)
 # action_name maps to ArxivBrowser.action_* methods (or "" for non-action commands)
 COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
@@ -153,7 +212,7 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
         "v",
         "toggle_detail_mode",
     ),
-    ("Cycle Theme", "Switch between Monokai/Catppuccin/Solarized", "Ctrl+t", "cycle_theme"),
+    ("Cycle Theme", "Switch between installed color themes", "Ctrl+t", "cycle_theme"),
     ("Toggle Sections", "Show/hide detail pane sections", "Ctrl+d", "toggle_sections"),
     (
         "Focus Details",

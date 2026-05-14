@@ -95,12 +95,16 @@ OmniInput #omni-results {
 }
 
 #paper-list > .option-list--option-highlighted {
-    background: $th-highlight;
+    background: $th-selection;
 }
 
 #paper-list:focus > .option-list--option-highlighted {
-    background: $th-highlight-focus;
+    background: $th-selection-highlight;
     text-style: bold;
+}
+
+#paper-list > .selected {
+    background: $th-selection;
 }
 
 #paper-list > .option-list--option-hover {
@@ -167,7 +171,7 @@ APP_BINDINGS: list[BindingType] = [
     Binding("F", "preview_pdf", "Preview PDF", show=False),
     Binding("c", "copy_selected", "Copy", show=False),
     Binding("s", "cycle_sort", "Sort", show=False),
-    Binding("tab", "toggle_focus_pane", "Focus Details", show=False),
+    Binding("tab", "toggle_focus_pane", "Focus Details", show=False, priority=True),
     Binding("space", "toggle_select", "Select", show=False),
     Binding("a", "select_all", "Select All", show=False),
     Binding("u", "clear_selection", "Clear Selection", show=False),

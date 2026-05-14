@@ -137,6 +137,19 @@ class TestOmniInputWidget:
         widget = OmniInput()
         assert widget._current_mode == "local"
 
+    def test_command_match_searches_group_key_and_action(self):
+        widget = OmniInput()
+        command = PaletteCommand(
+            name="Open",
+            description="Open paper",
+            key_hint="Ctrl+k",
+            action="collections",
+            group="Organize",
+        )
+        assert widget._command_match("organize", command) is not None
+        assert widget._command_match("ctrl+k", command) is not None
+        assert widget._command_match("collections", command) is not None
+
 
 @pytest.mark.asyncio
 class TestOmniInputTUI:
@@ -286,6 +299,38 @@ class TestOmniInputTUI:
             results = omni.query_one("#omni-results", OptionList)
             prompt = str(results.get_option_at_index(0).prompt)
             assert "Requires: No papers loaded" in prompt
+
+    async def test_suggested_command_label_includes_group_and_marker(self):
+        from textual.app import App
+        from textual.widgets import Input, OptionList
+
+        class TestApp(App):
+            def compose(self):
+                yield OmniInput()
+
+        async with TestApp().run_test() as pilot:
+            omni = pilot.app.query_one(OmniInput)
+            omni.set_commands(
+                [
+                    PaletteCommand(
+                        name="Open",
+                        description="Open paper",
+                        key_hint="o",
+                        action="open_url",
+                        group="Core",
+                        suggested=True,
+                    ),
+                ]
+            )
+            omni.open(">open")
+            inp = omni.query_one("#omni-input", Input)
+            inp.value = ">open"
+            await pilot.pause()
+
+            results = omni.query_one("#omni-results", OptionList)
+            prompt = str(results.get_option_at_index(0).prompt)
+            assert "Core" in prompt
+            assert "suggested" in prompt
 
     async def test_command_mode_arrow_keys_move_highlight(self):
         from textual.app import App

@@ -56,9 +56,9 @@ def test_set_ascii_icons_changes_rendered_selection_marker(make_paper):
             ),
         )
         assert "[x]" in ascii_text
-        assert "^7" in ascii_text
+        assert "HF:^7" in ascii_text
         assert "v1->v2" in ascii_text
-        assert "*9/10" in ascii_text
+        assert "Rel:*9/10" in ascii_text
     finally:
         set_ascii_icons(False)
 
@@ -81,9 +81,9 @@ def test_set_ascii_icons_changes_rendered_selection_marker(make_paper):
             relevance_score=(9, "high"),
         ),
     )
-    assert "↑7" in unicode_meta
+    assert "HF:↑7" in unicode_meta
     assert "v1→v2" in unicode_meta
-    assert "★9/10" in unicode_meta
+    assert "Rel:★9/10" in unicode_meta
 
 
 def test_paper_list_item_title_and_authors_text(make_paper):
@@ -145,10 +145,24 @@ def test_paper_list_item_meta_badges_with_all_sources(make_paper):
     meta_text = item._get_meta_text()
     assert "API" in meta_text
     assert "#topic:ml" in meta_text
-    assert "C42" in meta_text
-    assert "↑55" in meta_text
+    assert "S2:42" in meta_text
+    assert "HF:↑55" in meta_text
     assert "v1→v2" in meta_text
     assert "9/10" in meta_text
+
+
+def test_meta_badges_honor_row_budget(make_paper):
+    paper = make_paper(categories="cs.AI cs.CL cs.LG")
+    text = render_paper_option(
+        PaperRowRenderState(
+            paper=paper,
+            metadata=PaperMetadata(arxiv_id=paper.arxiv_id, tags=["topic:ml", "status:todo"]),
+            meta_line_budget=38,
+        )
+    )
+    meta_line = text.splitlines()[2]
+    assert "+1" in meta_line or "+2" in meta_line
+    assert len(_visible_text(meta_line)) <= 38
 
 
 def test_paper_list_item_preview_text_branches(make_paper):
@@ -536,6 +550,18 @@ def test_chrome_helper_branches_cover_status_and_date_navigation_helpers():
         llm_configured=True,
         has_history_navigation=True,
     )[5] == ("[/]", "dates")
+    browse_keys = [
+        key
+        for key, _label in chrome_mod.build_browse_footer_bindings(
+            s2_active=False,
+            has_starred=False,
+            llm_configured=False,
+            has_history_navigation=False,
+        )
+    ]
+    assert "Space" in browse_keys
+    assert "Ctrl+p" in browse_keys
+    assert chrome_mod.build_detail_focus_footer_bindings()[0] == ("Tab", "list")
     assert chrome_mod.build_footer_mode_badge(
         relevance_scoring_active=True,
         version_checking=False,
@@ -544,6 +570,15 @@ def test_chrome_helper_branches_cover_status_and_date_navigation_helpers():
         selected_count=0,
         theme_colors=base_colors,
     ).startswith("[bold")
+    assert "DETAILS" in chrome_mod.build_footer_mode_badge(
+        relevance_scoring_active=False,
+        version_checking=False,
+        search_visible=False,
+        in_arxiv_api_mode=False,
+        selected_count=0,
+        detail_focus=True,
+        theme_colors=base_colors,
+    )
 
     assert chrome_mod._compute_window_bounds(0, 0, 5) == (0, 0)
     assert chrome_mod._compute_window_bounds(10, 8, 5) == (5, 10)

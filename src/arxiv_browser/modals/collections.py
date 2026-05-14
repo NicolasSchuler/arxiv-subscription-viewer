@@ -10,7 +10,7 @@ from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, Input, Label, ListItem, ListView
+from textual.widgets import Button, Input, Label, ListItem, ListView, Static
 
 from arxiv_browser.action_messages import build_actionable_warning
 from arxiv_browser.empty_state import (
@@ -192,6 +192,7 @@ class CollectionsModal(ModalBase[str | None]):
         self._papers_by_id = papers_by_id or {}
         self._mode: Literal["manage", "pick"] = mode
         self._viewing_collection: PaperCollection | None = None
+        self._dirty = False
 
     # ── compose ──────────────────────────────────────────────────────
 
@@ -217,6 +218,9 @@ class CollectionsModal(ModalBase[str | None]):
                 with Horizontal(id="col-buttons"):
                     yield Button("Close", variant="default", id="col-close")
                     yield Button("Save", variant="primary", id="col-save")
+                yield Static(
+                    "[dim]Saved | Esc close | Enter picks highlighted items[/]", id="col-help"
+                )
 
             # detail-view (papers in a collection)
             with Vertical(id="detail-view"):
@@ -225,6 +229,9 @@ class CollectionsModal(ModalBase[str | None]):
                 with Horizontal(id="detail-buttons"):
                     yield Button("Remove Selected", variant="default", id="detail-remove")
                     yield Button("Back", variant="primary", id="detail-back")
+                yield Static(
+                    "[dim]Saved | Esc back | Remove Selected edits list[/]", id="detail-help"
+                )
 
             # pick-view (quick collection picker)
             with Vertical(id="pick-view"):
@@ -232,6 +239,7 @@ class CollectionsModal(ModalBase[str | None]):
                 yield ListView(id="pick-list")
                 with Horizontal(id="pick-buttons"):
                     yield Button("Cancel (Esc/q)", variant="default", id="pick-cancel")
+                yield Static("[dim]Enter choose | Esc cancel[/]", id="pick-help")
 
     # ── lifecycle ────────────────────────────────────────────────────
 
@@ -303,6 +311,16 @@ class CollectionsModal(ModalBase[str | None]):
             severity="warning",
         )
 
+    def _mark_dirty(self) -> None:
+        """Mark the modal as having unsaved collection edits."""
+        self._dirty = True
+        message = "[bold]Unsaved[/bold] | Save persists | Esc closes without saving"
+        for selector in ("#col-help", "#detail-help"):
+            try:
+                self.query_one(selector, Static).update(message)
+            except Exception:
+                pass
+
     # ── manage-view event handlers ───────────────────────────────────
 
     @on(ListView.Highlighted, "#col-list")
@@ -343,6 +361,7 @@ class CollectionsModal(ModalBase[str | None]):
                 created=datetime.now().isoformat(),
             )
         )
+        self._mark_dirty()
         self._refresh_manage_list()
 
     @on(Button.Pressed, "#col-rename")
@@ -365,6 +384,7 @@ class CollectionsModal(ModalBase[str | None]):
         desc = self.query_one("#col-desc", Input).value.strip()
         self._collections[idx].name = name
         self._collections[idx].description = desc
+        self._mark_dirty()
         self._refresh_manage_list()
 
     @on(Button.Pressed, "#col-delete")
@@ -378,6 +398,7 @@ class CollectionsModal(ModalBase[str | None]):
             )
             return
         self._collections.pop(idx)
+        self._mark_dirty()
         self._refresh_manage_list()
 
     @on(Button.Pressed, "#col-view")
@@ -449,6 +470,7 @@ class CollectionsModal(ModalBase[str | None]):
             )
             return
         self._viewing_collection.paper_ids.pop(idx)
+        self._mark_dirty()
         self._refresh_detail_list()
         count = len(self._viewing_collection.paper_ids)
         self.query_one("#detail-title", Label).update(

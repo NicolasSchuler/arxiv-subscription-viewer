@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-05-14
+
+### Added
+- Added a Solarized Light theme with matching category/tag colors and CLI/docs coverage.
+- Added TUI layout-contract tests across terminal sizes, ASCII/high-contrast mode, API mode, selection/detail focus, empty states, command palette, and major modals.
+
+### Changed
+- Aligned browse/detail footers, status text, and list headers with clearer mode and focus affordances.
+- Improved paper-list badges with labeled S2, HuggingFace, relevance, and version-update metadata plus width-aware compression.
+- Added a triage strip to the detail pane for read/star/tags/relevance/enrichment/version signals.
+- Improved command-palette search, grouping, suggested markers, and disabled-action guidance.
+- Added saved/unsaved footer state to editing, collections, and watch-list modals, plus filterable tag chips in the paper edit modal.
+
 ## [0.1.7] - 2026-05-14
 
 ### Changed

@@ -1006,11 +1006,19 @@ class TestSolarizedDarkTheme:
     def test_four_themes_in_cycle(self):
         from arxiv_browser.themes import THEME_NAMES as APP_THEME_NAMES
 
-        assert len(APP_THEME_NAMES) == 4
+        assert len(APP_THEME_NAMES) == 5
         assert "monokai" in APP_THEME_NAMES
         assert "catppuccin-mocha" in APP_THEME_NAMES
         assert "solarized-dark" in APP_THEME_NAMES
+        assert "solarized-light" in APP_THEME_NAMES
         assert "high-contrast" in APP_THEME_NAMES
+
+    def test_solarized_light_theme_exists(self):
+        from arxiv_browser.themes import SOLARIZED_LIGHT_THEME
+        from arxiv_browser.themes import THEMES as APP_THEMES
+
+        assert "solarized-light" in APP_THEMES
+        assert APP_THEMES["solarized-light"] is SOLARIZED_LIGHT_THEME
 
     def test_solarized_config_roundtrip(self):
         from arxiv_browser.config import (

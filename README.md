@@ -76,7 +76,7 @@ python -m arxiv_browser --version
 
 > **Requires Python 3.13+** · Press `?` in-app for help · `Ctrl+p` opens commands
 >
-> Global options: `--version` · `--debug` (log to file) · `--ascii` (ASCII-only icons) · `--color auto|always|never` · `--no-color` · `--theme {monokai|catppuccin-mocha|solarized-dark|high-contrast}`
+> Global options: `--version` · `--debug` (log to file) · `--ascii` (ASCII-only icons) · `--color auto|always|never` · `--no-color` · `--theme {monokai|catppuccin-mocha|solarized-dark|solarized-light|high-contrast}`
 >
 > Debug log paths: `~/.config/arxiv-browser/debug.log` (Linux) · `~/Library/Application Support/arxiv-browser/debug.log` (macOS) · `%APPDATA%/arxiv-browser/debug.log` (Windows)
 

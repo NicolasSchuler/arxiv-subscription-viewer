@@ -367,6 +367,7 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
         self._auto_tag_active = False
         self._auto_tag_progress: tuple[int, int] | None = None
         self._cancel_batch_requested = False
+        self._detail_focus_active = False
         self._tfidf_index: TfidfIndex | None = None
         self._tfidf_corpus_key: str | None = None
         self._tfidf_build_task: asyncio.Task[None] | None = None

@@ -771,11 +771,12 @@ class TestBrowserHelperCoverage:
         with patch("arxiv_browser.browser.detail_pane._resolve_llm_command", return_value=""):
             commands = app._build_command_palette_commands()
         assert (
-            next(cmd for cmd in commands if cmd.action == "fetch_s2").blocked_reason == "selection"
+            next(cmd for cmd in commands if cmd.action == "fetch_s2").blocked_reason
+            == "Select a paper first"
         )
         assert (
             next(cmd for cmd in commands if cmd.action == "check_versions").blocked_reason
-            == "starred papers"
+            == "Star at least one paper first"
         )
         app._config.watch_list = [
             SimpleNamespace(pattern="graph", match_type="keyword", case_sensitive=False)

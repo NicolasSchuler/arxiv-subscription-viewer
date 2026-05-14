@@ -659,7 +659,7 @@ class TestS2PaperListItem:
         )
         item.update_s2_data(s2)
         meta = item._get_meta_text()
-        assert "C42" in meta
+        assert "S2:42" in meta
 
     def test_no_badge_without_s2(self, make_paper):
         from arxiv_browser.widgets.listing import PaperListItem

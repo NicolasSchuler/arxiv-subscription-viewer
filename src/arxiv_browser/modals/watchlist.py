@@ -138,6 +138,7 @@ class WatchListModal(ModalBase[list[WatchListEntry] | None]):
             )
             for entry in entries
         ]
+        self._dirty = False
 
     def compose(self) -> ComposeResult:
         """Yield the watch list view, entry form, and save/cancel buttons."""
@@ -166,6 +167,7 @@ class WatchListModal(ModalBase[list[WatchListEntry] | None]):
             with Horizontal(id="watch-buttons"):
                 yield Button("Cancel", variant="default", id="watch-cancel")
                 yield Button("Save (Ctrl+S)", variant="primary", id="watch-save")
+            yield Static("[dim]Saved | Ctrl+S save | Esc cancel[/]", id="watch-help")
 
     def on_mount(self) -> None:
         """Populate the list view and focus the pattern input on mount."""
@@ -223,6 +225,16 @@ class WatchListModal(ModalBase[list[WatchListEntry] | None]):
             case_sensitive=case_sensitive,
         )
 
+    def _mark_dirty(self) -> None:
+        """Mark watch-list edits as unsaved in the modal footer."""
+        self._dirty = True
+        try:
+            self.query_one("#watch-help", Static).update(
+                "[bold]Unsaved[/bold] | Ctrl+S save | Esc cancel"
+            )
+        except Exception:
+            pass
+
     def action_save(self) -> None:
         """Dismiss the modal and return the current list of entries."""
         self.dismiss(self._entries)
@@ -239,6 +251,7 @@ class WatchListModal(ModalBase[list[WatchListEntry] | None]):
         if not entry:
             return
         self._entries.append(entry)
+        self._mark_dirty()
         self._refresh_list()
 
     @on(Button.Pressed, "#watch-update")
@@ -253,6 +266,7 @@ class WatchListModal(ModalBase[list[WatchListEntry] | None]):
             return
         index = list_view.index if list_view.index is not None else 0
         self._entries[index] = entry
+        self._mark_dirty()
         self._refresh_list()
 
     @on(Button.Pressed, "#watch-delete")
@@ -264,6 +278,7 @@ class WatchListModal(ModalBase[list[WatchListEntry] | None]):
             return
         index = list_view.index if list_view.index is not None else 0
         self._entries.pop(index)
+        self._mark_dirty()
         self._refresh_list()
 
     @on(Button.Pressed, "#watch-save")

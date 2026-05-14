@@ -16,7 +16,16 @@ from arxiv_browser.browser.constants import (
     MAX_ABSTRACT_LOADS,
     logger,
 )
-from arxiv_browser.browser.contracts import COMMAND_PALETTE_COMMANDS, _PaletteAppState
+from arxiv_browser.browser.contracts import (
+    COMMAND_PALETTE_COMMANDS,
+    _first_failed_palette_requirement,
+    _palette_blocked_copy,
+    _palette_ctrl_e_copy,
+    _palette_detail_mode_copy,
+    _palette_hf_copy,
+    _palette_preview_copy,
+    _PaletteAppState,
+)
 from arxiv_browser.config import save_config
 from arxiv_browser.help_ui import build_help_sections
 from arxiv_browser.models import SORT_OPTIONS, Paper, SessionState, UserConfig
@@ -47,46 +56,6 @@ _TARGET_PAPER_PALETTE_ACTIONS = frozenset(
         "start_mark",
     }
 )
-
-
-def _palette_ctrl_e_copy(state: _PaletteAppState) -> tuple[str, str]:
-    if state.in_arxiv_api_mode:
-        return "Exit Search Results", "Return to your local or history papers"
-    return "Toggle Semantic Scholar", "Enable or disable Semantic Scholar enrichment"
-
-
-def _palette_hf_copy(state: _PaletteAppState) -> tuple[str, str]:
-    if state.hf_active:
-        return (
-            "Disable HuggingFace Trending",
-            "Hide HuggingFace badges and detail-pane matches",
-        )
-    return (
-        "Enable HuggingFace Trending",
-        "Show HuggingFace badges and detail-pane matches",
-    )
-
-
-def _palette_preview_copy(state: _PaletteAppState) -> tuple[str, str]:
-    if state.show_abstract_preview:
-        return "Hide Abstract Preview", "Return to a denser paper list without snippets"
-    return "Show Abstract Preview", "Reveal abstract snippets in the paper list"
-
-
-def _palette_detail_mode_copy(state: _PaletteAppState) -> tuple[str, str]:
-    if state.detail_mode == "scan":
-        return "Switch to Full Details", "Expand the detail pane for long-form reading"
-    return "Switch to Scan Details", "Return to a faster triage-focused detail view"
-
-
-def _first_failed_palette_requirement(
-    action_name: str,
-    requirements: tuple[tuple[set[str], bool, str], ...],
-) -> str:
-    for actions, available, reason in requirements:
-        if action_name in actions and not available:
-            return reason
-    return ""
 
 
 def _footer_progress_bindings(
@@ -229,6 +198,7 @@ class DetailPaneMixin:
         s2_data, s2_loading = self._s2_state_for(arxiv_id)
         theme_runtime = self._resolved_theme_runtime()
         resolved_abstract = paper.abstract or "" if abstract_text is None else abstract_text
+        metadata = self._config.paper_metadata.get(arxiv_id)
         return DetailRenderState(
             paper=paper,
             abstract_text=resolved_abstract,
@@ -243,6 +213,8 @@ class DetailPaneMixin:
             summary_mode=self._summary_mode_label.get(arxiv_id, ""),
             tags=tuple(self._tags_for(arxiv_id) or ()),
             relevance=self._relevance_scores.get(arxiv_id),
+            is_read=bool(metadata and metadata.is_read),
+            starred=bool(metadata and metadata.starred),
             collapsed_sections=tuple(self._config.collapsed_sections),
             detail_mode=getattr(self, "_detail_mode", "scan"),
             theme_colors=theme_runtime.colors,
@@ -254,6 +226,13 @@ class DetailPaneMixin:
         """Build the list-row render state for one visible paper."""
         aid = paper.arxiv_id
         theme_runtime = self._resolved_theme_runtime()
+        meta_line_budget = 78
+        try:
+            list_width = getattr(self._get_paper_list_widget().size, "width", 0)
+            if list_width:
+                meta_line_budget = max(36, min(120, list_width - 4))
+        except (AttributeError, NoMatches):
+            pass
         return PaperRowRenderState(
             paper=paper,
             selected=aid in self.selected_ids,
@@ -270,6 +249,7 @@ class DetailPaneMixin:
             hf_data=self._hf_cache.get(aid) if self._hf_active else None,
             version_update=self._version_updates.get(aid),
             relevance_score=self._relevance_scores.get(aid),
+            meta_line_budget=meta_line_budget,
             theme_colors=theme_runtime.colors,
             category_colors=theme_runtime.category_colors,
             tag_namespace_colors=theme_runtime.tag_namespace_colors,
@@ -303,6 +283,7 @@ class DetailPaneMixin:
             hf_api_error=self._hf_api_error,
             version_checking=self._version_checking,
             version_update_count=len(self._version_updates),
+            detail_focus=self._is_detail_footer_active(),
             max_width=getattr(size, "width", None),
             theme_colors=theme_runtime.colors,
         )
@@ -757,13 +738,13 @@ class DetailPaneMixin:
         """Return whether a palette command is enabled and what blocks it."""
         blocked_reason = self._palette_basic_blocked_reason(action_name, state)
         if blocked_reason:
-            return False, blocked_reason
+            return False, _palette_blocked_copy(blocked_reason)
         blocked_reason = self._palette_enrichment_blocked_reason(action_name, state)
         if blocked_reason:
-            return False, blocked_reason
+            return False, _palette_blocked_copy(blocked_reason)
         blocked_reason = self._palette_llm_blocked_reason(action_name, state)
         if blocked_reason:
-            return False, blocked_reason
+            return False, _palette_blocked_copy(blocked_reason)
         return True, ""
 
     def _palette_basic_blocked_reason(
@@ -931,6 +912,8 @@ class DetailPaneMixin:
             return _widget_chrome.build_search_footer_bindings()
         if self._in_arxiv_api_mode:
             return _widget_chrome.build_api_footer_bindings()
+        if self._is_detail_footer_active():
+            return _widget_chrome.build_detail_focus_footer_bindings()
         if self.selected_ids:
             return _widget_chrome.build_selection_footer_bindings(len(self.selected_ids))
         return None
@@ -939,6 +922,17 @@ class DetailPaneMixin:
         try:
             return bool(self._get_search_container_widget().is_open)
         except NoMatches:
+            return False
+
+    def _is_detail_footer_active(self) -> bool:
+        if bool(getattr(self, "_detail_focus_active", False)):
+            return True
+        try:
+            details = self.query_one("#details-scroll")
+            return bool(
+                getattr(details, "has_focus", False) or getattr(details, "has_focus_within", False)
+            )
+        except (AttributeError, NoMatches):
             return False
 
     def _browse_footer_bindings(self) -> list[tuple[str, str]]:
@@ -967,6 +961,7 @@ class DetailPaneMixin:
             search_visible=search_visible,
             in_arxiv_api_mode=self._in_arxiv_api_mode,
             selected_count=len(self.selected_ids),
+            detail_focus=self._is_detail_footer_active(),
             theme_colors=theme_runtime.colors,
         )
 

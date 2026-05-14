@@ -810,7 +810,7 @@ class TestRenderPaperOptionBadges:
             url="https://api.semanticscholar.org/s2id",
         )
         result = render_paper_option(paper, s2_data=s2_data)
-        assert "C42" in result
+        assert "S2:42" in result
 
     def test_hf_upvote_badge(self, make_paper):
         """HF data should show upvote badge."""
@@ -1019,7 +1019,7 @@ class TestRenderPaperOptionBadges:
             relevance_score=(10, "perfect match"),
         )
         # All elements should be present
-        assert "C100" in result
+        assert "S2:100" in result
         assert "\u219150" in result
         assert "v1\u2192v5" in result
         assert "10/10" in result

@@ -93,6 +93,7 @@ async def test_collections_modal_create_rename_delete_flow(make_paper):
             desc_input.value = "new desc"
             modal.on_create_pressed()
             assert [c.name for c in modal.collections] == ["Reading", "Second"]
+            assert "Unsaved" in str(modal.query_one("#col-help", Static).content)
 
             list_view.index = 1
             name_input.value = "Renamed"
@@ -751,6 +752,7 @@ async def test_watch_list_modal_add_update_delete_and_save(make_paper):
             case.value = True
             modal.on_add_pressed()
             assert len(modal._entries) == 2
+            assert "Unsaved" in str(modal.query_one("#watch-help", Static).content)
 
             list_view.index = 1
             pattern.value = "diffusion"

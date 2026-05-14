@@ -227,6 +227,41 @@ class TestPaperDetailsCacheIntegration:
 
         assert len(details._detail_cache) == 2
 
+    def test_decision_strip_shows_triage_signals(self, make_paper):
+        from arxiv_browser.widgets.details import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(arxiv_id="2401.00001")
+
+        details.update_paper(
+            paper,
+            "abstract",
+            tags=["topic:ml"],
+            relevance=(8, "Good match"),
+            is_read=True,
+            starred=True,
+            version_update=(1, 2),
+        )
+
+        content = str(details.content)
+        assert "Read:" in content
+        assert "yes" in content
+        assert "Star:" in content
+        assert "Tags:" in content
+        assert "Rel:" in content
+        assert "v1" in content
+
+    def test_cache_with_read_and_star_state(self, make_paper):
+        from arxiv_browser.widgets.details import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(arxiv_id="2401.00001")
+
+        details.update_paper(paper, "abstract", is_read=False, starred=False)
+        details.update_paper(paper, "abstract", is_read=True, starred=True)
+
+        assert len(details._detail_cache) == 2
+
 
 class TestTextualThemes:
     """Tests for the Textual theme system with custom CSS variables."""
@@ -245,6 +280,8 @@ class TestTextualThemes:
             "th-panel-alt",
             "th-highlight",
             "th-highlight-focus",
+            "th-selection",
+            "th-selection-highlight",
             "th-accent",
             "th-accent-alt",
             "th-muted",
@@ -263,7 +300,7 @@ class TestTextualThemes:
         from arxiv_browser.themes import TEXTUAL_THEMES
 
         theme_names = list(TEXTUAL_THEMES.keys())
-        assert len(theme_names) == 4
+        assert len(theme_names) == 5
         keys_0 = set(TEXTUAL_THEMES[theme_names[0]].variables.keys())
         for name in theme_names[1:]:
             assert set(TEXTUAL_THEMES[name].variables.keys()) == keys_0
@@ -459,13 +496,13 @@ class TestFooterDiscoverability:
         bindings = app._get_footer_bindings()
         assert bindings == [
             ("/", "search"),
+            ("Space", "select"),
             ("o", "open"),
-            ("r", "read"),
-            ("x", "star"),
-            ("t", "tags"),
-            ("n", "notes"),
             ("s", "sort"),
+            ("r", "read"),
+            ("n", "notes"),
             ("E", "export"),
+            ("Ctrl+p", "commands"),
             ("?", "help"),
         ]
 
@@ -488,6 +525,7 @@ class TestFooterDiscoverability:
         keys = [k for k, _ in bindings]
         assert len(bindings) <= 10
         assert "?" in keys
+        assert "Ctrl+p" in keys
 
     def test_footer_keeps_core_actions_when_s2_active(self):
         from arxiv_browser.models import UserConfig
@@ -498,13 +536,13 @@ class TestFooterDiscoverability:
         bindings = app._get_footer_bindings()
         assert bindings == [
             ("/", "search"),
+            ("Space", "select"),
             ("o", "open"),
-            ("r", "read"),
-            ("x", "star"),
-            ("t", "tags"),
-            ("n", "notes"),
             ("s", "sort"),
+            ("r", "read"),
+            ("n", "notes"),
             ("E", "export"),
+            ("Ctrl+p", "commands"),
             ("?", "help"),
         ]
 

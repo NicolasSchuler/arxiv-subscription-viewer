@@ -108,6 +108,33 @@ SOLARIZED_DARK_THEME: dict[str, str] = {
     "scrollbar_corner_color": "#073642",
 }
 
+SOLARIZED_LIGHT_THEME: dict[str, str] = {
+    "background": "#fdf6e3",
+    "panel": "#eee8d5",
+    "panel_alt": "#e3dcc8",
+    "border": "#93a1a1",
+    "text": "#073642",
+    "muted": "#405a60",
+    "accent": "#005f87",
+    "accent_alt": "#7a5a00",
+    "green": "#5f6f00",
+    "yellow": "#7a5a00",
+    "orange": "#9a4b00",
+    "pink": "#b0005b",
+    "purple": "#5f4b9a",
+    "highlight": "#eee8d5",
+    "highlight_focus": "#d7e7ec",
+    "selection": "#dce8cf",
+    "selection_highlight": "#c9ddb8",
+    "scrollbar_background": "#eee8d5",
+    "scrollbar_background_hover": "#e3dcc8",
+    "scrollbar_background_active": "#d6ceb8",
+    "scrollbar": "#93a1a1",
+    "scrollbar_active": "#005f87",
+    "scrollbar_hover": "#586e75",
+    "scrollbar_corner_color": "#eee8d5",
+}
+
 HIGH_CONTRAST_THEME: dict[str, str] = {
     "background": "#000000",
     "panel": "#0a0a0a",
@@ -139,6 +166,7 @@ THEMES: dict[str, dict[str, str]] = {
     "monokai": DEFAULT_THEME,
     "catppuccin-mocha": CATPPUCCIN_MOCHA_THEME,
     "solarized-dark": SOLARIZED_DARK_THEME,
+    "solarized-light": SOLARIZED_LIGHT_THEME,
     "high-contrast": HIGH_CONTRAST_THEME,
 }
 THEME_NAMES: list[str] = list(THEMES.keys())
@@ -156,6 +184,8 @@ def _build_textual_theme(name: str, colors: dict[str, str]) -> TextualTheme:
         "th-panel-alt": colors["panel_alt"],
         "th-highlight": colors["highlight"],
         "th-highlight-focus": colors["highlight_focus"],
+        "th-selection": colors["selection"],
+        "th-selection-highlight": colors["selection_highlight"],
         "th-accent": colors["accent"],
         "th-accent-alt": colors["accent_alt"],
         "th-muted": colors["muted"],
@@ -180,7 +210,7 @@ def _build_textual_theme(name: str, colors: dict[str, str]) -> TextualTheme:
         warning=colors["orange"],
         error=colors["pink"],
         success=colors["green"],
-        dark=True,
+        dark=not name.endswith("-light"),
         variables=variables,
     )
 
@@ -216,6 +246,18 @@ THEME_CATEGORY_COLORS: dict[str, dict[str, str]] = {
         "cs.IR": "#8b8fd6",  # violet (WCAG AA)
         "cs.CR": "#e87d3e",  # orange (WCAG AA)
     },
+    "solarized-light": {
+        "cs.AI": "#b0005b",
+        "cs.CL": "#005f87",
+        "cs.LG": "#5f6f00",
+        "cs.CV": "#7a5a00",
+        "cs.SE": "#5f4b9a",
+        "cs.HC": "#9a4b00",
+        "cs.RO": "#005f87",
+        "cs.NE": "#b0005b",
+        "cs.IR": "#5f4b9a",
+        "cs.CR": "#9a4b00",
+    },
     "high-contrast": {
         "cs.AI": "#ff7ab2",  # pink (WCAG AAA)
         "cs.CL": "#5cb8ff",  # blue (WCAG AAA)
@@ -245,6 +287,13 @@ THEME_TAG_NAMESPACE_COLORS: dict[str, dict[str, str]] = {
         "project": "#e87d3e",  # WCAG AA
         "method": "#8b8fd6",  # WCAG AA
         "priority": "#e85da0",  # WCAG AA
+    },
+    "solarized-light": {
+        "topic": "#005f87",
+        "status": "#5f6f00",
+        "project": "#9a4b00",
+        "method": "#5f4b9a",
+        "priority": "#b0005b",
     },
     "high-contrast": {
         "topic": "#5cb8ff",  # WCAG AAA
@@ -417,6 +466,7 @@ __all__ = [
     "DEFAULT_THEME",
     "HIGH_CONTRAST_THEME",
     "SOLARIZED_DARK_THEME",
+    "SOLARIZED_LIGHT_THEME",
     "TAG_NAMESPACE_COLORS",
     "TEXTUAL_THEMES",
     "THEMES",
