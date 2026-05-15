@@ -204,6 +204,31 @@ async def test_generate_ai_comparison_failure_and_stale_modal_paths(make_paper):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("service_error", "expected"),
+    [("x" * 300, "x" * 200), (None, "LLM command failed")],
+)
+async def test_generate_ai_comparison_truncates_or_defaults_provider_error(
+    make_paper,
+    service_error,
+    expected,
+):
+    app, papers, service = _make_compare_app(make_paper)
+    service.compare_papers.return_value = (None, service_error)
+    screen = MagicMock(spec=PaperComparisonScreen, is_mounted=True)
+
+    await comparison_actions._generate_paper_comparison_async(app, screen, papers[:2], object())
+
+    screen.set_ai_error.assert_called_once_with(expected)
+    app.notify.assert_called_once_with(
+        expected,
+        title="Paper Comparison",
+        severity="error",
+        timeout=8,
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("side_effect", [RuntimeError("recoverable"), Exception("unexpected")])
 async def test_generate_ai_comparison_exception_paths_leave_modal_recoverable(
     make_paper, side_effect

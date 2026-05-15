@@ -263,6 +263,33 @@ class TestCSVFormat:
         assert data[9] == "'+danger"
         assert data[10] == "'-cmd|' /C calc'!A0"
 
+    def test_formula_like_prefixes_are_sanitized_in_all_paper_fields(self, make_paper):
+        paper = make_paper(
+            arxiv_id="=2401.00001",
+            title="+Title",
+            authors="-Author",
+            categories="@cat",
+            date="=Mon, 15 Jan 2024",
+            url="+https://example.test",
+            comments="-comment",
+        )
+
+        csv_text = format_papers_as_csv([paper])
+
+        import csv as csv_mod
+        import io
+
+        rows = list(csv_mod.reader(io.StringIO(csv_text)))
+        assert rows[1] == [
+            "'=2401.00001",
+            "'+Title",
+            "'-Author",
+            "'@cat",
+            "'=Mon, 15 Jan 2024",
+            "'+https://example.test",
+            "'-comment",
+        ]
+
 
 class TestCSVExportMethods:
     """Verify ArxivBrowser CSV export methods use self._config.paper_metadata."""

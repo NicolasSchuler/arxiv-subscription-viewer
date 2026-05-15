@@ -57,7 +57,7 @@ from arxiv_browser.services.interfaces import AppServices, build_default_app_ser
 from arxiv_browser.similarity import TfidfIndex
 from arxiv_browser.themes import TEXTUAL_THEMES, ThemeRuntime, build_theme_runtime
 from arxiv_browser.ui_constants import APP_BINDINGS, APP_CSS
-from arxiv_browser.ui_runtime import UiRefreshCoordinator, UiRefs
+from arxiv_browser.ui_runtime import UiRefreshCoordinator, UiRefs, restore_omni_chrome
 from arxiv_browser.widgets import (
     BookmarkTabBar,
     ContextFooter,
@@ -880,8 +880,7 @@ class ArxivBrowser(AudioActionMixin, DetailPaneMixin, BrowseMixin, DiscoveryMixi
     @on(OmniInput.CommandSelected)
     def on_omni_command_selected(self, event: OmniInput.CommandSelected) -> None:
         """Handle command selection from OmniInput inline results."""
-        self._get_search_container_widget().close()
-        self._update_footer()
+        restore_omni_chrome(self)
         method = getattr(self, f"action_{event.action}", None)
         if method is not None:
             try:

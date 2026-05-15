@@ -11,8 +11,10 @@ from arxiv_browser.browser.core import ArxivBrowser
 from arxiv_browser.modals.triage import (
     TRIAGE_LATER_TAG,
     QuickTriageCallbacks,
+    QuickTriageCounts,
     QuickTriageItem,
     QuickTriageRequest,
+    QuickTriageResult,
     QuickTriageScreen,
     first_two_abstract_lines,
 )
@@ -221,6 +223,26 @@ def test_quick_triage_badges_include_ml_prediction(make_paper):
     )
 
     assert "ML:?46%" in screen._format_badges(screen._items[0])
+
+
+def test_finish_quick_triage_falls_back_when_filter_refresh_fails():
+    app = _new_app_stub()
+    app._get_active_query = MagicMock(return_value="cat:cs.AI")
+    app._apply_filter = MagicMock(side_effect=RuntimeError("not mounted"))
+    result = QuickTriageResult(
+        reviewed=2,
+        total=3,
+        counts=QuickTriageCounts(starred=1, skipped=1),
+        completed=False,
+    )
+
+    triage_actions._finish_quick_triage(app, result)
+
+    app._apply_filter.assert_called_once_with("cat:cs.AI")
+    app._refresh_list_view.assert_called_once()
+    app._refresh_detail_pane.assert_called_once()
+    app._update_header.assert_called_once()
+    assert "Reviewed 2" in app.notify.call_args.args[0]
 
 
 @pytest.mark.asyncio

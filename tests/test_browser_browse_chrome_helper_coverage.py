@@ -40,12 +40,16 @@ from arxiv_browser.models import (
 )
 from arxiv_browser.services import enrichment_service as enrich
 from arxiv_browser.services.download_service import DownloadFailure, DownloadResult
+from arxiv_browser.triage_model import TRIAGE_BUCKET_LIKELY_STAR, TriagePrediction
+from arxiv_browser.widgets.listing import render_paper_option
 from tests.support.app_stubs import (
     _DummyInput,
     _DummyLabel,
     _DummyListView,
     _DummyTimer,
     _make_app_config,
+    _make_hf_paper,
+    _make_s2_paper,
     _new_app_stub,
     _OptionListStub,
     _paper,
@@ -263,6 +267,61 @@ class TestBrowserHelperCoverage:
         app._get_bookmark_bar_widget = MagicMock(return_value=bookmark_bar)
         await app._update_bookmark_bar()
         assert bookmark_bar.update_bookmarks.await_count == 1
+
+    def test_paper_row_budget_uses_live_list_width(self, make_paper) -> None:
+        app = _new_app_stub()
+        paper = make_paper(
+            arxiv_id="2401.12001",
+            title="Dense Metadata Paper",
+            categories="cs.AI cs.CL cs.LG",
+        )
+        app._config = UserConfig(
+            paper_metadata={
+                paper.arxiv_id: PaperMetadata(
+                    arxiv_id=paper.arxiv_id,
+                    tags=["topic:long-transformers", "status:read-later", "venue:iclr"],
+                    starred=True,
+                )
+            }
+        )
+        app.selected_ids = {paper.arxiv_id}
+        app._watched_paper_ids = {paper.arxiv_id}
+        app._show_abstract_preview = False
+        app._highlight_terms = {"title": [], "author": [], "abstract": []}
+        app._s2_active = True
+        app._hf_active = True
+        app._s2_cache = {paper.arxiv_id: _make_s2_paper(paper.arxiv_id)}
+        app._hf_cache = {paper.arxiv_id: _make_hf_paper(paper.arxiv_id)}
+        app._version_updates = {paper.arxiv_id: (1, 3)}
+        app._relevance_scores = {paper.arxiv_id: (9, "great match")}
+        app._triage_predictions = {
+            paper.arxiv_id: TriagePrediction(
+                paper.arxiv_id,
+                0.91,
+                TRIAGE_BUCKET_LIKELY_STAR,
+            )
+        }
+        app._get_abstract_text = MagicMock(return_value=paper.abstract)
+
+        app._get_paper_list_widget = MagicMock(
+            return_value=SimpleNamespace(size=SimpleNamespace(width=40))
+        )
+        narrow_state = app._build_paper_row_state(paper)
+        narrow_markup = render_paper_option(narrow_state)
+
+        app._get_paper_list_widget = MagicMock(
+            return_value=SimpleNamespace(size=SimpleNamespace(width=180))
+        )
+        wide_state = app._build_paper_row_state(paper)
+        wide_markup = render_paper_option(wide_state)
+
+        assert narrow_state.meta_line_budget == 36
+        assert wide_state.meta_line_budget == 120
+        assert "+6" in narrow_markup or "+7" in narrow_markup or "+8" in narrow_markup
+        assert "S2:10" in wide_markup
+        assert "HF:" in wide_markup
+        assert "v1" in wide_markup
+        assert len(wide_markup) > len(narrow_markup)
 
     @pytest.mark.asyncio
     async def test_history_reset_download_and_browser_open_helpers(

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
+from textual.css.query import NoMatches
 from textual.widget import Widget
 from textual.widgets import Input, Label, OptionList
 
@@ -70,7 +72,18 @@ class UiRefreshCoordinator:
         self.refresh_current_list_item()
 
 
+def restore_omni_chrome(app: Any) -> None:
+    """Close command input and restore browse chrome when widgets are mounted."""
+    app._get_search_container_widget().close()
+    try:
+        app._get_paper_list_widget().focus()
+    except (AttributeError, NoMatches):
+        pass
+    app._update_footer()
+
+
 __all__ = [
     "UiRefreshCoordinator",
     "UiRefs",
+    "restore_omni_chrome",
 ]

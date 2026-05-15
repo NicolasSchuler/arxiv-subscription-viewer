@@ -44,6 +44,12 @@ class _ProcessStub:
         return self.returncode
 
 
+class _CancellingProcessStub(_ProcessStub):
+    async def communicate(self, input: bytes | None = None) -> tuple[bytes, bytes]:
+        self.input = input
+        raise asyncio.CancelledError()
+
+
 def _app_for_paper(paper: object, abstract: str = "A useful abstract.") -> SimpleNamespace:
     return SimpleNamespace(
         _get_current_paper=MagicMock(return_value=paper),
@@ -267,6 +273,40 @@ async def test_read_abstract_async_notifies_when_executable_disappears(monkeypat
 
     assert "System TTS unavailable" in app.notify.call_args.args[0]
     assert app.notify.call_args.kwargs["severity"] == "warning"
+
+
+@pytest.mark.asyncio
+async def test_read_abstract_async_cancellation_terminates_process_and_waits(monkeypatch) -> None:
+    process = _CancellingProcessStub(returncode=None)
+    monkeypatch.setattr(
+        audio_actions.asyncio,
+        "create_subprocess_exec",
+        AsyncMock(return_value=process),
+    )
+    app = SimpleNamespace(
+        _tts_task=None,
+        _tts_process=None,
+        _tts_paper_id="2401.00001",
+        notify=MagicMock(),
+    )
+
+    async def run_current_task() -> None:
+        app._tts_task = asyncio.current_task()
+        await audio_actions._read_abstract_aloud_async(
+            app,
+            audio_actions.TtsCommand("/usr/bin/say", (), "say"),
+            "hello abstract",
+            "2401.00001",
+        )
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_current_task()
+
+    process.terminate.assert_called_once_with()
+    assert process.waited is True
+    assert app._tts_task is None
+    assert app._tts_process is None
+    assert app._tts_paper_id is None
 
 
 def test_read_abstract_aloud_is_registered_in_bindings_help_and_palette() -> None:

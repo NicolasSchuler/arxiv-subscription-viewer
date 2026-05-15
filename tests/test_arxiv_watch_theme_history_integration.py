@@ -136,6 +136,27 @@ class TestWatchListActions:
         app._apply_filter.assert_not_called()
         assert "Failed to save watch list" in app.notify.call_args[0][0]
 
+    def test_manage_watch_list_disables_active_filter_when_new_watch_list_matches_nothing(self):
+        app = self._make_mock_app()
+        app._watch_filter_active = True
+        app._watched_paper_ids = {"2401.00001"}
+        new_entries = [WatchListEntry(pattern="new", match_type="title")]
+
+        def fake_push_screen(_screen, callback):
+            callback(new_entries)
+
+        def clear_matches():
+            app._watched_paper_ids.clear()
+
+        app.push_screen = fake_push_screen
+        app._compute_watched_papers.side_effect = clear_matches
+        with patch_save_config(return_value=True):
+            app.action_manage_watch_list()
+
+        assert app._watch_filter_active is False
+        app._apply_filter.assert_called_once_with("cat:cs.AI")
+        assert "Watch list updated" in app.notify.call_args.args[0]
+
 
 @pytest.mark.integration
 class TestWatchFilterIntegration:

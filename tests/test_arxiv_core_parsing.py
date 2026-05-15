@@ -488,6 +488,30 @@ class TestArxivApiSearchHelpers:
         assert papers[0].title == "First"
         assert papers[0].categories == "cs.AI cs.LG"
 
+    def test_parse_arxiv_api_feed_uses_updated_when_published_missing_and_skips_blank_ids(self):
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>   </id>
+    <updated>2026-02-08T00:00:00Z</updated>
+    <title>Skipped</title>
+    <summary>Missing ID</summary>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2602.12345v1</id>
+    <updated>2026-02-09T00:00:00Z</updated>
+    <title>Updated Only</title>
+    <summary>Fallback date</summary>
+  </entry>
+</feed>"""
+
+        papers = parse_arxiv_api_feed(xml)
+
+        assert len(papers) == 1
+        assert papers[0].arxiv_id == "2602.12345"
+        assert papers[0].date == "Mon, 09 Feb 2026"
+        assert papers[0].source == "api"
+
     def test_parse_arxiv_api_feed_rejects_invalid_xml(self):
         with pytest.raises(ValueError, match="Invalid arXiv API XML response"):
             parse_arxiv_api_feed("<not xml")

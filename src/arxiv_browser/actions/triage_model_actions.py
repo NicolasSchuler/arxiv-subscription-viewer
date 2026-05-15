@@ -80,7 +80,16 @@ def load_triage_predictions_for_current_dataset(
         return False
 
     model, info = loaded
-    predictions = predict_triage(list(app.all_papers), model)
+    try:
+        predictions = predict_triage(list(app.all_papers), model)
+    except (OSError, ValueError, RuntimeError) as exc:
+        logger.warning("Failed to score triage model", exc_info=True)
+        _handle_triage_prediction_error(
+            app,
+            f"Could not score triage model: {exc}",
+            notify_on_error,
+        )
+        return False
     _apply_triage_predictions(app, predictions, info, refresh=refresh)
     return True
 

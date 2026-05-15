@@ -259,6 +259,51 @@ class TestBookmarkRelevanceAndCopyCoverage:
         app2.action_copy_selected()
         assert "Failed to copy to clipboard" in app2.notify.call_args[0][0]
 
+    @pytest.mark.asyncio
+    async def test_run_arxiv_search_returns_early_when_fetch_inflight(self):
+        app = _new_app()
+        app._config = UserConfig(arxiv_api_max_results=10)
+        app._arxiv_api_fetch_inflight = True
+        app._arxiv_api_loading = True
+        app._arxiv_api_request_token = 7
+        app.notify = MagicMock()
+        app._fetch_arxiv_api_page = AsyncMock()
+        app._update_status_bar = MagicMock()
+
+        await app._run_arxiv_search(ArxivSearchRequest(query="graph"), start=0)
+
+        app._fetch_arxiv_api_page.assert_not_awaited()
+        assert app._arxiv_api_fetch_inflight is True
+        assert app._arxiv_api_loading is True
+        assert app._arxiv_api_request_token == 7
+        assert "already in progress" in app.notify.call_args.args[0]
+        app._update_status_bar.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_run_arxiv_search_empty_later_page_keeps_existing_results(self, make_paper):
+        app = _new_app()
+        existing = [make_paper(arxiv_id="2401.80004")]
+        app.all_papers = existing
+        app.filtered_papers = existing.copy()
+        app._config = UserConfig(arxiv_api_max_results=10)
+        app._arxiv_api_fetch_inflight = False
+        app._arxiv_api_loading = False
+        app._arxiv_api_request_token = 0
+        app.notify = MagicMock()
+        app._update_status_bar = MagicMock()
+        app._fetch_arxiv_api_page = AsyncMock(return_value=[])
+        app._apply_arxiv_search_results = MagicMock()
+
+        await app._run_arxiv_search(ArxivSearchRequest(query="graph"), start=10)
+
+        app._fetch_arxiv_api_page.assert_awaited_once()
+        app._apply_arxiv_search_results.assert_not_called()
+        assert app.all_papers == existing
+        assert app.filtered_papers == existing
+        assert app._arxiv_api_fetch_inflight is False
+        assert app._arxiv_api_loading is False
+        assert "No more results" in app.notify.call_args.args[0]
+
 
 class TestAutoTagAndPdfOpenCoverage:
     @pytest.mark.asyncio

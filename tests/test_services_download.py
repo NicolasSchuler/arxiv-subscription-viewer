@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from arxiv_browser.models import UserConfig
@@ -179,3 +180,45 @@ async def test_download_pdf_returns_false_when_temp_file_is_never_created(
     assert ok.success is False
     assert ok.failure == DownloadFailure.DISK
     assert "PDF download failed for 2401.50004" in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status_code", "expected_failure"),
+    [(404, DownloadFailure.NOT_FOUND), (500, DownloadFailure.HTTP_ERROR)],
+)
+async def test_download_pdf_http_status_errors_are_classified_and_preserve_existing_file(
+    make_paper,
+    tmp_path,
+    status_code,
+    expected_failure,
+) -> None:
+    paper = make_paper(arxiv_id=f"2401.{status_code:05d}")
+    target = tmp_path / "pdfs" / f"{paper.arxiv_id}.pdf"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"old pdf")
+    request = httpx.Request("GET", "https://example.test/pdf")
+    response = httpx.Response(status_code, request=request)
+    error = httpx.HTTPStatusError("bad status", request=request, response=response)
+    client = SimpleNamespace(
+        stream=MagicMock(return_value=_StreamContext(_FakeResponse([], error)))
+    )
+
+    with (
+        patch(
+            "arxiv_browser.services.download_service.get_pdf_url",
+            return_value="https://example.test/pdf",
+        ),
+        patch("arxiv_browser.services.download_service.get_pdf_download_path", return_value=target),
+    ):
+        result = await download_pdf(
+            paper=paper,
+            config=UserConfig(),
+            client=client,
+            timeout_seconds=30,
+        )
+
+    assert result.success is False
+    assert result.failure == expected_failure
+    assert target.read_bytes() == b"old pdf"
+    assert list(target.parent.glob(".*.tmp")) == []

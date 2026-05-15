@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from arxiv_browser.actions import llm_actions
 from arxiv_browser.actions.llm_streaming import request_summary_streaming, should_stream_summary
 from arxiv_browser.llm_providers import LLMChunk, LLMResult
 from arxiv_browser.models import UserConfig
@@ -115,3 +116,51 @@ async def test_request_summary_streaming_rejects_empty_stream(make_paper) -> Non
     assert provider.prompt
     assert app._paper_summaries == {}
     app._update_abstract_display.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_generate_summary_streaming_error_after_partial_clears_partial_state(
+    make_paper,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    paper = make_paper(arxiv_id="2401.88001", abstract="Fallback abstract")
+    provider = _StreamingProvider(
+        [
+            LLMChunk(delta="draft "),
+            LLMChunk(error="stream broke"),
+        ]
+    )
+    app = SimpleNamespace(
+        _config=UserConfig(llm_streaming_enabled=True, llm_timeout=9),
+        _llm_provider=provider,
+        _summary_db_path=tmp_path / "summaries.db",
+        _paper_summaries={},
+        _summary_loading={paper.arxiv_id},
+        _summary_mode_label={paper.arxiv_id: "Detailed"},
+        _summary_command_hash={paper.arxiv_id: "hash"},
+        _capture_dataset_epoch=MagicMock(return_value=1),
+        _is_current_dataset_epoch=MagicMock(return_value=True),
+        _fetch_paper_content_async=AsyncMock(return_value="full paper content"),
+        _update_abstract_display=MagicMock(),
+        notify=MagicMock(),
+    )
+    save_summary = MagicMock()
+    monkeypatch.setattr(llm_actions, "_save_summary", save_summary)
+
+    await llm_actions._generate_summary_async(
+        app,
+        paper,
+        "{title}\n{paper_content}",
+        "hash",
+        mode_label="Detailed",
+        use_full_paper_content=True,
+    )
+
+    assert app._paper_summaries == {}
+    assert app._summary_loading == set()
+    assert app._summary_mode_label == {}
+    assert app._summary_command_hash == {}
+    save_summary.assert_not_called()
+    assert "stream broke" in app.notify.call_args.args[0]
+    assert app._update_abstract_display.call_count >= 2

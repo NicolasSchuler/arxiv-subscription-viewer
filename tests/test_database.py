@@ -81,6 +81,8 @@ class TestInitCacheDb:
             "hf_daily_fetch_state",
             "paper_content",
             "semantic_embeddings",
+            "conference_deadlines",
+            "conference_deadlines_fetch_state",
         }
         assert expected_tables.issubset(tables)
 
@@ -128,8 +130,28 @@ class TestInitCacheDb:
             content_row = conn.execute(
                 "SELECT source, content FROM paper_content WHERE arxiv_id = '2401.12345'"
             ).fetchone()
+            conn.execute(
+                "INSERT INTO conference_deadlines "
+                "(conference_id, payload_json, fetched_at) VALUES (?, ?, ?)",
+                ("iclr2027", "{}", "2026-01-01T00:00:00+00:00"),
+            )
+            conn.execute(
+                "INSERT INTO conference_deadlines_fetch_state "
+                "(cache_key, source_url, status, fetched_at) VALUES (?, ?, ?, ?)",
+                (
+                    "default",
+                    "https://example.test/deadlines.yml",
+                    "found",
+                    "2026-01-01T00:00:00+00:00",
+                ),
+            )
+            deadline_row = conn.execute(
+                "SELECT status FROM conference_deadlines_fetch_state WHERE cache_key = ?",
+                ("default",),
+            ).fetchone()
         assert row[0] == "Test summary"
         assert content_row == ("html", "Body")
+        assert deadline_row == ("found",)
 
 
 class TestLegacyModuleIntegration:

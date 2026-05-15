@@ -253,6 +253,42 @@ class TestDetailStateBuilder:
         app._save_config_or_warn.assert_called_once_with("line annotation")
         assert app._refresh_detail_pane.call_count == 3
 
+    def test_detail_cursor_resets_when_current_paper_changes(self, make_paper):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.themes import build_theme_runtime
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._http_client = None
+        app._paper_summaries = {}
+        app._summary_loading = set()
+        app._highlight_terms = {"abstract": []}
+        app._s2_active = False
+        app._s2_cache = {}
+        app._s2_loading = set()
+        app._hf_active = False
+        app._hf_cache = {}
+        app._version_updates = {}
+        app._summary_mode_label = {}
+        app._config = UserConfig()
+        app._relevance_scores = {}
+        app._conference_deadlines = []
+        app._conference_deadlines_active = False
+        app._conference_deadlines_api_error = False
+        app._resolved_theme_runtime = MagicMock(return_value=build_theme_runtime("monokai"))
+        first = make_paper(arxiv_id="2401.77001")
+        second = make_paper(arxiv_id="2401.77002")
+
+        app._detail_line_cursor_paper_id = first.arxiv_id
+        app._detail_line_cursor = 4
+        first_state = app._build_detail_state(first.arxiv_id, first)
+        assert first_state.detail_line_cursor == 4
+
+        second_state = app._build_detail_state(second.arxiv_id, second)
+        assert second_state.detail_line_cursor == 1
+        assert app._detail_line_cursor_paper_id == second.arxiv_id
+
 
 class TestArxivBrowserConstructorCompatibility:
     """Verify public constructor compatibility is preserved."""

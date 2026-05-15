@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-15
+
+### Added
+- Added focused runtime tests for cached UI refs, OmniInput command routing, chrome restoration, and TUI layout contracts.
+- Expanded regression coverage across enrichment services, downloads, Semantic Scholar parsing, figure/PDF previews, LLM streaming, quick triage, export safety, database snapshots, and onboarding overlays.
+
+### Changed
+- Centralized Omni command chrome restoration so command execution consistently closes the command input, restores list focus when available, and refreshes footer state.
+
+### Fixed
+- Triage model prediction failures now clear stale predictions and report scoring errors without refreshing stale UI badges.
+
 ## [0.1.9] - 2026-05-15
 
 ### Added
@@ -156,7 +168,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ASCII mode for terminals without Unicode support (`--ascii`)
 - Session persistence: scroll position, active filters, sort order
 
-[Unreleased]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.9...v0.2.0
 [0.1.9]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.6...v0.1.7

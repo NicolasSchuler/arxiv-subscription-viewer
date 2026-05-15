@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from contextlib import closing
 from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -31,7 +32,9 @@ from arxiv_browser.semantic_scholar import (
     init_s2_db,
     load_s2_citation_graph,
     load_s2_paper,
+    load_s2_paper_snapshot,
     load_s2_recommendations,
+    load_s2_recommendations_snapshot,
     parse_citation_entry,
     parse_s2_paper_response,
     save_s2_citation_graph,
@@ -196,3 +199,100 @@ class TestIsFresh:
         """Entry just over TTL should be stale."""
         just_expired = (datetime.now(UTC) - timedelta(days=7, hours=1)).isoformat()
         assert _is_fresh(just_expired, ttl_days=7) is False
+
+
+def test_save_s2_recommendations_empty_clears_prior_rows_and_sets_empty_snapshot(tmp_path) -> None:
+    db_path = tmp_path / "s2.db"
+    source_id = "2401.01000"
+    recs = [
+        _make_paper(arxiv_id="2401.01001", s2_paper_id="rec-1"),
+        _make_paper(arxiv_id="2401.01002", s2_paper_id="rec-2"),
+    ]
+
+    save_s2_recommendations(db_path, source_id, recs)
+    assert [paper.arxiv_id for paper in load_s2_recommendations(db_path, source_id)] == [
+        "2401.01001",
+        "2401.01002",
+    ]
+
+    save_s2_recommendations(db_path, source_id, [])
+
+    snapshot = load_s2_recommendations_snapshot(db_path, source_id)
+    assert snapshot.status == "empty"
+    assert snapshot.papers == []
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        row_count = conn.execute(
+            "SELECT COUNT(*) FROM s2_recommendations WHERE source_arxiv_id = ?",
+            (source_id,),
+        ).fetchone()[0]
+    assert row_count == 0
+
+
+def test_load_s2_paper_snapshot_found_state_without_payload_is_miss(tmp_path) -> None:
+    db_path = tmp_path / "s2.db"
+    init_s2_db(db_path)
+    with closing(sqlite3.connect(str(db_path))) as conn, conn:
+        conn.execute(
+            "INSERT INTO s2_paper_fetch_state (arxiv_id, status, fetched_at) VALUES (?, ?, ?)",
+            ("2401.01003", "found", datetime.now(UTC).isoformat()),
+        )
+
+    snapshot = load_s2_paper_snapshot(db_path, "2401.01003")
+
+    assert snapshot.status == "miss"
+    assert snapshot.paper is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_s2_citations_partial_second_page_failure_returns_prior_entries_incomplete(
+    monkeypatch,
+) -> None:
+    first_page = MagicMock()
+    first_page.json.return_value = {
+        "data": [
+            {
+                "citingPaper": {
+                    "paperId": "low",
+                    "title": "Low cites",
+                    "citationCount": 2,
+                    "url": "https://example.test/low",
+                    "year": 2024,
+                    "authors": [{"name": "B"}],
+                    "externalIds": {"ArXiv": "2401.01004"},
+                }
+            },
+            {
+                "citingPaper": {
+                    "paperId": "high",
+                    "title": "High cites",
+                    "citationCount": 9,
+                    "url": "https://example.test/high",
+                    "year": 2024,
+                    "authors": [{"name": "A"}],
+                    "externalIds": {"ArXiv": "2401.01005"},
+                }
+            },
+        ]
+        * (S2_CITATIONS_PAGE_SIZE // 2)
+    }
+    second_page = MagicMock()
+    second_page.json.return_value = {"data": "not-a-list"}
+    responses = [first_page, second_page]
+
+    async def fake_get_with_retry(_client, _request):
+        return responses.pop(0)
+
+    monkeypatch.setattr(
+        "arxiv_browser.semantic_scholar._s2_get_with_retry",
+        fake_get_with_retry,
+    )
+
+    entries, complete = await fetch_s2_citations(
+        "paper-id",
+        object(),
+        limit=3,
+        include_status=True,
+    )
+
+    assert complete is False
+    assert [entry.s2_paper_id for entry in entries] == ["high", "high", "high"]

@@ -7,8 +7,11 @@ from pathlib import Path
 
 import pytest
 from PIL import Image
+from textual.widgets import Static
 
+from arxiv_browser.browser.core import ArxivBrowser
 from arxiv_browser.figure_preview import (
+    FigurePreview,
     FigurePreviewError,
     build_figure_preview,
     cached_figure_is_valid,
@@ -17,6 +20,7 @@ from arxiv_browser.figure_preview import (
     save_figure_bytes_to_cache,
     validate_figure_content_type,
 )
+from arxiv_browser.modals.pdf import FigurePreviewScreen
 from arxiv_browser.models import UserConfig
 
 
@@ -98,3 +102,34 @@ def test_validate_figure_content_type_rejects_unsupported_images() -> None:
     validate_figure_content_type("")
     with pytest.raises(FigurePreviewError, match="Unsupported"):
         validate_figure_content_type("image/svg+xml")
+
+
+@pytest.mark.asyncio
+async def test_figure_preview_screen_escapes_caption_and_closes(make_paper, tmp_path: Path) -> None:
+    paper = make_paper(title="[red]Unsafe[/] Figure Paper")
+    image_path = tmp_path / "figure.png"
+    image_path.write_bytes(_png_bytes())
+    preview = FigurePreview(
+        image_url="https://example.test/figure.png",
+        image_path=image_path,
+        caption="[bold]Untrusted[/] " + "caption " * 80,
+        markup="terminal figure markup",
+    )
+    app = ArxivBrowser([paper], restore_session=False)
+    modal = FigurePreviewScreen(paper, preview)
+
+    async with app.run_test() as pilot:
+        app.push_screen(modal)
+        await pilot.pause(0.05)
+
+        title = str(modal.query_one("#pdf-preview-title", Static).content)
+        body = "\n".join(str(child.content) for child in modal.query("#pdf-preview-pages Static"))
+        assert "\\[red]Unsafe\\[/]" in title
+        assert "First HTML figure" in body
+        assert "terminal figure markup" in body
+        assert "\\[bold]Untrusted\\[/]" in body
+        assert len(body) < 500
+
+        await pilot.press("q")
+        await pilot.pause(0.05)
+        assert modal not in app.screen_stack

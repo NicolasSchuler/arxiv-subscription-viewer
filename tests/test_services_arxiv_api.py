@@ -105,6 +105,41 @@ async def test_fetch_page_uses_shared_client(make_paper) -> None:
 
 
 @pytest.mark.asyncio
+async def test_fetch_page_builds_expected_params_and_clamps_negative_start(make_paper) -> None:
+    request = ArxivSearchRequest(query="diffusion", field="title", category="cs.CV")
+    response = MagicMock()
+    response.text = "<feed/>"
+    response.raise_for_status = MagicMock()
+    client = SimpleNamespace(get=AsyncMock(return_value=response))
+
+    with patch(
+        "arxiv_browser.services.arxiv_api_service.parse_arxiv_api_feed",
+        return_value=[make_paper()],
+    ):
+        papers = await fetch_page(
+            client=client,
+            request=request,
+            start=-10,
+            max_results=25,
+            timeout_seconds=17,
+            user_agent="test-agent/1.0",
+        )
+
+    assert len(papers) == 1
+    client.get.assert_awaited_once()
+    kwargs = client.get.await_args.kwargs
+    assert kwargs["params"] == {
+        "search_query": "ti:diffusion AND cat:cs.CV",
+        "sortBy": "submittedDate",
+        "sortOrder": "descending",
+        "start": 0,
+        "max_results": 25,
+    }
+    assert kwargs["headers"] == {"User-Agent": "test-agent/1.0"}
+    assert kwargs["timeout"] == 17
+
+
+@pytest.mark.asyncio
 async def test_fetch_page_requires_explicit_client(make_paper) -> None:
     request = ArxivSearchRequest(query="transformers", field="all", category="")
 
@@ -220,6 +255,38 @@ def test_fetch_latest_day_digest_skips_invalid_first_date(make_paper) -> None:
 
     assert [paper.arxiv_id for paper in papers] == ["2602.00011", "2602.00012", "2602.00013"]
     assert page_calls == [0, 3]
+
+
+def test_fetch_latest_day_digest_full_invalid_page_then_valid_page(make_paper) -> None:
+    request = ArxivSearchRequest(query="graph", field="all", category="")
+    latest_day = "Mon, 17 Feb 2026"
+    page_calls: list[int] = []
+    pages = [
+        [
+            make_paper(arxiv_id="bad-1", date="not-a-date"),
+            make_paper(arxiv_id="bad-2", date="still-not-a-date"),
+        ],
+        [
+            make_paper(arxiv_id="2602.00021", date=latest_day),
+        ],
+    ]
+
+    def fake_fetch_page(**kwargs):
+        page_calls.append(int(kwargs["start"]))
+        return pages.pop(0)
+
+    sleep = MagicMock()
+    papers = fetch_latest_day_digest(
+        request=request,
+        max_results=2,
+        fetch_page_fn=fake_fetch_page,
+        sleep_fn=sleep,
+        min_interval_seconds=ARXIV_API_MIN_INTERVAL_SECONDS,
+    )
+
+    assert [paper.arxiv_id for paper in papers] == ["2602.00021"]
+    assert page_calls == [0, 2]
+    sleep.assert_called_once_with(ARXIV_API_MIN_INTERVAL_SECONDS)
 
 
 def test_fetch_recent_digest_daily_delegates_to_latest_day(make_paper) -> None:

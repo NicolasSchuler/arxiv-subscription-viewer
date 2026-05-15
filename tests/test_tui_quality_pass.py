@@ -730,6 +730,60 @@ async def test_command_palette_modal_filters_and_executes(make_paper):
             modal.dismiss.assert_called_once_with("")
 
 
+@pytest.mark.asyncio
+async def test_command_palette_groups_suggested_and_disabled_commands(make_paper):
+    from arxiv_browser.palette import PaletteCommand
+
+    commands = [
+        PaletteCommand(
+            "Suggested Action",
+            "Best next move",
+            "s",
+            "suggested",
+            "Core",
+            suggested=True,
+        ),
+        PaletteCommand("Regular Action", "Normal command", "r", "regular", "Core"),
+        PaletteCommand(
+            "Blocked Action",
+            "Unavailable command",
+            "b",
+            "blocked",
+            "Core",
+            enabled=False,
+            blocked_reason="No papers loaded",
+        ),
+    ]
+    app = ArxivBrowser([make_paper()], restore_session=False)
+    modal = CommandPaletteModal(commands)
+
+    with patch_save_config(return_value=True):
+        async with app.run_test() as pilot:
+            await _open_modal(app, pilot, modal)
+            results = modal.query_one("#palette-results")
+
+            prompts = [str(results.get_option_at_index(index).prompt) for index in range(5)]
+            assert "Suggested now" in prompts[0]
+            assert "Suggested Action" in prompts[1]
+            assert "All commands" in prompts[2]
+            assert "Regular Action" in prompts[3]
+            assert "Requires: No papers loaded" in prompts[4]
+            assert results.highlighted == 1
+
+            modal.dismiss = MagicMock()
+            results.highlighted = 4
+            modal.key_enter()
+            modal.dismiss.assert_not_called()
+
+            results.highlighted = 2
+            modal.key_enter()
+            modal.dismiss.assert_not_called()
+
+            results.highlighted = 3
+            modal.key_enter()
+            modal.dismiss.assert_called_once_with("regular")
+
+
 def test_read_only_modals_support_q_close_binding():
     from arxiv_browser.modals import (
         CitationGraphScreen,

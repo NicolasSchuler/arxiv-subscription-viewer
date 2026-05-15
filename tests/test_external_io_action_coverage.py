@@ -25,9 +25,10 @@ import arxiv_browser.semantic_scholar as s2
 from arxiv_browser.actions import external_io_actions as io_actions
 from arxiv_browser.actions import library_actions as library_actions
 from arxiv_browser.actions import llm_actions as llm_actions
-from arxiv_browser.export import get_pdf_download_path
+from arxiv_browser.export import get_pdf_download_path, get_pdf_url
+from arxiv_browser.figure_preview import figure_preview_cache_path
 from arxiv_browser.modals.collections import CollectionsModal
-from arxiv_browser.models import MAX_COLLECTIONS, PaperCollection, UserConfig
+from arxiv_browser.models import MAX_COLLECTIONS, PaperCollection, PaperMetadata, UserConfig
 from arxiv_browser.pdf_preview import PdfPreviewError, PdfPreviewPage
 from arxiv_browser.services import enrichment_service as enrich
 from tests.support.app_stubs import (
@@ -154,6 +155,43 @@ class TestExternalIoCoverage:
             app.notify.call_args[0][0].startswith("Import failed")
             or "Imported" in app.notify.call_args[0][0]
         )
+
+    def test_mark_visible_read_counts_only_unread_visible_and_skips_noop_save(
+        self, make_paper
+    ) -> None:
+        app = _new_app_stub()
+        unread = make_paper(arxiv_id="2401.31001")
+        already_read = make_paper(arxiv_id="2401.31002")
+        app.filtered_papers = [unread, already_read]
+        app._config.paper_metadata[already_read.arxiv_id] = PaperMetadata(
+            arxiv_id=already_read.arxiv_id,
+            is_read=True,
+        )
+        app._read_event_timestamps = deque()
+
+        library_actions.action_mark_visible_read(app)
+
+        assert app._config.paper_metadata[unread.arxiv_id].is_read is True
+        assert len(app._read_event_timestamps) == 1
+        app._save_config_or_warn.assert_called_once_with("mark visible read")
+        app._mark_badges_dirty.assert_called_once_with("read", immediate=True)
+        app._refresh_list_view.assert_called_once()
+        app._refresh_detail_pane.assert_called_once()
+        assert "Marked 1 paper as read" in app.notify.call_args.args[0]
+
+        app._save_config_or_warn.reset_mock()
+        app._mark_badges_dirty.reset_mock()
+        app._refresh_list_view.reset_mock()
+        app._refresh_detail_pane.reset_mock()
+        app.notify.reset_mock()
+        library_actions.action_mark_visible_read(app)
+
+        assert len(app._read_event_timestamps) == 1
+        app._save_config_or_warn.assert_not_called()
+        app._mark_badges_dirty.assert_not_called()
+        app._refresh_list_view.assert_not_called()
+        app._refresh_detail_pane.assert_not_called()
+        assert "Marked 0 papers as read" in app.notify.call_args.args[0]
 
     def test_export_and_download_failure_edges(self, make_paper, tmp_path) -> None:
         app = _new_app_stub()
@@ -329,6 +367,34 @@ class TestExternalIoCoverage:
         app._update_status_bar = MagicMock()
         io_actions._finish_download_batch(app)
         assert app._download_total == 0
+
+    def test_do_open_pdfs_defers_until_pdf_viewer_trust_callback(self, make_paper) -> None:
+        app = _new_app_stub()
+        app._config = UserConfig(pdf_viewer="viewer {url}")
+        app.notify = MagicMock()
+        app._open_with_viewer = MagicMock(return_value=True)
+        callbacks: list[object] = []
+
+        def ensure_trusted(_viewer, callback):
+            callbacks.append(callback)
+            return False
+
+        app._ensure_pdf_viewer_trusted = MagicMock(side_effect=ensure_trusted)
+        papers = [make_paper(arxiv_id="2401.41001"), make_paper(arxiv_id="2401.41002")]
+
+        io_actions._do_open_pdfs(app, papers)
+
+        app._open_with_viewer.assert_not_called()
+        app.notify.assert_not_called()
+        assert len(callbacks) == 1
+
+        app._ensure_pdf_viewer_trusted = MagicMock(return_value=True)
+        callbacks[0]()
+
+        assert [call.args for call in app._open_with_viewer.call_args_list] == [
+            (app._config.pdf_viewer, get_pdf_url(paper)) for paper in papers
+        ]
+        app.notify.assert_called_once()
 
     def test_additional_coverage_branches(self, make_paper, tmp_path) -> None:
         """Cover remaining uncovered lines in external_io_actions."""
@@ -528,6 +594,28 @@ class TestExternalIoCoverage:
         assert "render failed" in app.notify.call_args[0][0]
 
     @pytest.mark.asyncio
+    async def test_preview_pdf_stale_after_download_suppresses_render_and_modal(
+        self, make_paper, tmp_path
+    ):
+        app = _new_app_stub()
+        paper = make_paper(arxiv_id="2401.54446")
+        app._config = UserConfig(pdf_download_dir=str(tmp_path), pdf_preview_max_pages=1)
+        app._http_client = object()
+        app.notify = MagicMock()
+        app.push_screen = MagicMock()
+        app._capture_dataset_epoch = MagicMock(return_value=1)
+        app._is_current_dataset_epoch = MagicMock(return_value=False)
+        app._download_pdf_async = AsyncMock(return_value=True)
+
+        with patch("arxiv_browser.actions.external_io_actions.build_pdf_preview_pages") as render:
+            await io_actions._preview_pdf_async(app, paper)
+
+        app._download_pdf_async.assert_awaited_once()
+        render.assert_not_called()
+        app.push_screen.assert_not_called()
+        assert app.notify.call_args.args[0] == "Downloading PDF for preview..."
+
+    @pytest.mark.asyncio
     async def test_preview_figure_opens_modal_and_uses_cache(self, make_paper, tmp_path):
         app = _new_app_stub()
         paper = make_paper(arxiv_id="2402.08954")
@@ -569,6 +657,154 @@ class TestExternalIoCoverage:
         assert app.push_screen.call_count == 2
         assert app.push_screen.call_args.args[0].__class__.__name__ == "FigurePreviewScreen"
         assert client.urls.count("https://arxiv.org/html/2402.08954v1/figure.png") == 1
+
+    @pytest.mark.asyncio
+    async def test_preview_figure_image_non_200_notifies_without_cache_or_modal(
+        self, make_paper, tmp_path
+    ):
+        app = _new_app_stub()
+        paper = make_paper(arxiv_id="2401.44401")
+        app._config = UserConfig(pdf_download_dir=str(tmp_path))
+        app.notify = MagicMock()
+        app.push_screen = MagicMock()
+        app._capture_dataset_epoch = MagicMock(return_value=1)
+        app._is_current_dataset_epoch = MagicMock(return_value=True)
+        html = '<figure class="ltx_figure"><img src="fig.png"></figure>'
+
+        class Client:
+            async def get(self, url: str, **_kwargs):
+                if url.endswith("/html/2401.44401"):
+                    return SimpleNamespace(status_code=200, text=html)
+                return SimpleNamespace(status_code=403, headers={}, content=b"")
+
+        app._http_client = Client()
+
+        with (
+            patch("arxiv_browser.actions.external_io_actions.save_figure_bytes_to_cache") as save,
+            patch("arxiv_browser.actions.external_io_actions.build_figure_preview") as build,
+        ):
+            await io_actions._preview_figure_async(app, paper)
+
+        assert "Figure image unavailable (403)" in app.notify.call_args.args[0]
+        save.assert_not_called()
+        build.assert_not_called()
+        app.push_screen.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_preview_figure_refetches_and_replaces_corrupt_cache(self, make_paper, tmp_path):
+        app = _new_app_stub()
+        paper = make_paper(arxiv_id="2401.44402")
+        app._config = UserConfig(pdf_download_dir=str(tmp_path))
+        app.notify = MagicMock()
+        app.push_screen = MagicMock()
+        app._capture_dataset_epoch = MagicMock(return_value=1)
+        app._is_current_dataset_epoch = MagicMock(return_value=True)
+        cache_path = figure_preview_cache_path(paper, app._config)
+        cache_path.parent.mkdir(parents=True)
+        cache_path.write_bytes(b"corrupt")
+        html = (
+            '<figure class="ltx_figure"><img src="fig.png"><figcaption>Fresh</figcaption></figure>'
+        )
+        image_buffer = BytesIO()
+        Image.new("RGB", (3, 3), (40, 50, 60)).save(image_buffer, format="PNG")
+
+        class Client:
+            def __init__(self) -> None:
+                self.urls: list[str] = []
+
+            async def get(self, url: str, **_kwargs):
+                self.urls.append(url)
+                if url.endswith("/html/2401.44402"):
+                    return SimpleNamespace(status_code=200, text=html)
+                return SimpleNamespace(
+                    status_code=200,
+                    headers={"content-type": "image/png"},
+                    content=image_buffer.getvalue(),
+                )
+
+        client = Client()
+        app._http_client = client
+
+        await io_actions._preview_figure_async(app, paper)
+
+        assert client.urls == [
+            "https://arxiv.org/html/2401.44402",
+            "https://arxiv.org/html/fig.png",
+        ]
+        assert cache_path.read_bytes() != b"corrupt"
+        app.push_screen.assert_called_once()
+        app.notify.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_preview_figure_stale_dataset_suppresses_ui_updates(self, make_paper, tmp_path):
+        app = _new_app_stub()
+        paper = make_paper(arxiv_id="2401.44403")
+        app._config = UserConfig(pdf_download_dir=str(tmp_path))
+        app.notify = MagicMock()
+        app.push_screen = MagicMock()
+        app._capture_dataset_epoch = MagicMock(return_value=1)
+        app._is_current_dataset_epoch = MagicMock(return_value=False)
+        html = '<figure class="ltx_figure"><img src="fig.png"></figure>'
+        image_buffer = BytesIO()
+        Image.new("RGB", (3, 3), (70, 80, 90)).save(image_buffer, format="PNG")
+
+        class Client:
+            async def get(self, url: str, **_kwargs):
+                if url.endswith("/html/2401.44403"):
+                    return SimpleNamespace(status_code=200, text=html)
+                return SimpleNamespace(
+                    status_code=200,
+                    headers={"content-type": "image/png"},
+                    content=image_buffer.getvalue(),
+                )
+
+        app._http_client = Client()
+
+        await io_actions._preview_figure_async(app, paper)
+
+        app.push_screen.assert_not_called()
+        app.notify.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_preview_figure_error_does_not_mutate_paper_state(self, make_paper, tmp_path):
+        app = _new_app_stub()
+        paper = make_paper(arxiv_id="2401.44404")
+        app._config = UserConfig(pdf_download_dir=str(tmp_path))
+        app._config.paper_metadata[paper.arxiv_id] = PaperMetadata(
+            arxiv_id=paper.arxiv_id,
+            starred=True,
+        )
+        before_metadata = app._config.paper_metadata[paper.arxiv_id]
+        app.selected_ids = {paper.arxiv_id}
+        app.notify = MagicMock()
+        app.push_screen = MagicMock()
+        app._save_config_or_warn = MagicMock()
+        app._refresh_list_view = MagicMock()
+        app._refresh_detail_pane = MagicMock()
+        app._capture_dataset_epoch = MagicMock(return_value=1)
+        app._is_current_dataset_epoch = MagicMock(return_value=True)
+
+        class NoFigureClient:
+            async def get(self, _url: str, **_kwargs):
+                return SimpleNamespace(
+                    status_code=200,
+                    text="<html><body>No figures here</body></html>",
+                    headers={},
+                    content=b"",
+                )
+
+        app._http_client = NoFigureClient()
+
+        await io_actions._preview_figure_async(app, paper)
+
+        assert app._config.paper_metadata[paper.arxiv_id] is before_metadata
+        assert before_metadata.starred is True
+        assert app.selected_ids == {paper.arxiv_id}
+        app._save_config_or_warn.assert_not_called()
+        app._refresh_list_view.assert_not_called()
+        app._refresh_detail_pane.assert_not_called()
+        app.push_screen.assert_not_called()
+        assert "No figure" in app.notify.call_args.args[0]
 
     @pytest.mark.asyncio
     async def test_preview_figure_reports_missing_inputs_and_fetch_errors(
