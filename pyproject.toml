@@ -151,6 +151,7 @@ directory = "htmlcov"
 extend_exclude = [".venv", "tests"]
 
 [tool.deptry.per_rule_ignores]
+DEP002 = ["fastembed"]  # optional semantic-search backend imported lazily
 DEP003 = ["arxiv_browser"]  # arxiv_browser: intra-package imports
 
 # ── Bandit ────────────────────────────────────────────────────────────
