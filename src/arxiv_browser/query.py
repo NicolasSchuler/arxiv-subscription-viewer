@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import functools
+import math
 import re
 from collections import OrderedDict
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from datetime import date, datetime
 from typing import TYPE_CHECKING
 
 from rich.markup import escape as escape_markup
 
+from arxiv_browser.authors import author_matches_exact
 from arxiv_browser.models import (
     Paper,
     PaperMetadata,
@@ -17,11 +21,50 @@ from arxiv_browser.models import (
     WatchListEntry,
     parse_arxiv_date,
 )
+from arxiv_browser.review import is_review_due
 from arxiv_browser.themes import DEFAULT_CATEGORY_COLOR, DEFAULT_CATEGORY_COLORS, DEFAULT_THEME
+from arxiv_browser.triage_model import (
+    TRIAGE_BUCKET_LIKELY_SKIP,
+    TRIAGE_BUCKET_LIKELY_STAR,
+    TRIAGE_BUCKET_UNSURE,
+)
 
 if TYPE_CHECKING:
     from arxiv_browser.huggingface import HuggingFacePaper
     from arxiv_browser.semantic_scholar import SemanticScholarPaper
+    from arxiv_browser.triage_model import TriagePrediction
+
+
+_QUEUE_RELEVANCE_WEIGHT = 0.40
+_QUEUE_WATCH_WEIGHT = 0.25
+_QUEUE_RECENCY_WEIGHT = 0.15
+_QUEUE_HF_WEIGHT = 0.10
+_QUEUE_VELOCITY_WEIGHT = 0.10
+_QUEUE_RECENCY_DECAY_DAYS = 30.0
+_DAYS_PER_YEAR = 365.25
+_VIRTUAL_QUERY_TERMS = frozenset({"unread", "starred", "review-due"})
+
+
+@dataclass(frozen=True, slots=True)
+class _QueueScoreContext:
+    s2_cache: dict[str, SemanticScholarPaper] | None
+    hf_cache: dict[str, HuggingFacePaper] | None
+    relevance_cache: dict[str, tuple[int, str]] | None
+    watched_paper_ids: set[str]
+    today: datetime
+    max_hf_upvote_log: float
+    max_velocity_log: float
+
+
+@dataclass(frozen=True, slots=True)
+class PaperSortSignals:
+    """Optional cached signals used by advanced paper sort modes."""
+
+    s2_cache: dict[str, SemanticScholarPaper] | None = None
+    hf_cache: dict[str, HuggingFacePaper] | None = None
+    relevance_cache: dict[str, tuple[int, str]] | None = None
+    watched_paper_ids: set[str] | None = None
+    triage_predictions: dict[str, TriagePrediction] | None = None
 
 
 # ============================================================================
@@ -215,17 +258,24 @@ def _parse_quoted_phrase(query: str, i: int, query_len: int) -> tuple[QueryToken
 
 def _parse_field_value(query: str, i: int, query_len: int, field: str) -> tuple[QueryToken, int]:
     """Parse the value after a field:colon, handling both quoted and unquoted."""
+    exact_prefix = field == "author" and i < query_len and query[i] == "="
+    if exact_prefix:
+        i += 1
     if i < query_len and query[i] == '"':
         i += 1
         value_start = i
         while i < query_len and query[i] != '"':
             i += 1
         value = query[value_start:i]
+        if exact_prefix:
+            value = f"={value}"
         return QueryToken(kind="term", value=value, field=field, phrase=True), i + 1
     value_start = i
     while i < query_len and not query[i].isspace():
         i += 1
     value = query[value_start:i]
+    if exact_prefix:
+        value = f"={value}"
     return QueryToken(kind="term", value=value, field=field), i
 
 
@@ -276,6 +326,11 @@ def pill_label_for_token(token: QueryToken) -> str:
     Examples: cat:cs.AI, "exact phrase", author:"John Smith", transformer
     """
     value = token.value
+    if token.field == "author" and value.startswith("="):
+        exact_value = value[1:]
+        if token.phrase:
+            return f'{token.field}:="{exact_value}"'
+        return f"{token.field}:={exact_value}"
     if token.field and token.phrase:
         return f'{token.field}:"{value}"'
     if token.field:
@@ -329,6 +384,11 @@ def _token_to_str(token: QueryToken) -> str:
     """Convert a QueryToken back to its query string representation."""
     if token.kind == "op":
         return token.value
+    if token.field == "author" and token.value.startswith("="):
+        exact_value = token.value[1:]
+        if token.phrase:
+            return f'{token.field}:="{exact_value}"'
+        return f"{token.field}:={exact_value}"
     if token.field and token.phrase:
         return f'{token.field}:"{token.value}"'
     if token.field:
@@ -408,7 +468,7 @@ format_categories.cache_clear = _format_categories_cached.cache_clear  # type: i
 def is_advanced_query(tokens: list[QueryToken]) -> bool:
     """Check if a query uses advanced features (operators, fields, phrases, virtual terms)."""
     return any(
-        tok.kind == "op" or tok.field or tok.phrase or tok.value.lower() in {"unread", "starred"}
+        tok.kind == "op" or tok.field or tok.phrase or tok.value.lower() in _VIRTUAL_QUERY_TERMS
         for tok in tokens
     )
 
@@ -417,7 +477,7 @@ def build_highlight_terms(tokens: list[QueryToken]) -> dict[str, list[str]]:
     """Build highlight term lists from query tokens by field.
 
     Operator tokens (``AND``, ``OR``, ``NOT``) and virtual terms
-    (``unread``, ``starred``) are excluded — only literal match terms are
+    (``unread``, ``starred``, ``review-due``) are excluded — only literal match terms are
     collected.  Unscoped terms appear in both ``"title"`` and ``"author"``
     lists so they are highlighted in both columns.
 
@@ -432,12 +492,12 @@ def build_highlight_terms(tokens: list[QueryToken]) -> dict[str, list[str]]:
     for token in tokens:
         if token.kind != "term":
             continue
-        if token.value.lower() in {"unread", "starred"}:
+        if token.value.lower() in _VIRTUAL_QUERY_TERMS:
             continue
         if token.field == "title":
             highlight["title"].append(token.value)
         elif token.field == "author":
-            highlight["author"].append(token.value)
+            highlight["author"].append(token.value.removeprefix("="))
         elif token.field == "abstract":
             highlight["abstract"].append(token.value)
         elif token.field is None:
@@ -502,7 +562,8 @@ def match_query_term(
     """Check if a paper matches a single query term.
 
     Handles field-scoped tokens (``cat:``, ``tag:``, ``title:``, ``author:``,
-    ``abstract:``) as well as the virtual terms ``unread`` and ``starred``.
+    ``abstract:``) as well as virtual terms such as ``unread``, ``starred``,
+    and ``review-due``.
     Unscoped tokens match against ``title + authors``.
 
     Args:
@@ -543,6 +604,8 @@ def _match_field_query_term(
         return bool(paper_metadata) and any(
             value_lower in tag.lower() for tag in paper_metadata.tags
         )
+    if field == "author" and value_lower.startswith("="):
+        return author_matches_exact(paper.authors, value_lower[1:])
 
     haystacks = {
         "cat": paper.categories,
@@ -562,6 +625,8 @@ def _match_virtual_query_term(
         return not paper_metadata or not paper_metadata.is_read
     if value_lower == "starred":
         return bool(paper_metadata and paper_metadata.starred)
+    if value_lower == "review-due":
+        return is_review_due(paper_metadata, date.today())
     return None
 
 
@@ -648,35 +713,177 @@ def paper_matches_watch_entry(paper: Paper, entry: WatchListEntry) -> bool:
     return False
 
 
+def _build_queue_score_context(
+    papers: list[Paper],
+    s2_cache: dict[str, SemanticScholarPaper] | None,
+    hf_cache: dict[str, HuggingFacePaper] | None,
+    relevance_cache: dict[str, tuple[int, str]] | None,
+    watched_paper_ids: set[str] | None,
+    today: datetime | None = None,
+) -> _QueueScoreContext:
+    resolved_today = today or datetime.now()
+    context = _QueueScoreContext(
+        s2_cache=s2_cache,
+        hf_cache=hf_cache,
+        relevance_cache=relevance_cache,
+        watched_paper_ids=watched_paper_ids or set(),
+        today=resolved_today,
+        max_hf_upvote_log=0.0,
+        max_velocity_log=0.0,
+    )
+    return _QueueScoreContext(
+        s2_cache=s2_cache,
+        hf_cache=hf_cache,
+        relevance_cache=relevance_cache,
+        watched_paper_ids=context.watched_paper_ids,
+        today=resolved_today,
+        max_hf_upvote_log=max((_queue_hf_upvote_log(p, context) for p in papers), default=0.0),
+        max_velocity_log=max((_queue_velocity_log(p, context) for p in papers), default=0.0),
+    )
+
+
+def _queue_sort_key(paper: Paper, context: _QueueScoreContext) -> float:
+    """Return a descending sort key for the smart reading queue."""
+    return -_queue_score(paper, context)
+
+
+def _queue_score(paper: Paper, context: _QueueScoreContext) -> float:
+    """Return the composite smart-reading priority score for a paper."""
+    return (
+        _QUEUE_RELEVANCE_WEIGHT * _queue_relevance_score(paper, context)
+        + _QUEUE_WATCH_WEIGHT * _queue_watch_score(paper, context)
+        + _QUEUE_RECENCY_WEIGHT * _queue_recency_score(paper, context)
+        + _QUEUE_HF_WEIGHT
+        * _normalized_log(_queue_hf_upvote_log(paper, context), context.max_hf_upvote_log)
+        + _QUEUE_VELOCITY_WEIGHT
+        * _normalized_log(_queue_velocity_log(paper, context), context.max_velocity_log)
+    )
+
+
+def _queue_relevance_score(paper: Paper, context: _QueueScoreContext) -> float:
+    rel = context.relevance_cache.get(paper.arxiv_id) if context.relevance_cache else None
+    if rel is None:
+        return 0.0
+    return max(0.0, min(float(rel[0]), 10.0)) / 10.0
+
+
+def _queue_watch_score(paper: Paper, context: _QueueScoreContext) -> float:
+    return 1.0 if paper.arxiv_id in context.watched_paper_ids else 0.0
+
+
+def _queue_recency_score(paper: Paper, context: _QueueScoreContext) -> float:
+    age_days = _queue_paper_age_days(paper, context.today)
+    if age_days is None:
+        return 0.0
+    return 1.0 / (1.0 + age_days / _QUEUE_RECENCY_DECAY_DAYS)
+
+
+def _queue_hf_upvote_log(paper: Paper, context: _QueueScoreContext) -> float:
+    hf = context.hf_cache.get(paper.arxiv_id) if context.hf_cache else None
+    if hf is None or hf.upvotes <= 0:
+        return 0.0
+    return math.log1p(hf.upvotes)
+
+
+def _queue_velocity_log(paper: Paper, context: _QueueScoreContext) -> float:
+    s2 = context.s2_cache.get(paper.arxiv_id) if context.s2_cache else None
+    if s2 is None or s2.citation_count <= 0:
+        return 0.0
+    age_days = _queue_paper_age_days(paper, context.today)
+    if age_days is None:
+        return 0.0
+    age_years = max(age_days / _DAYS_PER_YEAR, 1.0 / _DAYS_PER_YEAR)
+    return math.log1p(s2.citation_count / age_years)
+
+
+def _queue_paper_age_days(paper: Paper, today: datetime) -> float | None:
+    parsed = parse_arxiv_date(paper.date)
+    if parsed == datetime.min:
+        return None
+    return max((today.date() - parsed.date()).days, 0)
+
+
+def _normalized_log(value: float, max_value: float) -> float:
+    if value <= 0.0 or max_value <= 0.0:
+        return 0.0
+    return min(value / max_value, 1.0)
+
+
+def _resolve_sort_signals(
+    signals: PaperSortSignals | None,
+    legacy_signals: dict[str, object],
+) -> PaperSortSignals:
+    allowed = {
+        "s2_cache",
+        "hf_cache",
+        "relevance_cache",
+        "watched_paper_ids",
+        "triage_predictions",
+    }
+    unknown = sorted(set(legacy_signals) - allowed)
+    if unknown:
+        raise TypeError(f"Unknown sort signal(s): {', '.join(unknown)}")
+    base = signals or PaperSortSignals()
+    if not legacy_signals:
+        return base
+    return PaperSortSignals(
+        s2_cache=legacy_signals.get("s2_cache", base.s2_cache),  # type: ignore[arg-type]
+        hf_cache=legacy_signals.get("hf_cache", base.hf_cache),  # type: ignore[arg-type]
+        relevance_cache=legacy_signals.get("relevance_cache", base.relevance_cache),  # type: ignore[arg-type]
+        watched_paper_ids=legacy_signals.get("watched_paper_ids", base.watched_paper_ids),  # type: ignore[arg-type]
+        triage_predictions=legacy_signals.get(
+            "triage_predictions",
+            base.triage_predictions,
+        ),  # type: ignore[arg-type]
+    )
+
+
+def _triage_sort_key(
+    paper: Paper,
+    predictions: dict[str, TriagePrediction] | None,
+) -> tuple[int, float, float]:
+    prediction = predictions.get(paper.arxiv_id) if predictions else None
+    if prediction is None:
+        return (3, 0.0, 0.0)
+    probability = max(0.0, min(1.0, prediction.probability))
+    if prediction.bucket == TRIAGE_BUCKET_LIKELY_STAR:
+        return (0, -probability, 0.0)
+    if prediction.bucket == TRIAGE_BUCKET_UNSURE:
+        return (1, abs(probability - 0.5), -probability)
+    if prediction.bucket == TRIAGE_BUCKET_LIKELY_SKIP:
+        return (2, -probability, 0.0)
+    return (3, 0.0, 0.0)
+
+
 def sort_papers(
     papers: list[Paper],
     sort_key: str,
-    s2_cache: dict[str, SemanticScholarPaper] | None = None,
-    hf_cache: dict[str, HuggingFacePaper] | None = None,
-    relevance_cache: dict[str, tuple[int, str]] | None = None,
+    signals: PaperSortSignals | None = None,
+    **legacy_signals: object,
 ) -> list[Paper]:
     """Sort papers by the given key, returning a new sorted list.
 
     For cache-backed sort modes (``citations``, ``trending``, ``relevance``),
     papers with a cache entry sort before papers without one using a two-tuple
     key ``(0, -value)`` < ``(1, 0)``.  Within the first group the value is
-    negated to produce a descending order.
+    negated to produce a descending order. The ``queue`` mode combines cached
+    relevance, watch-list matches, recency, HF upvotes, and a local S2 citation
+    velocity proxy into one stable priority rank.
 
     Args:
         papers: List of papers to sort.
         sort_key: One of ``"title"``, ``"date"``, ``"arxiv_id"``,
-            ``"citations"``, ``"trending"``, ``"relevance"``.
-        s2_cache: Optional Semantic Scholar cache; required for
-            ``"citations"`` sort.  Papers absent from the cache sort last.
-        hf_cache: Optional HuggingFace cache; required for ``"trending"``
-            sort.  Papers absent from the cache sort last.
-        relevance_cache: Optional relevance-score cache; required for
-            ``"relevance"`` sort.  Papers absent from the cache sort last.
+            ``"citations"``, ``"trending"``, ``"relevance"``, ``"queue"``,
+            ``"triage"``.
+        signals: Optional grouped cache inputs used by cache-backed sort modes.
+        legacy_signals: Backward-compatible keyword inputs such as
+            ``relevance_cache`` and ``watched_paper_ids``.
 
     Returns:
         A new sorted list.  Unknown *sort_key* values return a shallow copy
         of the input list in its original order.
     """
+    signals = _resolve_sort_signals(signals, legacy_signals)
     if sort_key == "title":
         return sorted(papers, key=lambda p: p.title.lower())
     elif sort_key == "date":
@@ -686,7 +893,7 @@ def sort_papers(
     elif sort_key == "citations":
 
         def _citation_key(p: Paper) -> tuple[int, int]:
-            s2 = s2_cache.get(p.arxiv_id) if s2_cache else None
+            s2 = signals.s2_cache.get(p.arxiv_id) if signals.s2_cache else None
             if s2 is not None:
                 # (0, -count) sorts before (1, 0); negated count gives descending order
                 return (0, -s2.citation_count)
@@ -696,7 +903,7 @@ def sort_papers(
     elif sort_key == "trending":
 
         def _trending_key(p: Paper) -> tuple[int, int]:
-            hf = hf_cache.get(p.arxiv_id) if hf_cache else None
+            hf = signals.hf_cache.get(p.arxiv_id) if signals.hf_cache else None
             if hf is not None:
                 return (0, -hf.upvotes)
             return (1, 0)  # Papers without HF data sort last
@@ -705,17 +912,29 @@ def sort_papers(
     elif sort_key == "relevance":
 
         def _relevance_key(p: Paper) -> tuple[int, int]:
-            rel = relevance_cache.get(p.arxiv_id) if relevance_cache else None
+            rel = signals.relevance_cache.get(p.arxiv_id) if signals.relevance_cache else None
             if rel is not None:
                 return (0, -rel[0])
             return (1, 0)  # Papers without a relevance score sort last
 
         return sorted(papers, key=_relevance_key)
+    elif sort_key == "queue":
+        context = _build_queue_score_context(
+            papers,
+            signals.s2_cache,
+            signals.hf_cache,
+            signals.relevance_cache,
+            signals.watched_paper_ids,
+        )
+        return sorted(papers, key=lambda p: _queue_sort_key(p, context))
+    elif sort_key == "triage":
+        return sorted(papers, key=lambda p: _triage_sort_key(p, signals.triage_predictions))
     return list(papers)
 
 
 __all__ = [
     "_HIGHLIGHT_PATTERN_CACHE",
+    "PaperSortSignals",
     "build_highlight_terms",
     "escape_rich_text",
     "format_categories",

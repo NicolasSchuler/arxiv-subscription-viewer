@@ -8,12 +8,15 @@ editing, and watch-list management.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from datetime import date
 from typing import TYPE_CHECKING
 
 from arxiv_browser.config import save_config
 from arxiv_browser.modals import PaperEditModal, WatchListModal
 from arxiv_browser.modals.editing import PaperEditResult
-from arxiv_browser.models import SORT_OPTIONS, WatchListEntry
+from arxiv_browser.models import SORT_OPTIONS, PaperMetadata, WatchListEntry
+from arxiv_browser.review import clear_review, mark_reviewed, schedule_review
 
 if TYPE_CHECKING:
     from arxiv_browser.browser.core import ArxivBrowser
@@ -21,12 +24,16 @@ if TYPE_CHECKING:
 
 def action_cursor_down(app: "ArxivBrowser") -> None:
     """Move cursor down (vim-style j key)."""
+    if app._move_detail_line_cursor(1):
+        return
     list_view = app._get_paper_list_widget()
     list_view.action_cursor_down()
 
 
 def action_cursor_up(app: "ArxivBrowser") -> None:
     """Move cursor up (vim-style k key)."""
+    if app._move_detail_line_cursor(-1):
+        return
     list_view = app._get_paper_list_widget()
     list_view.action_cursor_up()
 
@@ -49,6 +56,8 @@ def action_toggle_select(app: "ArxivBrowser") -> None:
 
 def action_select_all(app: "ArxivBrowser") -> None:
     """Select all currently visible papers."""
+    if app._open_line_annotation_modal():
+        return
     for paper in app.filtered_papers:
         app.selected_ids.add(paper.arxiv_id)
     for i in range(len(app.filtered_papers)):
@@ -65,7 +74,7 @@ def action_clear_selection(app: "ArxivBrowser") -> None:
 
 
 def action_cycle_sort(app: "ArxivBrowser") -> None:
-    """Cycle through sort options (title → date → arxiv_id → citations → trending → relevance)."""
+    """Cycle through the configured paper sort options."""
     app._sort_index = (app._sort_index + 1) % len(SORT_OPTIONS)
     sort_key = SORT_OPTIONS[app._sort_index]
     app.notify(f"Sorted by {sort_key}", title="Sort")
@@ -87,6 +96,8 @@ def action_toggle_read(app: "ArxivBrowser") -> None:
         return
     metadata = app._get_or_create_metadata(paper.arxiv_id)
     metadata.is_read = not metadata.is_read
+    if metadata.is_read:
+        app._record_read_velocity_events(1)
     idx = app._get_current_index()
     if idx is not None:
         app._update_option_at_index(idx)
@@ -240,6 +251,45 @@ def action_manage_watch_list(app: "ArxivBrowser") -> None:
     app.push_screen(WatchListModal(app._config.watch_list), on_watch_list_updated)
 
 
+def action_schedule_review(app: "ArxivBrowser") -> None:
+    """Schedule the current or selected papers for spaced review."""
+    _apply_review_metadata_action(
+        app,
+        schedule_review,
+        singular="Scheduled review for 1 paper",
+        plural="Scheduled reviews for {count} papers",
+    )
+
+
+def action_mark_reviewed(app: "ArxivBrowser") -> None:
+    """Advance the current or selected papers in the spaced-review schedule."""
+    _apply_review_metadata_action(
+        app,
+        mark_reviewed,
+        singular="Advanced review schedule for 1 paper",
+        plural="Advanced review schedules for {count} papers",
+    )
+
+
+def action_clear_review(app: "ArxivBrowser") -> None:
+    """Remove the current or selected papers from the spaced-review queue."""
+    _apply_review_metadata_action(
+        app,
+        lambda metadata, _today: clear_review(metadata),
+        singular="Cleared review schedule for 1 paper",
+        plural="Cleared review schedules for {count} papers",
+    )
+
+
+def action_show_due_reviews(app: "ArxivBrowser") -> None:
+    """Apply the review-due virtual query filter."""
+    query = "review-due"
+    search_input = app._get_search_input_widget()
+    search_input.value = query
+    app._apply_filter(query)
+    app.notify("Showing due reviews", title="Review")
+
+
 def action_mark_visible_read(app: "ArxivBrowser") -> None:
     """Mark all currently visible (filtered) papers as read."""
     changed = 0
@@ -249,6 +299,7 @@ def action_mark_visible_read(app: "ArxivBrowser") -> None:
             meta.is_read = True
             changed += 1
     if changed:
+        app._record_read_velocity_events(changed)
         app._save_config_or_warn("mark visible read")
         app._mark_badges_dirty("read", immediate=True)
         app._refresh_list_view()
@@ -257,3 +308,33 @@ def action_mark_visible_read(app: "ArxivBrowser") -> None:
         f"Marked {changed} paper{'s' if changed != 1 else ''} as read",
         title="Read Status",
     )
+
+
+def _apply_review_metadata_action(
+    app: "ArxivBrowser",
+    update: Callable[[PaperMetadata, date], None],
+    *,
+    singular: str,
+    plural: str,
+) -> None:
+    target_ids = _review_target_ids(app)
+    if not target_ids:
+        app.notify("Select a paper first", title="Review", severity="warning")
+        return
+    today = date.today()
+    for arxiv_id in target_ids:
+        update(app._get_or_create_metadata(arxiv_id), today)
+    app._save_config_or_warn("review schedule")
+    query = app._get_live_query()
+    app._apply_filter(query)
+    app._refresh_detail_pane()
+    count = len(target_ids)
+    message = singular if count == 1 else plural.format(count=count)
+    app.notify(message, title="Review")
+
+
+def _review_target_ids(app: "ArxivBrowser") -> set[str]:
+    if app.selected_ids:
+        return set(app.selected_ids)
+    paper = app._get_current_paper()
+    return {paper.arxiv_id} if paper else set()

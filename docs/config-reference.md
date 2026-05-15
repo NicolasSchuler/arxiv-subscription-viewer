@@ -31,13 +31,14 @@ The file is created on first run. If it becomes corrupt (invalid JSON), the app 
 
 ## LLM
 
-Configure AI summaries, paper chat, relevance scoring, and auto-tagging. See [llm-setup.md](llm-setup.md) for detailed usage.
+Configure AI summaries, paper chat, comparison, relevance scoring, and auto-tagging. See [llm-setup.md](llm-setup.md) for detailed usage.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `llm_preset` | `string` | `""` | Named preset: `"claude"`, `"codex"`, `"llm"`, `"copilot"`, `"opencode"`, or `""`. Used when `llm_command` is empty. |
 | `llm_command` | `string` | `""` | Shell command template, e.g. `"claude -p {prompt}"`. Takes precedence over `llm_preset` when non-empty. |
 | `llm_prompt_template` | `string` | `""` | Custom prompt template. Placeholders: `{title}`, `{authors}`, `{categories}`, `{abstract}`, `{arxiv_id}`, `{paper_content}`. Empty uses the built-in default. |
+| `llm_phd_explainer_field` | `string` | `"physics"` | Target outside field for the PhD summary mode, e.g. `"quantum physics"` or `"economics"`. |
 | `allow_llm_shell_fallback` | `bool` | `true` | Allow commands that require shell parsing. Set `false` to reject shell-only templates. |
 | `llm_max_retries` | `int` | `1` | Retries for transient LLM failures such as timeouts or non-zero exits. Range `0..5` (`1` means up to 2 total attempts). |
 | `llm_timeout` | `int` | `120` | Seconds to wait for each LLM attempt before timing out. Range `10..600`. |
@@ -69,6 +70,29 @@ Surface trending signals from HuggingFace Daily Papers. See [huggingface.md](hug
 | `hf_enabled` | `bool` | `false` | Enable HuggingFace trending on startup. Toggle at runtime with `Ctrl+h`. |
 | `hf_cache_ttl_hours` | `int` | `6` | Hours to cache HF daily data (trending changes frequently). |
 
+## Semantic Search
+
+Optional local or sidecar embedding search for `~`-prefixed local queries. Embeddings are cached in `cache.db`; if no backend is available, the app falls back to fuzzy search.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `semantic_search_backend` | `string` | `"auto"` | Embedding backend: `"auto"`, `"fastembed"`, `"sentence-transformers"`, `"http"`, or `"off"`. |
+| `semantic_search_model` | `string` | `"BAAI/bge-small-en-v1.5"` | Embedding model id. Use `"Qwen/Qwen3-Embedding-0.6B"` with the `sentence-transformers` or HTTP backend for Qwen. |
+| `semantic_search_api_base_url` | `string` | `""` | Base URL for an OpenAI-compatible embeddings endpoint, e.g. a local TEI server. |
+| `semantic_search_api_key` | `string` | `""` | API key for the embeddings endpoint. Leave empty for local servers without auth. |
+| `semantic_search_top_k` | `int` | `100` | Maximum semantic results to show. Clamped to `1..500`. |
+| `semantic_search_min_score` | `int` | `15` | Minimum cosine similarity score as a percentage after negative similarities are clamped to zero. Range `0..100`. |
+
+## Conference Deadlines
+
+Import upcoming submission deadlines from the third-party, community-maintained AI Deadlines dataset. Dates are cached locally and matched to papers by arXiv category, tags, title, and abstract overlap.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `conference_deadlines_enabled` | `bool` | `false` | Load cached/imported conference deadlines on startup and show matching future submission targets in paper details. |
+| `conference_deadlines_source_url` | `string` | AI Deadlines YAML URL | Source URL for the AI Deadlines-compatible YAML feed. Override this for a local mirror or custom curated list. |
+| `conference_deadlines_cache_ttl_hours` | `int` | `24` | Hours to reuse the imported deadline snapshot before fetching again. Clamped to `1..168`. |
+
 ## Export & PDF
 
 Configure file exports and PDF handling. See [export.md](export.md) for detailed usage.
@@ -87,7 +111,7 @@ Configure file exports and PDF handling. See [export.md](export.md) for detailed
 |-----|------|---------|-------------|
 | `theme_name` | `string` | `"monokai"` | Active color theme. Serialized values: `"monokai"`, `"catppuccin-mocha"`, `"solarized-dark"`, `"solarized-light"`, `"high-contrast"`. UI labels: Monokai, Catppuccin, Solarized Dark, Solarized Light, High Contrast. Cycle with `Ctrl+t`. |
 | `theme` | `dict[str, str]` | `{}` | Legacy theme color overrides. Prefer `theme_name` for new configs. |
-| `collapsed_sections` | `list[str]` | `["tags", "relevance", "summary", "s2", "hf", "version"]` | Detail pane sections that start collapsed. Valid keys: `"authors"`, `"abstract"`, `"tags"`, `"relevance"`, `"summary"`, `"s2"`, `"hf"`, `"version"`. Toggle with `Ctrl+d`. |
+| `collapsed_sections` | `list[str]` | `["tags", "relevance", "summary", "s2", "hf", "version"]` | Detail pane sections that start collapsed. Valid keys: `"authors"`, `"abstract"`, `"tags"`, `"relevance"`, `"deadlines"`, `"summary"`, `"s2"`, `"hf"`, `"version"`. Toggle with `Ctrl+d`. |
 
 ## Session State
 
@@ -97,7 +121,7 @@ Restored automatically on next run. **Managed by the app** — generally no need
 |-----|------|---------|-------------|
 | `session.scroll_index` | `int` | `0` | Last scroll position in the paper list. |
 | `session.current_filter` | `string` | `""` | Last active search query. |
-| `session.sort_index` | `int` | `0` | Index into sort order cycle: `0`=title, `1`=date, `2`=arxiv_id, `3`=citations, `4`=trending, `5`=relevance. |
+| `session.sort_index` | `int` | `0` | Index into sort order cycle: `0`=title, `1`=date, `2`=arxiv_id, `3`=citations, `4`=trending, `5`=relevance, `6`=queue, `7`=triage. |
 | `session.selected_ids` | `list[str]` | `[]` | arXiv IDs of papers selected at exit. |
 | `session.current_date` | `string \| null` | `null` | Current date in history mode (`YYYY-MM-DD`), or `null` for non-history mode. |
 
@@ -107,8 +131,9 @@ Collections of user-created data. **Managed by the app** via dedicated UI — ed
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `paper_metadata` | `dict[str, object]` | `{}` | Per-paper annotations keyed by arXiv ID. Each entry has: `notes` (string), `tags` (list of strings), `is_read` (bool), `starred` (bool), `last_checked_version` (int or null). |
+| `paper_metadata` | `dict[str, object]` | `{}` | Per-paper annotations keyed by arXiv ID. Each entry has: `notes` (string), `tags` (list of strings), `is_read` (bool), `starred` (bool), `last_checked_version` (int or null), `next_review_date` (`YYYY-MM-DD` string or null), `review_stage` (interval index or null), and `line_annotations` (list of `{line, text}` objects anchored to visible detail-pane lines). Review fields are managed by the app and use the interval sequence 1, 3, 7, 14, 30 days. |
 | `watch_list` | `list[object]` | `[]` | Patterns to highlight. Each entry: `pattern` (string), `match_type` (`"author"` \| `"keyword"` \| `"title"`), `case_sensitive` (bool). Manage with `W`. |
+| `tracked_authors` | `list[str]` | `[]` | Exact author names to highlight across loaded papers. Manage from `Ctrl+p` → **Track Author**; matching uses normalized full-name equality and appears through the watched-paper highlight path. |
 | `bookmarks` | `list[object]` | `[]` | Saved search queries (max 9). Each entry: `name` (string), `query` (string). Manage with `Ctrl+b` / `Ctrl+Shift+b`. |
 | `collections` | `list[object]` | `[]` | Paper reading lists (max 20, 500 papers each). Each entry: `name` (string), `description` (string), `paper_ids` (list of strings), `created` (ISO 8601 timestamp). Manage with `Ctrl+k`. |
 | `marks` | `dict[str, str]` | `{}` | Named marks mapping a letter (`a`-`z`) to an arXiv ID. Set with `m`, jump with `'`. |
@@ -130,7 +155,7 @@ All other keys use their defaults and are populated by the app as needed.
 
 ## See Also
 
-- [llm-setup.md](llm-setup.md) — AI summary, chat, relevance & auto-tag setup
+- [llm-setup.md](llm-setup.md) — AI summary, chat, comparison, relevance & auto-tag setup
 - [semantic-scholar.md](semantic-scholar.md) — Citation data, recommendations & citation graph
 - [huggingface.md](huggingface.md) — HuggingFace trending integration
 - [export.md](export.md) — Export formats, PDF download & viewer configuration

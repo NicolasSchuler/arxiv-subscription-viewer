@@ -6,11 +6,16 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from textual.css.query import NoMatches
 
 from arxiv_browser.browser.core import ArxivBrowser
+from arxiv_browser.llm import PaperDebateResult
 from arxiv_browser.llm_providers import LLMChunk, LLMResult
 from arxiv_browser.modals import (
     PaperChatScreen,
+    PaperComparisonScreen,
+    PaperDebateResultModal,
+    PaperRemixResultModal,
     ResearchInterestsModal,
     SummaryModeModal,
 )
@@ -70,6 +75,132 @@ def test_research_interests_modal_mount_actions_and_handlers():
     modal.action_cancel = MagicMock()
     modal.on_cancel_pressed()
     modal.action_cancel.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_paper_remix_result_modal_compose_and_close(make_paper):
+    papers = [
+        make_paper(arxiv_id="2401.70001", title="Paper [One]"),
+        make_paper(arxiv_id="2401.70002", title="Paper Two"),
+    ]
+    app = ArxivBrowser(papers, restore_session=False)
+    modal = PaperRemixResultModal(papers, "# Idea\nUse [brackets] safely.")
+
+    async with app.run_test() as pilot:
+        app.push_screen(modal)
+        await pilot.pause(0.05)
+
+        assert modal.query_one("#paper-remix-dialog") is not None
+        sources = modal.query_one("#paper-remix-sources")
+        body = modal.query_one("#paper-remix-body")
+        assert "Paper [One]" in str(sources.render())
+        assert "Use [brackets]" in str(body.children[0].render())
+        await pilot.press("q")
+        await pilot.pause(0.05)
+
+
+@pytest.mark.asyncio
+async def test_paper_debate_result_modal_compose_and_close(make_paper):
+    paper = make_paper(arxiv_id="2401.70003", title="Paper [Debate]")
+    app = ArxivBrowser([paper], restore_session=False)
+    modal = PaperDebateResultModal(
+        paper,
+        PaperDebateResult(
+            advocate="## Strength\nUse [optimism] fairly.",
+            reviewer="## Objection\nBaseline [weakness].",
+        ),
+    )
+
+    async with app.run_test() as pilot:
+        app.push_screen(modal)
+        await pilot.pause(0.05)
+
+        assert modal.query_one("#paper-debate-dialog") is not None
+        source = modal.query_one("#paper-debate-source")
+        body = modal.query_one("#paper-debate-thread")
+        assert "Paper [Debate]" in str(source.render())
+        rendered = str(body.render())
+        assert "Advocate" in rendered
+        assert "Reviewer 2" in rendered
+        assert "Use [optimism]" in rendered
+        await pilot.press("q")
+        await pilot.pause(0.05)
+
+
+@pytest.mark.asyncio
+async def test_paper_comparison_screen_renders_two_and_three_columns(make_paper):
+    for count in (2, 3):
+        papers = [
+            make_paper(
+                arxiv_id=f"2401.7100{index}",
+                title=f"Paper [{index}]",
+                abstract="" if index == 2 else f"Abstract [{index}]",
+            )
+            for index in range(count)
+        ]
+        app = ArxivBrowser(papers, restore_session=False)
+        modal = PaperComparisonScreen(papers, {papers[0].arxiv_id: "Escaped [abstract]"})
+
+        async with app.run_test() as pilot:
+            app.push_screen(modal)
+            await pilot.pause(0.05)
+
+            assert modal.query_one("#paper-comparison-dialog") is not None
+            assert len(modal.query(".paper-comparison-column")) == count
+            rendered = str(modal.query(".paper-comparison-column").first().children[0].render())
+            assert "Paper [0]" in rendered
+            assert "Escaped [abstract]" in rendered
+
+
+def test_paper_comparison_screen_generate_guard_and_result_methods(make_paper):
+    paper = make_paper(title="Compare")
+    callback = MagicMock()
+    modal = PaperComparisonScreen(
+        [paper, make_paper(arxiv_id="2401.71010")], on_generate_ai=callback
+    )
+
+    modal.action_generate_ai()
+    callback.assert_called_once_with(modal)
+
+    modal._ai_running = True
+    modal._update_ai_status = MagicMock()
+    modal.action_generate_ai()
+    callback.assert_called_once()
+    assert "already generating" in modal._update_ai_status.call_args.args[0]
+
+    modal._update_ai_status = MagicMock()
+    modal._update_ai_output = MagicMock()
+    modal.set_ai_loading()
+    assert modal.ai_running is True
+    modal.set_ai_result("## Methods\n- works")
+    assert modal.ai_running is False
+    modal._update_ai_output.assert_called()
+    modal.set_ai_error("bad [input]")
+    assert modal.ai_running is False
+
+
+def test_paper_comparison_screen_idle_close_and_missing_widget_paths(make_paper):
+    modal = PaperComparisonScreen([make_paper(), make_paper(arxiv_id="2401.71011")])
+
+    modal.set_ai_error = MagicMock()
+    modal.action_generate_ai()
+    modal.set_ai_error.assert_called_once_with("AI comparison unavailable")
+
+    modal._update_ai_status = MagicMock()
+    modal.set_ai_idle("needs [config]")
+    assert modal.ai_running is False
+    assert "needs \\[config]" in modal._update_ai_status.call_args.args[0]
+
+    def _raise_no_matches(*_args, **_kwargs):
+        raise NoMatches("missing")
+
+    modal.query_one = MagicMock(side_effect=_raise_no_matches)
+    modal._update_ai_status("ignored")
+    modal._update_ai_output("ignored")
+
+    modal.dismiss = MagicMock()
+    modal.action_close()
+    modal.dismiss.assert_called_once_with(None)
 
 
 def test_paper_chat_on_mount_hint_branches(make_paper):

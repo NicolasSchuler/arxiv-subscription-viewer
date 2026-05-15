@@ -561,10 +561,17 @@ class TestConstants:
     """Tests for module constants with real invariants."""
 
     def test_sort_options_defined(self):
-        """SORT_OPTIONS should contain the three expected sort keys."""
-        assert "title" in SORT_OPTIONS
-        assert "date" in SORT_OPTIONS
-        assert "arxiv_id" in SORT_OPTIONS
+        """SORT_OPTIONS should keep persisted sort indexes stable."""
+        assert SORT_OPTIONS == [
+            "title",
+            "date",
+            "arxiv_id",
+            "citations",
+            "trending",
+            "relevance",
+            "queue",
+            "triage",
+        ]
 
     def test_default_category_color_is_hex(self):
         """DEFAULT_CATEGORY_COLOR should be a valid #RRGGBB hex color."""

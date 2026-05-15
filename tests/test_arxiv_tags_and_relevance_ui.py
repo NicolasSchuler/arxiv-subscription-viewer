@@ -746,5 +746,14 @@ class TestRelevanceSortOptions:
     def test_relevance_in_sort_options(self):
         assert "relevance" in SORT_OPTIONS
 
-    def test_sort_options_count(self):
-        assert len(SORT_OPTIONS) == 6
+    def test_sort_options_order(self):
+        assert SORT_OPTIONS == [
+            "title",
+            "date",
+            "arxiv_id",
+            "citations",
+            "trending",
+            "relevance",
+            "queue",
+            "triage",
+        ]

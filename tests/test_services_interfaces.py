@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from arxiv_browser.llm import PaperDebateResult
 from arxiv_browser.models import ArxivSearchRequest, UserConfig
 from arxiv_browser.services.download_service import DownloadResult
 from arxiv_browser.services.interfaces import (
@@ -87,6 +88,14 @@ async def test_default_llm_adapter_delegates(make_paper) -> None:
             new=AsyncMock(return_value=(8, "fit")),
         ) as score,
         patch(
+            "arxiv_browser.services.interfaces._llm.compare_papers",
+            new=AsyncMock(return_value=("comparison", None)),
+        ) as compare,
+        patch(
+            "arxiv_browser.services.interfaces._llm.generate_paper_debate",
+            new=AsyncMock(return_value=(PaperDebateResult("adv", "rev"), None)),
+        ) as debate,
+        patch(
             "arxiv_browser.services.interfaces._llm.suggest_tags_once",
             new=AsyncMock(return_value=["topic:ml"]),
         ) as tags,
@@ -105,6 +114,20 @@ async def test_default_llm_adapter_delegates(make_paper) -> None:
             provider=provider,
             timeout_seconds=10,
         )
+        comparison, comparison_error = await services.llm.compare_papers(
+            papers=[paper, make_paper(arxiv_id="2401.33334")],
+            provider=provider,
+            timeout_seconds=10,
+            fetch_paper_content=AsyncMock(return_value="content"),
+            max_content_chars=12000,
+        )
+        debate_result, debate_error = await services.llm.generate_paper_debate(
+            paper=paper,
+            provider=provider,
+            timeout_seconds=10,
+            fetch_paper_content=AsyncMock(return_value="content"),
+            max_content_chars=12000,
+        )
         suggested = await services.llm.suggest_tags_once(
             paper=paper,
             taxonomy=["topic:ml"],
@@ -115,9 +138,15 @@ async def test_default_llm_adapter_delegates(make_paper) -> None:
     assert summary == "summary"
     assert error is None
     assert relevance == (8, "fit")
+    assert comparison == "comparison"
+    assert comparison_error is None
+    assert debate_result == PaperDebateResult("adv", "rev")
+    assert debate_error is None
     assert suggested == ["topic:ml"]
     gen.assert_awaited_once()
     score.assert_awaited_once()
+    compare.assert_awaited_once()
+    debate.assert_awaited_once()
     tags.assert_awaited_once()
 
 
@@ -159,6 +188,10 @@ async def test_default_enrichment_adapter_delegates(tmp_path) -> None:
             "arxiv_browser.services.interfaces._enrichment.load_or_fetch_s2_recommendations_result",
             new=AsyncMock(return_value="rec-result"),
         ) as rec_fetch,
+        patch(
+            "arxiv_browser.services.interfaces._enrichment.load_or_fetch_conference_deadlines_result",
+            new=AsyncMock(return_value="deadline-result"),
+        ) as deadline_fetch,
     ):
         assert (
             await services.enrichment.load_or_fetch_s2_paper(
@@ -188,10 +221,20 @@ async def test_default_enrichment_adapter_delegates(tmp_path) -> None:
             )
             == "rec-result"
         )
+        assert (
+            await services.enrichment.load_or_fetch_conference_deadlines(
+                db_path=tmp_path / "deadlines.db",
+                cache_ttl_hours=24,
+                client=client,
+                source_url="https://example.test/deadlines.yml",
+            )
+            == "deadline-result"
+        )
 
     s2_fetch.assert_awaited_once()
     hf_fetch.assert_awaited_once()
     rec_fetch.assert_awaited_once()
+    deadline_fetch.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -295,6 +338,16 @@ async def test_protocol_method_bodies_return_none_without_adapters() -> None:
             cache_ttl_days=7,
             client=AsyncMock(),
             api_key="",
+        )
+        is None
+    )
+    assert (
+        await EnrichmentService.load_or_fetch_conference_deadlines(
+            dummy,
+            db_path=Path("/tmp/deadlines.db"),
+            cache_ttl_hours=24,
+            client=AsyncMock(),
+            source_url="https://example.test/deadlines.yml",
         )
         is None
     )

@@ -46,8 +46,11 @@ jobs:
       - name: Format check
         run: uv run ruff format --check .
 
-      - name: Type check
+      - name: Type check (Pyright)
         run: uv run pyright
+
+      - name: Type check (Pyrefly)
+        run: uv run pyrefly check --output-format=github --summarize-errors --summary=none --progress-bar no
 
       - name: Tests with coverage
         run: uv run pytest --cov --cov-branch --cov-fail-under=0 --cov-report=term-missing --cov-report=json

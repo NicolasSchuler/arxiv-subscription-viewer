@@ -238,6 +238,122 @@ class TestPromptInjection:
         # The real taxonomy section is still present
         assert "topic:ml" in prompt
 
+    # -- build_paper_remix_prompt -------------------------------------------
+
+    def test_build_paper_remix_prompt_two_papers_with_interests(self, make_paper):
+        """Paper remix prompt includes sources, interests, and required sections."""
+        from arxiv_browser.llm import build_paper_remix_prompt
+
+        first = make_paper(
+            arxiv_id="2401.51001",
+            title="Attention Entropy Pruning",
+            authors="A. One",
+            categories="cs.LG",
+            abstract="Prune tokens using attention entropy.",
+        )
+        second = make_paper(
+            arxiv_id="2401.51002",
+            title="RAG Memory Routing",
+            authors="B. Two",
+            categories="cs.CL",
+            abstract="Route retrieval through learned memory.",
+        )
+
+        prompt = build_paper_remix_prompt([first, second], "efficient RAG systems")
+
+        assert "Research interests: efficient RAG systems" in prompt
+        assert "Paper 1" in prompt and "Attention Entropy Pruning" in prompt
+        assert "Paper 2" in prompt and "RAG Memory Routing" in prompt
+        assert "## Concrete Experiment" in prompt
+        assert "## Risks" in prompt
+
+    def test_build_paper_remix_prompt_three_papers_default_interests(self, make_paper):
+        """Paper remix supports exactly three papers and an empty interests fallback."""
+        from arxiv_browser.llm import build_paper_remix_prompt
+
+        papers = [
+            make_paper(arxiv_id=f"2401.5200{i}", title=f"Paper {i}", abstract=f"Abstract {i}")
+            for i in range(3)
+        ]
+
+        prompt = build_paper_remix_prompt(papers)
+
+        assert "Research interests: (not specified)" in prompt
+        assert "Paper 3" in prompt
+        assert "Abstract 2" in prompt
+
+    def test_build_paper_remix_prompt_rejects_wrong_count(self, make_paper):
+        """Paper remix is deliberately scoped to 2-3 papers."""
+        from arxiv_browser.llm import build_paper_remix_prompt
+
+        with pytest.raises(ValueError, match="2 or 3 papers"):
+            build_paper_remix_prompt([make_paper()])
+
+    # -- build_paper_comparison_prompt --------------------------------------
+
+    def test_build_paper_comparison_prompt_sections_and_truncation(self, make_paper):
+        """Paper comparison prompt includes every paper and clips large context blocks."""
+        from arxiv_browser.llm import build_paper_comparison_prompt
+
+        first = make_paper(arxiv_id="2401.53001", title="Alpha Method", abstract="alpha")
+        second = make_paper(arxiv_id="2401.53002", title="Beta Results", abstract="beta")
+
+        prompt = build_paper_comparison_prompt(
+            [first, second],
+            ["A" * 20, "B" * 20],
+            max_content_chars=6,
+        )
+
+        assert "## Methods" in prompt
+        assert "## Results" in prompt
+        assert "## Key Differences" in prompt
+        assert "## Bottom Line" in prompt
+        assert "Title: Alpha Method" in prompt
+        assert "Title: Beta Results" in prompt
+        assert "AAAAAA" in prompt and "AAAAAAA" not in prompt
+        assert "Not stated in provided context" in prompt
+
+    def test_build_paper_comparison_prompt_rejects_wrong_count(self, make_paper):
+        """Paper comparison is deliberately scoped to 2-3 papers."""
+        from arxiv_browser.llm import build_paper_comparison_prompt
+
+        with pytest.raises(ValueError, match="2 or 3 papers"):
+            build_paper_comparison_prompt([make_paper()])
+
+    # -- build_paper_debate_*_prompt ----------------------------------------
+
+    def test_build_paper_debate_prompts_grounded_and_truncated(self, make_paper):
+        """Paper debate prompts include context, grounding rules, and advocate claims."""
+        from arxiv_browser.llm import (
+            build_paper_debate_advocate_prompt,
+            build_paper_debate_reviewer_prompt,
+        )
+
+        paper = make_paper(
+            arxiv_id="2401.54001",
+            title="Debatable Results",
+            authors="A. Advocate",
+            categories="cs.LG",
+            abstract="Fallback abstract",
+        )
+
+        advocate_prompt = build_paper_debate_advocate_prompt(paper, "A" * 20, 6)
+        reviewer_prompt = build_paper_debate_reviewer_prompt(
+            paper,
+            "B" * 20,
+            "This could be important.",
+            6,
+        )
+
+        assert "enthusiastic advocate" in advocate_prompt
+        assert "Not stated in provided context" in advocate_prompt
+        assert "Title: Debatable Results" in advocate_prompt
+        assert "AAAAAA" in advocate_prompt and "AAAAAAA" not in advocate_prompt
+        assert "Reviewer 2" in reviewer_prompt
+        assert "Baseline And Evaluation Concerns" in reviewer_prompt
+        assert "This could be important." in reviewer_prompt
+        assert "BBBBBB" in reviewer_prompt and "BBBBBBB" not in reviewer_prompt
+
     # -- _parse_relevance_response ------------------------------------------
 
     def test_parse_relevance_with_injected_json_in_response(self):
@@ -905,6 +1021,73 @@ class TestSummaryModeSelection:
         assert "2401.12345" not in app._paper_summaries
         assert "2401.12345" in app._summary_loading
         assert app._summary_mode_label["2401.12345"] == "METHODS"
+
+    def test_eli5_mode_uses_full_content_and_explicit_label(self, make_paper, tmp_path):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock, patch
+
+        from arxiv_browser.actions import llm_actions
+
+        paper = make_paper(arxiv_id="2401.12345")
+        app = SimpleNamespace(
+            _config=SimpleNamespace(llm_prompt_template=""),
+            _summary_loading=set(),
+            _summary_db_path=tmp_path / "test_summaries.db",
+            _paper_summaries={},
+            _summary_mode_label={},
+            _summary_command_hash={},
+            _update_abstract_display=MagicMock(),
+            _generate_summary_async=MagicMock(return_value="summary-task"),
+            _track_dataset_task=MagicMock(),
+            notify=MagicMock(),
+        )
+
+        with patch("arxiv_browser.actions.llm_actions._load_summary", return_value=None):
+            llm_actions._on_summary_mode_selected(app, "eli5", paper, "cmd {prompt}")
+
+        args, kwargs = app._generate_summary_async.call_args
+        assert args[0] is paper
+        assert "five years old" in args[1]
+        assert kwargs["mode_label"] == "ELI5"
+        assert kwargs["use_full_paper_content"] is True
+
+    def test_phd_mode_resolves_config_field_before_hashing(self, make_paper, tmp_path):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock, patch
+
+        from arxiv_browser.actions import llm_actions
+        from arxiv_browser.llm import _compute_command_hash
+
+        paper = make_paper(arxiv_id="2401.12345")
+        app = SimpleNamespace(
+            _config=SimpleNamespace(
+                llm_prompt_template="",
+                llm_phd_explainer_field="quantum {spin} physics",
+            ),
+            _summary_loading=set(),
+            _summary_db_path=tmp_path / "test_summaries.db",
+            _paper_summaries={},
+            _summary_mode_label={},
+            _summary_command_hash={},
+            _update_abstract_display=MagicMock(),
+            _generate_summary_async=MagicMock(return_value="summary-task"),
+            _track_dataset_task=MagicMock(),
+            notify=MagicMock(),
+        )
+
+        with patch("arxiv_browser.actions.llm_actions._load_summary", return_value=None):
+            llm_actions._on_summary_mode_selected(app, "phd", paper, "cmd {prompt}")
+
+        args, kwargs = app._generate_summary_async.call_args
+        prompt_template = args[1]
+        command_hash = args[2]
+        assert "quantum {{spin}} physics" in prompt_template
+        assert command_hash == _compute_command_hash("cmd {prompt}", prompt_template)
+        assert "quantum {spin} physics" in build_llm_prompt(
+            paper, prompt_template, paper_content="Full paper text."
+        )
+        assert kwargs["mode_label"] == "PhD"
+        assert kwargs["use_full_paper_content"] is True
 
 
 class TestLlmSummaryDb:

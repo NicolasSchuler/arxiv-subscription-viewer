@@ -14,6 +14,7 @@ from arxiv_browser.services.arxiv_api_service import (
     fetch_latest_day_digest,
     fetch_page,
     fetch_page_sync,
+    fetch_recent_digest,
     format_query_label,
 )
 
@@ -219,3 +220,102 @@ def test_fetch_latest_day_digest_skips_invalid_first_date(make_paper) -> None:
 
     assert [paper.arxiv_id for paper in papers] == ["2602.00011", "2602.00012", "2602.00013"]
     assert page_calls == [0, 3]
+
+
+def test_fetch_recent_digest_daily_delegates_to_latest_day(make_paper) -> None:
+    request = ArxivSearchRequest(query="graph", field="all", category="")
+    paper = make_paper(arxiv_id="2602.20001", date="Mon, 17 Feb 2026")
+
+    result = fetch_recent_digest(
+        request=request,
+        period="daily",
+        max_results=2,
+        fetch_page_fn=lambda **_kwargs: [paper],
+        sleep_fn=MagicMock(),
+    )
+
+    assert result == [paper]
+
+
+def test_fetch_recent_digest_weekly_window_paginates_and_dedupes(make_paper) -> None:
+    request = ArxivSearchRequest(query="graph", field="all", category="")
+    page_calls: list[int] = []
+    pages = [
+        [
+            make_paper(arxiv_id="2602.00010", date="Tue, 17 Feb 2026"),
+            make_paper(arxiv_id="2602.00011", date="Mon, 16 Feb 2026"),
+            make_paper(arxiv_id="2602.00010", date="Tue, 17 Feb 2026"),
+        ],
+        [
+            make_paper(arxiv_id="2602.00012", date="Wed, 11 Feb 2026"),
+            make_paper(arxiv_id="2602.00013", date="Tue, 10 Feb 2026"),
+            make_paper(arxiv_id="2602.00014", date="not-a-date"),
+        ],
+    ]
+
+    def fake_fetch_page(**kwargs):
+        page_calls.append(int(kwargs["start"]))
+        return pages.pop(0)
+
+    sleep = MagicMock()
+    result = fetch_recent_digest(
+        request=request,
+        period="weekly",
+        max_results=3,
+        fetch_page_fn=fake_fetch_page,
+        sleep_fn=sleep,
+        min_interval_seconds=ARXIV_API_MIN_INTERVAL_SECONDS,
+    )
+
+    assert [paper.arxiv_id for paper in result] == ["2602.00010", "2602.00011", "2602.00012"]
+    assert page_calls == [0, 3]
+    sleep.assert_called_once_with(ARXIV_API_MIN_INTERVAL_SECONDS)
+
+
+def test_fetch_recent_digest_weekly_stops_on_short_final_page(make_paper) -> None:
+    request = ArxivSearchRequest(query="graph", field="all", category="")
+    sleep = MagicMock()
+
+    result = fetch_recent_digest(
+        request=request,
+        period="weekly",
+        max_results=3,
+        fetch_page_fn=lambda **_kwargs: [make_paper(arxiv_id="2602.30001")],
+        sleep_fn=sleep,
+    )
+
+    assert [paper.arxiv_id for paper in result] == ["2602.30001"]
+    sleep.assert_not_called()
+
+
+def test_fetch_recent_digest_weekly_handles_empty_and_malformed_pages(make_paper) -> None:
+    request = ArxivSearchRequest(query="graph", field="all", category="")
+
+    assert (
+        fetch_recent_digest(
+            request=request,
+            period="weekly",
+            max_results=3,
+            fetch_page_fn=lambda **_kwargs: [],
+            sleep_fn=MagicMock(),
+        )
+        == []
+    )
+
+    pages = [[make_paper(arxiv_id="bad", date="not-a-date"), make_paper(arxiv_id="good")]]
+    result = fetch_recent_digest(
+        request=request,
+        period="weekly",
+        max_results=3,
+        fetch_page_fn=lambda **_kwargs: pages.pop(0),
+        sleep_fn=MagicMock(),
+    )
+
+    assert [paper.arxiv_id for paper in result] == ["good"]
+
+
+def test_fetch_recent_digest_rejects_unknown_period() -> None:
+    request = ArxivSearchRequest(query="graph", field="all", category="")
+
+    with pytest.raises(ValueError, match="Unsupported digest period"):
+        fetch_recent_digest(request=request, period="monthly", max_results=2)

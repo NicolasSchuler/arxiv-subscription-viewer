@@ -6,17 +6,25 @@ import logging
 import sqlite3
 import webbrowser
 from collections.abc import Callable
-from typing import cast
+from typing import Literal, cast
 
 import httpx
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, Label, ListItem, ListView, Static
+from textual.widgets import Button, Label, ListItem, ListView, Static, Tree
 
 from arxiv_browser.action_messages import build_actionable_error
 from arxiv_browser.app_protocols import TaskTrackingApp
+from arxiv_browser.citation_genealogy import (
+    GenealogyContext,
+    GenealogyDirection,
+    GenealogyNode,
+    GenealogyOptions,
+    GenealogyRoot,
+    build_genealogy_tree,
+)
 from arxiv_browser.empty_state import (
     CITATIONS_CITES_EMPTY,
     CITATIONS_REFS_EMPTY,
@@ -30,6 +38,7 @@ from arxiv_browser.themes import theme_colors_for
 logger = logging.getLogger(__name__)
 
 RECOMMENDATION_TITLE_MAX_LEN = 60  # Max title length in recommendations modal
+CitationViewMode = Literal["graph", "ancestors", "descendants"]
 
 
 def _build_empty_placeholder(message: str) -> ListItem:
@@ -37,6 +46,27 @@ def _build_empty_placeholder(message: str) -> ListItem:
     item = ListItem(Label(f"[dim italic]{message}[/]"), classes="-empty")
     item.disabled = True
     return item
+
+
+def _format_genealogy_label(node: GenealogyNode) -> str:
+    """Return compact display text for one genealogy tree node."""
+    title = truncate_text(node.paper.title, 72)
+    year = str(node.paper.year) if node.paper.year is not None else "?"
+    parts = [f"{title} ({year}; {node.paper.citation_count} cites)"]
+    badges: list[str] = []
+    if node.is_target:
+        badges.append("target")
+    if node.is_local:
+        badges.append("local")
+    if node.is_starred:
+        badges.append("starred")
+    if node.repeated:
+        badges.append("repeat")
+    if node.truncated:
+        badges.append("more")
+    if badges:
+        parts.append(f"({'/'.join(badges)})")
+    return " ".join(parts)
 
 
 class RecommendationListItem(ListItem):
@@ -297,6 +327,9 @@ class CitationGraphScreen(ModalBase[str | None]):
         Binding("escape", "back_or_close", "Back / Close"),
         Binding("q", "back_or_close", "Back / Close"),
         Binding("enter", "drill_down", "Drill down"),
+        Binding("1", "show_graph", "Graph", show=False),
+        Binding("a", "show_ancestors", "Ancestors", show=False),
+        Binding("d", "show_descendants", "Descendants", show=False),
         Binding("o", "open_url", "Open in browser", show=False),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
@@ -326,8 +359,25 @@ class CitationGraphScreen(ModalBase[str | None]):
         height: auto;
     }
 
+    #citation-mode-buttons {
+        height: auto;
+        align: center middle;
+        margin-bottom: 1;
+    }
+
+    #citation-mode-buttons Button {
+        margin: 0 1;
+    }
+
     #citation-graph-panels {
         height: 1fr;
+    }
+
+    #genealogy-tree {
+        height: 1fr;
+        background: $th-panel;
+        border-left: tall $th-purple;
+        padding: 0 1;
     }
 
     .citation-panel {
@@ -415,11 +465,37 @@ class CitationGraphScreen(ModalBase[str | None]):
         self._current_paper_id = root_paper_id
         self._active_panel: str = "refs"  # "refs" or "cites"
         self._loading = False
+        root_arxiv_id = (
+            root_paper_id.removeprefix("ARXIV:") if root_paper_id.startswith("ARXIV:") else ""
+        )
+        self._view_mode: CitationViewMode = "graph"
+        self._genealogy_root = GenealogyRoot(
+            paper_id=root_paper_id,
+            title=root_title,
+            arxiv_id=root_arxiv_id,
+        )
+        self._genealogy_options = GenealogyOptions()
+        self._genealogy_cache: dict[GenealogyDirection, GenealogyNode] = {}
+        self._starred_arxiv_ids: frozenset[str] = frozenset()
+
+    def configure_genealogy(
+        self,
+        root: GenealogyRoot,
+        starred_arxiv_ids: frozenset[str] = frozenset(),
+    ) -> None:
+        """Set richer root/user context for the genealogy tree modes."""
+        self._genealogy_root = root
+        self._starred_arxiv_ids = starred_arxiv_ids
+        self._genealogy_cache.clear()
 
     def compose(self) -> ComposeResult:
         """Yield breadcrumb, side-by-side references/citations panels, status bar, and buttons."""
         with Vertical(id="citation-graph-dialog"):
             yield Static("", id="citation-graph-breadcrumb")
+            with Horizontal(id="citation-mode-buttons"):
+                yield Button("Graph", variant="primary", id="cg-mode-graph")
+                yield Button("Ancestors", variant="default", id="cg-mode-ancestors")
+                yield Button("Descendants", variant="default", id="cg-mode-descendants")
             with Horizontal(id="citation-graph-panels"):
                 with Vertical(classes="citation-panel"):
                     yield Static("", id="refs-title", classes="citation-panel-title")
@@ -427,6 +503,7 @@ class CitationGraphScreen(ModalBase[str | None]):
                 with Vertical(classes="citation-panel"):
                     yield Static("", id="cites-title", classes="citation-panel-title")
                     yield ListView(id="cites-list", classes="citation-list")
+            yield Tree("", id="genealogy-tree")
             yield Static("", id="citation-graph-status")
             with Horizontal(id="citation-graph-buttons"):
                 yield Button("Close (Esc/q)", variant="default", id="cg-close-btn")
@@ -436,6 +513,7 @@ class CitationGraphScreen(ModalBase[str | None]):
         """Populate both citation lists and focus the references panel."""
         self._populate_lists()
         self._update_breadcrumb()
+        self.query_one("#genealogy-tree", Tree).display = False
         refs_list = self.query_one("#refs-list", ListView)
         refs_list.focus()
 
@@ -500,6 +578,14 @@ class CitationGraphScreen(ModalBase[str | None]):
 
     def _update_breadcrumb(self) -> None:
         """Update the breadcrumb trail."""
+        if self._view_mode != "graph":
+            label = "Ancestors" if self._view_mode == "ancestors" else "Descendants"
+            title = truncate_text(self._genealogy_root.title, 56)
+            purple = theme_colors_for(self)["purple"]
+            self.query_one("#citation-graph-breadcrumb", Static).update(
+                f"Citation Genealogy: [{purple}]{label}[/] of {escape_rich_text(title)}"
+            )
+            return
         parts = [truncate_text(t, 40) for _, t, _, _ in self._stack]
         parts.append(truncate_text(self._current_title, 40))
         from arxiv_browser._ascii import is_ascii_mode
@@ -512,8 +598,18 @@ class CitationGraphScreen(ModalBase[str | None]):
     def _update_status(self) -> None:
         """Update status bar with navigation hints."""
         if self._loading:
+            if self._view_mode == "graph":
+                loading_message = "Loading citation graph..."
+            else:
+                loading_message = f"Loading {self._view_mode} genealogy..."
+            self.query_one("#citation-graph-status", Static).update(f"[dim]{loading_message}[/]")
+            return
+        if self._view_mode != "graph":
+            purple = theme_colors_for(self)["purple"]
             self.query_one("#citation-graph-status", Static).update(
-                "[dim]Loading citation graph...[/]"
+                f"[dim]1: graph | a: ancestors | d: descendants | "
+                f"Enter/click: go/open | o: open | g: go to local | Esc/q: close[/]"
+                f"  Active: [{purple}]{self._view_mode}[/]"
             )
             return
         active = self._active_panel
@@ -540,8 +636,121 @@ class CitationGraphScreen(ModalBase[str | None]):
             return child
         return None
 
+    def _get_genealogy_tree(self) -> Tree:
+        """Return the genealogy tree widget."""
+        return self.query_one("#genealogy-tree", Tree)
+
+    def _get_highlighted_genealogy_node(self) -> GenealogyNode | None:
+        """Return the selected genealogy node payload, if the cursor is on one."""
+        cursor_node = self._get_genealogy_tree().cursor_node
+        if cursor_node is None:
+            return None
+        data = cursor_node.data
+        return data if isinstance(data, GenealogyNode) else None
+
+    def _set_view_mode(self, mode: CitationViewMode) -> None:
+        """Toggle graph/tree widgets and mode buttons."""
+        self._view_mode = mode
+        graph_visible = mode == "graph"
+        self.query_one("#citation-graph-panels", Horizontal).display = graph_visible
+        self._get_genealogy_tree().display = not graph_visible
+        self.query_one("#cg-mode-graph", Button).variant = (
+            "primary" if mode == "graph" else "default"
+        )
+        self.query_one("#cg-mode-ancestors", Button).variant = (
+            "primary" if mode == "ancestors" else "default"
+        )
+        self.query_one("#cg-mode-descendants", Button).variant = (
+            "primary" if mode == "descendants" else "default"
+        )
+        self._update_breadcrumb()
+        self._update_status()
+
+    def action_show_graph(self) -> None:
+        """Switch back to the two-panel citation graph view."""
+        self._set_view_mode("graph")
+        self._get_active_list().focus()
+
+    async def action_show_ancestors(self) -> None:
+        """Build or show the ancestor genealogy tree."""
+        await self._show_genealogy("ancestors")
+
+    async def action_show_descendants(self) -> None:
+        """Build or show the descendant genealogy tree."""
+        await self._show_genealogy("descendants")
+
+    async def _show_genealogy(self, direction: GenealogyDirection) -> None:
+        """Build the requested genealogy view, respecting S2 cache/fetch bounds."""
+        if self._loading:
+            return
+        self._set_view_mode(direction)
+        cached = self._genealogy_cache.get(direction)
+        if cached is None:
+            self._loading = True
+            self._update_status()
+            try:
+                cached = await build_genealogy_tree(
+                    self._genealogy_root,
+                    direction,
+                    self._fetch_callback,
+                    self._genealogy_options,
+                    GenealogyContext(
+                        local_arxiv_ids=self._local_arxiv_ids,
+                        starred_arxiv_ids=self._starred_arxiv_ids,
+                    ),
+                )
+                self._genealogy_cache[direction] = cached
+            except (httpx.HTTPError, OSError, sqlite3.Error):
+                logger.warning(
+                    "Citation genealogy fetch failed for %s/%s",
+                    self._genealogy_root.paper_id,
+                    direction,
+                    exc_info=True,
+                )
+                self.app.notify(
+                    build_actionable_error(
+                        "load citation genealogy data",
+                        why="a network, API, or local cache error occurred",
+                        next_step="retry the genealogy mode or return to the graph view",
+                    ),
+                    severity="error",
+                )
+                self._set_view_mode("graph")
+                return
+            finally:
+                self._loading = False
+                self._update_status()
+        self._render_genealogy_tree(cached)
+        self._get_genealogy_tree().focus()
+
+    def _render_genealogy_tree(self, root: GenealogyNode) -> None:
+        """Render a GenealogyNode tree into the Textual Tree widget."""
+        tree = self._get_genealogy_tree()
+        root_data = root if root.paper.paper_id else None
+        tree.reset(_format_genealogy_label(root), data=root_data)
+        tree.root.expand()
+        for child in root.children:
+            self._add_genealogy_tree_node(tree.root, child)
+
+    def _add_genealogy_tree_node(self, parent, node: GenealogyNode) -> None:
+        child = parent.add(_format_genealogy_label(node), data=node, expand=True)
+        for grandchild in node.children:
+            self._add_genealogy_tree_node(child, grandchild)
+
+    def _activate_genealogy_node(self, node: GenealogyNode | None) -> None:
+        """Jump to local nodes or open remote genealogy nodes in a browser."""
+        if node is None:
+            return
+        if node.is_local and node.paper.arxiv_id:
+            self.dismiss(node.paper.arxiv_id)
+        elif node.paper.url:
+            webbrowser.open(node.paper.url)
+
     def action_back_or_close(self) -> None:
         """Pop one level or close the modal."""
+        if self._view_mode != "graph":
+            self.dismiss(None)
+            return
         if self._stack:
             paper_id, title, refs, cites = self._stack.pop()
             self._current_paper_id = paper_id
@@ -556,6 +765,9 @@ class CitationGraphScreen(ModalBase[str | None]):
 
     async def action_drill_down(self) -> None:
         """Drill into the highlighted entry's citation graph."""
+        if self._view_mode != "graph":
+            self._activate_genealogy_node(self._get_highlighted_genealogy_node())
+            return
         if self._loading:
             return
         item = self._get_highlighted_entry()
@@ -604,6 +816,9 @@ class CitationGraphScreen(ModalBase[str | None]):
 
     def action_switch_panel(self) -> None:
         """Toggle between references and citations panels."""
+        if self._view_mode != "graph":
+            self._get_genealogy_tree().focus()
+            return
         refs_list = self.query_one("#refs-list", ListView)
         cites_list = self.query_one("#cites-list", ListView)
         if self._active_panel == "refs":
@@ -620,22 +835,38 @@ class CitationGraphScreen(ModalBase[str | None]):
 
     def action_open_url(self) -> None:
         """Open the highlighted entry's URL in the browser."""
+        if self._view_mode != "graph":
+            node = self._get_highlighted_genealogy_node()
+            if node and node.paper.url:
+                webbrowser.open(node.paper.url)
+            return
         item = self._get_highlighted_entry()
         if item and item.entry.url:
             webbrowser.open(item.entry.url)
 
     def action_go_to_local(self) -> None:
         """If highlighted entry is local, dismiss with its arxiv_id to jump to it."""
+        if self._view_mode != "graph":
+            node = self._get_highlighted_genealogy_node()
+            if node and node.is_local and node.paper.arxiv_id:
+                self.dismiss(node.paper.arxiv_id)
+            return
         item = self._get_highlighted_entry()
         if item and item.is_local and item.entry.arxiv_id:
             self.dismiss(item.entry.arxiv_id)
 
     def action_cursor_down(self) -> None:
         """Move the highlight down in the active panel's list."""
+        if self._view_mode != "graph":
+            self._get_genealogy_tree().action_cursor_down()
+            return
         self._get_active_list().action_cursor_down()
 
     def action_cursor_up(self) -> None:
         """Move the highlight up in the active panel's list."""
+        if self._view_mode != "graph":
+            self._get_genealogy_tree().action_cursor_up()
+            return
         self._get_active_list().action_cursor_up()
 
     @on(Button.Pressed, "#cg-close-btn")
@@ -648,3 +879,25 @@ class CitationGraphScreen(ModalBase[str | None]):
         """Handle the drill-down button press by invoking the async drill-down action."""
         # Button click needs to invoke the async action; use app's tracked task
         cast(TaskTrackingApp, self.app)._track_task(self.action_drill_down())
+
+    @on(Button.Pressed, "#cg-mode-graph")
+    def on_mode_graph_pressed(self) -> None:
+        """Handle the Graph mode button."""
+        self.action_show_graph()
+
+    @on(Button.Pressed, "#cg-mode-ancestors")
+    def on_mode_ancestors_pressed(self) -> None:
+        """Handle the Ancestors mode button."""
+        cast(TaskTrackingApp, self.app)._track_task(self.action_show_ancestors())
+
+    @on(Button.Pressed, "#cg-mode-descendants")
+    def on_mode_descendants_pressed(self) -> None:
+        """Handle the Descendants mode button."""
+        cast(TaskTrackingApp, self.app)._track_task(self.action_show_descendants())
+
+    @on(Tree.NodeSelected, "#genealogy-tree")
+    def on_genealogy_node_selected(self, event: Tree.NodeSelected) -> None:
+        """Handle click/Enter selection in the genealogy tree."""
+        data = event.node.data
+        node = data if isinstance(data, GenealogyNode) else None
+        self._activate_genealogy_node(node)

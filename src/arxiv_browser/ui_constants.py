@@ -142,14 +142,18 @@ VerticalScroll {
 #
 # Standard (~15-20 keys) - prominent in help overlay.
 #   a  select all      u  clear selection  n  notes       t  tags
+#   T  quick triage
 #   c  copy            d  download         P  PDF         F  preview PDF
+#   I  preview figure
 #   v  detail mode     w  watch filter     W  watch list  A  API search
-#   1-9  bookmarks     Ctrl+b  add bookmark
+#   y  read aloud      1-9  bookmarks      Ctrl+b  add bookmark
 #
 # Power (remaining) - discoverable via command palette (Ctrl+p).
 #   m/'  marks          R  similar          G  citation graph
 #   V    versions       e  S2 fetch         Ctrl+s  AI summary
-#   C    chat           L  relevance        Ctrl+g  auto-tag
+#   C    chat           Ctrl+v compare      Ctrl+p  debate/remix
+#   L    relevance
+#   Ctrl+g  auto-tag
 #   Ctrl+t  theme       Ctrl+d  sections    Ctrl+k  collections
 #   Ctrl+h  HF toggle   Ctrl+e  S2 toggle   Ctrl+l  interests
 #   Ctrl+Shift+b  remove bookmark
@@ -169,6 +173,7 @@ APP_BINDINGS: list[BindingType] = [
     Binding("o", "open_url", "Open in Browser", show=False),
     Binding("P", "open_pdf", "Open PDF", show=False),
     Binding("F", "preview_pdf", "Preview PDF", show=False),
+    Binding("I", "preview_figure", "Preview Figure", show=False),
     Binding("c", "copy_selected", "Copy", show=False),
     Binding("s", "cycle_sort", "Sort", show=False),
     Binding("tab", "toggle_focus_pane", "Focus Details", show=False, priority=True),
@@ -182,6 +187,7 @@ APP_BINDINGS: list[BindingType] = [
     Binding("x", "toggle_star", "Star", show=False),
     Binding("n", "edit_notes", "Notes", show=False),
     Binding("t", "edit_tags", "Tags", show=False),
+    Binding("T", "quick_triage", "Quick Triage", show=False),
     # Watch list
     Binding("w", "toggle_watch_filter", "Watch", show=False),
     Binding("W", "manage_watch_list", "Watch List", show=False),
@@ -200,6 +206,7 @@ APP_BINDINGS: list[BindingType] = [
     # Abstract preview
     Binding("p", "toggle_preview", "Preview", show=False),
     Binding("v", "toggle_detail_mode", "Detail Mode", show=False),
+    Binding("y", "read_abstract_aloud", "Read Abstract", show=False),
     # Vim-style marks
     Binding("m", "start_mark", "Mark", show=False),
     Binding("apostrophe", "start_goto_mark", "Goto Mark", show=False),
@@ -211,6 +218,7 @@ APP_BINDINGS: list[BindingType] = [
     # LLM summary & chat
     Binding("ctrl+s", "generate_summary", "AI Summary", show=False),
     Binding("C", "chat_with_paper", "Chat", show=False),
+    Binding("ctrl+v", "compare_papers", "Compare Papers", show=False),
     # Semantic Scholar enrichment
     Binding("e", "fetch_s2", "Enrich (S2)", show=False),
     # HuggingFace trending

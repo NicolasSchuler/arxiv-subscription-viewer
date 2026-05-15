@@ -7,6 +7,7 @@ from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Static
 
+from arxiv_browser.figure_preview import FigurePreview
 from arxiv_browser.modals.base import ModalBase
 from arxiv_browser.models import Paper
 from arxiv_browser.pdf_preview import PdfPreviewPage
@@ -90,4 +91,37 @@ class PdfPreviewScreen(ModalBase[None]):
         self.dismiss(None)
 
 
-__all__ = ["PdfPreviewScreen"]
+class FigurePreviewScreen(ModalBase[None]):
+    """Full-screen arXiv HTML figure preview using terminal-safe block rendering."""
+
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+        Binding("q", "close", "Close", show=False),
+    ]
+
+    CSS = PdfPreviewScreen.CSS.replace("PdfPreviewScreen", "FigurePreviewScreen")
+
+    def __init__(self, paper: Paper, preview: FigurePreview) -> None:
+        super().__init__()
+        self._paper = paper
+        self._preview = preview
+
+    def compose(self) -> ComposeResult:
+        """Yield title, rendered figure, caption, and footer."""
+        title = escape_rich_text(truncate_text(self._paper.title, 90))
+        with Vertical(id="pdf-preview-dialog"):
+            yield Static(f"Figure Preview: {title}", id="pdf-preview-title")
+            with VerticalScroll(id="pdf-preview-pages"):
+                yield Static("First HTML figure", classes="pdf-preview-page-title")
+                yield Static(self._preview.markup, classes="pdf-preview-page")
+                if self._preview.caption:
+                    caption = escape_rich_text(truncate_text(self._preview.caption, 240))
+                    yield Static(f"[dim]{caption}[/]", classes="pdf-preview-page")
+            yield Static("[dim]Close: Esc / q[/dim]", id="pdf-preview-footer")
+
+    def action_close(self) -> None:
+        """Close the preview."""
+        self.dismiss(None)
+
+
+__all__ = ["FigurePreviewScreen", "PdfPreviewScreen"]

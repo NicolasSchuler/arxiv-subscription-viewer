@@ -158,6 +158,94 @@ def _config_to_dict(config):
             "docs/config-reference.md missing persisted config key: onboarding_seen",
         ]
 
+    def test_check_paper_metadata_reference_covers_documented_subfields(self):
+        module = _load_check_docs_sync_module()
+
+        models_text = """
+from dataclasses import dataclass
+
+
+@dataclass
+class PaperMetadata:
+    arxiv_id: str
+    notes: str = ""
+    tags: list[str] = None
+    is_read: bool = False
+    starred: bool = False
+    line_annotations: list = None
+"""
+        config_reference_text = """
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `paper_metadata` | `dict` | `{}` | Each entry has `notes`, `tags`, `is_read`, `starred`, and `line_annotations`. |
+"""
+
+        assert module._check_paper_metadata_reference(models_text, config_reference_text) == []
+
+    def test_check_paper_metadata_reference_reports_missing_subfields(self):
+        module = _load_check_docs_sync_module()
+
+        models_text = """
+from dataclasses import dataclass
+
+
+@dataclass
+class PaperMetadata:
+    arxiv_id: str
+    notes: str = ""
+    tags: list[str] = None
+    line_annotations: list = None
+"""
+        config_reference_text = "`paper_metadata` documents `notes` and `tags` only."
+
+        assert module._check_paper_metadata_reference(models_text, config_reference_text) == [
+            "docs/config-reference.md missing paper_metadata subfield: line_annotations"
+        ]
+
+
+class TestCheckSortIndexReference:
+    """Regression tests for sort-index documentation coverage."""
+
+    def test_check_sort_index_reference_passes_when_all_options_are_documented(self):
+        module = _load_check_docs_sync_module()
+
+        models_text = 'SORT_OPTIONS = ["title", "date", "queue"]'
+        config_reference_text = """
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `session.sort_index` | `int` | `0` | Index into sort order cycle: `0`=title, `1`=date, `2`=queue. |
+"""
+
+        assert module._check_sort_index_reference(models_text, config_reference_text) == []
+
+    def test_check_sort_index_reference_reports_missing_or_mismatched_options(self):
+        module = _load_check_docs_sync_module()
+
+        models_text = 'SORT_OPTIONS = ["title", "date", "queue"]'
+        config_reference_text = """
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `session.sort_index` | `int` | `0` | Index into sort order cycle: `0`=title, `1`=queue. |
+"""
+
+        assert module._check_sort_index_reference(models_text, config_reference_text) == [
+            "docs/config-reference.md session.sort_index missing or mismatched: `1`=date, `2`=queue"
+        ]
+
+    def test_check_sort_index_reference_reports_unknown_extra_indexes(self):
+        module = _load_check_docs_sync_module()
+
+        models_text = 'SORT_OPTIONS = ["title"]'
+        config_reference_text = """
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `session.sort_index` | `int` | `0` | Index into sort order cycle: `0`=title, `1`=queue. |
+"""
+
+        assert module._check_sort_index_reference(models_text, config_reference_text) == [
+            "docs/config-reference.md session.sort_index documents unknown indexes: 1"
+        ]
+
 
 class TestCheckDocsIndexNavigation:
     """Regression tests for docs landing-page guide navigation."""

@@ -15,6 +15,8 @@ pre-commit install
 just check
 ```
 
+`just check` runs both configured type checkers: Pyright and Pyrefly.
+
 Use `just quality` before release or when a change touches shared architecture, packaging, security-sensitive IO, or dependency boundaries.
 
 ## Docs map

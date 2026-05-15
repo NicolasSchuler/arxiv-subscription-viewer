@@ -14,7 +14,7 @@ import pytest
 
 from arxiv_browser.export import format_papers_as_csv
 from arxiv_browser.fuzzy import weighted_fuzzy_score
-from arxiv_browser.models import Paper, WatchListEntry
+from arxiv_browser.models import SORT_OPTIONS, Paper, WatchListEntry
 from arxiv_browser.parsing import clean_latex, parse_arxiv_file
 from arxiv_browser.query import paper_matches_watch_entry, sort_papers
 from arxiv_browser.similarity import TfidfIndex, find_similar_papers
@@ -100,8 +100,7 @@ class TestBenchmarks:
 
     def test_sort_all_keys(self, papers_500: list[Paper]) -> None:
         """Sorting 500 papers by each sort key should be fast."""
-        sort_keys = ["title", "date", "arxiv_id", "citations", "trending", "relevance"]
-        for key in sort_keys:
+        for key in SORT_OPTIONS:
             _assert_within(
                 lambda k=key: sort_papers(papers_500[:], k),
                 0.05,

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import time
 from collections.abc import Awaitable, Callable
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+from typing import Literal
 
 import httpx
 
@@ -161,6 +162,90 @@ def fetch_latest_day_digest(
     return papers
 
 
+def fetch_recent_digest(
+    *,
+    request: ArxivSearchRequest,
+    period: Literal["daily", "weekly"],
+    max_results: int,
+    fetch_page_fn: Callable[..., list[Paper]] = fetch_page_sync,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    min_interval_seconds: float = ARXIV_API_MIN_INTERVAL_SECONDS,
+) -> list[Paper]:
+    """Fetch recent arXiv papers for digest generation.
+
+    ``daily`` matches the existing latest-day digest behavior. ``weekly``
+    collects papers from the seven calendar days ending at the newest matching
+    submitted day, preserving API order and de-duplicating IDs across pages.
+    """
+    if period == "daily":
+        return fetch_latest_day_digest(
+            request=request,
+            max_results=max_results,
+            fetch_page_fn=fetch_page_fn,
+            sleep_fn=sleep_fn,
+            min_interval_seconds=min_interval_seconds,
+        )
+    if period != "weekly":
+        raise ValueError(f"Unsupported digest period: {period}")
+    return _fetch_weekly_digest(
+        request=request,
+        max_results=max_results,
+        fetch_page_fn=fetch_page_fn,
+        sleep_fn=sleep_fn,
+        min_interval_seconds=min_interval_seconds,
+    )
+
+
+def _fetch_weekly_digest(
+    *,
+    request: ArxivSearchRequest,
+    max_results: int,
+    fetch_page_fn: Callable[..., list[Paper]],
+    sleep_fn: Callable[[float], None],
+    min_interval_seconds: float,
+) -> list[Paper]:
+    start = 0
+    newest_day: date | None = None
+    window_start: date | None = None
+    papers: list[Paper] = []
+    seen_ids: set[str] = set()
+
+    while True:
+        page = fetch_page_fn(
+            request=request,
+            start=start,
+            max_results=max_results,
+            timeout_seconds=ARXIV_API_TIMEOUT,
+            user_agent=ARXIV_API_USER_AGENT,
+        )
+        if not page:
+            break
+
+        reached_older_window = False
+        for paper in page:
+            parsed_date = parse_arxiv_date(paper.date)
+            if parsed_date == datetime.min:
+                continue
+            paper_day = parsed_date.date()
+            if newest_day is None:
+                newest_day = paper_day
+                window_start = newest_day - timedelta(days=6)
+            if window_start is not None and paper_day < window_start:
+                reached_older_window = True
+                break
+            if paper.arxiv_id not in seen_ids:
+                papers.append(paper)
+                seen_ids.add(paper.arxiv_id)
+
+        if reached_older_window or len(page) < max_results:
+            break
+
+        start += max_results
+        sleep_fn(min_interval_seconds)
+
+    return papers
+
+
 __all__ = [
     "ARXIV_API_MIN_INTERVAL_SECONDS",
     "ARXIV_API_TIMEOUT",
@@ -170,5 +255,6 @@ __all__ = [
     "fetch_latest_day_digest",
     "fetch_page",
     "fetch_page_sync",
+    "fetch_recent_digest",
     "format_query_label",
 ]

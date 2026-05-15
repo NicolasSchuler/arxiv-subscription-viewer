@@ -3,22 +3,39 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import webbrowser
 from collections.abc import Callable
 from datetime import date
+from typing import Any, cast
 
 import httpx
 from textual.css.query import NoMatches
 from textual.widgets.option_list import Option, OptionDoesNotExist
 
 from arxiv_browser.action_messages import build_actionable_error
+from arxiv_browser.actions import triage_model_actions as _triage_model_actions
+from arxiv_browser.authors import paper_matches_tracked_author
 from arxiv_browser.browser.constants import (
     FUZZY_LIMIT,
     FUZZY_SCORE_CUTOFF,
     PDF_DOWNLOAD_TIMEOUT,
     logger,
+)
+from arxiv_browser.embedding_backends import (
+    EmbeddingBackend,
+    EmbeddingBackendError,
+    EmbeddingBackendUnavailable,
+    resolve_embedding_backend,
+)
+from arxiv_browser.embeddings import (
+    SemanticSearchRequest,
+    SemanticSearchResult,
+    is_semantic_search_query,
+    semantic_query_text,
+    semantic_search_papers,
 )
 from arxiv_browser.empty_state import build_list_empty_message
 from arxiv_browser.export import format_paper_as_markdown
@@ -43,6 +60,12 @@ from arxiv_browser.widgets import render_paper_option
 
 class BrowseMixin:
     """Dataset and filter state transitions shared by the main browser app."""
+
+    action_train_triage_model = _triage_model_actions.action_train_triage_model
+    action_clear_triage_model = _triage_model_actions.action_clear_triage_model
+    _load_triage_predictions_for_current_dataset = (
+        _triage_model_actions.load_triage_predictions_for_current_dataset
+    )
 
     def _capture_local_browse_snapshot(self) -> LocalBrowseSnapshot | None:
         """Capture the local-library view before switching into API search mode.
@@ -102,6 +125,7 @@ class BrowseMixin:
         self.sub_title = snapshot.sub_title
         # Recompute watch matches for the restored local dataset
         self._compute_watched_papers()
+        self._load_triage_predictions_for_current_dataset(refresh=False)
         try:
             self._get_search_input_widget().value = snapshot.search_query
         except NoMatches:
@@ -190,6 +214,159 @@ class BrowseMixin:
         self._match_scores = {p.arxiv_id: s for p, s in top_papers}
         return [p for p, _ in top_papers]
 
+    def _cancel_semantic_search_task(self) -> None:
+        """Cancel any in-flight semantic search for the current dataset."""
+        task = getattr(self, "_semantic_search_task", None)
+        try:
+            current_task = asyncio.current_task()
+        except RuntimeError:
+            current_task = None
+        if task is not None and task is current_task:
+            self._semantic_search_task = None
+            return
+        if task is not None and not task.done():
+            task.cancel()
+        self._semantic_search_task = None
+
+    def _apply_semantic_filter(self, query: str) -> None:
+        """Apply explicit semantic search mode without blocking the UI thread."""
+        semantic_text = semantic_query_text(query)
+        self._pending_query = query
+        self._applied_query = query
+        self._match_scores.clear()
+        _HIGHLIGHT_PATTERN_CACHE.clear()
+        self._highlight_terms = {"title": [], "author": [], "abstract": []}
+        self._cancel_semantic_search_task()
+
+        if not semantic_text:
+            self.filtered_papers = apply_watch_filter(
+                self.all_papers.copy(),
+                getattr(self, "_watched_paper_ids", set()),
+                bool(getattr(self, "_watch_filter_active", False)),
+            )
+            self._sort_papers()
+            self._refresh_filter_ui(query)
+            return
+
+        self.filtered_papers = apply_watch_filter(
+            self.all_papers.copy(),
+            getattr(self, "_watched_paper_ids", set()),
+            bool(getattr(self, "_watch_filter_active", False)),
+        )
+        self._rebuild_visible_index()
+        self._refresh_filter_ui(query)
+
+        epoch = self._capture_dataset_epoch()
+        papers_snapshot = list(self.all_papers)
+        self._semantic_search_task = self._track_dataset_task(
+            self._run_semantic_search_async(query, semantic_text, epoch, papers_snapshot)
+        )
+
+    async def _run_semantic_search_async(
+        self,
+        original_query: str,
+        semantic_text: str,
+        epoch: int,
+        papers_snapshot: list[Paper],
+    ) -> None:
+        """Run semantic search in the background and publish only fresh results."""
+        try:
+            backend = await self._get_semantic_backend_async()
+            config = cast(Any, self)._config
+            results = await semantic_search_papers(
+                SemanticSearchRequest(
+                    db_path=self._cache_db_path,
+                    papers=papers_snapshot,
+                    query=semantic_text,
+                    backend=backend,
+                    top_k=max(1, min(500, getattr(config, "semantic_search_top_k", 100))),
+                    min_score_percent=max(
+                        0, min(100, getattr(config, "semantic_search_min_score", 15))
+                    ),
+                )
+            )
+        except asyncio.CancelledError:
+            raise
+        except (
+            EmbeddingBackendUnavailable,
+            EmbeddingBackendError,
+            httpx.HTTPError,
+            OSError,
+            RuntimeError,
+            ValueError,
+        ) as exc:
+            logger.warning("Semantic search failed; falling back to fuzzy search", exc_info=True)
+            if self._semantic_search_is_current(original_query, epoch):
+                self._fallback_from_semantic_search(semantic_text, exc)
+            return
+        finally:
+            current_task = asyncio.current_task()
+            if getattr(self, "_semantic_search_task", None) is current_task:
+                self._semantic_search_task = None
+
+        if not self._semantic_search_is_current(original_query, epoch):
+            return
+        self._apply_semantic_results(original_query, results)
+
+    async def _get_semantic_backend_async(self) -> EmbeddingBackend:
+        """Resolve and cache the configured semantic-search backend lazily."""
+        cache_key = self._semantic_backend_cache_key()
+        backend = getattr(self, "_semantic_backend", None)
+        if backend is not None and getattr(self, "_semantic_backend_key", None) == cache_key:
+            return cast(EmbeddingBackend, backend)
+        backend = await asyncio.to_thread(resolve_embedding_backend, cast(Any, self)._config)
+        self._semantic_backend = backend
+        self._semantic_backend_key = cache_key
+        return backend
+
+    def _semantic_backend_cache_key(self) -> tuple[str, str, str]:
+        """Return config fields that affect embedding backend construction."""
+        config = cast(Any, self)._config
+        return (
+            getattr(config, "semantic_search_backend", "auto"),
+            getattr(config, "semantic_search_model", ""),
+            getattr(config, "semantic_search_api_base_url", ""),
+        )
+
+    def _semantic_search_is_current(self, original_query: str, epoch: int) -> bool:
+        """Return whether semantic-search results still target the live view."""
+        return self._is_current_dataset_epoch(epoch) and self._get_active_query() == original_query
+
+    def _apply_semantic_results(
+        self,
+        query: str,
+        results: list[SemanticSearchResult],
+    ) -> None:
+        """Publish ranked semantic-search results to the visible paper list."""
+        self.filtered_papers = [result.paper for result in results]
+        self._match_scores = {result.paper.arxiv_id: result.score for result in results}
+        self.filtered_papers = apply_watch_filter(
+            self.filtered_papers,
+            getattr(self, "_watched_paper_ids", set()),
+            bool(getattr(self, "_watch_filter_active", False)),
+        )
+        self._rebuild_visible_index()
+        self._refresh_filter_ui(query)
+
+    def _fallback_from_semantic_search(self, semantic_text: str, exc: Exception) -> None:
+        """Notify once and run the current fuzzy search over the unprefixed text."""
+        if not getattr(self, "_semantic_fallback_notified", False):
+            self._semantic_fallback_notified = True
+            self.notify(
+                "Semantic search unavailable; using fuzzy search. "
+                "Install semantic-fastembed, sentence-transformers, or configure HTTP embeddings.",
+                title="Search",
+                severity="warning",
+            )
+        logger.debug("Semantic fallback reason: %s", exc)
+        self._apply_filter(semantic_text)
+
+    def _refresh_filter_ui(self, query: str) -> None:
+        """Refresh UI surfaces after a filter result set changes."""
+        self._get_ui_refresh_coordinator().apply_filter_refresh(query)
+        self._update_subtitle()
+        self._track_task(self._update_bookmark_bar())
+
     def _apply_filter(self, query: str) -> None:
         """Apply the current query and refresh all dependent dataset UI state.
         Query execution runs through the shared query engine, then intersects
@@ -201,6 +378,10 @@ class BrowseMixin:
         """
         perf_start = time.perf_counter() if logger.isEnabledFor(logging.DEBUG) else None
         query = query.strip()
+        if is_semantic_search_query(query):
+            self._apply_semantic_filter(query)
+            return
+        self._cancel_semantic_search_task()
         # Keep status/empty-state context synchronized with the applied filter.
         self._pending_query = query
         self._applied_query = query
@@ -219,9 +400,7 @@ class BrowseMixin:
         )
         # Apply current sort order and refresh UI
         self._sort_papers()
-        self._get_ui_refresh_coordinator().apply_filter_refresh(query)
-        self._update_subtitle()
-        self._track_task(self._update_bookmark_bar())
+        self._refresh_filter_ui(query)
         logger.debug(
             "Filter applied: query=%r, matched=%d/%d papers",
             query,
@@ -260,6 +439,8 @@ class BrowseMixin:
             s2_cache=self._s2_cache,
             hf_cache=self._hf_cache,
             relevance_cache=self._relevance_scores,
+            watched_paper_ids=self._watched_paper_ids,
+            triage_predictions=getattr(self, "_triage_predictions", {}),
         )
         self._rebuild_visible_index()
 
@@ -426,6 +607,12 @@ class BrowseMixin:
             )
             for aid in self.selected_ids
         )
+        if attr == "is_read" and target:
+            read_count = sum(
+                not self._config.paper_metadata.get(aid, PaperMetadata(arxiv_id=aid)).is_read
+                for aid in self.selected_ids
+            )
+            self._record_read_velocity_events(read_count)
         self._apply_to_selected(
             lambda aid: setattr(self._get_or_create_metadata(aid), attr, target)
         )
@@ -484,9 +671,13 @@ class BrowseMixin:
         enabling O(1) lookup during display.
         """
         self._watched_paper_ids.clear()
-        if not self._config.watch_list:
+        tracked_authors = getattr(self._config, "tracked_authors", [])
+        if not self._config.watch_list and not tracked_authors:
             return
         for paper in self.all_papers:
+            if paper_matches_tracked_author(paper, tracked_authors):
+                self._watched_paper_ids.add(paper.arxiv_id)
+                continue
             for entry in self._config.watch_list:
                 if paper_matches_watch_entry(paper, entry):
                     self._watched_paper_ids.add(paper.arxiv_id)
@@ -639,12 +830,18 @@ class BrowseMixin:
         self._relevance_scores.clear()
         self._relevance_scoring_active = False
         self._scoring_progress = None
+        if not hasattr(self, "_triage_predictions"):
+            self._triage_predictions = {}
+        self._triage_predictions.clear()
+        self._triage_model_info = None
+        self._triage_training_active = False
         self._auto_tag_active = False
         self._auto_tag_progress = None
         self._cancel_batch_requested = False
         self._tfidf_index = None
         self._tfidf_corpus_key = None
         self._pending_similarity_paper_id = None
+        self._cancel_semantic_search_task()
         if self._tfidf_build_task is not None and not self._tfidf_build_task.done():
             self._tfidf_build_task.cancel()
         self._tfidf_build_task = None
@@ -682,6 +879,7 @@ class BrowseMixin:
         self.selected_ids.clear()
         # Recompute watched papers for new paper set
         self._compute_watched_papers()
+        self._load_triage_predictions_for_current_dataset(refresh=False)
         self._notify_watch_list_matches()
         self._show_daily_digest()
         # Apply current filter and sort

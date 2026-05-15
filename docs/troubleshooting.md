@@ -87,9 +87,46 @@ An empty search page is a different problem from missing local history files.
 
 ---
 
+## Digest CLI Issues
+
+**Symptom:** `arxiv-viewer digest` prints a digest but some sections are missing.
+
+That usually means the optional data source was unavailable:
+
+- Watch-list sections require configured `watch_list` entries.
+- High-relevance sections require cached scores, or `research_interests` plus a configured LLM provider.
+- Hugging Face sections require matching Daily Papers data. Use `--include-hf` to fetch even when `hf_enabled` is false.
+- Version sections check starred papers only. Use `x` in the TUI to star papers before expecting version-update tracking.
+
+**Untrusted custom LLM command:**
+
+Fresh digest relevance scoring cannot show the TUI trust prompt. If `llm_command` is custom and has not already been approved, the digest uses cached scores only and warns on stderr. Open the TUI and run a relevance action once, or use `--cached-relevance-only` for predictable cron runs.
+
+**No matching papers:**
+
+An empty but successful digest exits `0` and contains `No matching papers.`. For live mode, check `--query`, `--field`, and `--category`. For file mode, confirm the input parses with:
+
+```bash
+arxiv-viewer digest --input history/YYYY-MM-DD.txt
+```
+
+**Warnings in cron mail:**
+
+Digest Markdown goes to stdout and warnings go to stderr. Redirect them independently:
+
+```bash
+arxiv-viewer digest --category cs.AI --output digest.md 2>>digest-warnings.log
+```
+
+**Output write failure:**
+
+If `--output` points at a directory, unwritable path, or invalid parent location, the command exits `1`. Check the parent directory and permissions.
+
+---
+
 ## LLM Not Working
 
-**Symptom:** `Ctrl+s` (summary), `L` (relevance), `Ctrl+g` (auto-tag), or `C` (chat) does nothing or shows an error.
+**Symptom:** `Ctrl+s` (summary), `Ctrl+v` then `g` (AI comparison), `L` (relevance), `Ctrl+g` (auto-tag), or `C` (chat) does nothing or shows an error.
 
 **No preset configured:**
 
@@ -244,6 +281,39 @@ rm ~/.config/arxiv-browser/huggingface.db
 
 ---
 
+## Smart Reading Queue Looks Like Date Sort
+
+**Symptom:** `sort:queue` is active, but papers appear mostly ordered by recency or watch-list matches.
+
+Queue mode uses the signals that are currently available. Until you run relevance scoring (`L`), enable HuggingFace (`Ctrl+h`), or enrich papers with Semantic Scholar (`Ctrl+e` / `e`), the ranking is mostly recency plus watch-list matches. Missing enrichment is expected to contribute zero rather than blocking the queue.
+
+---
+
+## Semantic Search Falls Back to Fuzzy
+
+**Symptom:** A `~` query returns keyword-like fuzzy results or shows a semantic-search warning.
+
+Semantic search is optional. Install the lightweight backend:
+
+```bash
+pip install "arxiv-subscription-viewer[semantic-fastembed]"
+```
+
+For Hugging Face/Qwen models, install `sentence-transformers` separately and configure:
+
+```json
+{
+  "semantic_search_backend": "sentence-transformers",
+  "semantic_search_model": "Qwen/Qwen3-Embedding-0.6B"
+}
+```
+
+For a local embeddings sidecar, set `semantic_search_backend` to `"http"` and configure `semantic_search_api_base_url`.
+
+Embeddings are cached in `cache.db` in the `semantic_embeddings` table. Delete `cache.db` only if you intentionally want to clear all local caches.
+
+---
+
 ## Export Failures
 
 **Symptom:** BibTeX, RIS, CSV, or Markdown export fails or produces no file.
@@ -335,6 +405,32 @@ Lower the page limit:
 ```json
 { "pdf_preview_max_pages": 1 }
 ```
+
+---
+
+## HTML Figure Preview Issues
+
+**Symptom:** Pressing `I` does not show a figure preview.
+
+**arXiv HTML unavailable:**
+
+Not every paper has a rendered HTML page. The app requests `https://arxiv.org/html/{arxiv_id}`; if arXiv returns `404` or another non-OK status, the preview shows a warning and leaves the paper unchanged.
+
+**No figure found:**
+
+The preview intentionally selects the first LaTeXML paper figure (`<figure class="ltx_figure"><img ...>`) so page chrome, logos, and unrelated header images are ignored. Papers with no matching figure show a warning.
+
+**Image fetch or type failure:**
+
+If the figure URL is unreachable, the content type is unsupported, or the bytes are not a readable image, the cache entry is not used and the app reports the failure in the TUI.
+
+**Stale or corrupt cache:**
+
+Figure previews are cached in `.figure-cache/` next to the PDF download/cache location. Corrupt cached images are replaced automatically on the next successful preview. To force a refresh, delete that paper's cached figure PNG from `.figure-cache/`.
+
+**Terminal rendering limitations:**
+
+The preview uses the same terminal-safe renderer as PDF preview. Unicode half-block rendering gives the best result in modern terminals; `--ascii` and no-color modes fall back to lower-fidelity safe characters.
 
 ---
 
@@ -439,4 +535,4 @@ rm -rf ~/Library/Application\ Support/arxiv-browser/
 rm -rf ~/.config/arxiv-browser/
 ```
 
-This removes config, LLM summary cache (`summaries.db`), relevance scores (`relevance.db`), S2 cache (`semantic_scholar.db`), and HF cache (`huggingface.db`).
+This removes config, LLM summary cache (`summaries.db`), relevance scores (`relevance.db`), S2 cache (`semantic_scholar.db`), HF cache (`huggingface.db`), and semantic embeddings in unified `cache.db`.

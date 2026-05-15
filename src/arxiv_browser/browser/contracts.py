@@ -32,6 +32,7 @@ class _PaletteAppState:
     show_abstract_preview: bool
     detail_mode: str
     active_query: str
+    has_history_files: bool
     has_history_navigation: bool
     watch_list: list[WatchListEntry]
     has_marks: bool
@@ -39,6 +40,7 @@ class _PaletteAppState:
     llm_configured: bool
     has_visible_papers: bool
     has_selection: bool
+    selected_count: int
     has_current_paper: bool
     has_target_papers: bool
     s2_active: bool
@@ -56,6 +58,91 @@ _PALETTE_BLOCKED_COPY = {
     "Semantic Scholar enabled": "Enable Semantic Scholar first",
     "S2 data": "Fetch S2 data for this paper first",
     "LLM configuration": "Configure an LLM command first",
+    "2-3 selected papers": "Select exactly 2 or 3 papers first",
+}
+
+TARGET_PAPER_PALETTE_ACTIONS = frozenset(
+    {
+        "add_to_collection",
+        "author_profile",
+        "copy_selected",
+        "download_pdf",
+        "edit_notes",
+        "edit_tags",
+        "export_menu",
+        "open_pdf",
+        "open_url",
+        "preview_figure",
+        "preview_pdf",
+        "read_abstract_aloud",
+        "show_similar",
+        "start_mark",
+        "toggle_read",
+        "schedule_review",
+        "mark_reviewed",
+        "clear_review",
+        "toggle_star",
+        "track_author",
+    }
+)
+
+COMMAND_PALETTE_GROUPS: dict[str, str] = {
+    "toggle_search": "Core",
+    "show_search_syntax": "Core",
+    "arxiv_search": "Research",
+    "prev_date": "Advanced",
+    "next_date": "Advanced",
+    "open_url": "Core",
+    "open_pdf": "Core",
+    "preview_figure": "Research",
+    "read_abstract_aloud": "Research",
+    "download_pdf": "Core",
+    "copy_selected": "Core",
+    "toggle_read": "Organize",
+    "toggle_star": "Organize",
+    "quick_triage": "Organize",
+    "train_triage_model": "Organize",
+    "clear_triage_model": "Organize",
+    "edit_notes": "Organize",
+    "edit_tags": "Organize",
+    "select_all": "Core",
+    "clear_selection": "Core",
+    "toggle_select": "Core",
+    "cycle_sort": "Core",
+    "toggle_watch_filter": "Organize",
+    "manage_watch_list": "Organize",
+    "toggle_preview": "Advanced",
+    "export_menu": "Core",
+    "export_metadata": "Advanced",
+    "import_metadata": "Advanced",
+    "fetch_s2": "Research",
+    "ctrl_e_dispatch": "Research",
+    "toggle_hf": "Research",
+    "refresh_conference_deadlines": "Research",
+    "check_versions": "Research",
+    "citation_graph": "Research",
+    "trend_radar": "Research",
+    "generate_summary": "Research",
+    "chat_with_paper": "Research",
+    "debate_paper": "Research",
+    "compare_papers": "Research",
+    "remix_papers": "Research",
+    "score_relevance": "Research",
+    "edit_interests": "Research",
+    "auto_tag": "Research",
+    "show_similar": "Research",
+    "serendipity": "Research",
+    "author_profile": "Research",
+    "track_author": "Research",
+    "add_bookmark": "Organize",
+    "collections": "Organize",
+    "add_to_collection": "Organize",
+    "toggle_detail_mode": "Advanced",
+    "cycle_theme": "Advanced",
+    "toggle_sections": "Advanced",
+    "show_help": "Core",
+    "start_mark": "Advanced",
+    "start_goto_mark": "Advanced",
 }
 
 
@@ -115,6 +202,18 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
     ("Open in Browser", "Open selected paper(s) in web browser", "o", "open_url"),
     ("Open PDF", "Open selected paper(s) as PDF", "P", "open_pdf"),
     ("Preview PDF", "Render a terminal preview of the current paper PDF", "F", "preview_pdf"),
+    (
+        "Preview First Figure",
+        "Render the first arXiv HTML figure in the terminal",
+        "I",
+        "preview_figure",
+    ),
+    (
+        "Read Abstract Aloud",
+        "Play the current paper title and abstract through system TTS",
+        "y",
+        "read_abstract_aloud",
+    ),
     ("Download PDF", "Download PDF(s) to local folder", "d", "download_pdf"),
     ("Copy to Clipboard", "Copy paper info to clipboard", "c", "copy_selected"),
     ("Toggle Read", "Mark paper(s) as read/unread", "r", "toggle_read"),
@@ -124,6 +223,48 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
         "Ctrl+r",
         "mark_visible_read",
     ),
+    (
+        "Quick Triage",
+        "Review visible unread papers one at a time",
+        "T",
+        "quick_triage",
+    ),
+    (
+        "Train Triage Model",
+        "Learn likely-star and likely-skip buckets from saved decisions",
+        "",
+        "train_triage_model",
+    ),
+    (
+        "Clear Triage Model",
+        "Delete the local ML triage model and hide prediction badges",
+        "",
+        "clear_triage_model",
+    ),
+    (
+        "Schedule Review",
+        "Add current or selected papers to the spaced-review queue",
+        "",
+        "schedule_review",
+    ),
+    (
+        "Mark Reviewed",
+        "Advance current or selected papers to the next review interval",
+        "",
+        "mark_reviewed",
+    ),
+    (
+        "Clear Review",
+        "Remove current or selected papers from the spaced-review queue",
+        "",
+        "clear_review",
+    ),
+    (
+        "Show Due Reviews",
+        "Filter the list to papers whose next review is due",
+        "",
+        "show_due_reviews",
+    ),
     ("Toggle Star", "Star/unstar paper(s)", "x", "toggle_star"),
     ("Edit Notes", "Add or edit notes for current paper", "n", "edit_notes"),
     ("Edit Tags", "Add or edit tags (bulk when selected)", "t", "edit_tags"),
@@ -132,7 +273,7 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
     ("Toggle Selection", "Toggle selection on current paper", "Space", "toggle_select"),
     (
         "Cycle Sort",
-        "Cycle sort: title/date/arxiv_id/citations/trending/relevance",
+        "Cycle sort: title/date/arxiv_id/citations/trending/relevance/queue/triage",
         "s",
         "cycle_sort",
     ),
@@ -165,6 +306,12 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
         "Ctrl+h",
         "toggle_hf",
     ),
+    (
+        "Refresh Conference Deadlines",
+        "Import upcoming submission deadlines from the configured AI Deadlines source",
+        "",
+        "refresh_conference_deadlines",
+    ),
     ("Check Versions", "Check starred papers for arXiv updates", "V", "check_versions"),
     (
         "Citation Graph",
@@ -185,6 +332,24 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
         "chat_with_paper",
     ),
     (
+        "Debate Paper",
+        "Generate an advocate-vs-Reviewer-2 debate for the current paper",
+        "",
+        "debate_paper",
+    ),
+    (
+        "Compare Papers",
+        "Side-by-side comparison for 2-3 selected papers",
+        "Ctrl+v",
+        "compare_papers",
+    ),
+    (
+        "Paper Remix",
+        "Generate one research idea from 2-3 selected papers",
+        "",
+        "remix_papers",
+    ),
+    (
         "Score Relevance",
         "LLM-score loaded papers by research interests (requires LLM configuration)",
         "L",
@@ -202,6 +367,30 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
         "Find similar papers locally or via Semantic Scholar when available",
         "R",
         "show_similar",
+    ),
+    (
+        "Surprise Me",
+        "Jump to an unread paper far from your current interests",
+        "",
+        "serendipity",
+    ),
+    (
+        "Trend Radar",
+        "Show category, author, and topic trends across local history",
+        "",
+        "trend_radar",
+    ),
+    (
+        "Author Profile",
+        "Show this author's local papers, co-authors, and cached citations",
+        "",
+        "author_profile",
+    ),
+    (
+        "Track Author",
+        "Highlight future papers from an exact author match",
+        "",
+        "track_author",
     ),
     ("Add Bookmark", "Save current search as bookmark", "Ctrl+b", "add_bookmark"),
     ("Collections", "Manage paper reading lists", "Ctrl+k", "collections"),
@@ -226,4 +415,10 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
 ]
 
 
-__all__ = ["COMMAND_PALETTE_COMMANDS", "FOOTER_CONTEXTS", "TaskTrackingApp", "_PaletteAppState"]
+__all__ = [
+    "COMMAND_PALETTE_COMMANDS",
+    "FOOTER_CONTEXTS",
+    "TARGET_PAPER_PALETTE_ACTIONS",
+    "TaskTrackingApp",
+    "_PaletteAppState",
+]

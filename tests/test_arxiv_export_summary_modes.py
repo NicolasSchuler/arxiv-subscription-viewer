@@ -385,7 +385,16 @@ class TestSummaryModes:
     """Tests for SUMMARY_MODES constant and mode templates."""
 
     def test_summary_modes_has_expected_keys(self):
-        expected = {"default", "quick", "tldr", "methods", "results", "comparison"}
+        expected = {
+            "default",
+            "quick",
+            "tldr",
+            "methods",
+            "results",
+            "comparison",
+            "eli5",
+            "phd",
+        }
         assert set(SUMMARY_MODES.keys()) == expected
 
     def test_each_mode_has_description_and_template(self):
@@ -424,6 +433,8 @@ class TestSummaryModeModal:
         assert hasattr(modal, "action_mode_methods")
         assert hasattr(modal, "action_mode_results")
         assert hasattr(modal, "action_mode_comparison")
+        assert hasattr(modal, "action_mode_eli5")
+        assert hasattr(modal, "action_mode_phd")
         assert hasattr(modal, "action_cancel")
 
     def test_modal_bindings(self):
@@ -431,7 +442,7 @@ class TestSummaryModeModal:
 
         modal = SummaryModeModal()
         binding_keys = {b.key for b in modal.BINDINGS}
-        assert {"d", "q", "t", "m", "r", "c", "escape"} <= binding_keys
+        assert {"d", "q", "t", "m", "r", "c", "5", "p", "escape"} <= binding_keys
 
 
 class TestSummaryDbMigration:

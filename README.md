@@ -58,6 +58,9 @@ arxiv-viewer search --query "diffusion transformer" --field title
 # Paginate through results (instead of collecting the newest day)
 arxiv-viewer search --query "attention" --mode page --max-results 100
 
+# Generate a cron-friendly Markdown digest
+arxiv-viewer digest --category cs.AI --period weekly --output digest.md
+
 # Browse from a local history/ archive (see docs/history-mode.md)
 arxiv-viewer browse
 
@@ -111,12 +114,19 @@ If something looks off, run `arxiv-viewer doctor` to check config, history disco
 | | Feature | Key |
 |---|---------|-----|
 | 🔍 | **Fuzzy search** with filters (`cat:cs.AI`, `tag:`, `unread`, `starred`) | `/` |
-| 🤖 | **AI summaries, chat & auto-tag** via any LLM CLI (Claude, Copilot, llm, …) | `Ctrl+s` / `C` / `Ctrl+g` |
+| ⚡ | **Quick triage** — review visible unread papers one at a time | `T` |
+| 📈 | **Trend Radar & author profiles** — local history trends and exact author tracking | `Ctrl+p` |
+| 🤖 | **AI summaries, chat, comparison, paper remix & auto-tag** via any LLM CLI (Claude, Copilot, llm, …) | `Ctrl+s` / `C` / `Ctrl+v` / `Ctrl+p` / `Ctrl+g` |
 | 📊 | **Citation graph** and recommendations via Semantic Scholar | `G` / `R` |
 | 🔥 | **HuggingFace trending** — upvotes, keywords, GitHub links | `Ctrl+h` |
+| 🧭 | **Smart Reading Queue** — priority sort from relevance, watch matches, recency, HF, and S2 signals | `s` |
+| 🧪 | **Local triage model** — sklearn buckets for likely stars, unsure papers, and likely skips | `Ctrl+p` |
+| 📨 | **Markdown digests** — cron-friendly daily/weekly briefs | `arxiv-viewer digest` |
 | 🏷️ | **Tags, notes, stars** — organize your reading | `t` / `n` / `x` |
 | 📁 | **Collections** — curate reading lists | `Ctrl+k` |
 | 📥 | **Export** — BibTeX, Markdown, RIS, CSV, PDF download/preview | `E` / `d` / `F` |
+| 🖼️ | **HTML figure preview** — render the first arXiv HTML figure in-terminal | `I` |
+| 🔊 | **Audio abstract reading** — read the current abstract aloud with system TTS | `y` |
 | 🎯 | **Relevance scoring** — LLM scores papers against your interests | `L` |
 | 📅 | **History mode** — navigate daily email digests with `[` / `]` | |
 | ⌨️ | **Command palette** — quick access to all commands | `Ctrl+p` |
@@ -130,20 +140,22 @@ If something looks off, run `arxiv-viewer doctor` to check config, history disco
 | `A` | Search arXiv API | | `P` | Open PDF |
 | `j` / `k` | Navigate | | `d` | Download PDF |
 | `Space` | Select | | `F` | Preview PDF |
-| `s` | Cycle sort | | `E` | Export menu |
-| `r` | Toggle read | | `c` | Copy to clipboard |
-| `x` | Toggle star | | `Ctrl+s` | AI summary |
-| `n` | Notes | | `C` | Chat with paper |
-| `p` | Abstract preview | | `L` | Relevance score |
-| `t` | Tags | | `Ctrl+p` | Command palette |
-| `V` | Check versions | | `G` | Citation graph |
-| `Ctrl+b` | Save bookmark | | `R` | Recommendations |
-| `m` / `'` | Set / jump to mark | | `1-9` | Jump to bookmark |
-| `Ctrl+k` | Collections | | `w` / `W` | Watch list |
-| `Ctrl+d` | Detail pane sections | | `Ctrl+g` | Auto-tag (LLM) |
-| `v` | Detail mode | | `Ctrl+h` | HuggingFace trending |
-| `Ctrl+r` | Mark visible as read | | `Ctrl+Shift+b` | Remove bookmark |
-| | | | `Ctrl+e` | Toggle S2 / Exit API mode |
+| `s` | Cycle sort | | `I` | Preview first figure |
+| `r` | Toggle read | | `E` | Export menu |
+| `x` | Toggle star | | `c` | Copy to clipboard |
+| `T` | Quick triage | | `Ctrl+s` | AI summary |
+| `n` | Notes | | `Ctrl+k` | Collections |
+| `Ctrl+v` | Compare papers | | `C` | Chat with paper |
+| `p` | Abstract preview | | `y` | Read abstract aloud |
+| `L` | Relevance score | | `t` | Tags |
+| `Ctrl+p` | Command palette | | `V` | Check versions |
+| `Ctrl+g` | Auto-tag (LLM) | | `Ctrl+b` | Save bookmark |
+| `G` | Citation graph | | `m` / `'` | Set / jump to mark |
+| `R` | Recommendations | | `Ctrl+l` | Edit interests |
+| `1-9` | Jump to bookmark | | `Ctrl+d` | Detail pane sections |
+| `w` / `W` | Watch list | | `v` | Detail mode |
+| `Ctrl+e` | Toggle S2 / Exit API mode | | `Ctrl+r` | Mark visible as read |
+| `Ctrl+h` | HuggingFace trending | | `Ctrl+Shift+b` | Remove bookmark |
 | | | | `?` | Help / shortcuts |
 
 ### Marks
@@ -209,7 +221,7 @@ cd arxiv-subscription-viewer
 uv python install 3.13
 uv sync --locked
 pre-commit install
-just check   # docs drift + lint + typecheck + tests
+just check   # docs drift + lint + typechecks + tests
 just quality # full local quality suite
 ```
 

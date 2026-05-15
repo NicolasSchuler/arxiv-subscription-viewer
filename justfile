@@ -21,9 +21,16 @@ format:
     uv run ruff check --fix .
     uv run ruff format .
 
-# Run pyright type checker
+# Run Pyright type checker
 typecheck:
     uv run pyright
+
+# Run Pyrefly type checker
+typecheck-pyrefly:
+    uv run pyrefly check --summarize-errors --summary=none --progress-bar no
+
+# Run all type checkers
+typecheck-all: typecheck typecheck-pyrefly
 
 # Verify docs are aligned with CLI flags, presets, and keybindings
 docs-check:
@@ -78,7 +85,7 @@ deps-audit:
 # ── Composite targets ────────────────────────────────────────────────
 
 # Run all fast checks (docs drift + lint + types + tests)
-check: docs-check lint typecheck test quality-budget
+check: docs-check lint typecheck-all test quality-budget
 
 # Run all checks including quality tools
 quality: check complexity security dead-code deps
@@ -95,8 +102,11 @@ ci:
     @uv run ruff check .
     @uv run ruff format --check .
     @echo ""
-    @echo "=== Type Check ==="
+    @echo "=== Type Check (Pyright) ==="
     @uv run pyright
+    @echo ""
+    @echo "=== Type Check (Pyrefly) ==="
+    @uv run pyrefly check --summarize-errors --summary=none --progress-bar no
     @echo ""
     @echo "=== Tests ==="
     @uv run pytest --cov --cov-branch --cov-fail-under=0 --cov-report=term-missing --cov-report=json
@@ -178,7 +188,10 @@ report:
     echo ""
 
     echo "── Type Check ─────────────────────────────────────────────────"
+    echo "  Pyright:"
     uv run pyright 2>&1 | tail -1
+    echo "  Pyrefly:"
+    uv run pyrefly check --summarize-errors --summary=none --progress-bar no 2>&1 | tail -1
     echo ""
 
     echo "── Security (bandit) ──────────────────────────────────────────"

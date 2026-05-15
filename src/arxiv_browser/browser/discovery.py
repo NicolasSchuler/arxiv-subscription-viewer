@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING, cast
 
 import httpx
 
 from arxiv_browser.action_messages import build_actionable_error, build_actionable_warning
+from arxiv_browser.actions import ui_actions as _ui_actions
 from arxiv_browser.browser.constants import logger
+from arxiv_browser.citation_genealogy import GenealogyRoot
 from arxiv_browser.enrichment import apply_version_updates
 from arxiv_browser.modals.citations import CitationGraphScreen, RecommendationsScreen
 from arxiv_browser.models import Paper
@@ -22,11 +25,26 @@ from arxiv_browser.similarity import (
     find_similar_papers,
 )
 
+if TYPE_CHECKING:
+    from arxiv_browser.browser.core import ArxivBrowser
+
 
 class DiscoveryMixin:
     """Async discovery workflows for versions, similarity, and recommendations."""
 
     VERSION_CHECK_BATCH_SIZE = 40  # IDs per API request (URL length safe)
+
+    def action_trend_radar(self) -> None:
+        """Open local-history trend analytics."""
+        _ui_actions.action_trend_radar(cast("ArxivBrowser", self))
+
+    def action_author_profile(self) -> None:
+        """Open a local profile for one author on the current paper."""
+        _ui_actions.action_author_profile(cast("ArxivBrowser", self))
+
+    def action_track_author(self) -> None:
+        """Track one author from the current paper."""
+        _ui_actions.action_track_author(cast("ArxivBrowser", self))
 
     async def _check_versions_async(self, arxiv_ids: set[str]) -> None:
         """Check starred papers for newer arXiv versions against the live API.
@@ -268,11 +286,19 @@ class DiscoveryMixin:
         self._pending_similarity_paper_id = None
         pending_s2 = getattr(self, "_pending_similarity_s2_available", False)
         self._pending_similarity_s2_available = False
+        pending_serendipity = getattr(self, "_pending_serendipity", False)
+        self._pending_serendipity = False
         if pending_id is None:
+            if pending_serendipity:
+                self.action_serendipity()
+                return
             self.notify("Similarity index ready", title="Similar")
             return
         current_paper = self._get_current_paper()
         if current_paper is None or current_paper.arxiv_id != pending_id:
+            if pending_serendipity:
+                self.action_serendipity()
+                return
             self.notify("Similarity index ready", title="Similar")
             return
         self._show_local_recommendations(current_paper, s2_available=pending_s2)
@@ -375,7 +401,13 @@ class DiscoveryMixin:
             results.append((paper, score))
         return results
 
-    async def _show_citation_graph(self, paper_id: str, title: str) -> None:
+    async def _show_citation_graph(
+        self,
+        paper_id: str,
+        title: str,
+        root_arxiv_id: str = "",
+        root_s2_data: SemanticScholarPaper | None = None,
+    ) -> None:
         """Fetch citation graph data and push the CitationGraphScreen."""
         task_epoch = self._capture_dataset_epoch()
         try:
@@ -393,15 +425,36 @@ class DiscoveryMixin:
                 )
                 return
             local_ids = frozenset(self._papers_by_id.keys())
+            starred_ids = frozenset(
+                arxiv_id
+                for arxiv_id, metadata in self._config.paper_metadata.items()
+                if metadata.starred
+            )
+            screen = CitationGraphScreen(
+                root_title=title,
+                root_paper_id=paper_id,
+                references=refs,
+                citations=cites,
+                fetch_callback=self._fetch_citation_graph,
+                local_arxiv_ids=local_ids,
+            )
+            if hasattr(screen, "configure_genealogy"):
+                resolved_arxiv_id = root_arxiv_id
+                if not resolved_arxiv_id and paper_id.startswith("ARXIV:"):
+                    resolved_arxiv_id = paper_id.removeprefix("ARXIV:")
+                screen.configure_genealogy(
+                    GenealogyRoot(
+                        paper_id=paper_id,
+                        title=title,
+                        arxiv_id=resolved_arxiv_id,
+                        year=root_s2_data.year if root_s2_data else None,
+                        citation_count=root_s2_data.citation_count if root_s2_data else 0,
+                        url=root_s2_data.url if root_s2_data else "",
+                    ),
+                    starred_ids,
+                )
             self.push_screen(
-                CitationGraphScreen(
-                    root_title=title,
-                    root_paper_id=paper_id,
-                    references=refs,
-                    citations=cites,
-                    fetch_callback=self._fetch_citation_graph,
-                    local_arxiv_ids=local_ids,
-                ),
+                screen,
                 self._on_citation_graph_selected,
             )
         except asyncio.CancelledError:

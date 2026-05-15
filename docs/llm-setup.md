@@ -1,6 +1,6 @@
-# 🤖 AI Summary, Chat, Relevance & Auto-Tag
+# 🤖 AI Summary, Chat, Comparison, Relevance & Auto-Tag
 
-Generate paper summaries, chat with papers, score relevance, and auto-suggest tags using either an LLM CLI tool or an OpenAI-compatible HTTP endpoint.
+Generate paper summaries, chat with papers, compare selected papers, score relevance, and auto-suggest tags using either an LLM CLI tool or an OpenAI-compatible HTTP endpoint.
 
 ## Setup
 
@@ -124,12 +124,31 @@ Press `Ctrl+s` on any paper to generate a summary. A mode selector lets you choo
 | `m` | Methods | Methods deep-dive |
 | `r` | Results | Results-focused summary |
 | `c` | Comparison | Related-work comparison |
+| `5` | ELI5 | Jargon-free analogy explanation |
+| `p` | PhD | Explain for a PhD in another field |
 
 Summaries are cached in a local SQLite database and persist across sessions.
+The PhD mode uses `"physics"` as its default comparison field. Set
+`llm_phd_explainer_field` in `config.json` to change it, for example
+`"quantum physics"` or `"economics"`.
 
 ## Paper Chat (`C`)
 
 Press `C` to start an interactive conversation with the current paper. The full paper content is provided as context to the LLM.
+
+## Debate Paper (`Ctrl+p` -> Debate Paper)
+
+Open the command palette with `Ctrl+p` and run **Debate Paper** on the current paper to generate a threaded two-role review: an enthusiastic advocate makes the strongest fair case for the paper, then Reviewer 2 critiques the claims, baselines, evaluation, assumptions, reproducibility, and missing evidence. Debate uses full paper context when available, falls back to the abstract, and does not cache or save the result.
+
+## Paper Comparison (`Ctrl+v`)
+
+Select exactly 2-3 papers with `Space`, then press `Ctrl+v` to open a side-by-side comparison. The local view appears immediately and works without LLM configuration: it aligns each paper's title, authors, date, categories, comments, and abstract.
+
+Inside the comparison modal, press `g` to generate an optional AI comparison. The LLM comparison uses full paper context when available and returns structured sections for methods, results, key differences, and the bottom line. If no `llm_preset` or `llm_command` is configured, the modal stays open and the app shows the usual LLM setup warning.
+
+## Paper Remix (`Ctrl+p` -> Paper Remix)
+
+Select exactly 2-3 papers, open the command palette with `Ctrl+p`, and run **Paper Remix** to generate one concise research direction that combines their approaches. Remix uses titles, authors, categories, abstracts, and your configured `research_interests`; it does not fetch full paper text or save the result.
 
 ## Relevance Scoring (`L`)
 
@@ -144,6 +163,7 @@ Score all loaded papers 1-10 based on your research interests.
 - Press `L` to score all papers
 - Press `Ctrl+l` to edit interests (clears cached scores)
 - Sort by relevance with `s`
+- Smart Reading Queue sort also uses these relevance scores as its strongest signal
 - Score badges: 🟢 green (8-10), 🟡 yellow (5-7), dim (1-4)
 
 ## Auto-Tag (`Ctrl+g`)
@@ -156,6 +176,8 @@ Press `Ctrl+g` to have the LLM suggest tags for the current or selected papers b
 |-----|--------|
 | `Ctrl+s` | Generate AI summary (mode selector) |
 | `C` | Chat with current paper |
+| `Ctrl+v` | Compare 2-3 selected papers locally; press `g` inside for AI comparison |
+| `Ctrl+p` | Open command palette; run Debate Paper or Paper Remix |
 | `L` | Score all papers by relevance |
 | `Ctrl+l` | Edit research interests |
 | `Ctrl+g` | Auto-tag current/selected papers |

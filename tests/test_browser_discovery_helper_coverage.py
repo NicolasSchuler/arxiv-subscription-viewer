@@ -370,6 +370,22 @@ class TestDiscoveryMixinCoverage:
             await app._show_citation_graph(paper.arxiv_id, paper.title)
         assert app.push_screen.call_args.args[0] == "graph-screen"
 
+        app.push_screen.reset_mock()
+        app._config.paper_metadata = {
+            paper.arxiv_id: PaperMetadata(arxiv_id=paper.arxiv_id, starred=True)
+        }
+        app._fetch_citation_graph = AsyncMock(return_value=([citation_entry], []))
+        await app._show_citation_graph(
+            "s2:root",
+            paper.title,
+            root_arxiv_id=paper.arxiv_id,
+            root_s2_data=s2_paper,
+        )
+        screen = app.push_screen.call_args.args[0]
+        assert screen._genealogy_root.paper_id == "s2:root"
+        assert screen._genealogy_root.citation_count == s2_paper.citation_count
+        assert paper.arxiv_id in screen._starred_arxiv_ids
+
         app.notify.reset_mock()
         app._fetch_citation_graph = AsyncMock(side_effect=ValueError("boom"))
         await app._show_citation_graph(paper.arxiv_id, paper.title)

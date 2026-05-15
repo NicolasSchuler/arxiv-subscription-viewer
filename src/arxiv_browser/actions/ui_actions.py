@@ -9,6 +9,7 @@ help overlay, command palette, and paper-collections management.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import httpx
@@ -20,10 +21,17 @@ from arxiv_browser.action_messages import (
     build_actionable_warning,
 )
 from arxiv_browser.actions.constants import RECOVERABLE_ACTION_ERRORS, log_action_failure, logger
+from arxiv_browser.authors import (
+    build_author_profile,
+    dedupe_author_names,
+    normalize_author_name,
+    split_author_names,
+)
 from arxiv_browser.config import save_config
 from arxiv_browser.enrichment import count_hf_matches, get_starred_paper_ids_for_version_check
 from arxiv_browser.modals.collections import CollectionsModal
 from arxiv_browser.modals.common import SectionToggleModal
+from arxiv_browser.modals.discovery import AuthorPickerModal, AuthorProfileModal, TrendRadarModal
 from arxiv_browser.modals.help import HelpScreen
 from arxiv_browser.models import MAX_PAPERS_PER_COLLECTION
 from arxiv_browser.semantic_scholar import (
@@ -37,7 +45,13 @@ from arxiv_browser.semantic_scholar import (
     save_s2_citation_graph,
 )
 from arxiv_browser.semantic_scholar_models import CitationEntry
+from arxiv_browser.similarity import (
+    SerendipityRequest,
+    build_similarity_corpus_key,
+    find_serendipitous_papers,
+)
 from arxiv_browser.themes import THEME_NAMES
+from arxiv_browser.trend_radar import build_trend_report
 
 if TYPE_CHECKING:
     from arxiv_browser.browser.core import ArxivBrowser
@@ -459,6 +473,149 @@ def action_show_similar(app: "ArxivBrowser") -> None:
     app._show_recommendations(paper, "local", s2_available=app._s2_active)
 
 
+def action_serendipity(app: "ArxivBrowser") -> None:
+    """Jump to an intentionally surprising visible paper."""
+    visible_papers = list(getattr(app, "filtered_papers", []))
+    if not visible_papers:
+        app.notify(
+            build_actionable_warning(
+                "No visible papers are available for serendipity",
+                next_step="clear or adjust the filter with /, then try again",
+            ),
+            title="Surprise Me",
+            severity="warning",
+        )
+        return
+
+    corpus_key = build_similarity_corpus_key(app.all_papers)
+    tfidf_index = getattr(app, "_tfidf_index", None)
+    tfidf_corpus_key = getattr(app, "_tfidf_corpus_key", None)
+    if tfidf_index is None or tfidf_corpus_key != corpus_key:
+        app._pending_serendipity = True
+        build_task = getattr(app, "_tfidf_build_task", None)
+        if build_task is not None and not build_task.done():
+            app.notify("Similarity indexing in progress...", title="Surprise Me")
+            return
+        app.notify("Indexing papers for serendipity...", title="Surprise Me")
+        app._tfidf_build_task = app._track_dataset_task(app._build_tfidf_index_async(corpus_key))
+        return
+
+    app._pending_serendipity = False
+    current_paper = app._get_current_paper()
+    current_id = current_paper.arxiv_id if current_paper is not None else None
+    candidates = find_serendipitous_papers(
+        SerendipityRequest(
+            papers=visible_papers,
+            metadata=app._config.paper_metadata,
+            tfidf_index=tfidf_index,
+            current_paper_id=current_id,
+            top_n=1,
+        )
+    )
+    if not candidates:
+        app.notify(
+            build_actionable_warning(
+                "No serendipitous paper could be selected",
+                next_step="load or reveal more papers, then try again",
+            ),
+            title="Surprise Me",
+            severity="warning",
+        )
+        return
+
+    candidate = candidates[0]
+    visible_index = app._resolve_visible_index(candidate.paper.arxiv_id)
+    if visible_index is None:
+        app.notify(
+            build_actionable_warning(
+                "The surprise paper is not in the current filtered view",
+                next_step="clear or adjust the filter with /, then try again",
+            ),
+            title="Surprise Me",
+            severity="warning",
+        )
+        return
+
+    app._get_paper_list_widget().highlighted = visible_index
+    app.notify(candidate.reason, title="Surprise Me")
+
+
+def action_trend_radar(app: "ArxivBrowser") -> None:
+    """Open local-history trend analytics."""
+    history_files = getattr(app, "_history_files", [])
+    if not history_files:
+        app.notify(
+            build_actionable_warning(
+                "Trend Radar needs local history files",
+                next_step="open a history-backed digest directory, then try Trend Radar again",
+            ),
+            title="Trend Radar",
+            severity="warning",
+        )
+        return
+    report = build_trend_report(history_files)
+    app.push_screen(TrendRadarModal(report))
+
+
+def action_author_profile(app: "ArxivBrowser") -> None:
+    """Open a local profile for one author on the current paper."""
+
+    def _show_profile(author: str) -> None:
+        profile = build_author_profile(author, app.all_papers, app._s2_cache)
+        app.push_screen(AuthorProfileModal(profile))
+
+    _with_current_author(app, "Choose Author Profile", _show_profile)
+
+
+def action_track_author(app: "ArxivBrowser") -> None:
+    """Track one author from the current paper using exact author matching."""
+
+    def _track(author: str) -> None:
+        old_authors = list(app._config.tracked_authors)
+        existing = {normalize_author_name(name) for name in old_authors}
+        if normalize_author_name(author) in existing:
+            app.notify(f"Already tracking {author}", title="Authors")
+            return
+        app._config.tracked_authors = dedupe_author_names([*old_authors, author])
+        if not save_config(app._config):
+            app._config.tracked_authors = old_authors
+            app.notify("Failed to save tracked author", title="Authors", severity="error")
+            return
+        app._compute_watched_papers()
+        app._apply_filter(app._get_active_query())
+        app.notify(f"Tracking {author}", title="Authors")
+
+    _with_current_author(app, "Track Author", _track)
+
+
+def _with_current_author(
+    app: "ArxivBrowser",
+    title: str,
+    callback: Callable[[str], None],
+) -> None:
+    paper = app._get_current_paper()
+    if paper is None:
+        app.notify(
+            build_actionable_warning(
+                "No paper is selected",
+                next_step="move with j/k to a paper, then choose the author command again",
+            ),
+            title="Authors",
+            severity="warning",
+        )
+        return
+    authors = split_author_names(paper.authors)
+    if not authors:
+        app.notify("No authors are available for this paper", title="Authors", severity="warning")
+        return
+    if len(authors) == 1:
+        callback(authors[0])
+        return
+    app.push_screen(
+        AuthorPickerModal(authors, title=title), lambda author: callback(author) if author else None
+    )
+
+
 async def _fetch_s2_recommendations_async(
     app: "ArxivBrowser", arxiv_id: str
 ) -> list[SemanticScholarPaper]:
@@ -495,7 +652,14 @@ def action_citation_graph(app: "ArxivBrowser") -> None:
     s2_data = app._s2_cache.get(paper.arxiv_id)
     paper_id = s2_data.s2_paper_id if s2_data else f"ARXIV:{paper.arxiv_id}"
     app.notify("Fetching citation graph...", title="Citations")
-    app._track_dataset_task(app._show_citation_graph(paper_id, paper.title))
+    app._track_dataset_task(
+        app._show_citation_graph(
+            paper_id,
+            paper.title,
+            root_arxiv_id=paper.arxiv_id,
+            root_s2_data=s2_data,
+        )
+    )
 
 
 async def _fetch_citation_graph(

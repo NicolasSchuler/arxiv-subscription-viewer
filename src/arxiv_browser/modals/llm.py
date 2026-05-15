@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Mapping
 from typing import cast
 
 from textual import on
@@ -13,11 +14,11 @@ from textual.css.query import NoMatches
 from textual.widgets import Button, Input, Label, Static, TextArea
 
 from arxiv_browser.app_protocols import TaskTrackingApp
-from arxiv_browser.llm import CHAT_SYSTEM_PROMPT, LLM_COMMAND_TIMEOUT
+from arxiv_browser.llm import CHAT_SYSTEM_PROMPT, LLM_COMMAND_TIMEOUT, PaperDebateResult
 from arxiv_browser.llm_providers import LLMProvider
 from arxiv_browser.modals.base import ModalBase
 from arxiv_browser.models import Paper
-from arxiv_browser.query import escape_rich_text
+from arxiv_browser.query import escape_rich_text, format_summary_as_rich, truncate_text
 from arxiv_browser.themes import theme_colors_for
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,8 @@ class SummaryModeModal(ModalBase[str]):
         Binding("m", "mode_methods", "Methods", show=False),
         Binding("r", "mode_results", "Results", show=False),
         Binding("c", "mode_comparison", "Comparison", show=False),
+        Binding("5", "mode_eli5", "ELI5", show=False),
+        Binding("p", "mode_phd", "PhD", show=False),
     ]
 
     CSS = """
@@ -80,7 +83,9 @@ class SummaryModeModal(ModalBase[str]):
                 f"  [{g}]t[/]  TLDR     [dim]{dash} 1-2 sentence summary[/]\n"
                 f"  [{g}]m[/]  Methods  [dim]{dash} Technical methodology deep-dive[/]\n"
                 f"  [{g}]r[/]  Results  [dim]{dash} Key experimental results with numbers[/]\n"
-                f"  [{g}]c[/]  Compare  [dim]{dash} Comparison with related work[/]",
+                f"  [{g}]c[/]  Compare  [dim]{dash} Comparison with related work[/]\n"
+                f"  [{g}]5[/]  ELI5     [dim]{dash} Jargon-free analogy explanation[/]\n"
+                f"  [{g}]p[/]  PhD      [dim]{dash} Explain for another field[/]",
                 classes="summary-mode-keys",
             )
             yield Static("[dim]Cancel: Esc[/dim]", id="summary-mode-footer")
@@ -112,6 +117,14 @@ class SummaryModeModal(ModalBase[str]):
     def action_mode_comparison(self) -> None:
         """Dismiss with 'comparison' for a related-work comparison."""
         self.dismiss("comparison")
+
+    def action_mode_eli5(self) -> None:
+        """Dismiss with 'eli5' for a jargon-free analogy explanation."""
+        self.dismiss("eli5")
+
+    def action_mode_phd(self) -> None:
+        """Dismiss with 'phd' for a cross-field PhD explanation."""
+        self.dismiss("phd")
 
 
 class ResearchInterestsModal(ModalBase[str]):
@@ -209,6 +222,336 @@ class ResearchInterestsModal(ModalBase[str]):
     def on_cancel_pressed(self) -> None:
         """Handle the Cancel button press by delegating to action_cancel."""
         self.action_cancel()
+
+
+class PaperRemixResultModal(ModalBase[None]):
+    """Read-only modal showing an LLM-generated paper-remix idea."""
+
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+        Binding("q", "close", "Close", show=False),
+    ]
+
+    CSS = """
+    PaperRemixResultModal {
+        align: center middle;
+    }
+
+    #paper-remix-dialog {
+        width: 82%;
+        height: 85%;
+        min-width: 60;
+        min-height: 20;
+        background: $th-background;
+        border: tall $th-accent-alt;
+        padding: 0 2;
+    }
+
+    #paper-remix-title {
+        text-style: bold;
+        color: $th-accent-alt;
+        margin-bottom: 1;
+        height: auto;
+    }
+
+    #paper-remix-sources {
+        color: $th-muted;
+        margin-bottom: 1;
+        height: auto;
+    }
+
+    #paper-remix-body {
+        height: 1fr;
+        background: $th-panel;
+        padding: 1;
+    }
+
+    #paper-remix-help {
+        color: $th-muted;
+        margin-top: 1;
+        height: auto;
+    }
+    """
+
+    def __init__(self, papers: list[Paper], result_text: str) -> None:
+        """Initialize with the papers synthesized and the generated result."""
+        super().__init__()
+        self._papers = papers
+        self._result_text = result_text
+
+    def compose(self) -> ComposeResult:
+        """Yield the paper-remix result dialog."""
+        with Vertical(id="paper-remix-dialog"):
+            yield Static("Paper Remix", id="paper-remix-title")
+            yield Static(self._format_sources(), id="paper-remix-sources", markup=False)
+            with VerticalScroll(id="paper-remix-body"):
+                yield Static(self._result_text, markup=False)
+            yield Static("[dim]Esc/q close[/]", id="paper-remix-help")
+
+    def _format_sources(self) -> str:
+        """Return a compact plain-text source list."""
+        lines = [f"{index}. {paper.title}" for index, paper in enumerate(self._papers, start=1)]
+        return "Sources\n" + "\n".join(lines)
+
+    def action_close(self) -> None:
+        """Close the result modal."""
+        self.dismiss(None)
+
+
+class PaperDebateResultModal(ModalBase[None]):
+    """Read-only modal showing an advocate-vs-Reviewer-2 debate."""
+
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+        Binding("q", "close", "Close", show=False),
+    ]
+
+    CSS = """
+    PaperDebateResultModal {
+        align: center middle;
+    }
+
+    #paper-debate-dialog {
+        width: 82%;
+        height: 85%;
+        min-width: 60;
+        min-height: 20;
+        background: $th-background;
+        border: tall $th-purple;
+        padding: 0 2;
+    }
+
+    #paper-debate-title {
+        text-style: bold;
+        color: $th-purple;
+        margin-bottom: 1;
+        height: auto;
+    }
+
+    #paper-debate-source {
+        color: $th-muted;
+        margin-bottom: 1;
+        height: auto;
+    }
+
+    #paper-debate-body {
+        height: 1fr;
+        background: $th-panel;
+        padding: 1;
+    }
+
+    #paper-debate-help {
+        color: $th-muted;
+        margin-top: 1;
+        height: auto;
+    }
+    """
+
+    def __init__(self, paper: Paper, result: PaperDebateResult) -> None:
+        """Initialize with the source paper and generated debate result."""
+        super().__init__()
+        self._paper = paper
+        self._result = result
+
+    def compose(self) -> ComposeResult:
+        """Yield the paper debate result dialog."""
+        with Vertical(id="paper-debate-dialog"):
+            yield Static("Debate Paper", id="paper-debate-title")
+            yield Static(self._format_source(), id="paper-debate-source", markup=False)
+            with VerticalScroll(id="paper-debate-body"):
+                yield Static(self._format_debate_body(), id="paper-debate-thread")
+            yield Static("[dim]Esc/q close[/]", id="paper-debate-help")
+
+    def _format_source(self) -> str:
+        """Return a compact plain-text source label."""
+        return f"arXiv:{self._paper.arxiv_id} | {self._paper.title}"
+
+    def _format_debate_body(self) -> str:
+        """Return Rich-safe threaded debate markup."""
+        colors = theme_colors_for(self)
+        advocate_color = colors["green"]
+        reviewer_color = colors["pink"]
+        advocate = format_summary_as_rich(self._result.advocate, colors)
+        reviewer = format_summary_as_rich(self._result.reviewer, colors)
+        return (
+            f"[bold {advocate_color}]Advocate[/]\n"
+            f"{advocate}\n\n"
+            f"[bold {reviewer_color}]Reviewer 2[/]\n"
+            f"{reviewer}"
+        )
+
+    def action_close(self) -> None:
+        """Close the result modal."""
+        self.dismiss(None)
+
+
+class PaperComparisonScreen(ModalBase[None]):
+    """Read-only side-by-side comparison view for 2-3 papers."""
+
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+        Binding("q", "close", "Close", show=False),
+        Binding("g", "generate_ai", "AI Compare", show=False),
+    ]
+
+    CSS = """
+    PaperComparisonScreen {
+        align: center middle;
+    }
+
+    #paper-comparison-dialog {
+        width: 92%;
+        height: 90%;
+        min-width: 70;
+        min-height: 24;
+        background: $th-background;
+        border: tall $th-purple;
+        padding: 0 2;
+    }
+
+    #paper-comparison-title {
+        text-style: bold;
+        color: $th-purple;
+        margin-bottom: 1;
+        height: auto;
+    }
+
+    #paper-comparison-columns {
+        height: 2fr;
+        margin-bottom: 1;
+    }
+
+    .paper-comparison-column {
+        width: 1fr;
+        height: 1fr;
+        background: $th-panel;
+        padding: 1;
+        margin-right: 1;
+    }
+
+    #paper-comparison-ai-status {
+        height: auto;
+        color: $th-muted;
+        margin-bottom: 1;
+    }
+
+    #paper-comparison-ai-output {
+        height: 1fr;
+        background: $th-panel;
+        padding: 1;
+    }
+
+    #paper-comparison-help {
+        color: $th-muted;
+        margin-top: 1;
+        height: auto;
+    }
+    """
+
+    def __init__(
+        self,
+        papers: list[Paper],
+        abstracts: Mapping[str, str] | None = None,
+        on_generate_ai: Callable[[PaperComparisonScreen], None] | None = None,
+    ) -> None:
+        """Initialize with papers, local abstract text, and optional AI callback."""
+        super().__init__()
+        self._papers = papers
+        self._abstracts = dict(abstracts or {})
+        self._on_generate_ai = on_generate_ai
+        self._ai_running = False
+
+    @property
+    def ai_running(self) -> bool:
+        """Return whether an AI comparison request is currently in flight."""
+        return self._ai_running
+
+    def compose(self) -> ComposeResult:
+        """Yield the comparison dialog with local columns and an AI result panel."""
+        with Vertical(id="paper-comparison-dialog"):
+            yield Static(f"Compare {len(self._papers)} Papers", id="paper-comparison-title")
+            with Horizontal(id="paper-comparison-columns"):
+                for index, paper in enumerate(self._papers, start=1):
+                    with VerticalScroll(classes="paper-comparison-column"):
+                        yield Static(self._format_paper_column(index, paper))
+            yield Static(
+                "[dim]Press g to generate an optional AI comparison.[/]",
+                id="paper-comparison-ai-status",
+            )
+            with VerticalScroll(id="paper-comparison-ai-output"):
+                yield Static("", id="paper-comparison-ai-text")
+            yield Static("[dim]g AI compare · Esc/q close[/]", id="paper-comparison-help")
+
+    def _format_paper_column(self, index: int, paper: Paper) -> str:
+        """Return Rich-safe metadata and abstract markup for one comparison column."""
+        title = escape_rich_text(truncate_text(paper.title, 120))
+        authors = escape_rich_text(truncate_text(paper.authors, 120))
+        categories = escape_rich_text(paper.categories)
+        comments = escape_rich_text(paper.comments or "None")
+        abstract = escape_rich_text(self._abstract_for(paper))
+        return (
+            f"[bold]{index}. {title}[/]\n"
+            f"[dim]arXiv:[/] {paper.arxiv_id}\n"
+            f"[dim]Date:[/] {escape_rich_text(paper.date)}\n"
+            f"[dim]Categories:[/] {categories}\n"
+            f"[dim]Authors:[/] {authors}\n"
+            f"[dim]Comments:[/] {comments}\n\n"
+            f"[bold]Abstract[/]\n{abstract}"
+        )
+
+    def _abstract_for(self, paper: Paper) -> str:
+        abstract = self._abstracts.get(paper.arxiv_id) or paper.abstract or paper.abstract_raw or ""
+        return abstract.strip() or "(no abstract)"
+
+    def action_generate_ai(self) -> None:
+        """Request optional AI comparison generation through the app callback."""
+        if self._ai_running:
+            self._update_ai_status("[dim]AI comparison already generating...[/]")
+            return
+        if self._on_generate_ai is None:
+            self.set_ai_error("AI comparison unavailable")
+            return
+        self._on_generate_ai(self)
+
+    def set_ai_loading(self) -> None:
+        """Mark the AI panel as loading."""
+        self._ai_running = True
+        self._update_ai_status("[dim]Generating AI comparison...[/]")
+        self._update_ai_output("")
+
+    def set_ai_idle(self, message: str) -> None:
+        """Mark the AI panel idle with an explanatory status."""
+        self._ai_running = False
+        self._update_ai_status(f"[dim]{escape_rich_text(message)}[/]")
+
+    def set_ai_result(self, text: str) -> None:
+        """Render a completed AI comparison."""
+        self._ai_running = False
+        self._update_ai_status("[dim]AI comparison generated.[/]")
+        self._update_ai_output(format_summary_as_rich(text, theme_colors_for(self)))
+
+    def set_ai_error(self, message: str) -> None:
+        """Render an AI comparison error without closing the local comparison."""
+        self._ai_running = False
+        safe = escape_rich_text(message)
+        self._update_ai_status(f"[red]{safe}[/]")
+        self._update_ai_output("")
+
+    def _update_ai_status(self, markup: str) -> None:
+        try:
+            self.query_one("#paper-comparison-ai-status", Static).update(markup)
+        except NoMatches:
+            pass
+
+    def _update_ai_output(self, markup: str) -> None:
+        try:
+            self.query_one("#paper-comparison-ai-text", Static).update(markup)
+        except NoMatches:
+            pass
+
+    def action_close(self) -> None:
+        """Close the comparison modal."""
+        self.dismiss(None)
 
 
 class PaperChatScreen(ModalBase[None]):

@@ -10,10 +10,12 @@ import pytest
 
 import arxiv_browser.config as config_mod
 from arxiv_browser.config import (
+    export_metadata,
     import_metadata,
     load_config,
 )
 from arxiv_browser.models import (
+    LineAnnotation,
     PaperCollection,
     PaperMetadata,
     SearchBookmark,
@@ -73,6 +75,71 @@ def test_import_metadata_merge_mode_preserves_existing_sections() -> None:
     assert {collection.name for collection in config.collections} == {"existing", "incoming"}
 
 
+def test_review_metadata_config_roundtrip_and_sanitization() -> None:
+    data = {
+        "paper_metadata": {
+            "old": {"notes": "legacy"},
+            "valid": {"next_review_date": "2026-05-15", "review_stage": 2},
+            "invalid-date": {"next_review_date": "2026-13-01", "review_stage": 1},
+            "invalid-stage": {"next_review_date": "2026-05-20", "review_stage": "bad"},
+        }
+    }
+
+    config = config_mod._dict_to_config(data)
+
+    assert config.paper_metadata["old"].next_review_date is None
+    assert config.paper_metadata["old"].review_stage is None
+    assert config.paper_metadata["valid"].next_review_date == "2026-05-15"
+    assert config.paper_metadata["valid"].review_stage == 2
+    assert config.paper_metadata["invalid-date"].next_review_date is None
+    assert config.paper_metadata["invalid-date"].review_stage is None
+    assert config.paper_metadata["invalid-stage"].next_review_date == "2026-05-20"
+    assert config.paper_metadata["invalid-stage"].review_stage == 0
+
+    saved = config_mod._config_to_dict(config)
+    assert saved["paper_metadata"]["valid"]["next_review_date"] == "2026-05-15"
+    assert saved["paper_metadata"]["valid"]["review_stage"] == 2
+
+
+def test_review_metadata_export_import_semantics() -> None:
+    config = UserConfig(
+        paper_metadata={
+            "review-only": PaperMetadata(
+                arxiv_id="review-only",
+                next_review_date="2026-05-15",
+                review_stage=0,
+            )
+        }
+    )
+
+    exported = export_metadata(config)
+
+    assert exported["paper_metadata"]["review-only"]["next_review_date"] == "2026-05-15"
+    assert exported["paper_metadata"]["review-only"]["review_stage"] == 0
+
+    fresh = UserConfig()
+    import_metadata(exported, fresh)
+    assert fresh.paper_metadata["review-only"].next_review_date == "2026-05-15"
+    assert fresh.paper_metadata["review-only"].review_stage == 0
+
+    existing = UserConfig(
+        paper_metadata={
+            "review-only": PaperMetadata(
+                arxiv_id="review-only",
+                next_review_date="2026-06-01",
+                review_stage=3,
+            )
+        }
+    )
+    import_metadata(exported, existing, merge=True)
+    assert existing.paper_metadata["review-only"].next_review_date == "2026-06-01"
+    assert existing.paper_metadata["review-only"].review_stage == 3
+
+    import_metadata(exported, existing, merge=False)
+    assert existing.paper_metadata["review-only"].next_review_date == "2026-05-15"
+    assert existing.paper_metadata["review-only"].review_stage == 0
+
+
 @pytest.mark.parametrize("payload", [[], "oops", 123])
 def test_load_config_non_dict_root_returns_default(payload, tmp_path, monkeypatch) -> None:
     config_file = tmp_path / "config.json"
@@ -99,6 +166,11 @@ def test_config_parsing_helpers_cover_validation_and_bounds() -> None:
                         "is_read": True,
                         "starred": False,
                         "last_checked_version": 3,
+                        "line_annotations": [
+                            {"line": 1, "text": "keep"},
+                            {"line": 0, "text": "skip"},
+                            {"line": "2", "text": "skip"},
+                        ],
                     },
                     "paper-2": "skip",
                 },
@@ -136,6 +208,7 @@ def test_config_parsing_helpers_cover_validation_and_bounds() -> None:
                 "theme_name": 123,
                 "llm_command": 123,
                 "llm_prompt_template": "{bad}",
+                "llm_phd_explainer_field": 123,
                 "llm_preset": 123,
                 "allow_llm_shell_fallback": "no",
                 "llm_max_retries": 9,
@@ -163,6 +236,9 @@ def test_config_parsing_helpers_cover_validation_and_bounds() -> None:
     assert config.paper_metadata["paper-1"].notes == ""
     assert config.paper_metadata["paper-1"].tags == ["keep", "more"]
     assert config.paper_metadata["paper-1"].last_checked_version == 3
+    assert config.paper_metadata["paper-1"].line_annotations == [
+        LineAnnotation(line=1, text="keep")
+    ]
     assert [entry.match_type for entry in config.watch_list] == ["author", "author"]
     assert config.bookmarks == [SearchBookmark(name="bookmark", query="q")]
     assert len(config.collections) == 1
@@ -185,6 +261,7 @@ def test_config_parsing_helpers_cover_validation_and_bounds() -> None:
     assert config.theme_name == "monokai"
     assert config.llm_command == ""
     assert config.llm_prompt_template == ""
+    assert config.llm_phd_explainer_field == "physics"
     assert config.llm_preset == ""
     assert config.allow_llm_shell_fallback is True
     assert config.llm_max_retries == 5
@@ -223,6 +300,7 @@ def test_config_parsing_helpers_cover_validation_and_bounds() -> None:
 
 def test_config_roundtrip_includes_pdf_and_streaming_keys() -> None:
     config = UserConfig(
+        llm_phd_explainer_field="quantum physics",
         llm_streaming_enabled=True,
         paper_content_cache_ttl_days=12,
         paper_content_pdf_fallback=False,
@@ -232,10 +310,12 @@ def test_config_roundtrip_includes_pdf_and_streaming_keys() -> None:
     data = config_mod._config_to_dict(config)
     loaded = config_mod._dict_to_config(data)
 
+    assert data["llm_phd_explainer_field"] == "quantum physics"
     assert data["llm_streaming_enabled"] is True
     assert data["paper_content_cache_ttl_days"] == 12
     assert data["paper_content_pdf_fallback"] is False
     assert data["pdf_preview_max_pages"] == 5
+    assert loaded.llm_phd_explainer_field == "quantum physics"
     assert loaded.llm_streaming_enabled is True
     assert loaded.paper_content_cache_ttl_days == 12
     assert loaded.paper_content_pdf_fallback is False
@@ -249,12 +329,19 @@ def test_config_import_export_and_disk_error_paths(tmp_path, monkeypatch) -> Non
     existing = PaperMetadata(arxiv_id="paper-1", notes="keep", tags=["keep"], starred=False)
     config_mod._merge_paper_metadata(
         existing,
-        {"notes": "incoming", "tags": ["keep", "new", 1], "is_read": True, "starred": True},
+        {
+            "notes": "incoming",
+            "tags": ["keep", "new", 1],
+            "is_read": True,
+            "starred": True,
+            "line_annotations": [{"line": 2, "text": "merge note"}],
+        },
     )
     assert existing.notes == "keep"
     assert existing.tags == ["keep", "new"]
     assert existing.is_read is True
     assert existing.starred is True
+    assert existing.line_annotations == [LineAnnotation(line=2, text="merge note")]
 
     created = config_mod._create_paper_metadata(
         "paper-2",
@@ -264,6 +351,7 @@ def test_config_import_export_and_disk_error_paths(tmp_path, monkeypatch) -> Non
             "is_read": "yes",
             "starred": 1,
             "last_checked_version": "bad",
+            "line_annotations": [{"line": 3, "text": "created"}],
         },
     )
     assert created.notes == "123"
@@ -271,6 +359,7 @@ def test_config_import_export_and_disk_error_paths(tmp_path, monkeypatch) -> Non
     assert created.is_read is True
     assert created.starred is True
     assert created.last_checked_version is None
+    assert created.line_annotations == [LineAnnotation(line=3, text="created")]
 
     config = UserConfig()
     assert config_mod._import_paper_metadata("oops", config, merge=True) == 0

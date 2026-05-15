@@ -9,6 +9,7 @@ from typing import Protocol, runtime_checkable
 
 import httpx
 
+from arxiv_browser.llm import PaperDebateResult
 from arxiv_browser.llm_providers import LLMProvider
 from arxiv_browser.models import ArxivSearchRequest, Paper, UserConfig
 from arxiv_browser.services import arxiv_api_service as _arxiv_api
@@ -79,6 +80,41 @@ class LlmService(Protocol):
         """Score one paper for relevance."""
         ...
 
+    async def generate_paper_remix(
+        self,
+        *,
+        papers: list[Paper],
+        research_interests: str,
+        provider: LLMProvider,
+        timeout_seconds: int,
+    ) -> tuple[str | None, str | None]:
+        """Generate one synthesized research idea from 2-3 selected papers."""
+        ...
+
+    async def compare_papers(
+        self,
+        *,
+        papers: list[Paper],
+        provider: LLMProvider,
+        timeout_seconds: int,
+        fetch_paper_content: Callable[[Paper], Awaitable[str]],
+        max_content_chars: int,
+    ) -> tuple[str | None, str | None]:
+        """Generate a structured comparison for 2-3 selected papers."""
+        ...
+
+    async def generate_paper_debate(
+        self,
+        *,
+        paper: Paper,
+        provider: LLMProvider,
+        timeout_seconds: int,
+        fetch_paper_content: Callable[[Paper], Awaitable[str]],
+        max_content_chars: int,
+    ) -> tuple[PaperDebateResult | None, str | None]:
+        """Generate an advocate-vs-Reviewer-2 debate for one paper."""
+        ...
+
     async def suggest_tags_once(
         self,
         *,
@@ -141,6 +177,17 @@ class EnrichmentService(Protocol):
         api_key: str,
     ) -> _enrichment.S2RecommendationsFetchResult:
         """Load or fetch S2 recommendations, preserving empty state."""
+        ...
+
+    async def load_or_fetch_conference_deadlines(
+        self,
+        *,
+        db_path: Path,
+        cache_ttl_hours: int,
+        client: httpx.AsyncClient,
+        source_url: str,
+    ) -> _enrichment.ConferenceDeadlinesFetchResult:
+        """Load or fetch imported conference deadlines, preserving empty state."""
         ...
 
 
@@ -225,6 +272,58 @@ class DefaultLlmService:
             interests=interests,
             provider=provider,
             timeout_seconds=timeout_seconds,
+        )
+
+    async def generate_paper_remix(
+        self,
+        *,
+        papers: list[Paper],
+        research_interests: str,
+        provider: LLMProvider,
+        timeout_seconds: int,
+    ) -> tuple[str | None, str | None]:
+        """Generate one synthesized research idea from selected papers."""
+        return await _llm.generate_paper_remix(
+            papers=papers,
+            research_interests=research_interests,
+            provider=provider,
+            timeout_seconds=timeout_seconds,
+        )
+
+    async def compare_papers(
+        self,
+        *,
+        papers: list[Paper],
+        provider: LLMProvider,
+        timeout_seconds: int,
+        fetch_paper_content: Callable[[Paper], Awaitable[str]],
+        max_content_chars: int,
+    ) -> tuple[str | None, str | None]:
+        """Generate a structured comparison for selected papers."""
+        return await _llm.compare_papers(
+            papers=papers,
+            provider=provider,
+            timeout_seconds=timeout_seconds,
+            fetch_paper_content=fetch_paper_content,
+            max_content_chars=max_content_chars,
+        )
+
+    async def generate_paper_debate(
+        self,
+        *,
+        paper: Paper,
+        provider: LLMProvider,
+        timeout_seconds: int,
+        fetch_paper_content: Callable[[Paper], Awaitable[str]],
+        max_content_chars: int,
+    ) -> tuple[PaperDebateResult | None, str | None]:
+        """Generate an advocate-vs-Reviewer-2 debate for one paper."""
+        return await _llm.generate_paper_debate(
+            paper=paper,
+            provider=provider,
+            timeout_seconds=timeout_seconds,
+            fetch_paper_content=fetch_paper_content,
+            max_content_chars=max_content_chars,
         )
 
     async def suggest_tags_once(
@@ -314,6 +413,22 @@ class DefaultEnrichmentService:
             cache_ttl_days=cache_ttl_days,
             client=client,
             api_key=api_key,
+        )
+
+    async def load_or_fetch_conference_deadlines(
+        self,
+        *,
+        db_path: Path,
+        cache_ttl_hours: int,
+        client: httpx.AsyncClient,
+        source_url: str,
+    ) -> _enrichment.ConferenceDeadlinesFetchResult:
+        """Load or fetch imported conference deadlines, preserving empty state."""
+        return await _enrichment.load_or_fetch_conference_deadlines_result(
+            db_path=db_path,
+            cache_ttl_hours=cache_ttl_hours,
+            client=client,
+            source_url=source_url,
         )
 
 

@@ -64,6 +64,7 @@ The main package is organized by responsibility:
 - `models.py`: data objects and shared constants
 - `config.py`: persisted user configuration and metadata import/export
 - `parsing.py`, `query.py`, `export.py`: pure-ish domain helpers
+- `sources.py`: preprint provider identity and prototype non-arXiv parsers
 - `services/`: async external I/O seams for arXiv, downloads, enrichment, and LLM orchestration
 - `modals/` and `widgets/`: reusable UI building blocks
 
@@ -97,6 +98,7 @@ Examples:
 - `arxiv_browser.app` is intentionally small and only preserves the legacy CLI/bootstrap monkeypatch seam.
 - `browser/core.py` still coordinates a broad set of subsystem state, even though behavior has already been split across browser mixins and action modules.
 - `database.py` provides a unified `cache.db` for new installs. Legacy per-module SQLite files (`summaries.db`, `relevance.db`, `semantic_scholar.db`, `huggingface.db`) are still supported via dual-path resolution in `resolve_db_path()`.
+- `Paper.source` continues to mean local/API load origin. Cross-server identity lives separately in `Paper.provider` and `arxiv_browser.sources`, so arXiv-only workflows such as version checks can reject DOI-based non-arXiv records before calling arXiv endpoints.
 
 ## LLM Provider Architecture
 

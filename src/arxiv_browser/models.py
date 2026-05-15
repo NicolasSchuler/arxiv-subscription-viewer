@@ -11,7 +11,16 @@ from datetime import datetime
 CONFIG_APP_NAME = "arxiv-browser"
 
 # Sort order options
-SORT_OPTIONS = ["title", "date", "arxiv_id", "citations", "trending", "relevance"]
+SORT_OPTIONS = [
+    "title",
+    "date",
+    "arxiv_id",
+    "citations",
+    "trending",
+    "relevance",
+    "queue",
+    "triage",
+]
 
 # Watch list entry types
 WATCH_MATCH_TYPES = ("author", "title", "keyword")
@@ -30,6 +39,7 @@ DETAIL_SECTION_KEYS: list[str] = [
     "abstract",
     "tags",
     "relevance",
+    "deadlines",
     "summary",
     "s2",
     "hf",
@@ -40,6 +50,7 @@ DETAIL_SECTION_NAMES: dict[str, str] = {
     "abstract": "Abstract",
     "tags": "Tags",
     "relevance": "Relevance",
+    "deadlines": "Submission Targets",
     "summary": "AI Summary",
     "s2": "Semantic Scholar",
     "hf": "HuggingFace",
@@ -177,6 +188,15 @@ class Paper:
     url: str
     abstract_raw: str = ""
     source: str = "local"  # "local" | "api"
+    provider: str = "arxiv"  # "arxiv" | future preprint provider IDs
+
+
+@dataclass(slots=True)
+class LineAnnotation:
+    """Inline annotation anchored to a visible detail-pane line."""
+
+    line: int
+    text: str
 
 
 @dataclass(slots=True)
@@ -189,6 +209,9 @@ class PaperMetadata:
     is_read: bool = False
     starred: bool = False
     last_checked_version: int | None = None
+    next_review_date: str | None = None
+    review_stage: int | None = None
+    line_annotations: list[LineAnnotation] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -256,6 +279,7 @@ class UserConfig:
 
     paper_metadata: dict[str, PaperMetadata] = field(default_factory=dict)
     watch_list: list[WatchListEntry] = field(default_factory=list)
+    tracked_authors: list[str] = field(default_factory=list)
     bookmarks: list[SearchBookmark] = field(default_factory=list)
     collections: list[PaperCollection] = field(default_factory=list)
     marks: dict[str, str] = field(default_factory=dict)  # letter -> arxiv_id
@@ -270,6 +294,7 @@ class UserConfig:
     theme_name: str = "monokai"
     llm_command: str = ""  # Shell command template, e.g. 'claude -p {prompt}'
     llm_prompt_template: str = ""  # Empty = use DEFAULT_LLM_PROMPT
+    llm_phd_explainer_field: str = "physics"  # Target field for cross-field PhD summaries
     llm_preset: str = ""  # "claude" | "codex" | "llm" | "" (custom)
     allow_llm_shell_fallback: bool = True  # False = reject shell-only command templates
     llm_max_retries: int = 1  # Retries for transient LLM failures (timeout, non-zero exit)
@@ -288,6 +313,20 @@ class UserConfig:
     s2_cache_ttl_days: int = 7  # Days to cache S2 data
     hf_enabled: bool = False  # HuggingFace trending (opt-in)
     hf_cache_ttl_hours: int = 6  # Hours to cache HF daily data
+    semantic_search_backend: str = (
+        "auto"  # "auto" | "fastembed" | "sentence-transformers" | "http" | "off"
+    )
+    semantic_search_model: str = "BAAI/bge-small-en-v1.5"
+    semantic_search_api_base_url: str = ""
+    semantic_search_api_key: str = ""
+    semantic_search_top_k: int = 100
+    semantic_search_min_score: int = 15
+    conference_deadlines_enabled: bool = False  # Third-party conference deadline import
+    conference_deadlines_source_url: str = (
+        "https://raw.githubusercontent.com/paperswithcode/ai-deadlines/gh-pages/"
+        "_data/conferences.yml"
+    )
+    conference_deadlines_cache_ttl_hours: int = 24
     research_interests: str = ""  # Free-text research interest description for relevance scoring
     collapsed_sections: list[str] = field(default_factory=lambda: list(DEFAULT_COLLAPSED_SECTIONS))
     pdf_viewer: str = (
@@ -397,6 +436,7 @@ __all__ = [
     "WATCH_MATCH_TYPES",
     "ArxivSearchModeState",
     "ArxivSearchRequest",
+    "LineAnnotation",
     "LocalBrowseSnapshot",
     "Paper",
     "PaperCollection",

@@ -11,6 +11,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import httpx
+
 from arxiv_browser.action_messages import (
     build_actionable_error,
     build_download_pdfs_confirmation_prompt,
@@ -41,6 +43,15 @@ from arxiv_browser.export import (
     get_pdf_download_path,
     get_pdf_url,
 )
+from arxiv_browser.figure_preview import (
+    FigurePreviewError,
+    build_figure_preview,
+    cached_figure_is_valid,
+    extract_first_html_figure,
+    figure_preview_cache_path,
+    save_figure_bytes_to_cache,
+    validate_figure_content_type,
+)
 from arxiv_browser.io_actions import (
     build_clipboard_payload,
     build_markdown_export_document,
@@ -52,6 +63,7 @@ from arxiv_browser.io_actions import (
 from arxiv_browser.modals import (
     ConfirmModal,
     ExportMenuModal,
+    FigurePreviewScreen,
     MetadataSnapshotPickerModal,
     PdfPreviewScreen,
 )
@@ -456,6 +468,83 @@ def action_preview_pdf(app: "ArxivBrowser") -> None:
         app.notify("No paper selected", title="PDF Preview", severity="warning")
         return
     app._track_dataset_task(app._preview_pdf_async(paper))
+
+
+def action_preview_figure(app: "ArxivBrowser") -> None:
+    """Render a terminal preview of the first figure from arXiv HTML."""
+    paper = app._get_current_paper()
+    if not paper:
+        app.notify("No paper selected", title="Figure Preview", severity="warning")
+        return
+    app._track_dataset_task(app._preview_figure_async(paper))
+
+
+async def _preview_figure_async(app: "ArxivBrowser", paper: Paper) -> None:
+    """Fetch arXiv HTML, cache the first figure image, and open the preview modal."""
+    task_epoch = app._capture_dataset_epoch()
+    html_url = f"https://arxiv.org/html/{paper.arxiv_id}"
+    if app._http_client is None:
+        app.notify(
+            "Figure preview needs an active network client",
+            title="Figure Preview",
+            severity="warning",
+        )
+        return
+    try:
+        response = await app._http_client.get(html_url, timeout=20, follow_redirects=True)
+        if response.status_code != 200:
+            app.notify(
+                f"arXiv HTML unavailable ({response.status_code})",
+                title="Figure Preview",
+                severity="warning",
+                timeout=8,
+            )
+            return
+        figure = extract_first_html_figure(response.text, html_url)
+        image_path = figure_preview_cache_path(paper, app._config)
+        if not cached_figure_is_valid(image_path):
+            image_response = await app._http_client.get(
+                figure.image_url,
+                timeout=20,
+                follow_redirects=True,
+            )
+            if image_response.status_code != 200:
+                app.notify(
+                    f"Figure image unavailable ({image_response.status_code})",
+                    title="Figure Preview",
+                    severity="warning",
+                    timeout=8,
+                )
+                return
+            validate_figure_content_type(image_response.headers.get("content-type", ""))
+            image_bytes = bytes(getattr(image_response, "content", b""))
+            image_path = await asyncio.to_thread(
+                save_figure_bytes_to_cache,
+                image_bytes,
+                image_path,
+            )
+        preview = await asyncio.to_thread(
+            build_figure_preview,
+            figure=figure,
+            image_path=image_path,
+        )
+    except FigurePreviewError as exc:
+        if app._is_current_dataset_epoch(task_epoch):
+            app.notify(str(exc)[:200], title="Figure Preview", severity="warning", timeout=8)
+        return
+    except (httpx.HTTPError, OSError) as exc:
+        logger.warning("Figure preview failed for %s", paper.arxiv_id, exc_info=True)
+        if app._is_current_dataset_epoch(task_epoch):
+            app.notify(
+                f"Could not fetch arXiv HTML figure: {exc}",
+                title="Figure Preview",
+                severity="warning",
+                timeout=8,
+            )
+        return
+    if not app._is_current_dataset_epoch(task_epoch):
+        return
+    app.push_screen(FigurePreviewScreen(paper, preview))
 
 
 async def _preview_pdf_async(app: "ArxivBrowser", paper: Paper) -> None:

@@ -2,7 +2,7 @@
 """Tests for arXiv Paper Browser TUI."""
 
 from contextlib import closing
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -100,6 +100,7 @@ class TestStatusFilterRegressions:
         assert ("Ctrl+p", "Commands") in entries
         assert ("Ctrl+k", "Collections") in entries
         assert ("C", "Chat") in entries
+        assert ("Ctrl+v", "Compare Papers") in entries
         assert ("Ctrl+g", "Auto-Tag") in entries
 
     def test_command_palette_entries_adapt_to_app_state(self):
@@ -142,10 +143,17 @@ class TestStatusFilterRegressions:
         assert entries["fetch_s2"].enabled is True
         assert entries["citation_graph"].enabled is False
         assert entries["citation_graph"].blocked_reason == "Fetch S2 data for this paper first"
+        assert entries["serendipity"].enabled is True
         assert entries["generate_summary"].enabled is False
         assert entries["generate_summary"].blocked_reason == "Configure an LLM command first"
         assert entries["chat_with_paper"].blocked_reason == "Configure an LLM command first"
+        assert entries["compare_papers"].blocked_reason == "Select exactly 2 or 3 papers first"
         assert entries["score_relevance"].blocked_reason == "Configure an LLM command first"
+
+        app.filtered_papers = []
+        entries = {command.action: command for command in app._build_command_palette_commands()}
+        assert entries["serendipity"].enabled is False
+        assert entries["serendipity"].blocked_reason == "Show at least one visible paper first"
 
     def test_help_sections_include_getting_started_shortcuts(self):
         """Help content should lead with a concise getting-started flow."""
@@ -203,6 +211,30 @@ class TestStatusFilterRegressions:
         assert "preview" not in status.lower()
         assert "updated" not in status.lower()
         assert len(status) <= 83  # allow tiny ellipsis overhead
+
+    def test_status_bar_renders_queue_sort_label(self):
+        from arxiv_browser.widgets.chrome import build_status_bar_text
+
+        status = build_status_bar_text(
+            total=3,
+            filtered=3,
+            query="",
+            watch_filter_active=False,
+            selected_count=0,
+            sort_label="queue",
+            in_arxiv_api_mode=False,
+            api_page=None,
+            arxiv_api_loading=False,
+            show_abstract_preview=False,
+            s2_active=False,
+            s2_loading=False,
+            s2_count=0,
+            hf_active=False,
+            version_checking=False,
+            version_update_count=0,
+            max_width=80,
+        )
+        assert "sort:queue" in status
 
     def test_status_bar_compact_priority_across_width_tiers(self):
         from arxiv_browser.widgets.chrome import build_status_bar_text
@@ -775,6 +807,12 @@ class TestIsAdvancedQuery:
         tokens = [QueryToken(kind="term", value="starred")]
         assert is_advanced_query(tokens) is True
 
+    def test_review_due_virtual_term_is_advanced(self):
+        from arxiv_browser.query import is_advanced_query
+
+        tokens = [QueryToken(kind="term", value="review-due")]
+        assert is_advanced_query(tokens) is True
+
 
 class TestMatchQueryTerm:
     """Tests for match_query_term()."""
@@ -858,6 +896,59 @@ class TestMatchQueryTerm:
         meta = PaperMetadata(arxiv_id=paper.arxiv_id, starred=True)
         assert match_query_term(paper, token, meta) is True
 
+    def test_review_due_virtual_term(self, make_paper):
+        from arxiv_browser.query import match_query_term
+
+        paper = make_paper()
+        token = QueryToken(kind="term", value="review-due")
+        today = date.today()
+
+        assert match_query_term(paper, token, None) is False
+        assert (
+            match_query_term(
+                paper,
+                token,
+                PaperMetadata(
+                    arxiv_id=paper.arxiv_id,
+                    next_review_date=(today - timedelta(days=1)).isoformat(),
+                    review_stage=0,
+                ),
+            )
+            is True
+        )
+        assert (
+            match_query_term(
+                paper,
+                token,
+                PaperMetadata(
+                    arxiv_id=paper.arxiv_id,
+                    next_review_date=today.isoformat(),
+                    review_stage=0,
+                ),
+            )
+            is True
+        )
+        assert (
+            match_query_term(
+                paper,
+                token,
+                PaperMetadata(
+                    arxiv_id=paper.arxiv_id,
+                    next_review_date=(today + timedelta(days=1)).isoformat(),
+                    review_stage=0,
+                ),
+            )
+            is False
+        )
+        assert (
+            match_query_term(
+                paper,
+                token,
+                PaperMetadata(arxiv_id=paper.arxiv_id, next_review_date="bad", review_stage=0),
+            )
+            is False
+        )
+
     def test_fallback_search_title_and_authors(self, make_paper):
         from arxiv_browser.query import match_query_term
 
@@ -920,6 +1011,32 @@ class TestMatchesAdvancedQuery:
             QueryToken(kind="op", value="NOT"),
         ]
         assert matches_advanced_query(paper, rpn, None) is True
+
+    def test_review_due_boolean_combinations(self, make_paper):
+        from arxiv_browser.query import matches_advanced_query
+
+        today = date.today()
+        paper = make_paper(categories="cs.LG", title="Deep Learning")
+        due_meta = PaperMetadata(
+            arxiv_id=paper.arxiv_id,
+            tags=["topic:ml"],
+            next_review_date=today.isoformat(),
+            review_stage=0,
+        )
+        future_starred = PaperMetadata(
+            arxiv_id=paper.arxiv_id,
+            starred=True,
+            next_review_date=(today + timedelta(days=1)).isoformat(),
+            review_stage=0,
+        )
+
+        due_and_tag = to_rpn(insert_implicit_and(tokenize_query("review-due AND tag:ml")))
+        not_due = to_rpn(insert_implicit_and(tokenize_query("NOT review-due")))
+        due_or_starred = to_rpn(insert_implicit_and(tokenize_query("review-due OR starred")))
+
+        assert matches_advanced_query(paper, due_and_tag, due_meta) is True
+        assert matches_advanced_query(paper, not_due, due_meta) is False
+        assert matches_advanced_query(paper, due_or_starred, future_starred) is True
 
     def test_malformed_binary_operator_defaults_missing_operand_to_false(self, make_paper):
         from arxiv_browser.query import matches_advanced_query
@@ -1029,6 +1146,166 @@ class TestSortPapers:
         original_order = [p.title for p in papers]
         sort_papers(papers, "title")
         assert [p.title for p in papers] == original_order
+
+
+class TestSmartQueueSortPapers:
+    """Tests for the composite smart reading queue sort."""
+
+    def test_queue_relevance_component_can_change_rank(self, make_paper):
+        from arxiv_browser.query import sort_papers
+
+        papers = [
+            make_paper(arxiv_id="low", date=""),
+            make_paper(arxiv_id="high", date=""),
+        ]
+        result = sort_papers(
+            papers,
+            "queue",
+            relevance_cache={"low": (1, "weak"), "high": (10, "strong")},
+        )
+        assert [p.arxiv_id for p in result] == ["high", "low"]
+
+    def test_queue_watch_component_can_change_rank(self, make_paper):
+        from arxiv_browser.query import sort_papers
+
+        papers = [
+            make_paper(arxiv_id="plain", date=""),
+            make_paper(arxiv_id="watched", date=""),
+        ]
+        result = sort_papers(papers, "queue", watched_paper_ids={"watched"})
+        assert [p.arxiv_id for p in result] == ["watched", "plain"]
+
+    def test_queue_recency_component_can_change_rank(self, make_paper):
+        from arxiv_browser.query import _build_queue_score_context, _queue_score
+
+        old = make_paper(arxiv_id="old", date="Wed, 15 Jan 2025")
+        fresh = make_paper(arxiv_id="fresh", date="Thu, 14 May 2026")
+        context = _build_queue_score_context(
+            [old, fresh],
+            s2_cache=None,
+            hf_cache=None,
+            relevance_cache=None,
+            watched_paper_ids=None,
+            today=datetime(2026, 5, 15),
+        )
+        assert _queue_score(fresh, context) > _queue_score(old, context)
+
+    def test_queue_hf_component_can_change_rank(self, make_paper):
+        from arxiv_browser.huggingface import HuggingFacePaper
+        from arxiv_browser.query import sort_papers
+
+        papers = [
+            make_paper(arxiv_id="cold", date=""),
+            make_paper(arxiv_id="hot", date=""),
+        ]
+        hf_cache = {
+            "cold": HuggingFacePaper("cold", "Cold", 1, 0, "", (), "", 0),
+            "hot": HuggingFacePaper("hot", "Hot", 100, 0, "", (), "", 0),
+        }
+        result = sort_papers(papers, "queue", hf_cache=hf_cache)
+        assert [p.arxiv_id for p in result] == ["hot", "cold"]
+
+    def test_queue_s2_velocity_component_can_change_rank(self, make_paper):
+        from arxiv_browser.query import sort_papers
+        from arxiv_browser.semantic_scholar import SemanticScholarPaper
+
+        papers = [
+            make_paper(arxiv_id="slow", date="Mon, 15 Jan 2024"),
+            make_paper(arxiv_id="fast", date="Mon, 15 Jan 2024"),
+        ]
+        s2_cache = {
+            "slow": SemanticScholarPaper("slow", "slow-s2", 1, 0, "", (), 2024, ""),
+            "fast": SemanticScholarPaper("fast", "fast-s2", 100, 0, "", (), 2024, ""),
+        }
+        result = sort_papers(papers, "queue", s2_cache=s2_cache)
+        assert [p.arxiv_id for p in result] == ["fast", "slow"]
+
+    def test_queue_relevance_score_is_clamped(self, make_paper):
+        from arxiv_browser.query import _build_queue_score_context, _queue_score
+
+        low = make_paper(arxiv_id="low", date="")
+        high = make_paper(arxiv_id="high", date="")
+        context = _build_queue_score_context(
+            [low, high],
+            s2_cache=None,
+            hf_cache=None,
+            relevance_cache={"low": (-10, "bad"), "high": (99, "great")},
+            watched_paper_ids=None,
+            today=datetime(2026, 5, 15),
+        )
+        assert _queue_score(high, context) == pytest.approx(0.40)
+        assert _queue_score(low, context) == 0.0
+
+    def test_queue_missing_caches_and_equal_scores_are_stable(self, make_paper):
+        from arxiv_browser.query import sort_papers
+
+        papers = [
+            make_paper(arxiv_id="a", date=""),
+            make_paper(arxiv_id="b", date=""),
+            make_paper(arxiv_id="c", date=""),
+        ]
+        result = sort_papers(papers, "queue")
+        assert [p.arxiv_id for p in result] == ["a", "b", "c"]
+
+    def test_queue_invalid_dates_get_no_recency_or_velocity_boost(self, make_paper):
+        from arxiv_browser.query import _build_queue_score_context, _queue_score
+        from arxiv_browser.semantic_scholar import SemanticScholarPaper
+
+        invalid = make_paper(arxiv_id="invalid", date="not a date")
+        empty = make_paper(arxiv_id="empty", date="")
+        s2_cache = {
+            "invalid": SemanticScholarPaper("invalid", "s2-a", 100, 0, "", (), 2024, ""),
+            "empty": SemanticScholarPaper("empty", "s2-b", 100, 0, "", (), 2024, ""),
+        }
+        context = _build_queue_score_context(
+            [invalid, empty],
+            s2_cache=s2_cache,
+            hf_cache=None,
+            relevance_cache=None,
+            watched_paper_ids=None,
+            today=datetime(2026, 5, 15),
+        )
+        assert _queue_score(invalid, context) == 0.0
+        assert _queue_score(empty, context) == 0.0
+
+    def test_queue_sort_does_not_mutate_original(self, make_paper):
+        from arxiv_browser.query import sort_papers
+
+        papers = [
+            make_paper(arxiv_id="plain", date=""),
+            make_paper(arxiv_id="watched", date=""),
+        ]
+        sort_papers(papers, "queue", watched_paper_ids={"watched"})
+        assert [p.arxiv_id for p in papers] == ["plain", "watched"]
+
+
+class TestTriageSortPapers:
+    """Tests for local ML triage bucket sorting."""
+
+    def test_triage_sort_groups_buckets_and_unscored_last(self, make_paper):
+        from arxiv_browser.query import sort_papers
+        from arxiv_browser.triage_model import (
+            TRIAGE_BUCKET_LIKELY_SKIP,
+            TRIAGE_BUCKET_LIKELY_STAR,
+            TRIAGE_BUCKET_UNSURE,
+            TriagePrediction,
+        )
+
+        papers = [
+            make_paper(arxiv_id="unscored"),
+            make_paper(arxiv_id="skip"),
+            make_paper(arxiv_id="unsure"),
+            make_paper(arxiv_id="star"),
+        ]
+        predictions = {
+            "star": TriagePrediction("star", 0.91, TRIAGE_BUCKET_LIKELY_STAR),
+            "unsure": TriagePrediction("unsure", 0.49, TRIAGE_BUCKET_UNSURE),
+            "skip": TriagePrediction("skip", 0.08, TRIAGE_BUCKET_LIKELY_SKIP),
+        }
+
+        result = sort_papers(papers, "triage", triage_predictions=predictions)
+
+        assert [p.arxiv_id for p in result] == ["star", "unsure", "skip", "unscored"]
 
 
 class TestFormatPaperForClipboard:
@@ -1146,6 +1423,10 @@ class TestBuildHighlightTerms:
     def test_virtual_terms_skipped(self):
         from arxiv_browser.query import build_highlight_terms
 
-        tokens = [QueryToken(kind="term", value="unread")]
+        tokens = [
+            QueryToken(kind="term", value="unread"),
+            QueryToken(kind="term", value="starred"),
+            QueryToken(kind="term", value="review-due"),
+        ]
         result = build_highlight_terms(tokens)
         assert all(v == [] for v in result.values())

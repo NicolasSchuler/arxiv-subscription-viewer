@@ -30,7 +30,7 @@ def action_toggle_search(app: "ArxivBrowser") -> None:
     else:
         omni.open()
         app.notify(
-            'Search mode: try cat:cs.AI, author:hinton, unread, or "large language".',
+            'Search mode: try cat:cs.AI, author:hinton, review-due, or "large language".',
             title="Search",
         )
     app._update_footer()
@@ -175,6 +175,7 @@ def _apply_arxiv_search_results(
         pass
 
     app._compute_watched_papers()
+    app._load_triage_predictions_for_current_dataset(refresh=False)
     if app._watch_filter_active:
         app.filtered_papers = [
             paper for paper in app.filtered_papers if paper.arxiv_id in app._watched_paper_ids

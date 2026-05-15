@@ -12,6 +12,14 @@ from typing import Any, overload
 
 from platformdirs import user_config_dir
 
+from arxiv_browser import conference_deadline_config as _deadline_config
+from arxiv_browser.authors import dedupe_author_names
+from arxiv_browser.config_import_helpers import (
+    _import_bookmarks,
+    _import_collections,
+    _import_tracked_authors,
+    _import_watch_entries,
+)
 from arxiv_browser.models import (
     ARXIV_API_DEFAULT_MAX_RESULTS,
     ARXIV_API_MAX_RESULTS_LIMIT,
@@ -23,6 +31,7 @@ from arxiv_browser.models import (
     MAX_PAPERS_PER_COLLECTION,
     SORT_OPTIONS,
     WATCH_MATCH_TYPES,
+    LineAnnotation,
     PaperCollection,
     PaperMetadata,
     SearchBookmark,
@@ -30,11 +39,11 @@ from arxiv_browser.models import (
     UserConfig,
     WatchListEntry,
 )
+from arxiv_browser.review import normalize_review_schedule
 
 logger = logging.getLogger(__name__)
 
 # Validation contract — _dict_to_config() guarantees valid output for any input:
-#
 #   Field                  Rule                            Handler
 #   ─────────────────────  ──────────────────────────────  ──────────────────
 #   sort_index             0 ≤ x < len(SORT_OPTIONS)       _parse_session_state
@@ -44,9 +53,6 @@ logger = logging.getLogger(__name__)
 #   collections length     ≤ MAX_COLLECTIONS               _parse_collections
 #   collection.paper_ids   ≤ MAX_PAPERS_PER_COLLECTION     _parse_collections
 #   scalar fields          type-checked via _safe_get()    _dict_to_config
-#
-# SessionState.__post_init__ provides defense-in-depth clamping for sort_index,
-# ensuring safety even when constructed directly (not via deserialization).
 #
 CONFIG_FILENAME = "config.json"
 USER_TCSS_FILENAME = "user.tcss"
@@ -99,6 +105,7 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
         "theme_name": config.theme_name,
         "llm_command": config.llm_command,
         "llm_prompt_template": config.llm_prompt_template,
+        "llm_phd_explainer_field": config.llm_phd_explainer_field,
         "llm_preset": config.llm_preset,
         "allow_llm_shell_fallback": config.allow_llm_shell_fallback,
         "llm_max_retries": config.llm_max_retries,
@@ -117,6 +124,15 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
         "s2_cache_ttl_days": config.s2_cache_ttl_days,
         "hf_enabled": config.hf_enabled,
         "hf_cache_ttl_hours": config.hf_cache_ttl_hours,
+        "semantic_search_backend": config.semantic_search_backend,
+        "semantic_search_model": config.semantic_search_model,
+        "semantic_search_api_base_url": config.semantic_search_api_base_url,
+        "semantic_search_api_key": config.semantic_search_api_key,
+        "semantic_search_top_k": max(1, min(config.semantic_search_top_k, 500)),
+        "semantic_search_min_score": max(0, min(config.semantic_search_min_score, 100)),
+        "conference_deadlines_enabled": config.conference_deadlines_enabled,
+        "conference_deadlines_source_url": config.conference_deadlines_source_url,
+        "conference_deadlines_cache_ttl_hours": config.conference_deadlines_cache_ttl_hours,
         "research_interests": config.research_interests,
         "collapsed_sections": config.collapsed_sections,
         "pdf_viewer": config.pdf_viewer,
@@ -136,6 +152,12 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
                 "is_read": meta.is_read,
                 "starred": meta.starred,
                 "last_checked_version": meta.last_checked_version,
+                "next_review_date": meta.next_review_date,
+                "review_stage": meta.review_stage,
+                "line_annotations": [
+                    {"line": annotation.line, "text": annotation.text}
+                    for annotation in meta.line_annotations
+                ],
             }
             for arxiv_id, meta in config.paper_metadata.items()
         },
@@ -147,6 +169,7 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
             }
             for entry in config.watch_list
         ],
+        "tracked_authors": config.tracked_authors,
         "bookmarks": [{"name": b.name, "query": b.query} for b in config.bookmarks],
         "collections": [
             {
@@ -227,6 +250,26 @@ def _coerce_arxiv_api_max_results(value: Any) -> int:
     if not isinstance(value, int) or isinstance(value, bool):
         return ARXIV_API_DEFAULT_MAX_RESULTS
     return max(1, min(value, ARXIV_API_MAX_RESULTS_LIMIT))
+
+
+_SEMANTIC_SEARCH_BACKENDS = frozenset({"auto", "fastembed", "sentence-transformers", "http", "off"})
+_DEFAULT_SEMANTIC_SEARCH_MODEL = "BAAI/bge-small-en-v1.5"
+
+
+def _coerce_semantic_search_backend(value: Any) -> str:
+    """Return a supported semantic-search backend name."""
+    if not isinstance(value, str):
+        return "auto"
+    normalized = value.strip().lower()
+    return normalized if normalized in _SEMANTIC_SEARCH_BACKENDS else "auto"
+
+
+def _coerce_semantic_search_model(value: Any) -> str:
+    """Return a non-empty embedding model id, or the lightweight default."""
+    if not isinstance(value, str):
+        return _DEFAULT_SEMANTIC_SEARCH_MODEL
+    normalized = value.strip()
+    return normalized or _DEFAULT_SEMANTIC_SEARCH_MODEL
 
 
 def _parse_collapsed_sections(raw: Any) -> list[str]:
@@ -315,6 +358,10 @@ def _parse_paper_metadata_dict(data: dict[str, Any]) -> dict[str, PaperMetadata]
         if not isinstance(meta_data, dict):
             continue
         lcv_raw = meta_data.get("last_checked_version")
+        next_review_date, review_stage = normalize_review_schedule(
+            meta_data.get("next_review_date"),
+            meta_data.get("review_stage"),
+        )
         raw_tags = _safe_get(meta_data, "tags", [], list)
         safe_tags = [tag for tag in raw_tags if isinstance(tag, str)]
         result[arxiv_id] = PaperMetadata(
@@ -324,8 +371,26 @@ def _parse_paper_metadata_dict(data: dict[str, Any]) -> dict[str, PaperMetadata]
             is_read=_safe_get(meta_data, "is_read", False, bool),
             starred=_safe_get(meta_data, "starred", False, bool),
             last_checked_version=lcv_raw if isinstance(lcv_raw, int) else None,
+            next_review_date=next_review_date,
+            review_stage=review_stage,
+            line_annotations=_parse_line_annotations(meta_data.get("line_annotations")),
         )
     return result
+
+
+def _parse_line_annotations(raw_annotations: Any) -> list[LineAnnotation]:
+    """Parse persisted inline detail-pane annotations, skipping malformed entries."""
+    if not isinstance(raw_annotations, list):
+        return []
+    annotations: list[LineAnnotation] = []
+    for item in raw_annotations:
+        if not isinstance(item, dict):
+            continue
+        line = item.get("line")
+        text = item.get("text")
+        if isinstance(line, int) and line > 0 and isinstance(text, str) and text.strip():
+            annotations.append(LineAnnotation(line=line, text=text.strip()))
+    return annotations
 
 
 def _parse_watch_list(data: dict[str, Any]) -> list[WatchListEntry]:
@@ -499,6 +564,7 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
     return UserConfig(
         paper_metadata=_parse_paper_metadata_dict(data),
         watch_list=_parse_watch_list(data),
+        tracked_authors=dedupe_author_names(_parse_str_list(data, "tracked_authors")),
         bookmarks=_parse_bookmarks(data),
         collections=_parse_collections(data),
         marks=marks,
@@ -515,6 +581,7 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         llm_prompt_template=_validate_llm_prompt_template(
             _safe_get(data, "llm_prompt_template", "", str)
         ),
+        llm_phd_explainer_field=_safe_get(data, "llm_phd_explainer_field", "physics", str),
         llm_preset=_safe_get(data, "llm_preset", "", str),
         allow_llm_shell_fallback=_safe_get(data, "allow_llm_shell_fallback", True, bool),
         llm_max_retries=max(0, min(5, _safe_get(data, "llm_max_retries", 1, int))),
@@ -537,6 +604,17 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         s2_cache_ttl_days=_safe_get(data, "s2_cache_ttl_days", 7, int),
         hf_enabled=_safe_get(data, "hf_enabled", False, bool),
         hf_cache_ttl_hours=_safe_get(data, "hf_cache_ttl_hours", 6, int),
+        semantic_search_backend=_coerce_semantic_search_backend(
+            data.get("semantic_search_backend")
+        ),
+        semantic_search_model=_coerce_semantic_search_model(data.get("semantic_search_model")),
+        semantic_search_api_base_url=_safe_get(data, "semantic_search_api_base_url", "", str),
+        semantic_search_api_key=_safe_get(data, "semantic_search_api_key", "", str),
+        semantic_search_top_k=max(1, min(500, _safe_get(data, "semantic_search_top_k", 100, int))),
+        semantic_search_min_score=max(
+            0, min(100, _safe_get(data, "semantic_search_min_score", 15, int))
+        ),
+        **_deadline_config.from_dict(data),
         research_interests=_safe_get(data, "research_interests", "", str),
         collapsed_sections=_parse_collapsed_sections(data.get("collapsed_sections")),
         pdf_viewer=_safe_get(data, "pdf_viewer", "", str),
@@ -635,7 +713,7 @@ def save_config(config: UserConfig) -> bool:
 
 
 def export_metadata(config: UserConfig) -> dict[str, Any]:
-    """Export user metadata (read/star/notes/tags/watch list) as a portable dict.
+    """Export user metadata (read/star/notes/tags/reviews/watch list) as a portable dict.
 
     The exported data can be loaded on another machine via import_metadata().
     """
@@ -650,9 +728,20 @@ def export_metadata(config: UserConfig) -> dict[str, Any]:
                 "is_read": meta.is_read,
                 "starred": meta.starred,
                 "last_checked_version": meta.last_checked_version,
+                "next_review_date": meta.next_review_date,
+                "review_stage": meta.review_stage,
+                "line_annotations": [
+                    {"line": annotation.line, "text": annotation.text}
+                    for annotation in meta.line_annotations
+                ],
             }
             for arxiv_id, meta in config.paper_metadata.items()
-            if meta.notes or meta.tags or meta.is_read or meta.starred
+            if meta.notes
+            or meta.tags
+            or meta.is_read
+            or meta.starred
+            or meta.next_review_date
+            or meta.line_annotations
         },
         "watch_list": [
             {
@@ -662,6 +751,7 @@ def export_metadata(config: UserConfig) -> dict[str, Any]:
             }
             for entry in config.watch_list
         ],
+        "tracked_authors": config.tracked_authors,
         "bookmarks": [{"name": b.name, "query": b.query} for b in config.bookmarks],
         "collections": [
             {
@@ -695,6 +785,21 @@ def _merge_paper_metadata(existing: PaperMetadata, meta_dict: dict[str, Any]) ->
         existing.tags = list(dict.fromkeys(existing.tags + valid_tags))
     if not existing.notes and meta_dict.get("notes"):
         existing.notes = str(meta_dict["notes"])
+    imported_annotations = _parse_line_annotations(meta_dict.get("line_annotations"))
+    if imported_annotations:
+        seen = {(annotation.line, annotation.text) for annotation in existing.line_annotations}
+        for annotation in imported_annotations:
+            key = (annotation.line, annotation.text)
+            if key not in seen:
+                existing.line_annotations.append(annotation)
+                seen.add(key)
+    next_review_date, review_stage = normalize_review_schedule(
+        meta_dict.get("next_review_date"),
+        meta_dict.get("review_stage"),
+    )
+    if next_review_date and not existing.next_review_date:
+        existing.next_review_date = next_review_date
+        existing.review_stage = review_stage
     if meta_dict.get("is_read"):
         existing.is_read = True
     if meta_dict.get("starred"):
@@ -715,6 +820,10 @@ def _create_paper_metadata(arxiv_id: str, meta_dict: dict[str, Any]) -> PaperMet
         Missing or wrongly-typed values fall back to safe defaults.
     """
     lcv_raw = meta_dict.get("last_checked_version")
+    next_review_date, review_stage = normalize_review_schedule(
+        meta_dict.get("next_review_date"),
+        meta_dict.get("review_stage"),
+    )
     return PaperMetadata(
         arxiv_id=arxiv_id,
         notes=str(meta_dict.get("notes", "")),
@@ -724,6 +833,9 @@ def _create_paper_metadata(arxiv_id: str, meta_dict: dict[str, Any]) -> PaperMet
         is_read=bool(meta_dict.get("is_read", False)),
         starred=bool(meta_dict.get("starred", False)),
         last_checked_version=lcv_raw if isinstance(lcv_raw, int) else None,
+        next_review_date=next_review_date,
+        review_stage=review_stage,
+        line_annotations=_parse_line_annotations(meta_dict.get("line_annotations")),
     )
 
 
@@ -756,123 +868,6 @@ def _import_paper_metadata(pm_data: Any, config: UserConfig, merge: bool) -> int
     return count
 
 
-def _import_watch_entries(wl_data: Any, config: UserConfig) -> int:
-    """Import watch list entries into config with dedup.
-
-    Entries with a ``(pattern, match_type)`` pair that already exists in the
-    config are silently skipped.
-
-    Args:
-        wl_data: Raw ``"watch_list"`` value from the export dict (expected to
-            be a list of dicts with ``"pattern"``, ``"match_type"``, and
-            ``"case_sensitive"`` keys).
-        config: The ``UserConfig`` to modify in-place.
-
-    Returns:
-        The number of new entries added to ``config.watch_list``.
-    """
-    if not isinstance(wl_data, list):
-        return 0
-    existing_patterns = {(e.pattern, e.match_type) for e in config.watch_list}
-    count = 0
-    for entry_dict in wl_data:
-        if not isinstance(entry_dict, dict):
-            continue
-        pattern = str(entry_dict.get("pattern", ""))
-        match_type = str(entry_dict.get("match_type", "keyword"))
-        if match_type not in WATCH_MATCH_TYPES:
-            logger.warning(
-                "Unknown watch match_type %r for pattern %r, defaulting to 'keyword'",
-                match_type,
-                pattern,
-            )
-            match_type = "keyword"
-        if not pattern or (pattern, match_type) in existing_patterns:
-            continue
-        config.watch_list.append(
-            WatchListEntry(
-                pattern=pattern,
-                match_type=match_type,
-                case_sensitive=bool(entry_dict.get("case_sensitive", False)),
-            )
-        )
-        count += 1
-    return count
-
-
-def _import_bookmarks(bk_data: Any, config: UserConfig, merge: bool) -> int:
-    """Import bookmarks into config with dedup and capacity check.
-
-    Bookmarks with a ``query`` that already exists are skipped.  Import stops
-    when ``config.bookmarks`` reaches 9 entries.
-
-    Args:
-        bk_data: Raw ``"bookmarks"`` value from the export dict.
-        config: The ``UserConfig`` to modify in-place.
-        merge: When ``False`` this function is a no-op (returns 0), letting
-            ``import_metadata`` handle clearing in replace mode before calling
-            the individual import helpers.
-
-    Returns:
-        The number of new bookmarks added to ``config.bookmarks``.
-    """
-    if not isinstance(bk_data, list) or not merge:
-        return 0
-    existing_queries = {b.query for b in config.bookmarks}
-    count = 0
-    for bk_dict in bk_data:
-        if not isinstance(bk_dict, dict):
-            continue
-        query = str(bk_dict.get("query", ""))
-        if not query or query in existing_queries:
-            continue
-        if len(config.bookmarks) >= 9:
-            break
-        config.bookmarks.append(
-            SearchBookmark(name=str(bk_dict.get("name", "Imported")), query=query)
-        )
-        count += 1
-    return count
-
-
-def _import_collections(col_data: Any, config: UserConfig, merge: bool) -> int:
-    """Import collections into config with dedup and capacity checks."""
-    if not isinstance(col_data, list) or not merge:
-        return 0
-    existing_names = {c.name for c in config.collections}
-    count = 0
-    for col_dict in col_data:
-        collection = _collection_from_import(col_dict, existing_names)
-        if collection is None:
-            continue
-        if len(config.collections) >= MAX_COLLECTIONS:
-            break
-        config.collections.append(collection)
-        existing_names.add(collection.name)
-        count += 1
-    return count
-
-
-def _collection_from_import(col_dict: Any, existing_names: set[str]) -> PaperCollection | None:
-    if not isinstance(col_dict, dict):
-        return None
-    name = str(col_dict.get("name", ""))
-    if not name or name in existing_names:
-        return None
-    return PaperCollection(
-        name=name,
-        description=str(col_dict.get("description", "")),
-        paper_ids=_safe_collection_paper_ids(col_dict.get("paper_ids", [])),
-        created=str(col_dict.get("created", "")),
-    )
-
-
-def _safe_collection_paper_ids(paper_ids: Any) -> list[str]:
-    if not isinstance(paper_ids, list):
-        return []
-    return [pid for pid in paper_ids if isinstance(pid, str)][:MAX_PAPERS_PER_COLLECTION]
-
-
 def import_metadata(
     data: dict[str, Any], config: UserConfig, merge: bool = True
 ) -> tuple[int, int, int, int]:
@@ -892,12 +887,14 @@ def import_metadata(
         # Replace mode: clear all import-target sections before applying data.
         config.paper_metadata.clear()
         config.watch_list.clear()
+        config.tracked_authors.clear()
         config.bookmarks.clear()
         config.collections.clear()
         config.research_interests = ""
 
     papers = _import_paper_metadata(data.get("paper_metadata", {}), config, merge)
     watch = _import_watch_entries(data.get("watch_list", []), config)
+    _import_tracked_authors(data.get("tracked_authors", []), config)
     # Bookmark/collection import remains deduplicating, but replace mode now
     # imports into the cleared destination collections.
     bookmarks = _import_bookmarks(data.get("bookmarks", []), config, True)

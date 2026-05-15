@@ -70,6 +70,11 @@ Large modals also keep `min-width: 60; min-height: 20;` for small-terminal safet
   - `[/] page`, `Esc/Ctrl+e exit`, `A new query`, `o open`, `? help`.
 - API empty states must mention both recovery paths:
   - Pagination keys (`[` and `]`) and exit keys (`Esc` or `Ctrl+e`).
+- Detail-focus footer should show line-annotation flow:
+  - `Tab list`, `j/k scroll`, `a annotate`, `v density`, `Ctrl+d sections`, `? help`.
+- Context-sensitive keys must be documented by focus:
+  - In list focus, `a` remains select-all.
+  - In detail focus, `a` opens quick annotation input for the visible detail-line cursor.
 
 ## 6. Color And Icon Accessibility Rules
 
@@ -151,6 +156,11 @@ When adding any non-ASCII character to the UI, follow the established glyph-set 
 - Compact token casing rules:
 - Use `API p<N> loading` for active API fetches.
 - Omit lower-priority compact tokens such as preview/version details.
+- Visual status tokens:
+- Render enrichment progress, reading velocity, and category histogram only when the status bar has enough width.
+- Drop visual tokens before dropping core paper count, query/watch context, selection count, API page/loading, and sort context.
+- Do not duplicate active progress text; when a visual token shows `Versions`, suppress the separate `Checking versions...` text.
+- Use Unicode sparklines/histograms by default and ASCII-safe ramps (`#`, `-`, punctuation) when ASCII mode is active.
 
 ## 9. Help And Discoverability
 
@@ -223,6 +233,7 @@ These have no lowercase counterpart and all represent advanced or broad-scope fe
 |-----|--------|----------|
 | `A` | Search all of arXiv (API mode) | Broad scope — switches mode entirely |
 | `G` | Citation graph (S2-powered) | Advanced feature — opens drill-down screen |
+| `I` | Preview first HTML figure | Advanced current-paper preview using arXiv HTML |
 | `L` | Score papers by relevance (LLM) | Multi-paper operation |
 
 ### Guidance for Future Keybindings

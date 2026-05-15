@@ -13,6 +13,7 @@ from textual.events import Click
 from textual.widgets import Checkbox, Input, Label, ListView, Select, Static
 
 from arxiv_browser.browser.core import ArxivBrowser
+from arxiv_browser.citation_genealogy import GenealogyNode, GenealogyPaper, GenealogyRoot
 from arxiv_browser.modals import (
     ArxivSearchModal,
     CitationGraphScreen,
@@ -21,6 +22,7 @@ from arxiv_browser.modals import (
     RecommendationsScreen,
     WatchListModal,
 )
+from arxiv_browser.modals.citations import _format_genealogy_label
 from arxiv_browser.models import (
     MAX_COLLECTIONS,
     ArxivSearchRequest,
@@ -480,6 +482,176 @@ async def test_citation_graph_button_handlers_use_track_task(make_paper):
             modal.dismiss = MagicMock()
             modal.on_close_pressed()
             modal.dismiss.assert_called_once_with(None)
+
+
+@pytest.mark.asyncio
+async def test_citation_graph_genealogy_modes_go_open_and_cache(make_paper):
+    root = make_paper(arxiv_id="2401.00001", title="Root Paper")
+    local_ref = _citation_entry(
+        s2_paper_id="s2:local",
+        arxiv_id="2401.00002",
+        title="Local Ref",
+        url="https://arxiv.org/abs/2401.00002",
+    )
+    remote_cite = _citation_entry(
+        s2_paper_id="s2:remote",
+        arxiv_id="",
+        title="Remote Cite",
+        url="https://www.semanticscholar.org/paper/s2:remote",
+    )
+    calls: list[str] = []
+
+    async def _fetch(paper_id: str):
+        calls.append(paper_id)
+        if paper_id == "s2:root":
+            return [local_ref], [remote_cite]
+        return [], []
+
+    app = ArxivBrowser([root], restore_session=False)
+    modal = CitationGraphScreen(
+        root_title=root.title,
+        root_paper_id="s2:root",
+        references=[local_ref],
+        citations=[remote_cite],
+        fetch_callback=_fetch,
+        local_arxiv_ids=frozenset({"2401.00002"}),
+    )
+    modal.configure_genealogy(
+        GenealogyRoot("s2:root", root.title, arxiv_id=root.arxiv_id),
+        frozenset({"2401.00002"}),
+    )
+
+    with (
+        patch_save_config(return_value=True),
+        patch("arxiv_browser.modals.citations.webbrowser.open") as browser_open,
+    ):
+        async with app.run_test() as pilot:
+            await _open_modal(app, pilot, modal)
+            await modal.action_show_ancestors()
+            assert modal._view_mode == "ancestors"
+            assert modal.query_one("#genealogy-tree").display is True
+            assert modal.query_one("#citation-graph-panels").display is False
+
+            tree = modal.query_one("#genealogy-tree")
+            local_node = tree.root.children[0].data
+            modal.dismiss = MagicMock()
+            modal._get_highlighted_genealogy_node = MagicMock(return_value=local_node)
+            modal.action_go_to_local()
+            modal.dismiss.assert_called_once_with("2401.00002")
+
+            await modal.action_show_descendants()
+            remote_node = modal.query_one("#genealogy-tree").root.children[0].data
+            modal._get_highlighted_genealogy_node = MagicMock(return_value=remote_node)
+            await modal.action_drill_down()
+            browser_open.assert_called_once_with("https://www.semanticscholar.org/paper/s2:remote")
+
+            await modal.action_show_descendants()
+            assert calls.count("s2:root") == 2  # one ancestors build, one descendants build
+
+
+@pytest.mark.asyncio
+async def test_citation_graph_genealogy_fetch_error_restores_graph(make_paper):
+    root = make_paper(arxiv_id="2401.00001", title="Root Paper")
+
+    async def _fetch(_paper_id: str):
+        raise httpx.ConnectError("boom")
+
+    app = ArxivBrowser([root], restore_session=False)
+    modal = CitationGraphScreen(
+        root_title=root.title,
+        root_paper_id="s2:root",
+        references=[],
+        citations=[],
+        fetch_callback=_fetch,
+        local_arxiv_ids=frozenset(),
+    )
+
+    with patch_save_config(return_value=True):
+        async with app.run_test() as pilot:
+            await _open_modal(app, pilot, modal)
+            app.notify = MagicMock()
+            await modal.action_show_ancestors()
+            assert modal._view_mode == "graph"
+            app.notify.assert_called_once()
+            assert "Could not load citation genealogy data." in app.notify.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_citation_graph_genealogy_tree_controls_and_labels(make_paper):
+    root = make_paper(arxiv_id="2401.00001", title="Root Paper")
+    remote_cite = _citation_entry(
+        s2_paper_id="s2:remote",
+        arxiv_id="",
+        title="Remote Cite",
+        url="https://www.semanticscholar.org/paper/s2:remote",
+    )
+
+    async def _fetch(paper_id: str):
+        if paper_id == "s2:root":
+            return [], [remote_cite]
+        return [], []
+
+    app = ArxivBrowser([root], restore_session=False)
+    modal = CitationGraphScreen(
+        root_title=root.title,
+        root_paper_id="s2:root",
+        references=[],
+        citations=[remote_cite],
+        fetch_callback=_fetch,
+        local_arxiv_ids=frozenset(),
+    )
+
+    labeled = GenealogyNode(
+        GenealogyPaper("s2:label", "", "Label", None, 0, ""),
+        repeated=True,
+        truncated=True,
+    )
+    assert _format_genealogy_label(labeled).endswith("(repeat/more)")
+
+    with (
+        patch_save_config(return_value=True),
+        patch("arxiv_browser.modals.citations.webbrowser.open") as browser_open,
+    ):
+        async with app.run_test() as pilot:
+            await _open_modal(app, pilot, modal)
+            await modal.action_show_descendants()
+
+            modal.action_switch_panel()
+            modal.action_cursor_down()
+            modal.action_cursor_up()
+            modal._get_highlighted_genealogy_node = MagicMock(return_value=None)
+            modal.action_open_url()
+            browser_open.assert_not_called()
+
+            remote_node = modal.query_one("#genealogy-tree").root.children[0].data
+            modal._get_highlighted_genealogy_node = MagicMock(return_value=remote_node)
+            modal.action_open_url()
+            browser_open.assert_called_once_with("https://www.semanticscholar.org/paper/s2:remote")
+
+            modal.dismiss = MagicMock()
+            modal.action_back_or_close()
+            modal.dismiss.assert_called_once_with(None)
+
+            modal.dismiss.reset_mock()
+            modal.action_show_graph()
+            assert modal._view_mode == "graph"
+
+            modal._loading = True
+            await modal.action_show_ancestors()
+            modal._loading = False
+            assert modal._view_mode == "graph"
+
+            captured = []
+
+            def _track_task(coro):
+                captured.append(coro)
+                coro.close()
+
+            app._track_task = MagicMock(side_effect=_track_task)
+            modal.on_mode_graph_pressed()
+            modal.on_mode_ancestors_pressed()
+            modal.on_mode_descendants_pressed()
+            assert len(captured) == 2
 
 
 @pytest.mark.asyncio

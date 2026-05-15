@@ -203,6 +203,243 @@ class TestPaperSimilarity:
 
         assert len(similar) <= 1
 
+    @staticmethod
+    def _build_serendipity_index(papers):
+        from arxiv_browser.similarity import TfidfIndex
+
+        return TfidfIndex.build(
+            papers,
+            text_fn=lambda paper: f"{paper.title} {paper.abstract or paper.abstract_raw}",
+        )
+
+    def test_serendipity_prefers_far_unread_paper_from_starred_anchor(self):
+        """Serendipity should choose a far-topic unread paper over a near-topic one."""
+        from arxiv_browser.similarity import SerendipityRequest, find_serendipitous_papers
+
+        starred = Paper(
+            arxiv_id="2401.10001",
+            date="Mon, 15 Jan 2024",
+            title="Transformer Attention for Language Tokens",
+            authors="A. Author",
+            categories="cs.CL cs.LG",
+            comments=None,
+            abstract="transformer attention language token decoding",
+            url="https://arxiv.org/abs/2401.10001",
+        )
+        near = Paper(
+            arxiv_id="2401.10002",
+            date="Tue, 16 Jan 2024",
+            title="Attention Language Models",
+            authors="B. Author",
+            categories="cs.CL",
+            comments=None,
+            abstract="language transformer attention token prediction",
+            url="https://arxiv.org/abs/2401.10002",
+        )
+        far = Paper(
+            arxiv_id="2401.10003",
+            date="Wed, 17 Jan 2024",
+            title="Quantum Entanglement for Qubit Control",
+            authors="C. Author",
+            categories="quant-ph",
+            comments=None,
+            abstract="quantum entanglement qubit superconducting control",
+            url="https://arxiv.org/abs/2401.10003",
+        )
+        papers = [starred, near, far]
+        metadata = {
+            starred.arxiv_id: PaperMetadata(starred.arxiv_id, starred=True),
+        }
+
+        result = find_serendipitous_papers(
+            SerendipityRequest(
+                papers=papers,
+                metadata=metadata,
+                tfidf_index=self._build_serendipity_index(papers),
+                current_paper_id=starred.arxiv_id,
+                top_n=1,
+            )
+        )
+
+        assert [candidate.paper.arxiv_id for candidate in result] == [far.arxiv_id]
+        assert result[0].nearest_starred_anchor_id == starred.arxiv_id
+        assert "new category quant-ph" in result[0].reason
+
+    def test_serendipity_avoids_read_and_starred_when_unread_unstarred_exists(self):
+        """Candidate tiering should favor unread/unstarred papers before score."""
+        from arxiv_browser.similarity import SerendipityRequest, find_serendipitous_papers
+
+        starred = Paper(
+            arxiv_id="2401.10101",
+            date="Mon, 15 Jan 2024",
+            title="Quantum Anchor",
+            authors="A. Author",
+            categories="quant-ph",
+            comments=None,
+            abstract="quantum qubit entanglement anchor",
+            url="https://arxiv.org/abs/2401.10101",
+        )
+        read_far = Paper(
+            arxiv_id="2401.10102",
+            date="Tue, 16 Jan 2024",
+            title="Robot Planning",
+            authors="B. Author",
+            categories="cs.RO",
+            comments=None,
+            abstract="robot planning navigation manipulation",
+            url="https://arxiv.org/abs/2401.10102",
+        )
+        unread_near = Paper(
+            arxiv_id="2401.10103",
+            date="Wed, 17 Jan 2024",
+            title="Quantum Error Correction",
+            authors="C. Author",
+            categories="quant-ph",
+            comments=None,
+            abstract="quantum qubit error correction",
+            url="https://arxiv.org/abs/2401.10103",
+        )
+        papers = [starred, read_far, unread_near]
+        metadata = {
+            starred.arxiv_id: PaperMetadata(starred.arxiv_id, starred=True),
+            read_far.arxiv_id: PaperMetadata(read_far.arxiv_id, is_read=True),
+        }
+
+        result = find_serendipitous_papers(
+            SerendipityRequest(
+                papers=papers,
+                metadata=metadata,
+                tfidf_index=self._build_serendipity_index(papers),
+                top_n=1,
+            )
+        )
+
+        assert [candidate.paper.arxiv_id for candidate in result] == [unread_near.arxiv_id]
+
+    def test_serendipity_without_starred_uses_category_novelty(self):
+        """Without starred anchors, unseen categories should rank first."""
+        from arxiv_browser.similarity import SerendipityRequest, find_serendipitous_papers
+
+        read_ai = Paper(
+            arxiv_id="2401.10201",
+            date="Mon, 15 Jan 2024",
+            title="Language Models",
+            authors="A. Author",
+            categories="cs.CL",
+            comments=None,
+            abstract="language model attention",
+            url="https://arxiv.org/abs/2401.10201",
+        )
+        familiar = Paper(
+            arxiv_id="2401.10202",
+            date="Tue, 16 Jan 2024",
+            title="More Language Models",
+            authors="B. Author",
+            categories="cs.CL",
+            comments=None,
+            abstract="language model scaling",
+            url="https://arxiv.org/abs/2401.10202",
+        )
+        novel = Paper(
+            arxiv_id="2401.10203",
+            date="Wed, 17 Jan 2024",
+            title="Astrophysical Simulations",
+            authors="C. Author",
+            categories="astro-ph",
+            comments=None,
+            abstract="galaxy simulation cosmology",
+            url="https://arxiv.org/abs/2401.10203",
+        )
+        metadata = {read_ai.arxiv_id: PaperMetadata(read_ai.arxiv_id, is_read=True)}
+
+        result = find_serendipitous_papers(
+            SerendipityRequest(
+                papers=[read_ai, familiar, novel],
+                metadata=metadata,
+                top_n=1,
+            )
+        )
+
+        assert [candidate.paper.arxiv_id for candidate in result] == [novel.arxiv_id]
+        assert result[0].reason == "New category astro-ph."
+
+    def test_serendipity_excludes_current_paper_when_possible(self):
+        """The current paper should not be returned when another candidate exists."""
+        from arxiv_browser.similarity import SerendipityRequest, find_serendipitous_papers
+
+        current = Paper(
+            arxiv_id="2401.10301",
+            date="Mon, 15 Jan 2024",
+            title="Current Paper",
+            authors="A. Author",
+            categories="cs.CL",
+            comments=None,
+            abstract="language current",
+            url="https://arxiv.org/abs/2401.10301",
+        )
+        other = Paper(
+            arxiv_id="2401.10302",
+            date="Tue, 16 Jan 2024",
+            title="Other Paper",
+            authors="B. Author",
+            categories="math.OC",
+            comments=None,
+            abstract="optimization control",
+            url="https://arxiv.org/abs/2401.10302",
+        )
+
+        result = find_serendipitous_papers(
+            SerendipityRequest(
+                papers=[current, other],
+                current_paper_id=current.arxiv_id,
+                top_n=1,
+            )
+        )
+
+        assert [candidate.paper.arxiv_id for candidate in result] == [other.arxiv_id]
+
+    def test_serendipity_falls_back_to_starred_papers_when_needed(self):
+        """If every visible paper is starred, serendipity still returns a deterministic paper."""
+        from arxiv_browser.similarity import SerendipityRequest, find_serendipitous_papers
+
+        current = Paper(
+            arxiv_id="2401.10401",
+            date="Mon, 15 Jan 2024",
+            title="Current Transformer Paper",
+            authors="A. Author",
+            categories="cs.CL",
+            comments=None,
+            abstract="language transformer attention",
+            url="https://arxiv.org/abs/2401.10401",
+        )
+        other = Paper(
+            arxiv_id="2401.10402",
+            date="Tue, 16 Jan 2024",
+            title="Other Transformer Paper",
+            authors="B. Author",
+            categories="cs.CL",
+            comments=None,
+            abstract="language transformer decoding",
+            url="https://arxiv.org/abs/2401.10402",
+        )
+        metadata = {
+            current.arxiv_id: PaperMetadata(current.arxiv_id, starred=True),
+            other.arxiv_id: PaperMetadata(other.arxiv_id, starred=True),
+        }
+
+        result = find_serendipitous_papers(
+            SerendipityRequest(
+                papers=[current, other],
+                metadata=metadata,
+                current_paper_id=current.arxiv_id,
+                top_n=1,
+            )
+        )
+
+        assert [candidate.paper.arxiv_id for candidate in result] == [other.arxiv_id]
+        assert result[0].nearest_starred_anchor_id == current.arxiv_id
+        assert f"nearest starred anchor {current.arxiv_id}" in result[0].reason
+
 
 class TestBibTeXExport:
     """Tests for BibTeX formatting functions."""

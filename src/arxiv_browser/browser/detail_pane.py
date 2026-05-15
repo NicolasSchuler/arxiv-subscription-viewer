@@ -18,6 +18,8 @@ from arxiv_browser.browser.constants import (
 )
 from arxiv_browser.browser.contracts import (
     COMMAND_PALETTE_COMMANDS,
+    COMMAND_PALETTE_GROUPS,
+    TARGET_PAPER_PALETTE_ACTIONS,
     _first_failed_palette_requirement,
     _palette_blocked_copy,
     _palette_ctrl_e_copy,
@@ -26,6 +28,8 @@ from arxiv_browser.browser.contracts import (
     _palette_preview_copy,
     _PaletteAppState,
 )
+from arxiv_browser.browser.detail_annotations import DetailAnnotationMixin
+from arxiv_browser.conference_deadline_ui import build_detail_submission_targets
 from arxiv_browser.config import save_config
 from arxiv_browser.help_ui import build_help_sections
 from arxiv_browser.models import SORT_OPTIONS, Paper, SessionState, UserConfig
@@ -38,24 +42,7 @@ from arxiv_browser.widgets.chrome import StatusBarState
 from arxiv_browser.widgets.details import DetailRenderState
 from arxiv_browser.widgets.listing import PaperHighlightTerms, PaperRowRenderState
 
-_BADGE_REFRESH_KINDS = frozenset({"s2", "hf", "version", "relevance"})
-_TARGET_PAPER_PALETTE_ACTIONS = frozenset(
-    {
-        "open_url",
-        "open_pdf",
-        "preview_pdf",
-        "download_pdf",
-        "copy_selected",
-        "export_menu",
-        "toggle_read",
-        "toggle_star",
-        "edit_notes",
-        "edit_tags",
-        "show_similar",
-        "add_to_collection",
-        "start_mark",
-    }
-)
+_BADGE_REFRESH_KINDS = frozenset({"s2", "hf", "version", "relevance", "triage"})
 
 
 def _footer_progress_bindings(
@@ -76,7 +63,7 @@ def _footer_busy_bindings(label: str) -> list[tuple[str, str]]:
     return [("", f"{label}{ellipsis}"), ("?", "help")]
 
 
-class DetailPaneMixin:
+class DetailPaneMixin(DetailAnnotationMixin):
     """Mixin providing detail-pane, status bar, footer, and command-palette behaviour.
 
     Intended to be composed into the main ArxivBrowser app class alongside other
@@ -199,6 +186,10 @@ class DetailPaneMixin:
         theme_runtime = self._resolved_theme_runtime()
         resolved_abstract = paper.abstract or "" if abstract_text is None else abstract_text
         metadata = self._config.paper_metadata.get(arxiv_id)
+        self._ensure_detail_cursor_for(arxiv_id)
+        deadline_targets, deadline_countdown_key = build_detail_submission_targets(
+            self, paper, metadata
+        )
         return DetailRenderState(
             paper=paper,
             abstract_text=resolved_abstract,
@@ -213,8 +204,14 @@ class DetailPaneMixin:
             summary_mode=self._summary_mode_label.get(arxiv_id, ""),
             tags=tuple(self._tags_for(arxiv_id) or ()),
             relevance=self._relevance_scores.get(arxiv_id),
+            submission_targets=deadline_targets,
+            deadline_countdown_key=deadline_countdown_key,
             is_read=bool(metadata and metadata.is_read),
             starred=bool(metadata and metadata.starred),
+            next_review_date=metadata.next_review_date if metadata else None,
+            review_stage=metadata.review_stage if metadata else None,
+            line_annotations=tuple(metadata.line_annotations if metadata else ()),
+            detail_line_cursor=getattr(self, "_detail_line_cursor", 1),
             collapsed_sections=tuple(self._config.collapsed_sections),
             detail_mode=getattr(self, "_detail_mode", "scan"),
             theme_colors=theme_runtime.colors,
@@ -249,6 +246,7 @@ class DetailPaneMixin:
             hf_data=self._hf_cache.get(aid) if self._hf_active else None,
             version_update=self._version_updates.get(aid),
             relevance_score=self._relevance_scores.get(aid),
+            triage_prediction=getattr(self, "_triage_predictions", {}).get(aid),
             meta_line_budget=meta_line_budget,
             theme_colors=theme_runtime.colors,
             category_colors=theme_runtime.category_colors,
@@ -283,6 +281,9 @@ class DetailPaneMixin:
             hf_api_error=self._hf_api_error,
             version_checking=self._version_checking,
             version_update_count=len(self._version_updates),
+            enrichment_progress=self._status_enrichment_progress(),
+            reading_velocity=self._reading_velocity_series(),
+            category_distribution=self._category_distribution(),
             detail_focus=self._is_detail_footer_active(),
             max_width=getattr(size, "width", None),
             theme_colors=theme_runtime.colors,
@@ -494,6 +495,8 @@ class DetailPaneMixin:
             return set(self._version_updates), False
         if kind == "relevance":
             return set(self._relevance_scores), False
+        if kind == "triage":
+            return set(getattr(self, "_triage_predictions", {})), False
         return set(), True
 
     def _needs_full_badge_refresh(
@@ -534,6 +537,8 @@ class DetailPaneMixin:
             (badge_kind == "s2" and sort_key == "citations")
             or (badge_kind == "hf" and sort_key == "trending")
             or (badge_kind == "relevance" and sort_key == "relevance")
+            or (badge_kind == "triage" and sort_key == "triage")
+            or (sort_key == "queue" and badge_kind in {"s2", "hf", "relevance"})
         )
 
     def _schedule_sort_sensitive_refresh(
@@ -611,52 +616,7 @@ class DetailPaneMixin:
     @staticmethod
     def _palette_group_for_action(action_name: str) -> str:
         """Return a compact group label for a palette action."""
-        group_map = {
-            "toggle_search": "Core",
-            "show_search_syntax": "Core",
-            "arxiv_search": "Research",
-            "prev_date": "Advanced",
-            "next_date": "Advanced",
-            "open_url": "Core",
-            "open_pdf": "Core",
-            "download_pdf": "Core",
-            "copy_selected": "Core",
-            "toggle_read": "Organize",
-            "toggle_star": "Organize",
-            "edit_notes": "Organize",
-            "edit_tags": "Organize",
-            "select_all": "Core",
-            "clear_selection": "Core",
-            "toggle_select": "Core",
-            "cycle_sort": "Core",
-            "toggle_watch_filter": "Organize",
-            "manage_watch_list": "Organize",
-            "toggle_preview": "Advanced",
-            "export_menu": "Core",
-            "export_metadata": "Advanced",
-            "import_metadata": "Advanced",
-            "fetch_s2": "Research",
-            "ctrl_e_dispatch": "Research",
-            "toggle_hf": "Research",
-            "check_versions": "Research",
-            "citation_graph": "Research",
-            "generate_summary": "Research",
-            "chat_with_paper": "Research",
-            "score_relevance": "Research",
-            "edit_interests": "Research",
-            "auto_tag": "Research",
-            "show_similar": "Research",
-            "add_bookmark": "Organize",
-            "collections": "Organize",
-            "add_to_collection": "Organize",
-            "toggle_detail_mode": "Advanced",
-            "cycle_theme": "Advanced",
-            "toggle_sections": "Advanced",
-            "show_help": "Core",
-            "start_mark": "Advanced",
-            "start_goto_mark": "Advanced",
-        }
-        return group_map.get(action_name, "Commands")
+        return COMMAND_PALETTE_GROUPS.get(action_name, "Commands")
 
     def _command_palette_state(self) -> _PaletteAppState:
         """Capture the app state needed to shape command-palette entries."""
@@ -680,6 +640,7 @@ class DetailPaneMixin:
             show_abstract_preview=bool(getattr(config, "show_abstract_preview", False)),
             detail_mode=getattr(self, "_detail_mode", "scan"),
             active_query=self._get_active_query(),
+            has_history_files=bool(history_files),
             has_history_navigation=bool(history_files and len(history_files) > 1),
             watch_list=watch_list,
             has_marks=has_marks,
@@ -687,6 +648,7 @@ class DetailPaneMixin:
             llm_configured=bool(isinstance(config, UserConfig) and _resolve_llm_command(config)),
             has_visible_papers=bool(filtered_papers),
             has_selection=has_selection,
+            selected_count=len(getattr(self, "selected_ids", set())),
             has_current_paper=current_paper is not None,
             has_target_papers=has_selection or current_paper is not None,
             s2_active=bool(getattr(self, "_s2_active", False)),
@@ -707,7 +669,7 @@ class DetailPaneMixin:
         if state.active_query:
             suggested_actions.update({"add_bookmark", "show_search_syntax"})
         if state.has_selection:
-            suggested_actions.update({"edit_tags", "download_pdf"})
+            suggested_actions.update({"compare_papers", "edit_tags", "download_pdf"})
         return suggested_actions
 
     def _palette_entry_copy(
@@ -753,18 +715,23 @@ class DetailPaneMixin:
         state: _PaletteAppState,
     ) -> str:
         """Return generic non-LLM, non-enrichment blockers for a palette action."""
-        if action_name in _TARGET_PAPER_PALETTE_ACTIONS and not state.has_target_papers:
+        if action_name in TARGET_PAPER_PALETTE_ACTIONS and not state.has_target_papers:
             return "selection"
         return _first_failed_palette_requirement(
             action_name,
             (
                 ({"select_all"}, state.has_visible_papers, "visible papers"),
+                ({"quick_triage"}, state.has_visible_papers, "visible papers"),
+                ({"show_due_reviews"}, state.has_visible_papers, "visible papers"),
                 ({"clear_selection"}, state.has_selection, "selection"),
+                ({"compare_papers"}, state.selected_count in {2, 3}, "2-3 selected papers"),
                 ({"add_bookmark"}, bool(state.active_query), "an active search"),
                 ({"prev_date", "next_date"}, state.has_history_navigation, "history mode"),
+                ({"trend_radar"}, state.has_history_files, "history mode"),
                 ({"start_goto_mark"}, state.has_marks, "saved marks"),
                 ({"toggle_watch_filter"}, bool(state.watch_list), "watch list entries"),
                 ({"check_versions"}, state.has_starred, "starred papers"),
+                ({"serendipity"}, state.has_visible_papers, "visible papers"),
             ),
         )
 
@@ -795,12 +762,18 @@ class DetailPaneMixin:
         if action_name not in {
             "generate_summary",
             "chat_with_paper",
+            "debate_paper",
+            "remix_papers",
             "score_relevance",
             "auto_tag",
         }:
             return ""
         if not state.llm_configured:
             return "LLM configuration"
+        if action_name == "debate_paper" and not state.has_current_paper:
+            return "selection"
+        if action_name == "remix_papers" and state.selected_count not in {2, 3}:
+            return "2-3 selected papers"
         if action_name != "score_relevance" and not state.has_target_papers:
             return "selection"
         return ""
@@ -869,6 +842,8 @@ class DetailPaneMixin:
             self._download_progress_footer_bindings,
             self._auto_tag_progress_footer_bindings,
             self._auto_tag_busy_footer_bindings,
+            self._paper_remix_busy_footer_bindings,
+            self._paper_debate_busy_footer_bindings,
         ):
             bindings = builder()
             if bindings is not None:
@@ -906,6 +881,16 @@ class DetailPaneMixin:
         if not self._auto_tag_active:
             return None
         return _footer_busy_bindings("Auto-tagging")
+
+    def _paper_remix_busy_footer_bindings(self) -> list[tuple[str, str]] | None:
+        if not getattr(self, "_paper_remix_active", False):
+            return None
+        return _footer_busy_bindings("Remixing papers")
+
+    def _paper_debate_busy_footer_bindings(self) -> list[tuple[str, str]] | None:
+        if not getattr(self, "_paper_debate_active", False):
+            return None
+        return _footer_busy_bindings("Debating paper")
 
     def _mode_footer_bindings(self) -> list[tuple[str, str]] | None:
         if self._is_search_footer_active():

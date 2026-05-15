@@ -23,6 +23,7 @@ from arxiv_browser.services.interfaces import (
     build_default_app_services,
 )
 from arxiv_browser.services.llm_service import (
+    compare_papers,
     generate_summary,
     score_relevance_once,
     suggest_tags_once,
@@ -35,6 +36,7 @@ __all__ = [
     "EnrichmentService",
     "LlmService",
     "build_default_app_services",
+    "compare_papers",
     "download_pdf",
     "enforce_rate_limit",
     "fetch_page",

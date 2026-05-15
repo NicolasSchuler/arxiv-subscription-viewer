@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, MutableMapping
 
 from arxiv_browser.models import PaperMetadata
+from arxiv_browser.sources import is_arxiv_identifier
 
 
 def count_hf_matches(
@@ -19,7 +20,11 @@ def get_starred_paper_ids_for_version_check(
     paper_metadata: Mapping[str, PaperMetadata],
 ) -> set[str]:
     """Collect starred paper IDs eligible for version checks."""
-    return {arxiv_id for arxiv_id, meta in paper_metadata.items() if meta.starred}
+    return {
+        arxiv_id
+        for arxiv_id, meta in paper_metadata.items()
+        if meta.starred and is_arxiv_identifier(arxiv_id)
+    }
 
 
 def apply_version_updates(

@@ -107,6 +107,8 @@ class TestKeybindingsCommand:
         captured = capsys.readouterr()  # type: ignore[union-attr]
         output = captured.out
         assert "Power" in output
+        assert "Ctrl+v" in output
+        assert "Compare Papers" in output
         assert "Getting Started" not in output
 
     def test_keybindings_tier_filter_standard(self, capsys: object) -> None:

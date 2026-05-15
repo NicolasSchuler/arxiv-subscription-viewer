@@ -22,6 +22,7 @@ HELP_SECTION_ACTIONS: list[tuple[str, list[str]]] = [
             "open_url",
             "open_pdf",
             "preview_pdf",
+            "preview_figure",
             "cycle_sort",
             "toggle_focus_pane",
             "copy_selected",
@@ -36,6 +37,11 @@ HELP_SECTION_ACTIONS: list[tuple[str, list[str]]] = [
         [
             "toggle_read",
             "toggle_star",
+            "quick_triage",
+            "schedule_review",
+            "mark_reviewed",
+            "clear_review",
+            "show_due_reviews",
             "edit_notes",
             "edit_tags",
             "toggle_watch_filter",
@@ -54,10 +60,15 @@ HELP_SECTION_ACTIONS: list[tuple[str, list[str]]] = [
             "fetch_s2",
             "show_similar",
             "citation_graph",
+            "trend_radar",
+            "author_profile",
+            "track_author",
+            "read_abstract_aloud",
             "check_versions",
             "toggle_hf",
             "generate_summary",
             "chat_with_paper",
+            "compare_papers",
             "score_relevance",
             "edit_interests",
             "auto_tag",
@@ -86,6 +97,7 @@ HELP_SEARCH_SYNTAX: list[tuple[str, str]] = [
     ("title:transformer", "Title filter"),
     ("abstract:attention", "Abstract filter"),
     ("unread / starred", "State filters"),
+    ("review-due", "Due review filter"),
     ("AND / OR / NOT", "Boolean operators"),
 ]
 
@@ -119,9 +131,18 @@ HELP_DESCRIPTION_OVERRIDES: dict[str, str] = {
     "command_palette": "Commands",
     "show_help": "Help overlay",
     "show_search_syntax": "Search examples & operators",
+    "trend_radar": "Trend Radar",
+    "author_profile": "Author Profile",
+    "track_author": "Track Author",
+    "schedule_review": "Schedule Review",
+    "mark_reviewed": "Mark Reviewed",
+    "clear_review": "Clear Review",
+    "show_due_reviews": "Show Due Reviews",
     "open_url": "Open in Browser",
     "open_pdf": "Open PDF",
     "preview_pdf": "Preview PDF in terminal",
+    "preview_figure": "Preview first HTML figure",
+    "read_abstract_aloud": "Read abstract aloud",
     "toggle_detail_mode": "Toggle detail density (scan/full)",
     "toggle_focus_pane": "Focus details / paper list",
 }
@@ -130,6 +151,13 @@ HELP_DESCRIPTION_OVERRIDES: dict[str, str] = {
 # Actions accessible only via command palette (Ctrl+p) — no direct keybinding.
 HELP_PALETTE_ONLY_KEYS: dict[str, str] = {
     "show_search_syntax": "Ctrl+p",
+    "trend_radar": "Ctrl+p",
+    "author_profile": "Ctrl+p",
+    "track_author": "Ctrl+p",
+    "schedule_review": "Ctrl+p",
+    "mark_reviewed": "Ctrl+p",
+    "clear_review": "Ctrl+p",
+    "show_due_reviews": "Ctrl+p",
 }
 
 

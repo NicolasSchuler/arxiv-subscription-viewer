@@ -222,7 +222,11 @@ class TestTextualIntegration:
                 assert app._sort_index == 4  # trending
                 await pilot.press("s")
                 assert app._sort_index == 5  # relevance
-                # Should cycle back to 0
+                await pilot.press("s")
+                assert app._sort_index == SORT_OPTIONS.index("queue")
+                await pilot.press("s")
+                assert app._sort_index == SORT_OPTIONS.index("triage")
+                # Should cycle back to 0 after triage
                 await pilot.press("s")
                 assert app._sort_index == 0
 

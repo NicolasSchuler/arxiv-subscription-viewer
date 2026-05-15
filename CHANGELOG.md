@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-05-15
+
+### Added
+- Added terminal HTML figure preview on `I`, with arXiv HTML figure extraction, cached image rendering, and graceful fallback warnings.
+- Added width-aware status bar visual tokens for enrichment progress, reading velocity, and category distribution.
+- Added detail-pane line annotations with context-sensitive `a` behavior and persisted `paper_metadata.line_annotations`.
+
+### Changed
+- Expanded tests and docs drift checks for the new keybinding, status visuals, figure cache/error paths, and metadata subfield documentation.
+
 ## [0.1.8] - 2026-05-14
 
 ### Added
@@ -146,7 +156,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ASCII mode for terminals without Unicode support (`--ascii`)
 - Session persistence: scroll position, active filters, sort order
 
-[Unreleased]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.8...v0.1.9
+[0.1.8]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.4...v0.1.5

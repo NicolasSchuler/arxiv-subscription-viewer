@@ -22,8 +22,45 @@ Files must be named `YYYY-MM-DD.txt`. The app auto-loads the newest file on star
 |-----|--------|
 | `[` | Previous (older) date |
 | `]` | Next (newer) date |
+| `T` | Quick triage visible unread papers |
 
 Session state (including current date) persists across runs. Falls back to `arxiv.txt` if no `history/` directory exists.
+
+## Smart Reading Queue
+
+Cycle sorting with `s` until `sort:queue` appears to use the Smart Reading Queue. Queue mode is a priority sort over the loaded date file: relevance scores, watch-list matches, recency, HuggingFace upvotes, and Semantic Scholar citation velocity all contribute when available. It does not create a separate queue or change read/unread state.
+
+When queue mode is selected, it stays active as you move between date files, so each newly loaded digest is auto-ranked with the same priority formula.
+
+## Local Triage Model
+
+Once you have enough saved decisions, open `Ctrl+p` and run **Train Triage Model**. The model uses local sklearn TF-IDF features plus logistic regression to learn from stars, collection saves, and skips. It adds `ML:` badges and a `sort:triage` mode with likely-star papers first, uncertain papers next, and likely skips last. Tagged-only decisions such as `triage:later` are treated as neutral training data and are not forced into either class.
+
+Use **Clear Triage Model** from the command palette to delete the local model artifacts.
+
+## Quick Triage
+
+Press `T` to review the current visible unread queue one paper at a time. Each card shows the title, the first two abstract lines, any existing relevance score, local ML triage badge, and a watch-list badge when matched.
+
+| Key | Action |
+|-----|--------|
+| `y` | Star and mark read |
+| `n` | Skip by marking read |
+| `t` | Add `triage:later` and mark read |
+| `s` | Save to a collection and mark read |
+| `Esc` / `q` | Close with a partial summary |
+
+## Trend Radar
+
+Open `Ctrl+p` and run **Trend Radar** to inspect your local `history/` archive. The overlay reads the same dated digest files used for navigation; it does not query live arXiv API results.
+
+Trend Radar shows:
+
+- growing primary categories, with sparklines ordered oldest to newest
+- top authors across the parsed local history
+- hot recent abstract bigrams from the newest history dates
+
+The recent window defaults to the newest 10 history files and compares them with the previous 10 when available. A positive category delta means the category appeared more often in the recent window than in the previous one.
 
 ## CLI Options
 

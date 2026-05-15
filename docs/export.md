@@ -1,4 +1,4 @@
-# 📥 Export & PDF Configuration
+# 📥 Export, PDF & Figure Preview
 
 ## Export Menu (`E`)
 
@@ -48,6 +48,16 @@ Press `F` to render a terminal preview of the current paper's PDF. If the PDF is
   "pdf_preview_max_pages": 5
 }
 ```
+
+## HTML Figure Preview (`I`)
+
+Press `I` to preview the first figure from the current paper's arXiv HTML page.
+
+- Fetches `https://arxiv.org/html/{arxiv_id}` and selects the first LaTeXML paper figure (`<figure class="ltx_figure"><img ...>`)
+- Ignores header/logo images outside paper figures and resolves relative image URLs against arXiv
+- Caches the normalized figure image next to the paper download/cache area in `.figure-cache/`
+- Uses the same terminal-safe renderer as PDF preview, with half-block Unicode output by default and ASCII-safe output under `--ascii` / no-color modes
+- Shows a warning, without changing paper state, when arXiv HTML is unavailable, no figure is present, image bytes are invalid, the image type is unsupported, or the network request fails
 
 ## PDF Viewer (`P`)
 

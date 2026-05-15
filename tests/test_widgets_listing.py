@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import replace
+from datetime import date, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -163,6 +164,49 @@ def test_meta_badges_honor_row_budget(make_paper):
     meta_line = text.splitlines()[2]
     assert "+1" in meta_line or "+2" in meta_line
     assert len(_visible_text(meta_line)) <= 38
+
+
+def test_review_badges_render_due_and_future_states(make_paper):
+    paper = make_paper()
+    due = render_paper_option(
+        PaperRowRenderState(
+            paper=paper,
+            metadata=PaperMetadata(
+                arxiv_id=paper.arxiv_id,
+                next_review_date=date.today().isoformat(),
+                review_stage=0,
+            ),
+        )
+    )
+    future_date = (date.today() + timedelta(days=3)).isoformat()
+    future = render_paper_option(
+        PaperRowRenderState(
+            paper=paper,
+            metadata=PaperMetadata(
+                arxiv_id=paper.arxiv_id,
+                next_review_date=future_date,
+                review_stage=1,
+            ),
+        )
+    )
+
+    assert "Review:due" in due
+    assert f"Review:{future_date}" in future
+
+
+def test_triage_prediction_badge_renders(make_paper):
+    from arxiv_browser.triage_model import TRIAGE_BUCKET_LIKELY_STAR, TriagePrediction
+
+    paper = make_paper()
+    text = render_paper_option(
+        PaperRowRenderState(
+            paper=paper,
+            triage_prediction=TriagePrediction(paper.arxiv_id, 0.82, TRIAGE_BUCKET_LIKELY_STAR),
+        )
+    )
+
+    assert "ML:" in text
+    assert "82%" in text
 
 
 def test_paper_list_item_preview_text_branches(make_paper):
@@ -628,6 +672,140 @@ def test_chrome_helper_branches_cover_status_and_date_navigation_helpers():
     )
     assert start <= 1 <= end
     assert mode in chrome_mod.DATE_NAV_LABEL_MODES
+
+
+def test_status_bar_visual_tokens_are_width_aware_and_ascii_safe():
+    from arxiv_browser._ascii import set_ascii_mode
+    from arxiv_browser.widgets.chrome import build_status_bar_text, set_ascii_glyphs
+
+    state = StatusBarState(
+        total=100,
+        filtered=42,
+        query="transformers",
+        watch_filter_active=False,
+        selected_count=0,
+        sort_label="date",
+        in_arxiv_api_mode=False,
+        api_page=None,
+        arxiv_api_loading=False,
+        show_abstract_preview=False,
+        s2_active=False,
+        s2_loading=False,
+        s2_count=0,
+        version_checking=True,
+        enrichment_progress=("Versions", 2, 4),
+        reading_velocity=(0.0, 1.0, 3.0, 0.0),
+        category_distribution=(("cs.AI", 4), ("cs.LG", 2), ("stat.ML", 1)),
+        max_width=140,
+    )
+
+    wide = build_status_bar_text(state)
+    assert "Versions" in wide
+    assert "2/4" in wide
+    assert "Read/m" in wide
+    assert "Cats" in wide
+    assert "Checking versions" not in wide
+
+    narrow = build_status_bar_text(replace(state, max_width=90))
+    assert "Versions" not in narrow
+    assert "Read/m" not in narrow
+    assert "Cats" not in narrow
+    assert "sort:date" in narrow
+
+    set_ascii_mode(True)
+    set_ascii_glyphs(True)
+    try:
+        ascii_status = build_status_bar_text(replace(state, max_width=140))
+        plain = re.sub(r"\[[^\]]*]", "", ascii_status)
+        assert _NON_ASCII_RE.search(plain) is None
+        assert "#" in plain
+        assert "|" in plain
+    finally:
+        set_ascii_mode(False)
+        set_ascii_glyphs(False)
+
+
+def test_status_bar_visual_helpers_handle_category_edges():
+    import arxiv_browser.widgets.footer_status as footer_status
+
+    assert footer_status._category_histogram(()) == ""
+    assert "cs.AI" in footer_status._category_histogram((("cs.AI", 3),))
+    many = footer_status._category_histogram(
+        (("cs.AI", 4), ("cs.LG", 3), ("cs.CV", 2), ("stat.ML", 1))
+    )
+    assert "cs.AI" in many
+    assert "cs.LG" in many
+    assert "cs.CV" in many
+    assert "stat.ML" not in many
+
+
+def test_status_bar_helper_edge_branches():
+    import arxiv_browser.widgets.footer_status as footer_status
+
+    badge_state = footer_status.FooterModeBadgeState(
+        relevance_scoring_active=False,
+        version_checking=False,
+        search_visible=False,
+        in_arxiv_api_mode=False,
+        selected_count=0,
+    )
+    with pytest.raises(TypeError):
+        footer_status.build_footer_mode_badge(badge_state, selected_count=1)
+    assert "VERSIONS" in footer_status.build_footer_mode_badge(
+        replace(badge_state, version_checking=True)
+    )
+    assert "SEARCH" in footer_status.build_footer_mode_badge(
+        replace(badge_state, search_visible=True)
+    )
+    assert "API" in footer_status.build_footer_mode_badge(
+        replace(badge_state, in_arxiv_api_mode=True)
+    )
+    assert "2 SEL" in footer_status.build_footer_mode_badge(replace(badge_state, selected_count=2))
+
+    colors = dict(footer_status.DEFAULT_THEME)
+    assert "watched" in footer_status._full_primary_segment(
+        total=5,
+        filtered=2,
+        query="",
+        watch_filter_active=True,
+        theme_colors=colors,
+    )
+    assert "papers" in footer_status._full_primary_segment(
+        total=5,
+        filtered=5,
+        query="",
+        watch_filter_active=False,
+        theme_colors=colors,
+    )
+
+    state = StatusBarState(
+        total=5,
+        filtered=5,
+        query="",
+        watch_filter_active=False,
+        selected_count=0,
+        sort_label="date",
+        in_arxiv_api_mode=False,
+        api_page=None,
+        arxiv_api_loading=False,
+        show_abstract_preview=False,
+        s2_active=False,
+        s2_loading=False,
+        s2_count=0,
+        reading_velocity=(0.0, 0.0),
+        category_distribution=(("cs.AI", 0),),
+        theme_colors=colors,
+    )
+    assert footer_status._full_visual_segments(state) == []
+    assert footer_status._sparkline(()) == ""
+    assert len(footer_status._sparkline((0.0, 0.0))) == 2
+    assert "Checking versions" in "".join(
+        footer_status._full_version_segments(replace(state, version_checking=True))
+    )
+    assert "2 updated" in "".join(
+        footer_status._full_version_segments(replace(state, version_update_count=2))
+    )
+    assert footer_status._next_rich_text_chunk(r"\[", 0) == (r"\[", 2, 1)
 
 
 # ============================================================================

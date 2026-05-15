@@ -36,6 +36,7 @@ from arxiv_browser.models import (
     PaperMetadata,
     SearchBookmark,
     UserConfig,
+    WatchListEntry,
 )
 from arxiv_browser.services import enrichment_service as enrich
 from arxiv_browser.services.download_service import DownloadFailure, DownloadResult
@@ -355,12 +356,14 @@ class TestBrowserHelperCoverage:
         app._fetch_hf_daily = AsyncMock(return_value=None)
         app.call_after_refresh = MagicMock()
         app.selected_ids = {paper.arxiv_id}
+        app._sort_index = SORT_OPTIONS.index("queue")
         with patch("arxiv_browser.browser.browse.parse_arxiv_file", return_value=[paper]):
             assert app._load_current_date() is True
         assert app._advance_dataset_epoch.called
         assert app.all_papers == [paper]
         assert app._papers_by_id == {paper.arxiv_id: paper}
         assert app.selected_ids == set()
+        assert SORT_OPTIONS[app._sort_index] == "queue"
         app._apply_filter.assert_called_with("query")
         app.call_after_refresh.assert_called_once()
 
@@ -607,6 +610,45 @@ class TestBrowserHelperCoverage:
         app._schedule_sort_sensitive_refresh("hf")
         assert app._sort_refresh_dirty == {"hf"}
 
+        app._sort_index = SORT_OPTIONS.index("queue")
+        app._sort_refresh_dirty = set()
+        app._schedule_sort_sensitive_refresh("s2")
+        app._schedule_sort_sensitive_refresh("hf")
+        app._schedule_sort_sensitive_refresh("relevance")
+        assert app._sort_refresh_dirty == {"s2", "hf", "relevance"}
+
+    def test_sort_papers_passes_watched_ids_to_queue_sort(self, make_paper) -> None:
+        app = _new_app_stub()
+        paper = make_paper(arxiv_id="2401.30021")
+        app.filtered_papers = [paper]
+        app._s2_cache = {}
+        app._hf_cache = {}
+        app._relevance_scores = {}
+        app._watched_paper_ids = {paper.arxiv_id}
+        app._sort_index = SORT_OPTIONS.index("queue")
+
+        with patch("arxiv_browser.browser.browse.sort_papers", return_value=[paper]) as sort_mock:
+            app._sort_papers()
+
+        assert sort_mock.call_args.kwargs["watched_paper_ids"] == {paper.arxiv_id}
+        assert app._visible_index_by_id == {paper.arxiv_id: 0}
+
+    def test_queue_sort_uses_recomputed_watch_list_matches(self, make_paper) -> None:
+        app = _new_app_stub()
+        plain = make_paper(arxiv_id="plain", title="Plain Paper")
+        priority = make_paper(arxiv_id="priority", title="Priority Queue Paper")
+        app.all_papers = [plain, priority]
+        app.filtered_papers = [plain, priority]
+        app._config.watch_list = [WatchListEntry(pattern="Priority", match_type="title")]
+        app._watched_paper_ids = set()
+        app._sort_index = SORT_OPTIONS.index("queue")
+
+        app._compute_watched_papers()
+        app._sort_papers()
+
+        assert app._watched_paper_ids == {"priority"}
+        assert [paper.arxiv_id for paper in app.filtered_papers] == ["priority", "plain"]
+
     @staticmethod
     def _build_chrome_state_app(make_paper):
         app = _new_app_stub()
@@ -725,8 +767,24 @@ class TestBrowserHelperCoverage:
         assert detail_state.s2_data == "s2data" and detail_state.hf_data == "hfdata"
         row_state = app._build_paper_row_state(paper1)
         assert row_state.selected is True and row_state.watched is True
+        app._read_event_timestamps = deque()
+        app._record_read_velocity_events(2)
         status_state = app._build_status_bar_state()
         assert status_state.total == 2 and status_state.filtered == 1 and status_state.api_page == 3
+        assert status_state.enrichment_progress == ("Versions", 1, 2)
+        assert status_state.category_distribution == (("cs.AI", 1),)
+        assert sum(status_state.reading_velocity) == 2.0
+
+        app._scoring_progress = (3, 5)
+        assert app._status_enrichment_progress() == ("Scoring", 3, 5)
+        app._scoring_progress = None
+        app._version_progress = None
+        assert app._status_enrichment_progress() == ("Downloading", 1, 1)
+        app._download_queue.clear()
+        app._downloading.clear()
+        app._download_total = 0
+        app._auto_tag_progress = (4, 6)
+        assert app._status_enrichment_progress() == ("Auto-tag", 4, 6)
 
     def test_chrome_subtitle_header_and_save_config_paths(self, make_paper) -> None:
         app, paper1, _paper2, _theme_runtime = self._build_chrome_state_app(make_paper)

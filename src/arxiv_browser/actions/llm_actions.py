@@ -29,6 +29,8 @@ from arxiv_browser.llm import (
     _resolve_llm_command,
     _save_relevance_score,
     _save_summary,
+    resolve_summary_prompt_template,
+    summary_mode_display_label,
 )
 from arxiv_browser.llm_providers import LLMProvider, llm_command_requires_shell, resolve_provider
 from arxiv_browser.modals import (
@@ -39,6 +41,12 @@ from arxiv_browser.modals import (
 )
 from arxiv_browser.modals.editing import PaperEditResult
 from arxiv_browser.models import Paper
+from arxiv_browser.paper_remix_actions import (
+    _generate_paper_remix_async,
+    _selected_papers_for_remix,
+    _start_paper_remix_flow,
+    action_remix_papers,
+)
 
 if TYPE_CHECKING:
     from arxiv_browser.browser.core import ArxivBrowser
@@ -60,6 +68,7 @@ __all__ = [
     "_ensure_command_trusted",
     "_ensure_llm_command_trusted",
     "_ensure_pdf_viewer_trusted",
+    "_generate_paper_remix_async",
     "_is_llm_command_trusted",
     "_is_pdf_viewer_trusted",
     "_load_all_relevance_scores",
@@ -68,7 +77,10 @@ __all__ = [
     "_resolve_llm_command",
     "_save_relevance_score",
     "_save_summary",
+    "_selected_papers_for_remix",
+    "_start_paper_remix_flow",
     "_trust_hash",
+    "action_remix_papers",
     "asyncio",
     "get_config_path",
     "llm_command_requires_shell",
@@ -77,7 +89,6 @@ __all__ = [
     "resolve_provider",
     "save_config",
 ]
-
 
 _RECOVERABLE_ACTION_ERRORS = RECOVERABLE_ACTION_ERRORS
 _TRUST_HASH_LENGTH = 16
@@ -206,42 +217,37 @@ def _on_summary_mode_selected(app, mode: str | None, paper: Paper, command_templ
     if arxiv_id in app._summary_loading:
         return
 
-    # Resolve prompt template for this mode
-    if mode == "default" and app._config.llm_prompt_template:
-        prompt_template = app._config.llm_prompt_template
-    else:
-        prompt_template = SUMMARY_MODES[mode][1]
+    prompt_template = resolve_summary_prompt_template(
+        mode,
+        custom_default_prompt=app._config.llm_prompt_template,
+        phd_explainer_field=getattr(app._config, "llm_phd_explainer_field", "physics"),
+    )
 
     cmd_hash = _compute_command_hash(command_template, prompt_template)
-    mode_label = mode.upper() if mode != "default" else ""
-    use_full_paper_content = mode != "quick"
 
-    # Check SQLite cache first
     cached = _load_summary(app._summary_db_path, arxiv_id, cmd_hash)
     if cached:
         app._paper_summaries[arxiv_id] = cached
-        app._summary_mode_label[arxiv_id] = mode_label
+        app._summary_mode_label[arxiv_id] = summary_mode_display_label(mode)
         app._summary_command_hash[arxiv_id] = cmd_hash
         app._update_abstract_display(arxiv_id)
         app.notify("Summary loaded from cache", title="AI Summary")
         return
 
-    # Avoid showing stale content under a newly selected mode.
     if app._summary_command_hash.get(arxiv_id) != cmd_hash:
         app._paper_summaries.pop(arxiv_id, None)
         app._summary_command_hash.pop(arxiv_id, None)
 
-    # Start async generation
     app._summary_loading.add(arxiv_id)
-    app._summary_mode_label[arxiv_id] = mode_label
+    app._summary_mode_label[arxiv_id] = summary_mode_display_label(mode)
     app._update_abstract_display(arxiv_id)
     app._track_dataset_task(
         app._generate_summary_async(
             paper,
             prompt_template,
             cmd_hash,
-            mode_label=mode_label,
-            use_full_paper_content=use_full_paper_content,
+            mode_label=summary_mode_display_label(mode),
+            use_full_paper_content=mode != "quick",
         )
     )
 

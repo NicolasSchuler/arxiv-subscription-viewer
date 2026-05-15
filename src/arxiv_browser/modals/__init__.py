@@ -26,8 +26,18 @@ from arxiv_browser.modals.common import (
     SectionToggleModal,
 )
 
+# discovery.py — local analytics and author profiles
+from arxiv_browser.modals.discovery import (
+    AuthorListItem,
+    AuthorPickerModal,
+    AuthorProfileModal,
+    TrendRadarModal,
+)
+
 # editing.py — unified paper editing modal (notes + tags + auto-tag)
 from arxiv_browser.modals.editing import (
+    LineAnnotationModal,
+    LineAnnotationResult,
     PaperEditModal,
     PaperEditResult,
 )
@@ -38,12 +48,15 @@ from arxiv_browser.modals.help import HelpScreen
 # llm.py — LLM-powered modals (summaries, relevance, chat)
 from arxiv_browser.modals.llm import (
     PaperChatScreen,
+    PaperComparisonScreen,
+    PaperDebateResultModal,
+    PaperRemixResultModal,
     ResearchInterestsModal,
     SummaryModeModal,
 )
 
-# pdf.py — terminal PDF preview
-from arxiv_browser.modals.pdf import PdfPreviewScreen
+# pdf.py — terminal PDF/figure preview
+from arxiv_browser.modals.pdf import FigurePreviewScreen, PdfPreviewScreen
 
 # search.py — arXiv search form, command palette
 from arxiv_browser.modals.search import (
@@ -51,6 +64,9 @@ from arxiv_browser.modals.search import (
     CommandPaletteModal,
     PaletteCommand,
 )
+
+# triage.py — rapid unread-paper triage
+from arxiv_browser.modals.triage import QuickTriageScreen
 
 # watchlist.py — watch list management modals
 from arxiv_browser.modals.watchlist import WatchListItem, WatchListModal
@@ -63,25 +79,36 @@ from arxiv_browser.modals.whats_new import WhatsNewScreen
 
 __all__ = [
     "ArxivSearchModal",
+    "AuthorListItem",
+    "AuthorPickerModal",
+    "AuthorProfileModal",
     "CitationGraphListItem",
     "CitationGraphScreen",
     "CollectionsModal",
     "CommandPaletteModal",
     "ConfirmModal",
     "ExportMenuModal",
+    "FigurePreviewScreen",
     "HelpScreen",
+    "LineAnnotationModal",
+    "LineAnnotationResult",
     "MetadataSnapshotPickerModal",
     "ModalBase",
     "PaletteCommand",
     "PaperChatScreen",
+    "PaperComparisonScreen",
+    "PaperDebateResultModal",
     "PaperEditModal",
     "PaperEditResult",
+    "PaperRemixResultModal",
     "PdfPreviewScreen",
+    "QuickTriageScreen",
     "RecommendationListItem",
     "RecommendationsScreen",
     "ResearchInterestsModal",
     "SectionToggleModal",
     "SummaryModeModal",
+    "TrendRadarModal",
     "WatchListItem",
     "WatchListModal",
     "WelcomeScreen",

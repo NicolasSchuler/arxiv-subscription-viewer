@@ -395,6 +395,246 @@ class TestArxivApiAndSimilarityCoverage:
             app._show_local_recommendations(paper)
         app.push_screen.assert_called_once()
 
+    def test_serendipity_palette_entry_resolves_to_action(self):
+        from arxiv_browser.browser.contracts import COMMAND_PALETTE_COMMANDS
+
+        entry = next(command for command in COMMAND_PALETTE_COMMANDS if command[0] == "Surprise Me")
+        assert entry[3] == "serendipity"
+        assert hasattr(ArxivBrowser, "action_serendipity")
+
+    def test_review_palette_entries_and_availability(self):
+        from arxiv_browser.browser.contracts import COMMAND_PALETTE_COMMANDS, _PaletteAppState
+
+        entries = {command[0]: command[3] for command in COMMAND_PALETTE_COMMANDS}
+        assert entries["Schedule Review"] == "schedule_review"
+        assert entries["Mark Reviewed"] == "mark_reviewed"
+        assert entries["Clear Review"] == "clear_review"
+        assert entries["Show Due Reviews"] == "show_due_reviews"
+        assert hasattr(ArxivBrowser, "action_schedule_review")
+        assert hasattr(ArxivBrowser, "action_show_due_reviews")
+
+        app = _new_app()
+        state = _PaletteAppState(
+            in_arxiv_api_mode=False,
+            hf_active=False,
+            watch_filter_active=False,
+            show_abstract_preview=False,
+            detail_mode="scan",
+            active_query="",
+            has_history_files=False,
+            has_history_navigation=False,
+            watch_list=[],
+            has_marks=False,
+            has_starred=False,
+            llm_configured=False,
+            has_visible_papers=False,
+            has_selection=False,
+            selected_count=0,
+            has_current_paper=False,
+            has_target_papers=False,
+            s2_active=False,
+            s2_data_loaded=False,
+        )
+        assert app._palette_basic_blocked_reason("schedule_review", state) == "selection"
+        assert app._palette_basic_blocked_reason("mark_reviewed", state) == "selection"
+        assert app._palette_basic_blocked_reason("clear_review", state) == "selection"
+        assert app._palette_basic_blocked_reason("show_due_reviews", state) == "visible papers"
+
+    def test_serendipity_action_jumps_to_ranked_visible_paper(self, make_paper):
+        from arxiv_browser.similarity import build_similarity_corpus_key
+
+        starred = make_paper(
+            arxiv_id="2401.71001",
+            title="Transformer Attention",
+            categories="cs.CL",
+            abstract="transformer attention language token",
+            abstract_raw="transformer attention language token",
+        )
+        near = make_paper(
+            arxiv_id="2401.71002",
+            title="Language Attention",
+            categories="cs.CL",
+            abstract="language attention transformer token",
+            abstract_raw="language attention transformer token",
+        )
+        far = make_paper(
+            arxiv_id="2401.71003",
+            title="Quantum Qubits",
+            categories="quant-ph",
+            abstract="quantum qubit entanglement superconducting",
+            abstract_raw="quantum qubit entanglement superconducting",
+        )
+        papers = [starred, near, far]
+        app = _new_app()
+        app.notify = MagicMock()
+        app.all_papers = papers
+        app.filtered_papers = papers
+        app._config = UserConfig(
+            paper_metadata={starred.arxiv_id: PaperMetadata(starred.arxiv_id, starred=True)}
+        )
+        app._tfidf_index = app._build_tfidf_index_for_similarity(papers)
+        app._tfidf_corpus_key = build_similarity_corpus_key(papers)
+        app._get_current_paper = MagicMock(return_value=starred)
+        app._resolve_visible_index = MagicMock(return_value=2)
+        option_list = _DummyOptionList()
+        app._get_paper_list_widget = MagicMock(return_value=option_list)
+
+        app.action_serendipity()
+
+        app._resolve_visible_index.assert_called_once_with(far.arxiv_id)
+        assert option_list.highlighted == 2
+        assert "new category quant-ph" in app.notify.call_args.args[0]
+
+    def test_serendipity_action_starts_lazy_index_build(self, make_paper):
+        paper = make_paper(arxiv_id="2401.71101")
+        app = _new_app()
+        app.notify = MagicMock()
+        app.all_papers = [paper]
+        app.filtered_papers = [paper]
+        app._tfidf_index = None
+        app._tfidf_corpus_key = None
+        app._tfidf_build_task = None
+
+        tracked = []
+
+        def track_dataset_task(coro):
+            tracked.append(coro)
+            coro.close()
+            return SimpleNamespace(done=lambda: False)
+
+        async def build_index(_corpus_key):
+            return None
+
+        app._track_dataset_task = MagicMock(side_effect=track_dataset_task)
+        app._build_tfidf_index_async = build_index
+
+        app.action_serendipity()
+
+        assert app._pending_serendipity is True
+        assert len(tracked) == 1
+        assert "Indexing papers for serendipity" in app.notify.call_args.args[0]
+
+    def test_serendipity_action_reports_index_build_in_progress(self, make_paper):
+        paper = make_paper(arxiv_id="2401.71102")
+        app = _new_app()
+        app.notify = MagicMock()
+        app.all_papers = [paper]
+        app.filtered_papers = [paper]
+        app._tfidf_index = None
+        app._tfidf_corpus_key = None
+        app._tfidf_build_task = SimpleNamespace(done=lambda: False)
+        app._track_dataset_task = MagicMock()
+
+        app.action_serendipity()
+
+        assert app._pending_serendipity is True
+        assert "Similarity indexing in progress" in app.notify.call_args.args[0]
+        app._track_dataset_task.assert_not_called()
+
+    def test_serendipity_action_warns_when_ranker_finds_no_candidates(self, make_paper):
+        from arxiv_browser.similarity import build_similarity_corpus_key
+
+        paper = make_paper(arxiv_id="2401.71103")
+        app = _new_app()
+        app.notify = MagicMock()
+        app.all_papers = [paper]
+        app.filtered_papers = [paper]
+        app._tfidf_index = object()
+        app._tfidf_corpus_key = build_similarity_corpus_key(app.all_papers)
+        app._get_current_paper = MagicMock(return_value=paper)
+        app._resolve_visible_index = MagicMock()
+
+        with patch("arxiv_browser.actions.ui_actions.find_serendipitous_papers", return_value=[]):
+            app.action_serendipity()
+
+        assert "No serendipitous paper could be selected" in app.notify.call_args.args[0]
+        app._resolve_visible_index.assert_not_called()
+
+    def test_serendipity_action_warns_when_candidate_is_not_visible(self, make_paper):
+        from arxiv_browser.similarity import (
+            SerendipityCandidate,
+            build_similarity_corpus_key,
+        )
+
+        paper = make_paper(arxiv_id="2401.71104")
+        app = _new_app()
+        app.notify = MagicMock()
+        app.all_papers = [paper]
+        app.filtered_papers = [paper]
+        app._tfidf_index = object()
+        app._tfidf_corpus_key = build_similarity_corpus_key(app.all_papers)
+        app._get_current_paper = MagicMock(return_value=paper)
+        app._resolve_visible_index = MagicMock(return_value=None)
+        app._get_paper_list_widget = MagicMock()
+
+        with patch(
+            "arxiv_browser.actions.ui_actions.find_serendipitous_papers",
+            return_value=[SerendipityCandidate(paper=paper, score=1.0, reason="surprise")],
+        ):
+            app.action_serendipity()
+
+        assert "not in the current filtered view" in app.notify.call_args.args[0]
+        app._get_paper_list_widget.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_tfidf_build_resumes_pending_serendipity(self, make_paper):
+        from arxiv_browser.similarity import build_similarity_corpus_key
+
+        papers = [
+            make_paper(arxiv_id="2401.71201", abstract_raw="alpha beta gamma"),
+            make_paper(arxiv_id="2401.71202", abstract_raw="delta epsilon zeta"),
+        ]
+        app = _new_app()
+        app.notify = MagicMock()
+        app.all_papers = papers
+        app._capture_dataset_epoch = MagicMock(return_value=1)
+        app._is_current_dataset_epoch = MagicMock(return_value=True)
+        app._pending_similarity_paper_id = None
+        app._pending_similarity_s2_available = False
+        app._pending_serendipity = True
+        app._tfidf_build_task = None
+        app.action_serendipity = MagicMock()
+
+        await app._build_tfidf_index_async(build_similarity_corpus_key(papers))
+
+        app.action_serendipity.assert_called_once_with()
+
+    @pytest.mark.asyncio
+    async def test_tfidf_build_resumes_pending_serendipity_after_stale_similarity(self, make_paper):
+        from arxiv_browser.similarity import build_similarity_corpus_key
+
+        current = make_paper(arxiv_id="2401.71203", abstract_raw="alpha beta gamma")
+        pending = make_paper(arxiv_id="2401.71204", abstract_raw="delta epsilon zeta")
+        app = _new_app()
+        app.notify = MagicMock()
+        app.all_papers = [current, pending]
+        app._capture_dataset_epoch = MagicMock(return_value=1)
+        app._is_current_dataset_epoch = MagicMock(return_value=True)
+        app._pending_similarity_paper_id = pending.arxiv_id
+        app._pending_similarity_s2_available = False
+        app._pending_serendipity = True
+        app._tfidf_build_task = None
+        app._get_current_paper = MagicMock(return_value=current)
+        app.action_serendipity = MagicMock()
+        app._show_local_recommendations = MagicMock()
+
+        await app._build_tfidf_index_async(build_similarity_corpus_key(app.all_papers))
+
+        app.action_serendipity.assert_called_once_with()
+        app._show_local_recommendations.assert_not_called()
+
+    def test_serendipity_action_empty_pool_warns_without_jump(self):
+        app = _new_app()
+        app.notify = MagicMock()
+        app.all_papers = []
+        app.filtered_papers = []
+        app._get_paper_list_widget = MagicMock()
+
+        app.action_serendipity()
+
+        assert "No visible papers are available" in app.notify.call_args.args[0]
+        app._get_paper_list_widget.assert_not_called()
+
     @pytest.mark.asyncio
     async def test_show_s2_recommendations_and_citation_graph_paths(self, make_paper):
         app = _new_app()

@@ -65,6 +65,7 @@ class HelpScreen(ModalBase[None]):
                 ("cat:cs.AI", "Category filter"),
                 ("author:hinton", "Author filter"),
                 ("unread / starred", "State filters"),
+                ("review-due", "Due review filter"),
                 ("AND / OR / NOT", "Boolean operators"),
             ],
         ),

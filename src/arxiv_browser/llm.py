@@ -11,6 +11,7 @@ import shlex
 import sqlite3
 import subprocess
 from contextlib import closing
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -111,6 +112,50 @@ SUMMARY_MODES: dict[str, tuple[str, str]] = {
         "Paper: {title}\nAuthors: {authors}\nCategories: {categories}\n\n"
         "{paper_content}",
     ),
+    "eli5": (
+        "Explain Like I'm 5",
+        "Explain this arXiv paper like the reader is five years old, while "
+        "staying faithful to what the paper actually says.\n"
+        "Rules:\n"
+        "1. Use everyday words and short sentences.\n"
+        "2. Do not use jargon or unexplained acronyms.\n"
+        "3. Include exactly one concrete analogy that captures the main idea.\n"
+        "4. Explain why the paper matters without hype.\n"
+        "5. Mention one limitation or open question in plain language.\n\n"
+        "Use concise Markdown with these sections:\n"
+        "## Big Idea\n"
+        "## Analogy\n"
+        "## What They Tried\n"
+        "## What They Found\n"
+        "## One Caveat\n\n"
+        "Paper: {title}\nAuthors: {authors}\nCategories: {categories}\n\n"
+        "{paper_content}",
+    ),
+    "phd": (
+        "Explain to a PhD in another field",
+        "Explain this arXiv paper to a PhD-level researcher in {phd_field} who "
+        "is not an expert in this paper's specific subfield.\n"
+        "Assume strong mathematical and scientific maturity, but translate "
+        "subfield-specific jargon into concepts a {phd_field} researcher would "
+        "likely know. Use analogies to {phd_field} only when they are accurate; "
+        "avoid forced comparisons when they would mislead.\n\n"
+        "Use concise Markdown with these sections:\n"
+        "## Problem Translation\n"
+        "## Core Method\n"
+        "## Field Analogy\n"
+        "## Evidence\n"
+        "## Limitations\n"
+        "## Takeaway\n\n"
+        "Paper: {title}\nAuthors: {authors}\nCategories: {categories}\n\n"
+        "{paper_content}",
+    ),
+}
+DEFAULT_PHD_EXPLAINER_FIELD = "physics"
+_PHD_EXPLAINER_FIELD_PLACEHOLDER = "{phd_field}"
+_SUMMARY_MODE_DISPLAY_LABELS = {
+    "default": "",
+    "eli5": "ELI5",
+    "phd": "PhD",
 }
 
 RELEVANCE_PROMPT_TEMPLATE = (
@@ -139,12 +184,91 @@ AUTO_TAG_PROMPT_TEMPLATE = (
     "Abstract: {abstract}\n"
 )
 
+PAPER_REMIX_PROMPT_TEMPLATE = (
+    "You are a research ideation assistant. Propose one novel, testable research "
+    "direction that synthesizes the papers below.\n"
+    "Use only the supplied metadata and abstracts. Do not overclaim novelty; frame "
+    "the idea as a hypothesis to investigate.\n"
+    "Keep the response under 600 words and return concise Markdown with exactly "
+    "these sections:\n"
+    "# Synthesis Title\n"
+    "## Core Idea\n"
+    "## Why It Is Interesting\n"
+    "## Concrete Experiment\n"
+    "## Risks\n"
+    "## Next Step\n\n"
+    "Research interests: {research_interests}\n\n"
+    "Papers:\n"
+    "{papers}\n"
+)
+
+PAPER_COMPARISON_CONTENT_MAX_CHARS = 12_000
+PAPER_COMPARISON_PROMPT_TEMPLATE = (
+    "You are a careful research assistant comparing 2-3 arXiv papers.\n"
+    "Use only the supplied metadata and paper context. If a method, result, or "
+    "difference is not stated in the provided context, write "
+    '"Not stated in provided context" instead of guessing.\n'
+    "Keep the response under 700 words and return concise Markdown with exactly "
+    "these sections:\n"
+    "## Methods\n"
+    "## Results\n"
+    "## Key Differences\n"
+    "## Bottom Line\n\n"
+    "Papers:\n"
+    "{papers}\n"
+)
+
+PAPER_DEBATE_CONTENT_MAX_CHARS = 12_000
+PAPER_DEBATE_ADVOCATE_PROMPT_TEMPLATE = (
+    "You are the enthusiastic advocate in a two-person research debate about "
+    "one arXiv paper.\n"
+    "Use only the supplied paper context. If evidence for a claim is missing, "
+    'write "Not stated in provided context" instead of guessing.\n'
+    "Make the strongest fair case for why this paper matters. Be excited, but "
+    "do not overclaim beyond the context.\n"
+    "Keep the response under 350 words and return concise Markdown with exactly "
+    "these sections:\n"
+    "## Why This Could Matter\n"
+    "## Strongest Contributions\n"
+    "## Best-Case Impact\n\n"
+    "Paper:\n"
+    "{paper_context}\n"
+)
+PAPER_DEBATE_REVIEWER_PROMPT_TEMPLATE = (
+    "You are Reviewer 2 in a two-person research debate about one arXiv paper.\n"
+    "Use only the supplied paper context and the advocate's claims. If evidence "
+    'for a critique is missing, write "Not stated in provided context" instead '
+    "of guessing.\n"
+    "Be harsh, concrete, and useful. Focus on unfair baselines, inadequate sample "
+    "size or evaluation, shaky assumptions, reproducibility gaps, missing "
+    "ablations, unclear novelty, and threats to validity.\n"
+    "Keep the response under 450 words and return concise Markdown with exactly "
+    "these sections:\n"
+    "## Main Objections\n"
+    "## Baseline And Evaluation Concerns\n"
+    "## Missing Evidence\n"
+    "## Verdict\n\n"
+    "Paper:\n"
+    "{paper_context}\n\n"
+    "Advocate claims:\n"
+    "{advocate_response}\n"
+)
+
 CHAT_SYSTEM_PROMPT = (
     "You are a helpful research assistant. Answer questions about this paper.\n"
     "Be concise and specific. Reference paper details when relevant.\n\n"
     "Paper: {title}\nAuthors: {authors}\nCategories: {categories}\n\n"
     "{paper_content}"
 )
+
+
+@dataclass(slots=True, frozen=True)
+class PaperDebateResult:
+    """Role-separated output for a paper debate."""
+
+    advocate: str
+    reviewer: str
+
 
 # ============================================================================
 # LLM Summary Persistence (SQLite)
@@ -488,6 +612,118 @@ def build_auto_tag_prompt(paper: Paper, existing_tags: list[str]) -> str:
     )
 
 
+# ============================================================================
+# Paper Remix Prompt
+# ============================================================================
+
+
+def _format_paper_remix_source(index: int, paper: Paper) -> str:
+    abstract = paper.abstract or paper.abstract_raw or "(no abstract)"
+    return (
+        f"Paper {index}\n"
+        f"Title: {paper.title}\n"
+        f"Authors: {paper.authors}\n"
+        f"Categories: {paper.categories}\n"
+        f"Abstract: {abstract}"
+    )
+
+
+def build_paper_remix_prompt(papers: list[Paper], research_interests: str = "") -> str:
+    """Build a prompt that asks the LLM to synthesize 2-3 papers into one idea."""
+    if len(papers) not in {2, 3}:
+        raise ValueError("Paper remix requires exactly 2 or 3 papers")
+    interests = research_interests.strip() or "(not specified)"
+    paper_blocks = "\n\n".join(
+        _format_paper_remix_source(index, paper) for index, paper in enumerate(papers, start=1)
+    )
+    return PAPER_REMIX_PROMPT_TEMPLATE.format(
+        research_interests=interests,
+        papers=paper_blocks,
+    )
+
+
+def _format_paper_comparison_source(index: int, paper: Paper, content: str) -> str:
+    context = (
+        content.strip() or paper.abstract or paper.abstract_raw or "Not stated in provided context"
+    )
+    return (
+        f"Paper {index}\n"
+        f"arXiv: {paper.arxiv_id}\n"
+        f"Title: {paper.title}\n"
+        f"Authors: {paper.authors}\n"
+        f"Date: {paper.date}\n"
+        f"Categories: {paper.categories}\n"
+        f"Comments: {paper.comments or 'None'}\n"
+        f"Context:\n{context}"
+    )
+
+
+def build_paper_comparison_prompt(
+    papers: list[Paper],
+    paper_contents: list[str] | None = None,
+    max_content_chars: int = PAPER_COMPARISON_CONTENT_MAX_CHARS,
+) -> str:
+    """Build a prompt that asks the LLM to compare 2-3 papers."""
+    if len(papers) not in {2, 3}:
+        raise ValueError("Paper comparison requires exactly 2 or 3 papers")
+    contents = paper_contents or []
+    clipped_contents = [
+        (contents[index] if index < len(contents) else "")[:max_content_chars]
+        for index in range(len(papers))
+    ]
+    paper_blocks = "\n\n".join(
+        _format_paper_comparison_source(index, paper, clipped_contents[index - 1])
+        for index, paper in enumerate(papers, start=1)
+    )
+    return PAPER_COMPARISON_PROMPT_TEMPLATE.format(papers=paper_blocks)
+
+
+def _format_paper_debate_context(
+    paper: Paper,
+    paper_content: str,
+    max_content_chars: int,
+) -> str:
+    context = (
+        paper_content.strip()
+        or paper.abstract
+        or paper.abstract_raw
+        or "Not stated in provided context"
+    )
+    return (
+        f"arXiv: {paper.arxiv_id}\n"
+        f"Title: {paper.title}\n"
+        f"Authors: {paper.authors}\n"
+        f"Date: {paper.date}\n"
+        f"Categories: {paper.categories}\n"
+        f"Comments: {paper.comments or 'None'}\n"
+        f"Context:\n{context[:max_content_chars]}"
+    )
+
+
+def build_paper_debate_advocate_prompt(
+    paper: Paper,
+    paper_content: str,
+    max_content_chars: int = PAPER_DEBATE_CONTENT_MAX_CHARS,
+) -> str:
+    """Build the first debate prompt: the strongest fair advocate case."""
+    paper_context = _format_paper_debate_context(paper, paper_content, max_content_chars)
+    return PAPER_DEBATE_ADVOCATE_PROMPT_TEMPLATE.format(paper_context=paper_context)
+
+
+def build_paper_debate_reviewer_prompt(
+    paper: Paper,
+    paper_content: str,
+    advocate_response: str,
+    max_content_chars: int = PAPER_DEBATE_CONTENT_MAX_CHARS,
+) -> str:
+    """Build the second debate prompt: Reviewer 2 responds to the advocate."""
+    paper_context = _format_paper_debate_context(paper, paper_content, max_content_chars)
+    return PAPER_DEBATE_REVIEWER_PROMPT_TEMPLATE.format(
+        paper_context=paper_context,
+        advocate_response=advocate_response.strip(),
+    )
+
+
 def _extract_tags_from_json(data: Any) -> list[str] | None:
     """Extract and normalize tags from a parsed JSON object.
 
@@ -626,6 +862,38 @@ def build_llm_prompt(paper: Paper, prompt_template: str = "", paper_content: str
     return result
 
 
+def resolve_summary_prompt_template(
+    mode: str,
+    *,
+    custom_default_prompt: str = "",
+    phd_explainer_field: str = DEFAULT_PHD_EXPLAINER_FIELD,
+) -> str:
+    """Return the effective prompt template for a built-in summary mode."""
+    if mode == "default" and custom_default_prompt:
+        return custom_default_prompt
+    prompt_template = SUMMARY_MODES[mode][1]
+    if mode != "phd":
+        return prompt_template
+    return prompt_template.replace(
+        _PHD_EXPLAINER_FIELD_PLACEHOLDER,
+        _escape_format_literal(_normalize_phd_explainer_field(phd_explainer_field)),
+    )
+
+
+def summary_mode_display_label(mode: str) -> str:
+    return _SUMMARY_MODE_DISPLAY_LABELS.get(mode, mode.upper())
+
+
+def _normalize_phd_explainer_field(value: str) -> str:
+    if not isinstance(value, str):
+        return DEFAULT_PHD_EXPLAINER_FIELD
+    return value.strip() or DEFAULT_PHD_EXPLAINER_FIELD
+
+
+def _escape_format_literal(value: str) -> str:
+    return value.replace("{", "{{").replace("}", "}}")
+
+
 def _resolve_llm_command(config: UserConfig) -> str:
     """Resolve the LLM command template from config (custom or preset).
 
@@ -683,12 +951,25 @@ __all__ = [
     "CHAT_SYSTEM_PROMPT",
     "DEFAULT_LLM_PROMPT",
     "LLM_PRESETS",
+    "PAPER_COMPARISON_CONTENT_MAX_CHARS",
+    "PAPER_COMPARISON_PROMPT_TEMPLATE",
+    "PAPER_DEBATE_ADVOCATE_PROMPT_TEMPLATE",
+    "PAPER_DEBATE_CONTENT_MAX_CHARS",
+    "PAPER_DEBATE_REVIEWER_PROMPT_TEMPLATE",
+    "PAPER_REMIX_PROMPT_TEMPLATE",
     "RELEVANCE_PROMPT_TEMPLATE",
     "SUMMARY_MODES",
+    "PaperDebateResult",
     "build_auto_tag_prompt",
     "build_llm_prompt",
+    "build_paper_comparison_prompt",
+    "build_paper_debate_advocate_prompt",
+    "build_paper_debate_reviewer_prompt",
+    "build_paper_remix_prompt",
     "build_relevance_prompt",
     "get_relevance_db_path",
     "get_summary_db_path",
+    "resolve_summary_prompt_template",
+    "summary_mode_display_label",
     "validate_prompt_template",
 ]

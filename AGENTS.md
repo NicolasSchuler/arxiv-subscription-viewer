@@ -4,7 +4,7 @@ Quick-reference for AI agents. See `docs/architecture.md` for the human-facing a
 
 ## Task Runner
 
-- **Pre-commit**: `just check` (docs drift + lint + types + tests)
+- **Pre-commit**: `just check` (docs drift + lint + Pyright/Pyrefly types + tests)
 - **Full suite**: `just quality`
 - **Auto-fix**: `just format`
 - **Docs drift**: `just docs-check`
@@ -21,7 +21,8 @@ Quick-reference for AI agents. See `docs/architecture.md` for the human-facing a
 ## Must-Pass Gates (CI enforced)
 
 - `just lint` — zero ruff errors, formatting matches
-- `just typecheck` — zero pyright errors (basic mode)
+- `just typecheck` — zero Pyright errors (basic mode)
+- `just typecheck-pyrefly` — zero Pyrefly errors
 - `just test` — all tests pass, overall coverage >= 95% (from `pyproject.toml`), combined coverage for `actions/`, `browser/`, and `cli.py` >= 85%, and the signature-count structural guard passes
 - `uv run xenon src/arxiv_browser/ --max-absolute C --max-modules C --max-average B`
 - `just dead-code` / `just security` / `just deps` — zero findings each

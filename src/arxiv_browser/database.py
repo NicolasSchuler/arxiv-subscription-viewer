@@ -51,6 +51,18 @@ _CREATE_TABLE_SQL: tuple[str, ...] = (
     "  fetched_at TEXT NOT NULL,"
     "  content TEXT NOT NULL"
     ")",
+    # embeddings.py — local semantic-search embeddings
+    "CREATE TABLE IF NOT EXISTS semantic_embeddings ("
+    "  arxiv_id TEXT NOT NULL,"
+    "  backend TEXT NOT NULL,"
+    "  model_id TEXT NOT NULL,"
+    "  text_hash TEXT NOT NULL,"
+    "  dimensions INTEGER NOT NULL,"
+    "  dtype TEXT NOT NULL,"
+    "  embedding BLOB NOT NULL,"
+    "  created_at TEXT NOT NULL,"
+    "  PRIMARY KEY (arxiv_id, backend, model_id)"
+    ")",
     # semantic_scholar_cache.py — s2_papers
     "CREATE TABLE IF NOT EXISTS s2_papers ("
     "  arxiv_id TEXT PRIMARY KEY,"
@@ -100,6 +112,19 @@ _CREATE_TABLE_SQL: tuple[str, ...] = (
     # huggingface.py — hf_daily_fetch_state
     "CREATE TABLE IF NOT EXISTS hf_daily_fetch_state ("
     "  cache_key TEXT PRIMARY KEY,"
+    "  status TEXT NOT NULL,"
+    "  fetched_at TEXT NOT NULL"
+    ")",
+    # conference_deadlines.py — imported AI Deadlines snapshot
+    "CREATE TABLE IF NOT EXISTS conference_deadlines ("
+    "  conference_id TEXT PRIMARY KEY,"
+    "  payload_json TEXT NOT NULL,"
+    "  fetched_at TEXT NOT NULL"
+    ")",
+    # conference_deadlines.py — fetch state
+    "CREATE TABLE IF NOT EXISTS conference_deadlines_fetch_state ("
+    "  cache_key TEXT PRIMARY KEY,"
+    "  source_url TEXT NOT NULL,"
     "  status TEXT NOT NULL,"
     "  fetched_at TEXT NOT NULL"
     ")",

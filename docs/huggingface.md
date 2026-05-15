@@ -25,6 +25,7 @@ Enable at runtime with `Ctrl+h`, or add to `config.json`:
 3. Trending papers show upvote badges in the list view
 4. The detail pane shows a HuggingFace section with upvotes, comments, GitHub repository, AI summary, and keywords
 5. Sort by trending with `s` (cycle sort order)
+6. Smart Reading Queue sort uses HF upvotes as a community-interest signal when HF data is enabled and matched
 
 ---
 

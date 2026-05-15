@@ -66,6 +66,9 @@ class _FakeLlmService:
     async def generate_summary(self, **_kwargs):
         return ("summary", None)
 
+    async def compare_papers(self, **_kwargs):
+        return ("comparison", None)
+
     async def score_relevance_once(self, **kwargs):
         paper = kwargs["paper"]
         self.scored.append(paper.arxiv_id)

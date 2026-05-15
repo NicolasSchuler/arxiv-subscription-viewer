@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
+from datetime import date
 from typing import Any
 
 from textual.app import ComposeResult
@@ -19,7 +20,9 @@ from arxiv_browser.query import (
     highlight_text,
     truncate_at_word_boundary,
 )
+from arxiv_browser.review import review_status_label
 from arxiv_browser.semantic_scholar import SemanticScholarPaper
+from arxiv_browser.sources import ARXIV_PROVIDER, provider_display_name
 from arxiv_browser.themes import (
     DEFAULT_TAG_NAMESPACE_COLORS,
     DEFAULT_THEME,
@@ -27,6 +30,12 @@ from arxiv_browser.themes import (
     get_tag_color,
     tag_namespace_colors_for,
     theme_colors_for,
+)
+from arxiv_browser.triage_model import (
+    TRIAGE_BUCKET_LIKELY_SKIP,
+    TRIAGE_BUCKET_LIKELY_STAR,
+    TriagePrediction,
+    format_triage_prediction,
 )
 
 PREVIEW_ABSTRACT_MAX_LEN = 150  # Max abstract preview length in list items
@@ -100,6 +109,7 @@ class PaperRowRenderState:
     hf_data: HuggingFacePaper | None = None
     version_update: tuple[int, int] | None = None
     relevance_score: tuple[int, str] | None = None
+    triage_prediction: TriagePrediction | None = None
     meta_line_budget: int = META_LINE_BUDGET
     theme_colors: Mapping[str, str] = field(default_factory=lambda: dict(DEFAULT_THEME))
     category_colors: Mapping[str, str] = field(
@@ -199,7 +209,10 @@ def _compress_meta_parts(parts: list[str], budget: int = META_LINE_BUDGET) -> st
 def _build_meta_parts(state: PaperRowRenderState) -> list[str]:
     """Build ordered metadata parts with deterministic priority."""
     parts: list[str] = []
-    if state.paper.source == "api":
+    provider = getattr(state.paper, "provider", ARXIV_PROVIDER)
+    if provider != ARXIV_PROVIDER:
+        parts.append(f"[{state.theme_colors['orange']}]{provider_display_name(provider)}[/]")
+    elif state.paper.source == "api":
         parts.append(f"[{state.theme_colors['orange']}]API[/]")
     parts.extend(
         [
@@ -214,6 +227,12 @@ def _build_meta_parts(state: PaperRowRenderState) -> list[str]:
             for tag in tags
         )
         parts.append(tag_str)
+    review_label = review_status_label(state.metadata, date.today())
+    if review_label:
+        color = (
+            state.theme_colors["yellow"] if review_label == "due" else state.theme_colors["purple"]
+        )
+        parts.append(f"[{color}]Review:{review_label}[/]")
     if state.s2_data is not None:
         parts.append(f"[{state.theme_colors['green']}]S2:{state.s2_data.citation_count}[/]")
     if state.hf_data is not None:
@@ -227,6 +246,15 @@ def _build_meta_parts(state: PaperRowRenderState) -> list[str]:
         score, _ = state.relevance_score
         color, sym = _relevance_badge_parts(score, theme_colors=state.theme_colors)
         parts.append(f"[{color}]Rel:{sym}{score}/10[/]")
+    if state.triage_prediction is not None:
+        color = _triage_badge_color(state.triage_prediction, state.theme_colors)
+        badge = escape_rich_text(
+            format_triage_prediction(
+                state.triage_prediction,
+                ascii_mode=_ACTIVE_LISTING_ASCII_MODE,
+            )
+        )
+        parts.append(f"[{color}]{badge}[/]")
     return parts
 
 
@@ -268,6 +296,18 @@ def _relevance_badge_parts(
     if score >= 5:
         return colors["yellow"], _ACTIVE_META_GLYPHS["relevance_mid"]
     return colors["muted"], _ACTIVE_META_GLYPHS["relevance_low"]
+
+
+def _triage_badge_color(
+    prediction: TriagePrediction,
+    theme_colors: Mapping[str, str],
+) -> str:
+    """Return a theme color for a triage prediction badge."""
+    if prediction.bucket == TRIAGE_BUCKET_LIKELY_STAR:
+        return theme_colors["green"]
+    if prediction.bucket == TRIAGE_BUCKET_LIKELY_SKIP:
+        return theme_colors["muted"]
+    return theme_colors["yellow"]
 
 
 def _render_meta_badges(state: PaperRowRenderState) -> str:

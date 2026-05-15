@@ -68,6 +68,7 @@ _API_FOOTER_BINDINGS: tuple[tuple[str, str], ...] = (
 _DETAIL_FOCUS_FOOTER_BINDINGS: tuple[tuple[str, str], ...] = (
     ("Tab", "list"),
     ("j/k", "scroll"),
+    ("a", "annotate"),
     ("v", "density"),
     ("Ctrl+d", "sections"),
     ("?", "help"),
@@ -133,6 +134,9 @@ class StatusBarState:
     hf_api_error: bool = False
     version_checking: bool = False
     version_update_count: int = 0
+    enrichment_progress: tuple[str, int, int] | None = None
+    reading_velocity: tuple[float, ...] = ()
+    category_distribution: tuple[tuple[str, int], ...] = ()
     detail_focus: bool = False
     max_width: int | None = None
     theme_colors: Mapping[str, str] = field(default_factory=lambda: dict(DEFAULT_THEME))
@@ -167,6 +171,9 @@ def _coerce_status_bar_state(
             hf_api_error=state.hf_api_error,
             version_checking=state.version_checking,
             version_update_count=state.version_update_count,
+            enrichment_progress=state.enrichment_progress,
+            reading_velocity=tuple(state.reading_velocity or ()),
+            category_distribution=tuple(state.category_distribution or ()),
             detail_focus=state.detail_focus,
             max_width=state.max_width,
             theme_colors=dict(state.theme_colors or DEFAULT_THEME),
@@ -390,8 +397,16 @@ def _build_full_status_parts(state: StatusBarState) -> list[str]:
     if state.show_abstract_preview:
         parts.append(f"[{state.theme_colors['purple']}]Preview[/]")
 
+    render_visuals = _should_render_visual_status(state)
+    visual_segments = _full_visual_segments(state) if render_visuals else []
+    parts.extend(visual_segments)
     parts.extend(_full_flag_segments(state))
-    parts.extend(_full_version_segments(state))
+    suppress_version_checking = (
+        render_visuals
+        and state.enrichment_progress is not None
+        and state.enrichment_progress[0] == "Versions"
+    )
+    parts.extend(_full_version_segments(state, suppress_checking=suppress_version_checking))
     return parts
 
 
@@ -453,14 +468,81 @@ def _rich_flag_segment(
     return f"[{color}]{label}[/]"
 
 
-def _full_version_segments(state: StatusBarState) -> list[str]:
+def _full_version_segments(state: StatusBarState, *, suppress_checking: bool = False) -> list[str]:
     """Return full-width version-checking status segments."""
     color = state.theme_colors["pink"]
-    if state.version_checking:
+    if state.version_checking and not suppress_checking:
         return [f"[{color}]Checking versions...[/]"]
     if state.version_update_count > 0:
         return [f"[{color}]{state.version_update_count} updated[/]"]
     return []
+
+
+def _should_render_visual_status(state: StatusBarState) -> bool:
+    """Return whether the status bar has enough room for visual density tokens."""
+    return state.max_width is None or state.max_width >= 120
+
+
+def _full_visual_segments(state: StatusBarState) -> list[str]:
+    """Return width-aware sparkline/histogram status segments."""
+    segments: list[str] = []
+    if state.enrichment_progress is not None:
+        label, current, total = state.enrichment_progress
+        segments.append(
+            f"[{state.theme_colors['accent']}]{label} "
+            f"{_progress_sparkline(current, total)} {current}/{total}[/]"
+        )
+    if state.reading_velocity:
+        rate = sum(state.reading_velocity) / max(1, len(state.reading_velocity))
+        if rate > 0:
+            segments.append(
+                f"[{state.theme_colors['green']}]Read/m "
+                f"{_sparkline(state.reading_velocity)} {rate:.1f}[/]"
+            )
+    if state.category_distribution:
+        histogram = _category_histogram(state.category_distribution)
+        if histogram:
+            segments.append(f"[{state.theme_colors['purple']}]Cats {histogram}[/]")
+    return segments
+
+
+def _sparkline(values: tuple[float, ...]) -> str:
+    """Render a small Unicode or ASCII sparkline."""
+    if not values:
+        return ""
+    from arxiv_browser._ascii import is_ascii_mode
+
+    glyphs = " .:-=+*#@" if is_ascii_mode() else "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"
+    maximum = max(values)
+    if maximum <= 0:
+        return glyphs[0] * len(values)
+    top_index = len(glyphs) - 1
+    return "".join(glyphs[min(top_index, round(value / maximum * top_index))] for value in values)
+
+
+def _progress_sparkline(current: int, total: int, width: int = 8) -> str:
+    """Render compact progress as a visual status token."""
+    from arxiv_browser._ascii import is_ascii_mode
+
+    current = max(0, current)
+    total = max(0, total)
+    ratio = 0.0 if total <= 0 else min(1.0, current / total)
+    filled = int(ratio * width)
+    if is_ascii_mode():
+        return "#" * filled + "-" * (width - filled)
+    return "\u2588" * filled + "\u2581" * (width - filled)
+
+
+def _category_histogram(categories: tuple[tuple[str, int], ...]) -> str:
+    """Render top category counts as a compact histogram."""
+    top = tuple((label, count) for label, count in categories[:3] if count > 0)
+    if not top:
+        return ""
+    maximum = max(count for _, count in top)
+    return " ".join(
+        f"{escape_rich_text(label)}{_progress_sparkline(count, maximum, width=3)}"
+        for label, count in top
+    )
 
 
 def _render_compact_status(parts: list[str], max_width: int) -> str:

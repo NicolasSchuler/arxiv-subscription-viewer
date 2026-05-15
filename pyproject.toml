@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "arxiv-subscription-viewer"
-version = "0.1.8"
+version = "0.1.9"
 description = "Keyboard-first terminal UI for arXiv digest triage and live arXiv search"
 authors = [
     { name = "Nicolas Sebastian Schuler", email = "nicolas.schuler@kit.edu" }
@@ -31,6 +31,7 @@ dependencies = [
     "httpx>=0.27.0",
     "platformdirs>=3.0",
     "defusedxml>=0.7.1",
+    "PyYAML>=6.0",
     "pypdf>=6.0.0",
     "pypdfium2>=5.0.0",
     "Pillow>=12.0.0",
@@ -38,6 +39,11 @@ dependencies = [
 
 [project.optional-dependencies]
 fuzzy = ["rapidfuzz>=3.0.0"]
+semantic-fastembed = ["fastembed>=0.8.0"]
+ml = [
+    "joblib>=1.4",
+    "scikit-learn>=1.7,<2",
+]
 
 [project.scripts]
 arxiv-viewer = "arxiv_browser.cli:main"
@@ -54,6 +60,7 @@ dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=0.25.0",
     "pytest-cov>=6.0",
+    "pyrefly>=1.0.0",
     "pyright>=1.1.390",
     "ruff>=0.12.0",
     "deptry>=0.22.0",
@@ -64,8 +71,10 @@ dev = [
     "xenon>=0.9.3",
     "diff-cover>=9.2",
     "hypothesis>=6.100.0",
+    "joblib>=1.4",
     "mutmut>=3.2",
     "rapidfuzz>=3.0.0",
+    "scikit-learn>=1.7,<2",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -111,6 +120,14 @@ include = ["src/arxiv_browser"]
 exclude = ["tests", ".venv"]
 reportMissingTypeStubs = false
 reportUnusedImport = false
+
+# ── Pyrefly ───────────────────────────────────────────────────────────
+[tool.pyrefly]
+project-includes = ["src/arxiv_browser/**/*.py"]
+project-excludes = ["tests/**", ".venv/**"]
+search-path = ["src"]
+python-version = "3.13"
+baseline = "pyrefly-baseline.json"
 
 # ── Coverage ──────────────────────────────────────────────────────────
 [tool.coverage.run]

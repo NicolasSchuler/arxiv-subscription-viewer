@@ -17,6 +17,11 @@ def _new_app() -> ArxivBrowser:
     app._http_client = None
     app._visible_index_by_id = {}
     app._config = UserConfig()
+    app._conference_deadlines = []
+    app._conference_deadlines_active = False
+    app._conference_deadlines_loading = False
+    app._conference_deadlines_api_error = False
+    app._deadline_countdown_task = None
     return app
 
 
@@ -197,6 +202,12 @@ def _new_app_stub():
     app._hf_cache = {}
     app._s2_loading = set()
     app._hf_loading = False
+    app._conference_deadlines_active = False
+    app._conference_deadlines = []
+    app._conference_deadlines_loading = False
+    app._conference_deadlines_api_error = False
+    app._conference_deadlines_db_path = None
+    app._deadline_countdown_task = None
     app._badges_dirty = set()
     app._badge_timer = None
     app._sort_refresh_dirty = set()
@@ -212,6 +223,11 @@ def _new_app_stub():
     app._highlight_terms = {"abstract": []}
     app._version_updates = {}
     app._relevance_scores = {}
+    app._triage_predictions = {}
+    app._triage_model_info = None
+    app._triage_training_active = False
+    app._paper_remix_active = False
+    app._paper_debate_active = False
     app._paper_summaries = {}
     app._summary_loading = set()
     app._summary_mode_label = {}

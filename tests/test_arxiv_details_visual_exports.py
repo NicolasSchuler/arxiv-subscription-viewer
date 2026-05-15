@@ -2,7 +2,7 @@
 """Tests for arXiv Paper Browser TUI."""
 
 from contextlib import closing
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -37,6 +37,7 @@ from arxiv_browser.models import (
     MAX_COLLECTIONS,
     MAX_PAPERS_PER_COLLECTION,
     SORT_OPTIONS,
+    LineAnnotation,
     Paper,
     PaperCollection,
     PaperMetadata,
@@ -120,6 +121,29 @@ class TestPaperDetailsCacheIntegration:
         details.update_paper(paper, "abstract", tags=["ml", "cv"])
 
         assert len(details._detail_cache) == 2
+
+    def test_line_annotations_render_below_target_line(self, make_paper):
+        from arxiv_browser.models import LineAnnotation
+        from arxiv_browser.widgets.details import DetailRenderState, PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(arxiv_id="2401.00001", title="Annotated")
+        details.update_state(
+            DetailRenderState(
+                paper=paper,
+                abstract_text="abstract",
+                line_annotations=(
+                    LineAnnotation(line=1, text="first note"),
+                    LineAnnotation(line=1, text="second note"),
+                ),
+                detail_line_cursor=1,
+            )
+        )
+
+        rendered = str(details.content)
+        assert "first note" in rendered
+        assert "second note" in rendered
+        assert details.detail_line_count >= 1
 
     def test_cache_miss_on_summary_loading_change(self, make_paper):
         from arxiv_browser.widgets.details import PaperDetails
@@ -251,6 +275,23 @@ class TestPaperDetailsCacheIntegration:
         assert "Rel:" in content
         assert "v1" in content
 
+    def test_decision_strip_shows_review_status(self, make_paper):
+        from arxiv_browser.widgets.details import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(arxiv_id="2401.00001")
+
+        details.update_paper(
+            paper,
+            "abstract",
+            next_review_date=date.today().isoformat(),
+            review_stage=0,
+        )
+
+        content = str(details.content)
+        assert "Review:" in content
+        assert "due" in content
+
     def test_cache_with_read_and_star_state(self, make_paper):
         from arxiv_browser.widgets.details import PaperDetails
 
@@ -259,6 +300,27 @@ class TestPaperDetailsCacheIntegration:
 
         details.update_paper(paper, "abstract", is_read=False, starred=False)
         details.update_paper(paper, "abstract", is_read=True, starred=True)
+
+        assert len(details._detail_cache) == 2
+
+    def test_cache_with_review_state(self, make_paper):
+        from arxiv_browser.widgets.details import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(arxiv_id="2401.00001")
+
+        details.update_paper(
+            paper,
+            "abstract",
+            next_review_date=date.today().isoformat(),
+            review_stage=0,
+        )
+        details.update_paper(
+            paper,
+            "abstract",
+            next_review_date=(date.today() + timedelta(days=3)).isoformat(),
+            review_stage=1,
+        )
 
         assert len(details._detail_cache) == 2
 
@@ -639,6 +701,7 @@ class TestExportMetadata:
             is_read=True,
             starred=True,
             last_checked_version=3,
+            line_annotations=[LineAnnotation(line=2, text="look here")],
         )
         config.watch_list = [
             WatchListEntry(pattern="GPT", match_type="keyword", case_sensitive=True)
@@ -660,6 +723,7 @@ class TestExportMetadata:
         assert meta.is_read is True
         assert meta.starred is True
         assert meta.last_checked_version == 3
+        assert meta.line_annotations == [LineAnnotation(line=2, text="look here")]
         assert fresh.watch_list[0].pattern == "GPT"
         assert fresh.watch_list[0].case_sensitive is True
         assert fresh.bookmarks[0].query == "cat:cs.AI"
@@ -713,6 +777,45 @@ class TestImportMetadata:
         tags = config.paper_metadata["2401.0001"].tags
         assert tags.count("topic:ml") == 1
         assert "topic:new" in tags
+
+    def test_import_line_annotations_skips_malformed_and_deduplicates(self):
+        config = UserConfig()
+        config.paper_metadata["2401.0001"] = PaperMetadata(
+            arxiv_id="2401.0001",
+            line_annotations=[LineAnnotation(line=1, text="existing")],
+        )
+        data = {
+            "format": "arxiv-browser-metadata",
+            "paper_metadata": {
+                "2401.0001": {
+                    "line_annotations": [
+                        {"line": 1, "text": "existing"},
+                        {"line": 2, "text": "new note"},
+                        {"line": 0, "text": "bad line"},
+                        {"line": 3, "text": "  "},
+                        {"line": "4", "text": "bad type"},
+                        "skip",
+                    ]
+                },
+                "2401.0002": {
+                    "line_annotations": [
+                        {"line": 5, "text": "fresh"},
+                        {"line": 6, "text": 123},
+                    ]
+                },
+            },
+        }
+
+        papers_n, _, _, _ = import_metadata(data, config)
+
+        assert papers_n == 2
+        assert config.paper_metadata["2401.0001"].line_annotations == [
+            LineAnnotation(line=1, text="existing"),
+            LineAnnotation(line=2, text="new note"),
+        ]
+        assert config.paper_metadata["2401.0002"].line_annotations == [
+            LineAnnotation(line=5, text="fresh")
+        ]
 
     def test_replace_mode_overwrites(self):
         config = UserConfig()

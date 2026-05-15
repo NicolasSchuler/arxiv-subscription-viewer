@@ -8,12 +8,14 @@ import sqlite3
 from collections import deque
 from contextlib import closing
 from datetime import UTC, date, datetime
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from PIL import Image
 from textual.app import ScreenStackError
 
 import arxiv_browser.actions.ui_actions as ui_actions
@@ -21,6 +23,7 @@ import arxiv_browser.cli as cli
 import arxiv_browser.llm_providers as llm_providers
 import arxiv_browser.semantic_scholar as s2
 from arxiv_browser.actions import external_io_actions as io_actions
+from arxiv_browser.actions import library_actions as library_actions
 from arxiv_browser.actions import llm_actions as llm_actions
 from arxiv_browser.export import get_pdf_download_path
 from arxiv_browser.modals.collections import CollectionsModal
@@ -68,6 +71,27 @@ class TestExternalIoCoverage:
         app._get_target_papers = MagicMock(return_value=[paper, make_paper(arxiv_id="2401.30002")])
         io_actions.action_copy_selected(app)
         assert "Copied 2 papers to clipboard" in app.notify.call_args[0][0]
+
+    def test_select_all_delegates_to_detail_annotation_when_focused(
+        self, make_paper, tmp_path
+    ) -> None:
+        app = _new_app_stub()
+        app.filtered_papers = [make_paper(arxiv_id="a"), make_paper(arxiv_id="b")]
+        paper = app.filtered_papers[0]
+        app.selected_ids = set()
+        app._open_line_annotation_modal = MagicMock(return_value=True)
+        app._update_option_at_index = MagicMock()
+        app._update_header = MagicMock()
+
+        library_actions.action_select_all(app)
+
+        assert app.selected_ids == set()
+        app._open_line_annotation_modal.assert_called_once_with()
+        app._update_header.assert_not_called()
+
+        app._open_line_annotation_modal = MagicMock(return_value=False)
+        library_actions.action_select_all(app)
+        assert app.selected_ids == {"a", "b"}
 
         app._export_file_csv = MagicMock()
         io_actions._do_export(app, "file-csv", [paper])
@@ -502,3 +526,114 @@ class TestExternalIoCoverage:
 
         app.push_screen.assert_not_called()
         assert "render failed" in app.notify.call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_preview_figure_opens_modal_and_uses_cache(self, make_paper, tmp_path):
+        app = _new_app_stub()
+        paper = make_paper(arxiv_id="2402.08954")
+        app._config = UserConfig(pdf_download_dir=str(tmp_path))
+        app.notify = MagicMock()
+        app.push_screen = MagicMock()
+        app._capture_dataset_epoch = MagicMock(return_value=1)
+        app._is_current_dataset_epoch = MagicMock(return_value=True)
+
+        html = """
+        <figure class="ltx_figure">
+          <img src="2402.08954v1/figure.png">
+          <figcaption>Figure 1</figcaption>
+        </figure>
+        """
+        image_buffer = BytesIO()
+        Image.new("RGB", (3, 3), (10, 20, 30)).save(image_buffer, format="PNG")
+
+        class Client:
+            def __init__(self) -> None:
+                self.urls: list[str] = []
+
+            async def get(self, url: str, **_kwargs):
+                self.urls.append(url)
+                if url.endswith("/html/2402.08954"):
+                    return SimpleNamespace(status_code=200, text=html)
+                return SimpleNamespace(
+                    status_code=200,
+                    headers={"content-type": "image/png"},
+                    content=image_buffer.getvalue(),
+                )
+
+        client = Client()
+        app._http_client = client
+
+        await io_actions._preview_figure_async(app, paper)
+        await io_actions._preview_figure_async(app, paper)
+
+        assert app.push_screen.call_count == 2
+        assert app.push_screen.call_args.args[0].__class__.__name__ == "FigurePreviewScreen"
+        assert client.urls.count("https://arxiv.org/html/2402.08954v1/figure.png") == 1
+
+    @pytest.mark.asyncio
+    async def test_preview_figure_reports_missing_inputs_and_fetch_errors(
+        self, make_paper, tmp_path
+    ):
+        app = _new_app_stub()
+        paper = make_paper(arxiv_id="2401.12345")
+        app._config = UserConfig(pdf_download_dir=str(tmp_path))
+        app.notify = MagicMock()
+        app.push_screen = MagicMock()
+        app._capture_dataset_epoch = MagicMock(return_value=1)
+        app._is_current_dataset_epoch = MagicMock(return_value=True)
+
+        app._get_current_paper = MagicMock(return_value=None)
+        io_actions.action_preview_figure(app)
+        assert "No paper selected" in app.notify.call_args[0][0]
+
+        app.notify.reset_mock()
+        app._http_client = None
+        await io_actions._preview_figure_async(app, paper)
+        assert "active network client" in app.notify.call_args[0][0]
+
+        class MissingHtmlClient:
+            async def get(self, _url: str, **_kwargs):
+                return SimpleNamespace(status_code=404, text="", headers={}, content=b"")
+
+        app.notify.reset_mock()
+        app._http_client = MissingHtmlClient()
+        await io_actions._preview_figure_async(app, paper)
+        assert "arXiv HTML unavailable" in app.notify.call_args[0][0]
+
+        class NoFigureClient:
+            async def get(self, _url: str, **_kwargs):
+                return SimpleNamespace(
+                    status_code=200, text="<p>No figures</p>", headers={}, content=b""
+                )
+
+        app.notify.reset_mock()
+        app._http_client = NoFigureClient()
+        await io_actions._preview_figure_async(app, paper)
+        assert "No figure" in app.notify.call_args[0][0]
+
+        class UnsupportedImageClient:
+            async def get(self, url: str, **_kwargs):
+                if url.endswith("/html/2401.12345"):
+                    return SimpleNamespace(
+                        status_code=200,
+                        text='<figure class="ltx_figure"><img src="fig.svg"></figure>',
+                    )
+                return SimpleNamespace(
+                    status_code=200,
+                    headers={"content-type": "image/svg+xml"},
+                    content=b"<svg></svg>",
+                )
+
+        app.notify.reset_mock()
+        app._http_client = UnsupportedImageClient()
+        await io_actions._preview_figure_async(app, paper)
+        assert "Unsupported figure image type" in app.notify.call_args[0][0]
+
+        class RaisingClient:
+            async def get(self, _url: str, **_kwargs):
+                raise httpx.ConnectError("offline")
+
+        app.notify.reset_mock()
+        app._http_client = RaisingClient()
+        await io_actions._preview_figure_async(app, paper)
+        assert "Could not fetch arXiv HTML figure" in app.notify.call_args[0][0]

@@ -10,9 +10,10 @@ from textual.widgets import Button, Static
 
 from arxiv_browser.browser.core import ArxivBrowser
 from arxiv_browser.modals import (
+    LineAnnotationModal,
     PaperEditModal,
 )
-from arxiv_browser.modals.editing import PaperEditResult, TagChip
+from arxiv_browser.modals.editing import LineAnnotationResult, PaperEditResult, TagChip
 
 
 @pytest.mark.asyncio
@@ -146,3 +147,29 @@ async def test_paper_edit_modal_autotag_tab(make_paper):
     modal.action_save = MagicMock()
     modal.on_autotag_submitted()
     modal.action_save.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_line_annotation_modal_submits_and_cancels(make_paper):
+    app = ArxivBrowser([make_paper()], restore_session=False)
+    modal = LineAnnotationModal(line=4)
+
+    async with app.run_test() as pilot:
+        app.push_screen(modal)
+        await pilot.pause(0.05)
+        assert "Annotate line 4" in str(modal.query_one("#line-annotation-title").render())
+
+    modal.dismiss = MagicMock()
+    modal.on_annotation_submitted(SimpleNamespace(value="Margin thought"))
+    result = modal.dismiss.call_args.args[0]
+    assert isinstance(result, LineAnnotationResult)
+    assert result.line == 4
+    assert result.text == "Margin thought"
+
+    modal.dismiss = MagicMock()
+    modal.on_annotation_submitted(SimpleNamespace(value="  "))
+    modal.dismiss.assert_called_once_with(None)
+
+    modal.dismiss = MagicMock()
+    modal.action_cancel()
+    modal.dismiss.assert_called_once_with(None)

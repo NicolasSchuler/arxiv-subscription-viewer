@@ -13,7 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from platformdirs import user_config_dir
 
@@ -47,8 +47,8 @@ from arxiv_browser.cli_resolver import (
     _resolve_legacy_fallback,
     _resolve_papers,
 )
-from arxiv_browser.config import CONFIG_APP_NAME, load_config
-from arxiv_browser.models import ARXIV_API_MAX_RESULTS_LIMIT, Paper, UserConfig
+from arxiv_browser.config import CONFIG_APP_NAME, _coerce_arxiv_api_max_results, load_config
+from arxiv_browser.models import ARXIV_API_MAX_RESULTS_LIMIT, ArxivSearchRequest, Paper, UserConfig
 from arxiv_browser.parsing import (
     ARXIV_QUERY_FIELDS,
     HISTORY_DATE_FORMAT,
@@ -58,7 +58,16 @@ from arxiv_browser.themes import THEME_NAMES
 
 logger = logging.getLogger(__name__)
 _DOCTOR_SHUTIL_PATCH_SURFACE = shutil  # Preserve arxiv_browser.cli.shutil patch target.
-CLI_COMMANDS = ("browse", "search", "dates", "completions", "config-path", "doctor", "keybindings")
+CLI_COMMANDS = (
+    "browse",
+    "search",
+    "digest",
+    "dates",
+    "completions",
+    "config-path",
+    "doctor",
+    "keybindings",
+)
 CLI_ROOT_DESCRIPTION = "Browse and search arXiv papers from your terminal."
 CLI_ROOT_EPILOG = """Examples:
   arxiv-viewer
@@ -66,6 +75,7 @@ CLI_ROOT_EPILOG = """Examples:
   arxiv-viewer browse --input papers.txt
   arxiv-viewer search --category cs.AI
   arxiv-viewer search --query "diffusion transformer" --field title
+  arxiv-viewer digest --category cs.AI --period weekly --output digest.md
   arxiv-viewer dates
   arxiv-viewer config-path
   arxiv-viewer doctor
@@ -85,6 +95,23 @@ _LOG_BACKUP_COUNT = 3
 
 _ROOT_FLAG_OPTIONS = frozenset({"--debug", "--ascii", "--no-color", "-V", "--version"})
 _ROOT_VALUE_OPTIONS = frozenset({"--color", "--theme"})
+
+
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("expected an integer") from exc
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("expected a positive integer")
+    return parsed
+
+
+def _relevance_score_int(value: str) -> int:
+    parsed = _positive_int(value)
+    if parsed > 10:
+        raise argparse.ArgumentTypeError("expected an integer from 1 to 10")
+    return parsed
 
 
 def _configure_logging(debug: bool) -> None:
@@ -262,6 +289,110 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         help=(f"API request page size (1-{ARXIV_API_MAX_RESULTS_LIMIT}; default: config value)"),
     )
 
+    digest_parser = subparsers.add_parser(
+        "digest",
+        help="Generate a Markdown digest and exit",
+        description="Generate a cron-friendly Markdown digest from arXiv API search or a file.",
+        epilog=(
+            "Examples:\n"
+            "  arxiv-viewer digest --category cs.AI\n"
+            '  arxiv-viewer digest --query "diffusion transformer" --period weekly\n'
+            "  arxiv-viewer digest --input history/2026-02-13.txt --output digest.md"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    digest_parser.add_argument(
+        "--input",
+        type=Path,
+        default=None,
+        help="Local arXiv digest file to render instead of fetching live results",
+    )
+    digest_parser.add_argument(
+        "--query",
+        type=str,
+        default="",
+        help="Query text for live arXiv API digest mode",
+    )
+    digest_parser.add_argument(
+        "--field",
+        choices=sorted(ARXIV_QUERY_FIELDS),
+        default="all",
+        help="Field for --query: all, title, author, abstract (default: all)",
+    )
+    digest_parser.add_argument(
+        "--category",
+        type=str,
+        default="",
+        help="Optional arXiv category filter for live digest mode (for example: cs.AI)",
+    )
+    digest_parser.add_argument(
+        "--period",
+        choices=("daily", "weekly"),
+        default="daily",
+        help="Live digest window: newest matching day or newest matching 7-day window",
+    )
+    digest_parser.add_argument(
+        "--max-results",
+        type=int,
+        default=None,
+        help=(f"API request page size (1-{ARXIV_API_MAX_RESULTS_LIMIT}; default: config value)"),
+    )
+    digest_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Write Markdown to this file instead of stdout",
+    )
+    digest_parser.add_argument(
+        "--limit",
+        type=_positive_int,
+        default=10,
+        help="Maximum papers to show in each digest section (default: 10)",
+    )
+    digest_parser.add_argument(
+        "--min-relevance",
+        type=_relevance_score_int,
+        default=7,
+        help="Minimum relevance score for the High Relevance section (1-10; default: 7)",
+    )
+    digest_parser.add_argument(
+        "--include-triage",
+        action="store_true",
+        help="Include local ML triage model likely-star and unsure sections",
+    )
+    hf_group = digest_parser.add_mutually_exclusive_group()
+    hf_group.add_argument(
+        "--include-hf",
+        dest="hf_mode",
+        action="store_const",
+        const="include",
+        default="config",
+        help="Fetch/use HuggingFace trending even when config disables it",
+    )
+    hf_group.add_argument(
+        "--no-hf",
+        dest="hf_mode",
+        action="store_const",
+        const="off",
+        help="Disable HuggingFace trending for this digest",
+    )
+    relevance_group = digest_parser.add_mutually_exclusive_group()
+    relevance_group.add_argument(
+        "--cached-relevance-only",
+        action="store_true",
+        help="Use cached relevance scores only; do not call the configured LLM",
+    )
+    relevance_group.add_argument(
+        "--no-relevance",
+        action="store_true",
+        help="Disable relevance cache loading and fresh relevance scoring",
+    )
+    digest_parser.add_argument(
+        "--no-versions",
+        action="store_true",
+        help="Skip starred-paper version checks",
+    )
+
     subparsers.add_parser(
         "dates",
         help="List available local history dates and exit",
@@ -422,6 +553,95 @@ def _run_dates_command(history_files: list[tuple[date, Path]]) -> int:
     return 0
 
 
+def _run_digest_command(args: argparse.Namespace, config: UserConfig) -> int:
+    from arxiv_browser._ascii import set_ascii_mode
+    from arxiv_browser.digest import (
+        DigestError,
+        DigestHfMode,
+        DigestOptions,
+        DigestPeriod,
+        DigestRelevanceMode,
+        generate_digest,
+    )
+
+    set_ascii_mode(bool(getattr(args, "ascii", False)))
+    conflict = _digest_input_source_conflict(args)
+    if conflict:
+        print(f"Error: {conflict}", file=sys.stderr)
+        return 2
+
+    max_results_arg = getattr(args, "max_results", None)
+    max_results = _coerce_arxiv_api_max_results(
+        max_results_arg if max_results_arg is not None else config.arxiv_api_max_results
+    )
+    options = DigestOptions(
+        input_path=getattr(args, "input", None),
+        request=ArxivSearchRequest(
+            query=str(getattr(args, "query", "") or "").strip(),
+            field=str(getattr(args, "field", "all")),
+            category=str(getattr(args, "category", "") or "").strip(),
+        ),
+        period=cast(DigestPeriod, str(getattr(args, "period", "daily"))),
+        max_results=max_results,
+        limit=int(getattr(args, "limit", 10)),
+        min_relevance=int(getattr(args, "min_relevance", 7)),
+        hf_mode=cast(DigestHfMode, str(getattr(args, "hf_mode", "config"))),
+        relevance_mode=cast(DigestRelevanceMode, _digest_relevance_mode(args)),
+        versions_enabled=not bool(getattr(args, "no_versions", False)),
+        include_triage=bool(getattr(args, "include_triage", False)),
+    )
+    try:
+        result = generate_digest(options, config)
+    except DigestError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    for warning in result.warnings:
+        print(f"Warning: {warning}", file=sys.stderr)
+    return _write_digest_output(result.markdown, getattr(args, "output", None))
+
+
+def _digest_input_source_conflict(args: argparse.Namespace) -> str:
+    if getattr(args, "input", None) is None:
+        return ""
+    live_flags = []
+    if str(getattr(args, "query", "") or "").strip():
+        live_flags.append("--query")
+    if str(getattr(args, "category", "") or "").strip():
+        live_flags.append("--category")
+    if str(getattr(args, "field", "all")) != "all":
+        live_flags.append("--field")
+    if str(getattr(args, "period", "daily")) != "daily":
+        live_flags.append("--period")
+    if getattr(args, "max_results", None) is not None:
+        live_flags.append("--max-results")
+    if not live_flags:
+        return ""
+    return "--input cannot be combined with live source flags: " + ", ".join(live_flags)
+
+
+def _digest_relevance_mode(args: argparse.Namespace) -> str:
+    if bool(getattr(args, "no_relevance", False)):
+        return "off"
+    if bool(getattr(args, "cached_relevance_only", False)):
+        return "cached"
+    return "score"
+
+
+def _write_digest_output(markdown: str, output_path: Path | None) -> int:
+    if output_path is None:
+        print(markdown, end="")
+        return 0
+    resolved = output_path.expanduser()
+    try:
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        resolved.write_text(markdown, encoding="utf-8")
+    except OSError as exc:
+        print(f"Error: Failed to write digest to {resolved}: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def _print_empty_papers_error() -> None:
     print(
         build_actionable_error(
@@ -530,6 +750,9 @@ def main(
     if getattr(args, "command", None) == "dates":
         return _run_dates_command(history_files)
 
+    if getattr(args, "command", None) == "digest":
+        return _run_digest_command(args, config)
+
     result = dependencies.resolve_papers_fn(args, base_dir, config, history_files)
     if isinstance(result, int):
         return result
@@ -584,6 +807,7 @@ __all__ = [
     "_resolve_input_file",
     "_resolve_legacy_fallback",
     "_resolve_papers",
+    "_run_digest_command",
     "_run_doctor",
     "_run_keybindings",
     "_validate_interactive_tty",

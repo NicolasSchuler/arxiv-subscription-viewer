@@ -80,6 +80,7 @@ class TestInitCacheDb:
             "hf_daily_papers",
             "hf_daily_fetch_state",
             "paper_content",
+            "semantic_embeddings",
         }
         assert expected_tables.issubset(tables)
 
@@ -99,7 +100,7 @@ class TestInitCacheDb:
 
         with closing(sqlite3.connect(str(db_path))) as conn:
             tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-        assert len(tables) >= 11
+        assert len(tables) >= 12
 
     def test_creates_parent_directory(self, tmp_path: Path):
         db_path = tmp_path / "sub" / "dir" / "test_cache.db"

@@ -37,6 +37,7 @@ from arxiv_browser.models import (
     MAX_COLLECTIONS,
     MAX_PAPERS_PER_COLLECTION,
     SORT_OPTIONS,
+    LineAnnotation,
     Paper,
     PaperCollection,
     PaperMetadata,
@@ -176,7 +177,12 @@ class TestDetailStateBuilder:
             "Config",
             (),
             {
-                "paper_metadata": {},
+                "paper_metadata": {
+                    "2401.00001": PaperMetadata(
+                        arxiv_id="2401.00001",
+                        line_annotations=[LineAnnotation(line=2, text="check equation")],
+                    )
+                },
                 "collapsed_sections": ["tags", "relevance", "summary", "s2", "hf", "version"],
                 "theme_name": "monokai",
                 "theme": {},
@@ -207,6 +213,45 @@ class TestDetailStateBuilder:
             "version",
         )
         assert state.detail_mode == "scan"
+        assert state.line_annotations == (LineAnnotation(line=2, text="check equation"),)
+        assert state.detail_line_cursor == 1
+
+    def test_detail_cursor_and_annotation_modal_save_single_line_note(self, make_paper):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.modals.editing import LineAnnotationResult
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        paper = make_paper(arxiv_id="2401.00002")
+        app._config = UserConfig()
+        app._detail_focus_active = True
+        app._detail_line_cursor_paper_id = paper.arxiv_id
+        app._detail_line_cursor = 1
+        app._get_current_paper = MagicMock(return_value=paper)
+        app._get_paper_details_widget = MagicMock(return_value=SimpleNamespace(detail_line_count=3))
+        app._refresh_detail_pane = MagicMock()
+        app._save_config_or_warn = MagicMock(return_value=True)
+        app.notify = MagicMock()
+        app.push_screen = MagicMock()
+
+        assert app._move_detail_line_cursor(5) is True
+        assert app._detail_line_cursor == 3
+        assert app._move_detail_line_cursor(-5) is True
+        assert app._detail_line_cursor == 1
+
+        app._detail_line_cursor = 2
+        assert app._open_line_annotation_modal() is True
+        callback = app.push_screen.call_args.args[1]
+        callback(None)
+        callback(LineAnnotationResult(line=2, text="margin note"))
+
+        assert app._config.paper_metadata[paper.arxiv_id].line_annotations == [
+            LineAnnotation(line=2, text="margin note")
+        ]
+        app._save_config_or_warn.assert_called_once_with("line annotation")
+        assert app._refresh_detail_pane.call_count == 3
 
 
 class TestArxivBrowserConstructorCompatibility:

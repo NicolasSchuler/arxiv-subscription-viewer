@@ -28,6 +28,15 @@ class PaperEditResult:
     active_tab: str
 
 
+@dataclass
+class LineAnnotationResult:
+    """Result from the quick detail-line annotation modal."""
+
+    __slots__ = ("line", "text")
+    line: int
+    text: str
+
+
 class TagChip(Button):
     """Clickable tag suggestion chip in the paper editing modal."""
 
@@ -366,3 +375,70 @@ class PaperEditModal(ModalBase["PaperEditResult | None"]):
     def on_autotag_submitted(self) -> None:
         """Handle Enter key in the autotag input by triggering save."""
         self.action_save()
+
+
+class LineAnnotationModal(ModalBase["LineAnnotationResult | None"]):
+    """Compact modal for adding an inline detail-pane annotation."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    CSS = """
+    LineAnnotationModal {
+        align: center middle;
+    }
+
+    #line-annotation-dialog {
+        width: 68;
+        height: auto;
+        background: $th-background;
+        border: tall $th-accent;
+        padding: 1 2;
+    }
+
+    #line-annotation-title {
+        text-style: bold;
+        color: $th-accent-alt;
+        margin-bottom: 1;
+    }
+
+    #line-annotation-input {
+        width: 100%;
+        background: $th-panel;
+        border: none;
+    }
+
+    #line-annotation-input:focus {
+        border-left: tall $th-accent;
+    }
+
+    #line-annotation-help {
+        color: $th-muted;
+        margin-top: 1;
+    }
+    """
+
+    def __init__(self, line: int) -> None:
+        super().__init__()
+        self._line = max(1, line)
+
+    def compose(self) -> ComposeResult:
+        """Yield a single-line annotation input."""
+        with Vertical(id="line-annotation-dialog"):
+            yield Label(f"Annotate line {self._line}", id="line-annotation-title")
+            yield Input(placeholder="Margin note...", id="line-annotation-input")
+            yield Static("[dim]Enter save | Esc cancel[/dim]", id="line-annotation-help")
+
+    def on_mount(self) -> None:
+        """Focus the note input."""
+        self._focus_widget("#line-annotation-input")
+
+    @on(Input.Submitted, "#line-annotation-input")
+    def on_annotation_submitted(self, event: Input.Submitted) -> None:
+        """Save a non-empty annotation."""
+        text = event.value.strip()
+        if not text:
+            self.dismiss(None)
+            return
+        self.dismiss(LineAnnotationResult(line=self._line, text=text))

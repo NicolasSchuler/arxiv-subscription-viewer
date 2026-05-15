@@ -5,12 +5,18 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
 
 from textual.widgets import Static
 
+from arxiv_browser.conference_deadlines import (
+    SubmissionTarget,
+    format_countdown,
+    format_deadline_time,
+)
 from arxiv_browser.huggingface import HuggingFacePaper
-from arxiv_browser.models import Paper
+from arxiv_browser.models import LineAnnotation, Paper
 from arxiv_browser.query import (
     escape_rich_text,
     format_categories,
@@ -18,6 +24,7 @@ from arxiv_browser.query import (
     highlight_text,
     truncate_at_word_boundary,
 )
+from arxiv_browser.review import review_status_label_for_schedule
 from arxiv_browser.semantic_scholar import SemanticScholarPaper
 from arxiv_browser.themes import (
     DEFAULT_CATEGORY_COLORS,
@@ -127,8 +134,14 @@ class DetailRenderState:
     summary_mode: str = ""
     tags: tuple[str, ...] = ()
     relevance: tuple[int, str] | None = None
+    submission_targets: tuple[SubmissionTarget, ...] = ()
+    deadline_countdown_key: str = ""
     is_read: bool = False
     starred: bool = False
+    next_review_date: str | None = None
+    review_stage: int | None = None
+    line_annotations: tuple[LineAnnotation, ...] = ()
+    detail_line_cursor: int | None = None
     collapsed_sections: tuple[str, ...] = ()
     detail_mode: str = "full"
     theme_colors: Mapping[str, str] = field(default_factory=lambda: dict(DEFAULT_THEME))
@@ -156,8 +169,14 @@ def _normalize_detail_state(state: DetailRenderState) -> DetailRenderState:
         summary_mode=state.summary_mode,
         tags=tuple(state.tags or ()),
         relevance=state.relevance,
+        submission_targets=tuple(state.submission_targets or ()),
+        deadline_countdown_key=state.deadline_countdown_key,
         is_read=state.is_read,
         starred=state.starred,
+        next_review_date=state.next_review_date,
+        review_stage=state.review_stage,
+        line_annotations=tuple(state.line_annotations or ()),
+        detail_line_cursor=state.detail_line_cursor,
         collapsed_sections=tuple(state.collapsed_sections or ()),
         detail_mode=state.detail_mode,
         theme_colors=dict(state.theme_colors or DEFAULT_THEME),
@@ -263,8 +282,14 @@ def _detail_cache_key_for_state(state: DetailRenderState) -> tuple:
         state.summary_mode,
         state.tags,
         state.relevance,
+        state.submission_targets,
+        state.deadline_countdown_key,
         state.is_read,
         state.starred,
+        state.next_review_date,
+        state.review_stage,
+        tuple((annotation.line, annotation.text) for annotation in state.line_annotations),
+        state.detail_line_cursor,
         state.collapsed_sections,
         state.detail_mode,
         tuple(sorted(state.theme_colors.items())),
@@ -291,6 +316,36 @@ def _truncate_detail_text(text: str, max_len: int) -> str:
     return truncate_at_word_boundary(text, max_len, ascii_mode=_ACTIVE_DETAIL_GLYPH_MODE == "ascii")
 
 
+def _render_line_annotations(
+    markup: str,
+    annotations: tuple[LineAnnotation, ...],
+    cursor_line: int | None,
+    theme_colors: Mapping[str, str],
+) -> str:
+    """Insert a visible cursor and inline annotations into rendered detail markup."""
+    if not markup:
+        return markup
+    notes_by_line: dict[int, list[str]] = {}
+    for annotation in annotations:
+        if annotation.line <= 0 or not annotation.text.strip():
+            continue
+        notes_by_line.setdefault(annotation.line, []).append(annotation.text.strip())
+
+    lines: list[str] = []
+    cursor = cursor_line if cursor_line and cursor_line > 0 else None
+    cursor_glyph = ">" if _ACTIVE_DETAIL_GLYPH_MODE == "ascii" else "\u25b8"
+    note_glyph = "->" if _ACTIVE_DETAIL_GLYPH_MODE == "ascii" else "\u21b3"
+    for index, line in enumerate(markup.splitlines(), start=1):
+        if cursor == index:
+            lines.append(f"[{theme_colors['accent']}]{cursor_glyph}[/] {line}")
+        else:
+            lines.append(line)
+        for note in notes_by_line.get(index, []):
+            safe_note = escape_rich_text(note)
+            lines.append(f"  [dim]{note_glyph} {safe_note}[/]")
+    return "\n".join(lines)
+
+
 class PaperDetails(Static):
     """Widget to display full paper details."""
 
@@ -306,6 +361,7 @@ class PaperDetails(Static):
         self._paper: Paper | None = None
         self._detail_cache: dict[tuple, str] = {}
         self._detail_cache_order: list[tuple] = []
+        self._detail_line_count = 0
         self._theme_colors = dict(theme_colors or DEFAULT_THEME)
         self._category_colors = dict(category_colors or DEFAULT_CATEGORY_COLORS)
         self._tag_namespace_colors = dict(tag_namespace_colors or DEFAULT_TAG_NAMESPACE_COLORS)
@@ -316,6 +372,7 @@ class PaperDetails(Static):
         paper = resolved_state.paper if resolved_state is not None else None
         self._paper = paper
         if resolved_state is None or paper is None:
+            self._detail_line_count = 0
             self.update("[dim italic]Select a paper to view details[/]")
             return
 
@@ -333,8 +390,14 @@ class PaperDetails(Static):
             summary_mode=resolved_state.summary_mode,
             tags=resolved_state.tags,
             relevance=resolved_state.relevance,
+            submission_targets=resolved_state.submission_targets,
+            deadline_countdown_key=resolved_state.deadline_countdown_key,
             is_read=resolved_state.is_read,
             starred=resolved_state.starred,
+            next_review_date=resolved_state.next_review_date,
+            review_stage=resolved_state.review_stage,
+            line_annotations=resolved_state.line_annotations,
+            detail_line_cursor=resolved_state.detail_line_cursor,
             collapsed_sections=resolved_state.collapsed_sections,
             detail_mode=resolved_state.detail_mode,
             theme_colors=theme_colors_for(self, resolved_state.theme_colors),
@@ -376,6 +439,11 @@ class PaperDetails(Static):
                 state.tag_namespace_colors,
             ),
             self._render_relevance(state.relevance, "relevance" in collapsed, state.theme_colors),
+            self._render_deadlines(
+                state.submission_targets,
+                "deadlines" in collapsed,
+                state.theme_colors,
+            ),
             self._render_summary(
                 state.summary,
                 state.summary_loading,
@@ -390,6 +458,13 @@ class PaperDetails(Static):
             self._render_url(paper, state.theme_colors),
         ]
         markup = "\n\n".join(s for s in sections if s)
+        self._detail_line_count = max(1, len(markup.splitlines()))
+        markup = _render_line_annotations(
+            markup,
+            state.line_annotations,
+            state.detail_line_cursor,
+            state.theme_colors,
+        )
 
         # Store in cache with FIFO eviction
         if len(self._detail_cache) >= DETAIL_CACHE_MAX:
@@ -399,6 +474,11 @@ class PaperDetails(Static):
         self._detail_cache_order.append(cache_key)
 
         self.update(markup)
+
+    @property
+    def detail_line_count(self) -> int:
+        """Return the number of base rendered detail lines before inline notes."""
+        return self._detail_line_count
 
     def update_paper(
         self,
@@ -449,6 +529,13 @@ class PaperDetails(Static):
             f"[bold {colors['accent']}]Star:[/] {'yes' if state.starred else 'no'}",
             f"[bold {colors['accent']}]Tags:[/] {len(state.tags) if state.tags else 'none'}",
         ]
+        review_label = review_status_label_for_schedule(
+            state.next_review_date,
+            state.review_stage,
+            date.today(),
+        )
+        if review_label:
+            parts.append(f"[bold {colors['accent']}]Review:[/] {review_label}")
         if state.relevance is not None:
             score, _reason = state.relevance
             score_color, score_sym = _relevance_badge_parts(score, theme_colors=colors)
@@ -587,6 +674,41 @@ class PaperDetails(Static):
         if rel_reason:
             safe_reason = escape_rich_text(rel_reason)
             lines.append(f"  [{resolved_theme_colors['text']}]{safe_reason}[/]")
+        return "\n".join(lines)
+
+    def _render_deadlines(
+        self,
+        targets: tuple[SubmissionTarget, ...],
+        is_collapsed: bool,
+        theme_colors: Mapping[str, str] | None = None,
+    ) -> str:
+        """Return Rich markup for candidate submission targets."""
+        if not targets:
+            return ""
+        resolved_theme_colors = theme_colors or theme_colors_for(self, self._theme_colors)
+        collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
+        expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
+        if is_collapsed:
+            return f"[dim]{collapsed_glyph} Submission Targets ({len(targets)})[/]"
+
+        lines = [f"[bold {resolved_theme_colors['accent']}]{expanded_glyph} Submission Targets[/]"]
+        for target in targets:
+            deadline = target.deadline
+            venue = escape_rich_text(f"{deadline.title} {deadline.year}")
+            kind = "abstract" if target.next_deadline_kind == "abstract" else "paper"
+            countdown = format_countdown(target.next_deadline_at)
+            when = escape_rich_text(format_deadline_time(target.next_deadline_at))
+            subject_label = ", ".join(target.matching_subjects) or "topic"
+            safe_subjects = escape_rich_text(subject_label)
+            link = escape_rich_text(deadline.link)
+            line = (
+                f"  [bold {resolved_theme_colors['text']}]{venue}[/] "
+                f"[{resolved_theme_colors['green']}]{countdown}[/] "
+                f"[dim]({kind}: {when}; {safe_subjects})[/]"
+            )
+            lines.append(line)
+            if link:
+                lines.append(f"    [dim]{link}[/]")
         return "\n".join(lines)
 
     def _render_summary(

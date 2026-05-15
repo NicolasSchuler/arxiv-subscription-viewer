@@ -123,7 +123,7 @@
             </svg>
           </div>
           <h3 class="text-lg font-semibold mb-2">Enrich on demand</h3>
-          <p class="text-gray-400 text-sm">Pull in Semantic Scholar citations, HuggingFace daily-paper signals, and LLM summaries, chat, relevance scoring, or auto-tagging only when they help.</p>
+          <p class="text-gray-400 text-sm">Pull in Semantic Scholar citations, HuggingFace daily-paper signals, and LLM summaries, chat, paper comparison, relevance scoring, or auto-tagging only when they help.</p>
         </div>
         <div class="bg-black/30 border border-gray-800 rounded-xl p-6 hover:border-monokai-purple/50 transition-colors">
           <div class="w-12 h-12 bg-monokai-purple/20 rounded-lg flex items-center justify-center mb-4">
@@ -132,7 +132,7 @@
             </svg>
           </div>
           <h3 class="text-lg font-semibold mb-2">Organize the reading queue</h3>
-          <p class="text-gray-400 text-sm">Track read state, stars, tags, notes, marks, bookmarks, and collections so your next pass through the literature starts from your own metadata.</p>
+          <p class="text-gray-400 text-sm">Track read state, stars, tags, notes, marks, bookmarks, collections, and spaced-review schedules so your next pass through the literature starts from your own metadata.</p>
         </div>
         <div class="bg-black/30 border border-gray-800 rounded-xl p-6 hover:border-monokai-blue/50 transition-colors">
           <div class="w-12 h-12 bg-monokai-blue/20 rounded-lg flex items-center justify-center mb-4">
@@ -245,6 +245,12 @@
           <p class="text-gray-400 text-sm">Learn structured queries, API search flows, bookmarkable filters, and faster scanning patterns.</p>
         </a>
 
+        <a href="https://github.com/NicolasSchuler/arxiv-subscription-viewer/blob/main/docs/digest.md" class="bg-black/30 border border-gray-800 rounded-xl p-6 hover:border-monokai-yellow/50 transition-colors">
+          <p class="mono text-monokai-yellow text-sm mb-2">Automation guide</p>
+          <h3 class="text-lg font-semibold mb-2">Markdown digests</h3>
+          <p class="text-gray-400 text-sm">Generate daily or weekly non-interactive digests for cron, files, email pipes, or Slack webhooks.</p>
+        </a>
+
         <a href="https://github.com/NicolasSchuler/arxiv-subscription-viewer/blob/main/docs/config-reference.md" class="bg-black/30 border border-gray-800 rounded-xl p-6 hover:border-monokai-green/50 transition-colors">
           <p class="mono text-monokai-green text-sm mb-2">Reference</p>
           <h3 class="text-lg font-semibold mb-2">Configuration reference</h3>
@@ -341,9 +347,9 @@
         </div>
 
         <div class="bg-black/40 border border-gray-800 rounded-xl p-6">
-          <h3 class="text-lg font-semibold mb-3">AI Summary / Chat / Relevance / Auto-Tag</h3>
+          <h3 class="text-lg font-semibold mb-3">AI Summary / Chat / Compare / Relevance / Auto-Tag</h3>
           <p class="text-gray-400 text-sm mb-3">Prerequisites: configure <code class="mono text-gray-300">llm_preset</code> or <code class="mono text-gray-300">llm_command</code>; relevance scoring also uses <code class="mono text-gray-300">research_interests</code>.</p>
-          <p class="text-gray-500 text-sm">First use: try <code class="mono text-gray-300">Ctrl+s</code> for summaries, <code class="mono text-gray-300">C</code> for chat, <code class="mono text-gray-300">L</code> for relevance scoring, and <code class="mono text-gray-300">Ctrl+g</code> for auto-tagging. Custom LLM commands prompt for trust on first execution.</p>
+          <p class="text-gray-500 text-sm">First use: try <code class="mono text-gray-300">Ctrl+s</code> for summaries, <code class="mono text-gray-300">C</code> for chat, <code class="mono text-gray-300">Ctrl+v</code> for comparison, <code class="mono text-gray-300">L</code> for relevance scoring, and <code class="mono text-gray-300">Ctrl+g</code> for auto-tagging. Custom LLM commands prompt for trust on first execution.</p>
         </div>
       </div>
     </div>

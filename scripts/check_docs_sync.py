@@ -57,8 +57,10 @@ REQUIRED_KEYBINDINGS: set[str] = {
     "t",
     "p",
     "v",
+    "y",
     "o",
     "P",
+    "I",
     "c",
     "d",
     "w",
@@ -180,12 +182,17 @@ def _extract_table_keys(text: str) -> set[str]:
 
 def _extract_user_config_fields(models_text: str) -> set[str]:
     """Extract ``UserConfig`` field names from ``models.py``."""
+    return _extract_dataclass_fields(models_text, "UserConfig")
+
+
+def _extract_dataclass_fields(models_text: str, class_name: str) -> set[str]:
+    """Extract annotated field names from a dataclass-like class."""
     module = _parse_python_module(models_text)
     if module is None:
         return set()
 
     for node in module.body:
-        if not isinstance(node, ast.ClassDef) or node.name != "UserConfig":
+        if not isinstance(node, ast.ClassDef) or node.name != class_name:
             continue
         return {
             stmt.target.id
@@ -233,6 +240,41 @@ def _extract_config_reference_keys(config_reference_text: str) -> set[str]:
             config_reference_text,
         )
     )
+
+
+def _extract_sort_options(models_text: str) -> list[str]:
+    """Extract the literal SORT_OPTIONS list from ``models.py``."""
+    module = _parse_python_module(models_text)
+    if module is None:
+        return []
+    for node in module.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(
+            isinstance(target, ast.Name) and target.id == "SORT_OPTIONS" for target in node.targets
+        ):
+            continue
+        if not isinstance(node.value, ast.List):
+            return []
+        options: list[str] = []
+        for elt in node.value.elts:
+            if not isinstance(elt, ast.Constant) or not isinstance(elt.value, str):
+                return []
+            options.append(elt.value)
+        return options
+    return []
+
+
+def _extract_sort_index_reference(config_reference_text: str) -> dict[int, str]:
+    """Extract the documented session.sort_index integer-to-name mapping."""
+    for line in config_reference_text.splitlines():
+        if "`session.sort_index`" not in line:
+            continue
+        return {
+            int(index): name
+            for index, name in re.findall(r"`(\d+)`\s*=\s*`?([a-z_][a-z0-9_]*)`?", line)
+        }
+    return {}
 
 
 def _extract_markdown_section(text: str, heading: str) -> str:
@@ -304,10 +346,14 @@ def _extract_markdown_links(text: str) -> list[str]:
 
 
 def _tracked_files() -> set[str]:
-    """Return git-tracked repo paths, or an empty set outside git."""
+    """Return git-known repo paths, or an empty set outside git.
+
+    Include untracked non-ignored files so local docs checks work before a new
+    guide has been staged. In CI, this is equivalent to tracked files only.
+    """
     try:
         result = subprocess.run(
-            ["git", "ls-files"],
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
             cwd=ROOT,
             check=True,
             capture_output=True,
@@ -456,6 +502,45 @@ def _check_config_reference(
     return errors
 
 
+def _check_sort_index_reference(models_text: str, config_reference_text: str) -> list[str]:
+    """Verify ``session.sort_index`` docs enumerate every SORT_OPTIONS entry."""
+    sort_options = _extract_sort_options(models_text)
+    if not sort_options:
+        return ["Could not parse SORT_OPTIONS from src/arxiv_browser/models.py"]
+
+    documented = _extract_sort_index_reference(config_reference_text)
+    missing_or_wrong = [
+        f"`{index}`={option}"
+        for index, option in enumerate(sort_options)
+        if documented.get(index) != option
+    ]
+    extra = sorted(index for index in documented if index >= len(sort_options))
+    errors = []
+    if missing_or_wrong:
+        errors.append(
+            "docs/config-reference.md session.sort_index missing or mismatched: "
+            + ", ".join(missing_or_wrong)
+        )
+    if extra:
+        errors.append(
+            "docs/config-reference.md session.sort_index documents unknown indexes: "
+            + ", ".join(str(index) for index in extra)
+        )
+    return errors
+
+
+def _check_paper_metadata_reference(models_text: str, config_reference_text: str) -> list[str]:
+    """Verify documented per-paper metadata subfields stay aligned with the model."""
+    fields = _extract_dataclass_fields(models_text, "PaperMetadata")
+    if not fields:
+        return ["Could not parse PaperMetadata from src/arxiv_browser/models.py"]
+    documented_keys = _extract_config_reference_keys(config_reference_text)
+    missing = sorted(fields - documented_keys - {"arxiv_id"})
+    return [
+        f"docs/config-reference.md missing paper_metadata subfield: {field}" for field in missing
+    ]
+
+
 def _extract_cli_commands(cli_text: str) -> set[str]:
     """Extract the subcommand names from the ``CLI_COMMANDS`` tuple in cli.py."""
     match = re.search(r"CLI_COMMANDS\s*=\s*\((.*?)\)", cli_text, re.DOTALL)
@@ -563,6 +648,8 @@ def main() -> int:
     errors.extend(_check_llm_presets(readme_text, claude_text, llm_text))
     errors.extend(_check_keybindings(readme_text, claude_text))
     errors.extend(_check_config_reference(models_text, config_text, config_reference_text))
+    errors.extend(_check_sort_index_reference(models_text, config_reference_text))
+    errors.extend(_check_paper_metadata_reference(models_text, config_reference_text))
     errors.extend(_check_completions(cli_text, completions_text))
     errors.extend(_check_docs_index_navigation(docs_readme_text, docs_index_text))
     errors.extend(

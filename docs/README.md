@@ -9,6 +9,8 @@ The app supports two first-class entry paths:
 
 If setup or discovery looks wrong, run `arxiv-viewer doctor` before digging deeper.
 
+Review organization is local-first: use read state, stars, tags, notes, marks, bookmarks, collections, and command-palette spaced-review scheduling to keep a durable paper queue. Scheduled papers can be surfaced later with the `review-due` filter.
+
 ## Choose The Right Entry Point
 
 - **[Main README](../README.md)**: install, quick commands, highlights, and key bindings
@@ -22,8 +24,9 @@ If setup or discovery looks wrong, run `arxiv-viewer doctor` before digging deep
 2. [Published guide hub](https://nicolasschuler.github.io/arxiv-subscription-viewer/) for the short visual overview and workflow chooser
 3. [history-mode.md](history-mode.md) if you keep local digest files
 4. [search-filters.md](search-filters.md) if you want API search or complex local filtering
-5. [config-reference.md](config-reference.md) once you start customizing exports, themes, or enrichment
-6. [troubleshooting.md](troubleshooting.md) when `doctor` or first-run behavior surfaces problems
+5. [digest.md](digest.md) if you want cron-friendly Markdown daily or weekly digests
+6. [config-reference.md](config-reference.md) once you start customizing exports, themes, or enrichment
+7. [troubleshooting.md](troubleshooting.md) when `doctor` or first-run behavior surfaces problems
 
 ## Feature Guides
 
@@ -31,7 +34,8 @@ If setup or discovery looks wrong, run `arxiv-viewer doctor` before digging deep
 |----------|-------------|
 | [history-mode.md](history-mode.md) | `history/` setup, date navigation, and digest-ingestion workflow |
 | [search-filters.md](search-filters.md) | Query syntax, filter prefixes, boolean operators, bookmarks, and API search |
-| [llm-setup.md](llm-setup.md) | AI summaries, chat, relevance scoring, auto-tagging |
+| [digest.md](digest.md) | Non-interactive daily/weekly Markdown digests for cron, email, or Slack piping |
+| [llm-setup.md](llm-setup.md) | AI summaries, chat, paper comparison, relevance scoring, auto-tagging |
 | [semantic-scholar.md](semantic-scholar.md) | Citation counts, recommendations, citation graph |
 | [huggingface.md](huggingface.md) | Trending papers, community upvotes |
 | [export.md](export.md) | BibTeX, RIS, CSV, Markdown, PDF downloads, collections |

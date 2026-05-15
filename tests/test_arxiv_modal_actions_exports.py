@@ -393,6 +393,26 @@ class TestSummaryModeModalDismiss:
         modal.action_mode_comparison()
         modal.dismiss.assert_called_once_with("comparison")
 
+    def test_action_mode_eli5_dismisses_eli5(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser.modals import SummaryModeModal
+
+        modal = SummaryModeModal()
+        modal.dismiss = MagicMock()
+        modal.action_mode_eli5()
+        modal.dismiss.assert_called_once_with("eli5")
+
+    def test_action_mode_phd_dismisses_phd(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser.modals import SummaryModeModal
+
+        modal = SummaryModeModal()
+        modal.dismiss = MagicMock()
+        modal.action_mode_phd()
+        modal.dismiss.assert_called_once_with("phd")
+
     def test_action_cancel_dismisses_empty(self):
         from unittest.mock import MagicMock
 
@@ -419,6 +439,8 @@ class TestSummaryModeModalDismiss:
             "methods": modal.action_mode_methods,
             "results": modal.action_mode_results,
             "comparison": modal.action_mode_comparison,
+            "eli5": modal.action_mode_eli5,
+            "phd": modal.action_mode_phd,
         }
         for mode_name, action in mode_actions.items():
             modal.dismiss.reset_mock()
@@ -844,6 +866,129 @@ class TestToggleReadStar:
         app.action_toggle_star()
         app._update_option_at_index.assert_not_called()
         assert app._config.paper_metadata["2401.00001"].starred is True
+
+
+class TestReviewActions:
+    """Tests for spaced-review command-palette actions."""
+
+    def _make_mock_app(self, make_paper, papers=None, selected_ids=None):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+
+        from arxiv_browser.browser.core import ArxivBrowser
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._config = UserConfig()
+        app.selected_ids = set(selected_ids or ())
+        app.filtered_papers = papers or [make_paper(arxiv_id="2401.00001")]
+        app._get_current_paper = MagicMock(
+            return_value=app.filtered_papers[0] if app.filtered_papers else None
+        )
+        app._get_search_input_widget = MagicMock(return_value=SimpleNamespace(value=""))
+        app._get_live_query = MagicMock(return_value="")
+        app._apply_filter = MagicMock()
+        app._refresh_detail_pane = MagicMock()
+        app._save_config_or_warn = MagicMock(return_value=True)
+        app.notify = MagicMock()
+        return app
+
+    def test_schedule_review_current_paper(self, make_paper):
+        from datetime import date, timedelta
+
+        paper = make_paper(arxiv_id="2401.00001")
+        app = self._make_mock_app(make_paper, papers=[paper])
+
+        app.action_schedule_review()
+
+        meta = app._config.paper_metadata["2401.00001"]
+        assert meta.review_stage == 0
+        assert meta.next_review_date == (date.today() + timedelta(days=1)).isoformat()
+        app._apply_filter.assert_called_once_with("")
+        assert "Scheduled review" in app.notify.call_args.args[0]
+
+    def test_mark_reviewed_selected_papers(self, make_paper):
+        from datetime import date, timedelta
+
+        papers = [
+            make_paper(arxiv_id="2401.00001"),
+            make_paper(arxiv_id="2401.00002"),
+        ]
+        app = self._make_mock_app(
+            make_paper,
+            papers=papers,
+            selected_ids={"2401.00001", "2401.00002"},
+        )
+        app._config.paper_metadata["2401.00001"] = PaperMetadata(
+            arxiv_id="2401.00001",
+            next_review_date=date.today().isoformat(),
+            review_stage=0,
+        )
+
+        app.action_mark_reviewed()
+
+        assert app._config.paper_metadata["2401.00001"].review_stage == 1
+        assert (
+            app._config.paper_metadata["2401.00001"].next_review_date
+            == (date.today() + timedelta(days=3)).isoformat()
+        )
+        assert app._config.paper_metadata["2401.00002"].review_stage == 0
+        assert "2 papers" in app.notify.call_args.args[0]
+
+    def test_mark_reviewed_caps_at_final_interval(self, make_paper):
+        from datetime import date, timedelta
+
+        paper = make_paper(arxiv_id="2401.00001")
+        app = self._make_mock_app(make_paper, papers=[paper])
+        app._config.paper_metadata["2401.00001"] = PaperMetadata(
+            arxiv_id="2401.00001",
+            next_review_date=date.today().isoformat(),
+            review_stage=4,
+        )
+
+        app.action_mark_reviewed()
+
+        meta = app._config.paper_metadata["2401.00001"]
+        assert meta.review_stage == 4
+        assert meta.next_review_date == (date.today() + timedelta(days=30)).isoformat()
+
+    def test_clear_review_current_paper(self, make_paper):
+        paper = make_paper(arxiv_id="2401.00001")
+        app = self._make_mock_app(make_paper, papers=[paper])
+        app._config.paper_metadata["2401.00001"] = PaperMetadata(
+            arxiv_id="2401.00001",
+            next_review_date="2026-05-15",
+            review_stage=0,
+        )
+
+        app.action_clear_review()
+
+        meta = app._config.paper_metadata["2401.00001"]
+        assert meta.next_review_date is None
+        assert meta.review_stage is None
+        assert "Cleared review" in app.notify.call_args.args[0]
+
+    def test_show_due_reviews_applies_virtual_query(self, make_paper):
+        app = self._make_mock_app(make_paper)
+        search_input = app._get_search_input_widget.return_value
+
+        app.action_show_due_reviews()
+
+        assert search_input.value == "review-due"
+        app._apply_filter.assert_called_once_with("review-due")
+        assert "due reviews" in app.notify.call_args.args[0]
+
+    def test_review_action_without_target_warns(self, make_paper):
+        app = self._make_mock_app(make_paper, papers=[])
+        app._get_current_paper.return_value = None
+
+        app.action_schedule_review()
+
+        app.notify.assert_called_once_with(
+            "Select a paper first",
+            title="Review",
+            severity="warning",
+        )
+        app._apply_filter.assert_not_called()
 
 
 class TestFormatPaperForClipboardExtended:

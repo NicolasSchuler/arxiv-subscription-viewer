@@ -12,6 +12,7 @@ from arxiv_browser.widgets.omni_input import (
     OMNI_HINT_API,
     OMNI_HINT_COMMAND,
     OMNI_HINT_LOCAL,
+    OMNI_HINT_SEMANTIC,
     OMNI_PLACEHOLDER,
     OmniInput,
     OmniMode,
@@ -54,6 +55,18 @@ class TestParseOmniMode:
         result = parse_omni_mode("@")
         assert result == OmniMode(mode="api", query="")
 
+    def test_semantic_prefix(self):
+        result = parse_omni_mode("~papers about RAG hallucination")
+        assert result == OmniMode(mode="semantic", query="papers about RAG hallucination")
+
+    def test_semantic_prefix_with_space(self):
+        result = parse_omni_mode("~ papers about RAG hallucination")
+        assert result == OmniMode(mode="semantic", query="papers about RAG hallucination")
+
+    def test_semantic_prefix_only(self):
+        result = parse_omni_mode("~")
+        assert result == OmniMode(mode="semantic", query="")
+
     def test_greater_than_mid_text_is_local(self):
         """A > not at position 0 is just local search."""
         result = parse_omni_mode("foo > bar")
@@ -90,6 +103,7 @@ class TestConstants:
         assert isinstance(OMNI_HINT_LOCAL, str)
         assert isinstance(OMNI_HINT_COMMAND, str)
         assert isinstance(OMNI_HINT_API, str)
+        assert isinstance(OMNI_HINT_SEMANTIC, str)
 
     def test_fuzzy_threshold_is_positive(self):
         assert FUZZY_THRESHOLD > 0
@@ -398,6 +412,34 @@ class TestOmniInputTUI:
             await pilot.pause()
             assert any(m.query == "transformer" for m in messages)
 
+    async def test_semantic_mode_emits_local_search_with_prefix(self):
+        from textual.app import App
+        from textual.widgets import Input
+
+        messages: list[OmniInput.LocalSearch] = []
+        submissions: list[OmniInput.LocalSearchSubmitted] = []
+
+        class TestApp(App):
+            def compose(self):
+                yield OmniInput()
+
+            def on_omni_input_local_search(self, msg: OmniInput.LocalSearch):
+                messages.append(msg)
+
+            def on_omni_input_local_search_submitted(self, msg: OmniInput.LocalSearchSubmitted):
+                submissions.append(msg)
+
+        async with TestApp().run_test() as pilot:
+            omni = pilot.app.query_one(OmniInput)
+            omni.open("~RAG")
+            inp = omni.query_one("#omni-input", Input)
+            inp.value = "~RAG"
+            await pilot.pause()
+            await inp.action_submit()
+            await pilot.pause()
+            assert any(m.query == "~ RAG" for m in messages)
+            assert any(m.query == "~ RAG" for m in submissions)
+
     async def test_command_select_emits_message(self):
         from textual.app import App
         from textual.widgets import Input
@@ -459,6 +501,11 @@ class TestOmniInputTUI:
             inp.value = "@query"
             await pilot.pause()
             assert omni._current_mode == "api"
+
+            # Semantic mode
+            inp.value = "~query"
+            await pilot.pause()
+            assert omni._current_mode == "semantic"
 
             # Back to local
             inp.value = "plain"

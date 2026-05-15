@@ -11,6 +11,12 @@ from typing import Literal, overload
 
 import httpx
 
+from arxiv_browser.conference_deadlines import (
+    ConferenceDeadline,
+    fetch_conference_deadlines,
+    load_conference_deadlines_cache_snapshot,
+    save_conference_deadlines_cache,
+)
 from arxiv_browser.huggingface import (
     HFDailyCacheSnapshot,
     HuggingFacePaper,
@@ -72,6 +78,16 @@ class S2RecommendationsFetchResult:
 
     state: Literal["found", "empty", "unavailable"]
     papers: list[SemanticScholarPaper]
+    complete: bool
+    from_cache: bool
+
+
+@dataclass(slots=True, frozen=True)
+class ConferenceDeadlinesFetchResult:
+    """Resolved conference-deadline state after cache lookup and optional remote fetch."""
+
+    state: Literal["found", "empty", "unavailable"]
+    deadlines: list[ConferenceDeadline]
     complete: bool
     from_cache: bool
 
@@ -222,6 +238,64 @@ async def load_or_fetch_s2_recommendations_result(
     return S2RecommendationsFetchResult(
         state="empty",
         papers=[],
+        complete=True,
+        from_cache=False,
+    )
+
+
+async def load_or_fetch_conference_deadlines_result(
+    *,
+    db_path: Path | str,
+    cache_ttl_hours: int,
+    client: httpx.AsyncClient,
+    source_url: str,
+) -> ConferenceDeadlinesFetchResult:
+    """Load conference deadlines from cache, or fetch and persist on cache miss."""
+    db_path = _normalize_db_path(db_path)
+    cached = await asyncio.to_thread(
+        load_conference_deadlines_cache_snapshot,
+        db_path,
+        cache_ttl_hours,
+        source_url,
+    )
+    if cached.status == "found":
+        return ConferenceDeadlinesFetchResult(
+            state="found",
+            deadlines=cached.deadlines,
+            complete=True,
+            from_cache=True,
+        )
+    if cached.status == "empty":
+        return ConferenceDeadlinesFetchResult(
+            state="empty",
+            deadlines=[],
+            complete=True,
+            from_cache=True,
+        )
+
+    deadlines, complete = await fetch_conference_deadlines(
+        client,
+        source_url=source_url,
+        include_status=True,
+    )
+    if not complete:
+        return ConferenceDeadlinesFetchResult(
+            state="unavailable",
+            deadlines=[],
+            complete=False,
+            from_cache=False,
+        )
+    await _best_effort_cache_write(save_conference_deadlines_cache, db_path, deadlines, source_url)
+    if deadlines:
+        return ConferenceDeadlinesFetchResult(
+            state="found",
+            deadlines=deadlines,
+            complete=True,
+            from_cache=False,
+        )
+    return ConferenceDeadlinesFetchResult(
+        state="empty",
+        deadlines=[],
         complete=True,
         from_cache=False,
     )

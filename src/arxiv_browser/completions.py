@@ -12,7 +12,7 @@ _arxiv_viewer() {
     local cur prev words cword
     _init_completion || return
 
-    local commands="browse search dates completions config-path doctor keybindings"
+    local commands="browse search digest dates completions config-path doctor keybindings"
     local global_opts="--debug --color --no-color --ascii --version -V --help -h"
 
     # Find the subcommand (skip global flags)
@@ -47,6 +47,17 @@ _arxiv_viewer() {
             esac
             COMPREPLY=($(compgen -W "--query --field --category --mode --max-results --help -h" -- "$cur"))
             ;;
+        digest)
+            case "$prev" in
+                --field)
+                    COMPREPLY=($(compgen -W "all title author abstract" -- "$cur"))
+                    return ;;
+                --period)
+                    COMPREPLY=($(compgen -W "daily weekly" -- "$cur"))
+                    return ;;
+            esac
+            COMPREPLY=($(compgen -W "--input --query --field --category --period --max-results --output --limit --min-relevance --include-triage --include-hf --no-hf --cached-relevance-only --no-relevance --no-versions --help -h" -- "$cur"))
+            ;;
         dates|config-path|doctor)
             COMPREPLY=($(compgen -W "--help -h" -- "$cur"))
             ;;
@@ -79,6 +90,7 @@ _arxiv_viewer() {
     commands=(
         'browse:Open local history or a local paper file'
         'search:Fetch startup papers from the arXiv API'
+        'digest:Generate a Markdown digest and exit'
         'dates:List available local history dates and exit'
         'completions:Generate shell completion scripts'
         'config-path:Print the configuration file path'
@@ -123,6 +135,25 @@ _arxiv_viewer() {
                         '--max-results[API page size]:number:' \
                         '(-h --help)'{-h,--help}'[Show help]'
                     ;;
+                digest)
+                    _arguments \
+                        '--input[Local digest file]:file:_files' \
+                        '--query[Query text]:query:' \
+                        '--field[Search field]:field:(all title author abstract)' \
+                        '--category[Category filter]:category:' \
+                        '--period[Digest period]:period:(daily weekly)' \
+                        '--max-results[API page size]:number:' \
+                        '--output[Markdown output file]:file:_files' \
+                        '--limit[Maximum papers per section]:number:' \
+                        '--min-relevance[Minimum relevance score]:number:' \
+                        '--include-triage[Include local ML triage sections]' \
+                        '--include-hf[Force HuggingFace trending]' \
+                        '--no-hf[Disable HuggingFace trending]' \
+                        '--cached-relevance-only[Use cached relevance only]' \
+                        '--no-relevance[Disable relevance]' \
+                        '--no-versions[Skip version checks]' \
+                        '(-h --help)'{-h,--help}'[Show help]'
+                    ;;
                 dates|config-path|doctor)
                     _arguments '(-h --help)'{-h,--help}'[Show help]'
                     ;;
@@ -159,6 +190,7 @@ complete -c arxiv-viewer -n '__fish_use_subcommand' -s V -l version -d 'Show ver
 # Subcommands
 complete -c arxiv-viewer -n '__fish_use_subcommand' -a browse -d 'Open local history or a local paper file'
 complete -c arxiv-viewer -n '__fish_use_subcommand' -a search -d 'Fetch startup papers from the arXiv API'
+complete -c arxiv-viewer -n '__fish_use_subcommand' -a digest -d 'Generate a Markdown digest and exit'
 complete -c arxiv-viewer -n '__fish_use_subcommand' -a dates -d 'List available local history dates and exit'
 complete -c arxiv-viewer -n '__fish_use_subcommand' -a completions -d 'Generate shell completion scripts'
 complete -c arxiv-viewer -n '__fish_use_subcommand' -a config-path -d 'Print the configuration file path'
@@ -176,6 +208,23 @@ complete -c arxiv-viewer -n '__fish_seen_subcommand_from search' -l field -x -a 
 complete -c arxiv-viewer -n '__fish_seen_subcommand_from search' -l category -x -d 'Category filter (e.g. cs.AI)'
 complete -c arxiv-viewer -n '__fish_seen_subcommand_from search' -l mode -x -a 'latest page' -d 'Search mode'
 complete -c arxiv-viewer -n '__fish_seen_subcommand_from search' -l max-results -x -d 'API page size'
+
+# digest options
+complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l input -r -d 'Local digest file'
+complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l query -x -d 'Query text'
+complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l field -x -a 'all title author abstract' -d 'Search field'
+complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l category -x -d 'Category filter (e.g. cs.AI)'
+complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l period -x -a 'daily weekly' -d 'Digest period'
+complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l max-results -x -d 'API page size'
+complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l output -r -d 'Markdown output file'
+complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l limit -x -d 'Maximum papers per section'
+complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l min-relevance -x -d 'Minimum relevance score'
+complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l include-triage -d 'Include local ML triage sections'
+complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l include-hf -d 'Force HuggingFace trending'
+complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l no-hf -d 'Disable HuggingFace trending'
+complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l cached-relevance-only -d 'Use cached relevance only'
+complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l no-relevance -d 'Disable relevance'
+complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l no-versions -d 'Skip version checks'
 
 # completions options
 complete -c arxiv-viewer -n '__fish_seen_subcommand_from completions' -a 'bash zsh fish' -d 'Shell type'

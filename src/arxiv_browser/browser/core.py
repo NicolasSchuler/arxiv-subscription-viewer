@@ -20,13 +20,17 @@ from textual.events import Key
 from textual.timer import Timer
 from textual.widgets import Header, Input, Label, OptionList
 
+from arxiv_browser import conference_deadline_ui as _deadline_ui
 from arxiv_browser import empty_state as _empty_state
+from arxiv_browser.actions import comparison_actions as _comparison_actions
 from arxiv_browser.actions import constants as _action_constants
 from arxiv_browser.actions import external_io_actions as _external_io_actions
 from arxiv_browser.actions import library_actions as _library_actions
 from arxiv_browser.actions import llm_actions as _llm_actions
 from arxiv_browser.actions import search_api_actions as _search_api_actions
+from arxiv_browser.actions import triage_actions as _triage_actions
 from arxiv_browser.actions import ui_actions as _ui_actions
+from arxiv_browser.actions.audio_actions import AudioActionMixin
 from arxiv_browser.browser import constants as _browser_constants
 from arxiv_browser.browser import content as _browser_content
 from arxiv_browser.browser.browse import BrowseMixin
@@ -46,6 +50,7 @@ from arxiv_browser.models import (
     SessionState,
     UserConfig,
 )
+from arxiv_browser.paper_debate_actions import action_debate_paper as _action_debate_paper
 from arxiv_browser.query import remove_query_token
 from arxiv_browser.semantic_scholar import SemanticScholarPaper
 from arxiv_browser.services.interfaces import AppServices, build_default_app_services
@@ -72,36 +77,19 @@ FUZZY_SCORE_CUTOFF = _browser_constants.FUZZY_SCORE_CUTOFF
 MAX_ABSTRACT_LOADS = _browser_constants.MAX_ABSTRACT_LOADS
 build_list_empty_message = _empty_state.build_list_empty_message
 _fetch_paper_content_async = _browser_content._fetch_paper_content_async
-# ============================================================================
-# Constants
-# ============================================================================
-# UI Layout constants
-MIN_LIST_WIDTH = 50
-MAX_LIST_WIDTH = 100
-CLIPBOARD_SEPARATOR = _action_constants.CLIPBOARD_SEPARATOR
 
-# History file discovery cap retained for custom callers/tests.
-MAX_HISTORY_FILES = 365
-SUBPROCESS_TIMEOUT = _action_constants.SUBPROCESS_TIMEOUT
+MIN_LIST_WIDTH, MAX_LIST_WIDTH = 50, 100
+CLIPBOARD_SEPARATOR = _action_constants.CLIPBOARD_SEPARATOR
+MAX_HISTORY_FILES, SUBPROCESS_TIMEOUT = 365, _action_constants.SUBPROCESS_TIMEOUT
 BOOKMARK_NAME_MAX_LEN = _action_constants.BOOKMARK_NAME_MAX_LEN
 MAX_CONCURRENT_DOWNLOADS = _action_constants.MAX_CONCURRENT_DOWNLOADS
 BATCH_CONFIRM_THRESHOLD = _action_constants.BATCH_CONFIRM_THRESHOLD
-RELEVANCE_SCORE_TIMEOUT = 30  # Seconds to wait for relevance scoring LLM response
-AUTO_TAG_TIMEOUT = 30  # Seconds to wait for auto-tag LLM response
-# Search debounce delay in seconds
-SEARCH_DEBOUNCE_DELAY = 0.3
-# Detail pane update debounce delay in seconds (shorter — must feel responsive)
-DETAIL_PANE_DEBOUNCE_DELAY = 0.1
+RELEVANCE_SCORE_TIMEOUT = AUTO_TAG_TIMEOUT = 30
+SEARCH_DEBOUNCE_DELAY, DETAIL_PANE_DEBOUNCE_DELAY = 0.3, 0.1
 
 
 def _resolve_user_css_path() -> Path | None:
-    """Return the user's ``user.tcss`` path when present and readable.
-
-    Returning ``None`` when the file is missing skips the later user stylesheet
-    overlay and keeps test environments untouched by stray config directories.
-    Any error (permissions, broken symlink) is logged and the override is
-    ignored so the app still starts.
-    """
+    """Return a readable user ``user.tcss`` path, or ``None`` when unavailable."""
     try:
         path = get_user_tcss_path()
     except Exception:
@@ -115,12 +103,10 @@ def _resolve_user_css_path() -> Path | None:
     return None
 
 
-class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
+class ArxivBrowser(AudioActionMixin, DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
     """A TUI application to browse arXiv papers."""
 
-    TITLE = "arXiv Paper Browser"
-    CSS = APP_CSS
-    BINDINGS = APP_BINDINGS
+    TITLE, CSS, BINDINGS = "arXiv Paper Browser", APP_CSS, APP_BINDINGS
     VERSION_CHECK_BATCH_SIZE = 40
     action_toggle_search = _search_api_actions.action_toggle_search
     action_cancel_search = _search_api_actions.action_cancel_search
@@ -131,6 +117,7 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
     action_toggle_hf = _ui_actions.action_toggle_hf
     _fetch_hf_daily = _ui_actions._fetch_hf_daily
     _fetch_hf_daily_async = _ui_actions._fetch_hf_daily_async
+    action_refresh_conference_deadlines = _deadline_ui.action_refresh_conference_deadlines
     action_check_versions = _ui_actions.action_check_versions
     action_exit_arxiv_search_mode = _search_api_actions.action_exit_arxiv_search_mode
     action_arxiv_search = _search_api_actions.action_arxiv_search
@@ -152,7 +139,13 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
     _collect_all_tags = _llm_actions._collect_all_tags
     action_toggle_watch_filter = _library_actions.action_toggle_watch_filter
     action_manage_watch_list = _library_actions.action_manage_watch_list
+    action_schedule_review = _library_actions.action_schedule_review
+    action_mark_reviewed = _library_actions.action_mark_reviewed
+    action_clear_review = _library_actions.action_clear_review
+    action_show_due_reviews = _library_actions.action_show_due_reviews
     action_mark_visible_read = _library_actions.action_mark_visible_read
+    action_quick_triage = _triage_actions.action_quick_triage
+    action_compare_papers = _comparison_actions.action_compare_papers
     action_goto_bookmark = _search_api_actions.action_goto_bookmark
     action_add_bookmark = _search_api_actions.action_add_bookmark
     action_remove_bookmark = _search_api_actions.action_remove_bookmark
@@ -171,6 +164,7 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
     action_export_metadata = _external_io_actions.action_export_metadata
     action_import_metadata = _external_io_actions.action_import_metadata
     action_show_similar = _ui_actions.action_show_similar
+    action_serendipity = _ui_actions.action_serendipity
     _fetch_s2_recommendations_async = _ui_actions._fetch_s2_recommendations_async
     action_citation_graph = _ui_actions.action_citation_graph
     _fetch_citation_graph = _ui_actions._fetch_citation_graph
@@ -196,6 +190,10 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
     action_chat_with_paper = _llm_actions.action_chat_with_paper
     _start_chat_with_paper = _llm_actions._start_chat_with_paper
     _open_chat_screen = _llm_actions._open_chat_screen
+    action_remix_papers = _llm_actions.action_remix_papers
+    _start_paper_remix_flow = _llm_actions._start_paper_remix_flow
+    _generate_paper_remix_async = _llm_actions._generate_paper_remix_async
+    action_debate_paper = _action_debate_paper
     action_score_relevance = _llm_actions.action_score_relevance
     _start_score_relevance_flow = _llm_actions._start_score_relevance_flow
     _on_interests_saved_then_score = _llm_actions._on_interests_saved_then_score
@@ -219,6 +217,8 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
     action_download_pdf = _external_io_actions.action_download_pdf
     action_preview_pdf = _external_io_actions.action_preview_pdf
     _preview_pdf_async = _external_io_actions._preview_pdf_async
+    action_preview_figure = _external_io_actions.action_preview_figure
+    _preview_figure_async = _external_io_actions._preview_figure_async
     _fetch_paper_content_async = _browser_content.fetch_browser_paper_content
     _do_start_downloads = _external_io_actions._do_start_downloads
     _format_paper_for_clipboard = _external_io_actions._format_paper_for_clipboard
@@ -316,6 +316,8 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
         self._match_scores: dict[str, float] = {}
         self._highlight_terms = {"title": [], "author": [], "abstract": []}
         self._pending_mark_action: str | None = None
+        self._detail_line_cursor = 1
+        self._detail_line_cursor_paper_id: str | None = None
 
     def _init_task_and_io_state(self) -> None:
         """Initialize background task tracking and download queues."""
@@ -325,6 +327,7 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
         self._downloading: set[str] = set()
         self._download_results: dict[str, bool] = {}
         self._download_total = 0
+        self._tts_task = self._tts_process = self._tts_paper_id = None
 
     def _init_llm_and_api_state(self) -> None:
         """Initialize LLM summary state, API browsing state, and shared clients."""
@@ -357,6 +360,7 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
         self._hf_loading = False
         self._hf_db_path = self._cache_db_path
         self._hf_api_error = False
+        _deadline_ui.init_conference_deadline_state(self)
         self._version_updates: dict[str, tuple[int, int]] = {}
         self._version_checking = False
         self._version_progress: tuple[int, int] | None = None
@@ -366,8 +370,10 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
         self._relevance_db_path = self._cache_db_path
         self._auto_tag_active = False
         self._auto_tag_progress: tuple[int, int] | None = None
+        self._paper_remix_active = False
         self._cancel_batch_requested = False
         self._detail_focus_active = False
+        self._read_event_timestamps: deque[float] = deque(maxlen=240)
         self._tfidf_index: TfidfIndex | None = None
         self._tfidf_corpus_key: str | None = None
         self._tfidf_build_task: asyncio.Task[None] | None = None
@@ -460,10 +466,11 @@ class ArxivBrowser(DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
                 severity="warning",
                 timeout=8,
             )
-        self._s2_active = self._config.s2_enabled
-        self._hf_active = self._config.hf_enabled
+        self._s2_active, self._hf_active = self._config.s2_enabled, self._config.hf_enabled
         if self._hf_active:
             self._track_dataset_task(self._fetch_hf_daily())
+        self._load_triage_predictions_for_current_dataset(refresh=False)
+        _deadline_ui.start_conference_deadlines_if_enabled(self)
         if self._is_history_mode() and len(self._history_files) > 1:
             self.call_after_refresh(self._refresh_date_navigator)
 

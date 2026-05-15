@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
 
@@ -23,6 +24,29 @@ SIMILARITY_RECENCY_DAYS = 365
 SIMILARITY_WEIGHT_CATEGORY = 0.30
 SIMILARITY_WEIGHT_AUTHOR = 0.20
 SIMILARITY_WEIGHT_TEXT = 0.50
+SERENDIPITY_TOP_N = 5
+
+
+@dataclass(frozen=True, slots=True)
+class SerendipityRequest:
+    """Inputs for ranking intentionally novel papers within a visible pool."""
+
+    papers: list[Paper]
+    metadata: dict[str, PaperMetadata] | None = None
+    tfidf_index: TfidfIndex | None = None
+    current_paper_id: str | None = None
+    top_n: int = SERENDIPITY_TOP_N
+
+
+@dataclass(frozen=True, slots=True)
+class SerendipityCandidate:
+    """One ranked paper surfaced by the serendipity engine."""
+
+    paper: Paper
+    score: float
+    reason: str
+    nearest_starred_anchor_id: str | None = None
+
 
 # ============================================================================
 # TF-IDF Index
@@ -397,7 +421,219 @@ def find_similar_papers(
     return scored[:top_n]
 
 
+def _metadata_for(
+    metadata: dict[str, PaperMetadata] | None,
+    arxiv_id: str,
+) -> PaperMetadata | None:
+    return metadata.get(arxiv_id) if metadata else None
+
+
+def _is_starred(metadata: dict[str, PaperMetadata] | None, paper: Paper) -> bool:
+    entry = _metadata_for(metadata, paper.arxiv_id)
+    return bool(entry and entry.starred)
+
+
+def _is_read(metadata: dict[str, PaperMetadata] | None, paper: Paper) -> bool:
+    entry = _metadata_for(metadata, paper.arxiv_id)
+    return bool(entry and entry.is_read)
+
+
+def _paper_categories(paper: Paper) -> set[str]:
+    return set(paper.categories.split())
+
+
+def _category_novelty_score(categories: set[str], reference_categories: set[str]) -> float:
+    if not categories:
+        return 0.0
+    if not reference_categories:
+        return 1.0
+    familiar = len(categories & reference_categories) / len(categories)
+    return max(0.0, 1.0 - familiar)
+
+
+def _serendipity_candidate_pool(
+    papers: list[Paper],
+    metadata: dict[str, PaperMetadata] | None,
+    current_paper_id: str | None,
+) -> list[Paper]:
+    candidates = list(papers)
+    if current_paper_id and len(candidates) > 1:
+        without_current = [paper for paper in candidates if paper.arxiv_id != current_paper_id]
+        if without_current:
+            candidates = without_current
+
+    unread_unstarred = [
+        paper
+        for paper in candidates
+        if not _is_read(metadata, paper) and not _is_starred(metadata, paper)
+    ]
+    if unread_unstarred:
+        return unread_unstarred
+
+    unstarred = [paper for paper in candidates if not _is_starred(metadata, paper)]
+    if unstarred:
+        return unstarred
+
+    return candidates
+
+
+def _nearest_starred_distance(
+    candidate: Paper,
+    starred_papers: list[Paper],
+    tfidf_index: TfidfIndex | None,
+) -> tuple[float, str | None]:
+    nearest_id: str | None = None
+    max_similarity = -1.0
+    for anchor in starred_papers:
+        if anchor.arxiv_id == candidate.arxiv_id:
+            continue
+        if tfidf_index is not None:
+            similarity = tfidf_index.cosine_similarity(candidate.arxiv_id, anchor.arxiv_id)
+        else:
+            similarity = compute_paper_similarity(candidate, anchor)
+        if similarity > max_similarity:
+            max_similarity = similarity
+            nearest_id = anchor.arxiv_id
+    return max(0.0, 1.0 - max(0.0, max_similarity)), nearest_id
+
+
+def _serendipity_reason_with_starred(
+    paper: Paper,
+    starred_categories: set[str],
+    nearest_id: str | None,
+) -> str:
+    new_categories = sorted(_paper_categories(paper) - starred_categories)
+    if new_categories:
+        return f"Far from starred papers; new category {new_categories[0]}."
+    if nearest_id:
+        return f"Far from starred papers; nearest starred anchor {nearest_id}."
+    return "Far from starred papers."
+
+
+def _rank_with_starred_anchors(
+    candidates: list[Paper],
+    starred_papers: list[Paper],
+    starred_categories: set[str],
+    tfidf_index: TfidfIndex | None,
+) -> list[SerendipityCandidate]:
+    ranked: list[SerendipityCandidate] = []
+    for paper in candidates:
+        distance, nearest_id = _nearest_starred_distance(paper, starred_papers, tfidf_index)
+        novelty = _category_novelty_score(_paper_categories(paper), starred_categories)
+        score = (0.75 * distance) + (0.25 * novelty)
+        ranked.append(
+            SerendipityCandidate(
+                paper=paper,
+                score=max(0.0, min(1.0, score)),
+                reason=_serendipity_reason_with_starred(paper, starred_categories, nearest_id),
+                nearest_starred_anchor_id=nearest_id,
+            )
+        )
+    return ranked
+
+
+def _least_common_category_score(
+    categories: set[str],
+    category_counts: dict[str, int],
+    total_papers: int,
+) -> float:
+    if not categories or total_papers <= 0:
+        return 0.0
+    least_common = min(category_counts.get(category, 0) for category in categories)
+    return max(0.0, 1.0 - (least_common / total_papers))
+
+
+def _serendipity_reason_without_starred(
+    paper: Paper,
+    represented_categories: set[str],
+    category_counts: dict[str, int],
+) -> str:
+    categories = _paper_categories(paper)
+    new_categories = sorted(categories - represented_categories)
+    if new_categories:
+        return f"New category {new_categories[0]}."
+    if categories:
+        rarest = min(categories, key=lambda category: (category_counts.get(category, 0), category))
+        return f"Rare category {rarest}."
+    return "Least familiar paper in visible set."
+
+
+def _rank_without_starred_anchors(
+    candidates: list[Paper],
+    all_papers: list[Paper],
+    metadata: dict[str, PaperMetadata] | None,
+) -> list[SerendipityCandidate]:
+    represented_categories: set[str] = set()
+    category_counts: dict[str, int] = {}
+    for paper in all_papers:
+        categories = _paper_categories(paper)
+        for category in categories:
+            category_counts[category] = category_counts.get(category, 0) + 1
+        if _is_read(metadata, paper) or _is_starred(metadata, paper):
+            represented_categories.update(categories)
+
+    ranked: list[SerendipityCandidate] = []
+    total_papers = len(all_papers)
+    for paper in candidates:
+        categories = _paper_categories(paper)
+        novelty = _category_novelty_score(categories, represented_categories)
+        rarity = _least_common_category_score(categories, category_counts, total_papers)
+        score = (0.70 * novelty) + (0.30 * rarity)
+        ranked.append(
+            SerendipityCandidate(
+                paper=paper,
+                score=max(0.0, min(1.0, score)),
+                reason=_serendipity_reason_without_starred(
+                    paper,
+                    represented_categories,
+                    category_counts,
+                ),
+            )
+        )
+    return ranked
+
+
+def find_serendipitous_papers(request: SerendipityRequest) -> list[SerendipityCandidate]:
+    """Rank visible papers by intentional novelty.
+
+    Candidate selection is tiered before scoring: unread and unstarred papers
+    are preferred, then all unstarred papers, then all visible papers.  Within
+    the active tier, papers far from starred anchors score highest.  When there
+    are no starred anchors, category novelty and rarity provide the fallback
+    signal.
+    """
+    if request.top_n <= 0 or not request.papers:
+        return []
+
+    candidates = _serendipity_candidate_pool(
+        request.papers,
+        request.metadata,
+        request.current_paper_id,
+    )
+    if not candidates:
+        return []
+
+    metadata = request.metadata
+    starred_papers = [paper for paper in request.papers if _is_starred(metadata, paper)]
+    if starred_papers:
+        starred_categories: set[str] = set()
+        for paper in starred_papers:
+            starred_categories.update(_paper_categories(paper))
+        ranked = _rank_with_starred_anchors(
+            candidates,
+            starred_papers,
+            starred_categories,
+            request.tfidf_index,
+        )
+    else:
+        ranked = _rank_without_starred_anchors(candidates, request.papers, metadata)
+
+    ranked.sort(key=lambda candidate: (-candidate.score, candidate.paper.arxiv_id))
+    return ranked[: request.top_n]
+
+
 __all__ = [
+    "SERENDIPITY_TOP_N",
     "SIMILARITY_READ_PENALTY",
     "SIMILARITY_RECENCY_DAYS",
     "SIMILARITY_RECENCY_WEIGHT",
@@ -407,8 +643,11 @@ __all__ = [
     "SIMILARITY_WEIGHT_AUTHOR",
     "SIMILARITY_WEIGHT_CATEGORY",
     "SIMILARITY_WEIGHT_TEXT",
+    "SerendipityCandidate",
+    "SerendipityRequest",
     "TfidfIndex",
     "build_similarity_corpus_key",
     "compute_paper_similarity",
+    "find_serendipitous_papers",
     "find_similar_papers",
 ]

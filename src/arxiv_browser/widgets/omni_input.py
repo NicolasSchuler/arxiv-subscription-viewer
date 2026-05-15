@@ -4,6 +4,7 @@ Modes:
 - No prefix  → local paper search (default)
 - ``>``      → command palette (inline results)
 - ``@``      → arXiv API search (triggers on Enter)
+- ``~``      → semantic local paper search
 """
 
 from __future__ import annotations
@@ -34,11 +35,13 @@ logger = logging.getLogger(__name__)
 
 PREFIX_COMMAND = ">"
 PREFIX_API = "@"
+PREFIX_SEMANTIC = "~"
 
-OMNI_PLACEHOLDER = "Search papers · > commands · @ arXiv API"
-OMNI_HINT_LOCAL = 'Examples: cat:cs.AI  author:hinton  unread  "large language"'
+OMNI_PLACEHOLDER = "Search papers · ~ semantic · > commands · @ arXiv API"
+OMNI_HINT_LOCAL = 'Examples: cat:cs.AI  author:hinton  ~ hallucination in RAG  "large language"'
 OMNI_HINT_COMMAND = "↑↓ move · Enter run · Esc close"
 OMNI_HINT_API = "Enter to search arXiv · Esc cancel"
+OMNI_HINT_SEMANTIC = "Semantic search over titles + abstracts · Esc cancel"
 
 FUZZY_THRESHOLD = 40
 
@@ -49,7 +52,7 @@ CommandMatch = tuple[float, int, int, PaletteCommand]
 class OmniMode:
     """Parsed state of the OmniInput prefix and query."""
 
-    mode: str  # "local", "command", "api"
+    mode: str  # "local", "command", "api", "semantic"
     query: str  # text after prefix (stripped)
 
 
@@ -59,6 +62,8 @@ def parse_omni_mode(raw: str) -> OmniMode:
         return OmniMode(mode="command", query=raw[1:].lstrip())
     if raw.startswith(PREFIX_API):
         return OmniMode(mode="api", query=raw[1:].lstrip())
+    if raw.startswith(PREFIX_SEMANTIC):
+        return OmniMode(mode="semantic", query=raw[1:].lstrip())
     return OmniMode(mode="local", query=raw)
 
 
@@ -342,6 +347,9 @@ class OmniInput(Vertical):
             self._populate_command_results(parsed.query)
         elif parsed.mode == "api":
             self._hide_results()
+        elif parsed.mode == "semantic":
+            self._hide_results()
+            self.post_message(self.LocalSearch(f"{PREFIX_SEMANTIC} {parsed.query}".rstrip()))
         else:
             self._hide_results()
             self.post_message(self.LocalSearch(parsed.query))
@@ -354,6 +362,10 @@ class OmniInput(Vertical):
             self.post_message(self.ApiSearch(parsed.query.strip()))
         elif parsed.mode == "command":
             self._select_highlighted_command()
+        elif parsed.mode == "semantic":
+            self.post_message(
+                self.LocalSearchSubmitted(f"{PREFIX_SEMANTIC} {parsed.query}".rstrip())
+            )
         elif parsed.mode == "local":
             self.post_message(self.LocalSearchSubmitted(parsed.query))
 
@@ -396,6 +408,8 @@ def _hint_for_mode(mode: str) -> str:
         return _mode_safe_hint(OMNI_HINT_COMMAND)
     if mode == "api":
         return _mode_safe_hint(OMNI_HINT_API)
+    if mode == "semantic":
+        return _mode_safe_hint(OMNI_HINT_SEMANTIC)
     return _mode_safe_hint(OMNI_HINT_LOCAL)
 
 
@@ -403,6 +417,7 @@ __all__ = [
     "OMNI_HINT_API",
     "OMNI_HINT_COMMAND",
     "OMNI_HINT_LOCAL",
+    "OMNI_HINT_SEMANTIC",
     "OMNI_PLACEHOLDER",
     "OmniInput",
     "OmniMode",
