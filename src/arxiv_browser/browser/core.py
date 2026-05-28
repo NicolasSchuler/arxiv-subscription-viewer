@@ -114,11 +114,15 @@ class ArxivBrowser(AudioActionMixin, DetailPaneMixin, BrowseMixin, DiscoveryMixi
     action_toggle_s2 = _ui_actions.action_toggle_s2
     action_fetch_s2 = _ui_actions.action_fetch_s2
     _fetch_s2_paper_async = _ui_actions._fetch_s2_paper_async
+    _fetch_s2_paper_worker = _ui_actions._fetch_s2_paper_worker
     action_toggle_hf = _ui_actions.action_toggle_hf
     _fetch_hf_daily = _ui_actions._fetch_hf_daily
+    _queue_hf_daily = _ui_actions._queue_hf_daily
+    _fetch_hf_daily_worker = _ui_actions._fetch_hf_daily_worker
     _fetch_hf_daily_async = _ui_actions._fetch_hf_daily_async
     action_refresh_conference_deadlines = _deadline_ui.action_refresh_conference_deadlines
     action_check_versions = _ui_actions.action_check_versions
+    _check_versions_worker = _ui_actions._check_versions_worker
     action_exit_arxiv_search_mode = _search_api_actions.action_exit_arxiv_search_mode
     action_arxiv_search = _search_api_actions.action_arxiv_search
     _format_arxiv_search_label = _search_api_actions._format_arxiv_search_label
@@ -126,6 +130,7 @@ class ArxivBrowser(AudioActionMixin, DetailPaneMixin, BrowseMixin, DiscoveryMixi
     _fetch_arxiv_api_page = _search_api_actions._fetch_arxiv_api_page
     _apply_arxiv_search_results = _search_api_actions._apply_arxiv_search_results
     _run_arxiv_search = _search_api_actions._run_arxiv_search
+    _run_arxiv_search_worker = _search_api_actions._run_arxiv_search_worker
     action_cursor_down = _library_actions.action_cursor_down
     action_cursor_up = _library_actions.action_cursor_up
     action_toggle_select = _library_actions.action_toggle_select
@@ -168,6 +173,8 @@ class ArxivBrowser(AudioActionMixin, DetailPaneMixin, BrowseMixin, DiscoveryMixi
     _fetch_s2_recommendations_async = _ui_actions._fetch_s2_recommendations_async
     action_citation_graph = _ui_actions.action_citation_graph
     _fetch_citation_graph = _ui_actions._fetch_citation_graph
+    _show_citation_graph_worker = _ui_actions._show_citation_graph_worker
+    _build_tfidf_index_worker = _ui_actions._build_tfidf_index_worker
     action_cycle_theme = _ui_actions.action_cycle_theme
     action_toggle_sections = _ui_actions.action_toggle_sections
     action_show_help = _ui_actions.action_show_help
@@ -376,8 +383,10 @@ class ArxivBrowser(AudioActionMixin, DetailPaneMixin, BrowseMixin, DiscoveryMixi
         self._read_event_timestamps: deque[float] = deque(maxlen=240)
         self._tfidf_index: TfidfIndex | None = None
         self._tfidf_corpus_key: str | None = None
-        self._tfidf_build_task: asyncio.Task[None] | None = None
+        self._tfidf_build_task: Any = None
         self._pending_similarity_paper_id: str | None = None
+        self._semantic_search_worker: Any = None
+        self._semantic_search_token = 0
 
     def _configure_ascii_mode(self, ascii_icons: bool) -> None:
         """Apply ASCII/Unicode rendering mode across the UI."""
@@ -394,7 +403,7 @@ class ArxivBrowser(AudioActionMixin, DetailPaneMixin, BrowseMixin, DiscoveryMixi
         self._ui_refresh = UiRefreshCoordinator(
             refresh_list_view=self._refresh_list_view,
             update_list_header=self._update_list_header,
-            update_status_bar=self._update_status_bar,
+            update_status_bar=self._safe_update_status_bar,
             update_filter_pills=self._update_filter_pills,
             refresh_detail_pane=self._refresh_detail_pane,
             refresh_current_list_item=self._refresh_current_list_item,
@@ -468,7 +477,7 @@ class ArxivBrowser(AudioActionMixin, DetailPaneMixin, BrowseMixin, DiscoveryMixi
             )
         self._s2_active, self._hf_active = self._config.s2_enabled, self._config.hf_enabled
         if self._hf_active:
-            self._track_dataset_task(self._fetch_hf_daily())
+            self.call_after_refresh(self._queue_hf_daily)
         self._load_triage_predictions_for_current_dataset(refresh=False)
         _deadline_ui.start_conference_deadlines_if_enabled(self)
         if self._is_history_mode() and len(self._history_files) > 1:
@@ -591,6 +600,7 @@ class ArxivBrowser(AudioActionMixin, DetailPaneMixin, BrowseMixin, DiscoveryMixi
         self._cancel_dataset_tasks()
         await self._cancel_background_tasks()
         self._tfidf_build_task = None
+        await self._cancel_textual_workers()
         await self._close_http_client()
         self._reset_ui_refs()
 
@@ -615,6 +625,71 @@ class ArxivBrowser(AudioActionMixin, DetailPaneMixin, BrowseMixin, DiscoveryMixi
                 logger.debug("Background task did not cancel before shutdown: %r", task)
         if hasattr(self, "_background_tasks"):
             self._background_tasks.clear()
+
+    def _safe_update_status_bar(self) -> None:
+        try:
+            self._update_status_bar()
+        except Exception:
+            logger.debug("Status bar refresh failed", exc_info=True)
+
+    async def _cancel_textual_workers(self) -> None:
+        workers = getattr(self, "workers", None)
+        if workers is None:
+            return
+        try:
+            workers.cancel_node(self)
+            await workers.wait_for_complete()
+        except Exception:
+            logger.debug("Failed while waiting for Textual workers during shutdown", exc_info=True)
+
+    def _cancel_worker_group(self, group: str) -> None:
+        workers = getattr(self, "workers", None)
+        if workers is None:
+            return
+        try:
+            workers.cancel_group(self, group)
+        except Exception:
+            logger.debug("Failed to cancel worker group %s", group, exc_info=True)
+
+    @staticmethod
+    def _is_background_work_running(work_item: Any) -> bool:
+        if work_item is None:
+            return False
+        if isinstance(work_item, asyncio.Task):
+            return not work_item.done()
+        is_running = getattr(work_item, "is_running", None)
+        if isinstance(is_running, bool):
+            return is_running
+        is_finished = getattr(work_item, "is_finished", None)
+        if isinstance(is_finished, bool):
+            return not is_finished
+        done = getattr(work_item, "done", None)
+        if callable(done):
+            return not bool(done())
+        return False
+
+    def _start_dataset_worker_compat(
+        self,
+        worker_method: Callable[..., Any],
+        coro_factory: Callable[[], Coroutine[Any, Any, None]],
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        if hasattr(self, "_thread_id"):
+            return worker_method(*args, **kwargs)
+        return self._track_dataset_task(coro_factory())
+
+    def _set_paper_list_loading(self, loading: bool) -> None:
+        try:
+            self._get_paper_list_widget().loading = loading
+        except (AttributeError, NoMatches):
+            return
+
+    def _set_details_loading(self, loading: bool) -> None:
+        try:
+            self._get_paper_details_widget().loading = loading
+        except (AttributeError, NoMatches):
+            return
 
     async def _close_http_client(self) -> None:
         client = self._http_client
@@ -725,7 +800,7 @@ class ArxivBrowser(AudioActionMixin, DetailPaneMixin, BrowseMixin, DiscoveryMixi
             coordinator = UiRefreshCoordinator(
                 refresh_list_view=self._refresh_list_view,
                 update_list_header=self._update_list_header,
-                update_status_bar=self._update_status_bar,
+                update_status_bar=self._safe_update_status_bar,
                 update_filter_pills=self._update_filter_pills,
                 refresh_detail_pane=self._refresh_detail_pane,
                 refresh_current_list_item=self._refresh_current_list_item,
@@ -875,7 +950,7 @@ class ArxivBrowser(AudioActionMixin, DetailPaneMixin, BrowseMixin, DiscoveryMixi
         from arxiv_browser.models import ArxivSearchRequest
 
         request = ArxivSearchRequest(query=event.query, field="all", category="")
-        self._track_task(self._run_arxiv_search(request, start=0))
+        self._run_arxiv_search_worker(request, start=0)
 
     @on(OmniInput.CommandSelected)
     def on_omni_command_selected(self, event: OmniInput.CommandSelected) -> None:

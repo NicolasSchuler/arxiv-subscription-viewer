@@ -847,9 +847,13 @@ class TestBrowserHelperCoverage:
 
     def test_chrome_subtitle_header_and_save_config_paths(self, make_paper) -> None:
         app, paper1, _paper2, _theme_runtime = self._build_chrome_state_app(make_paper)
+        app._get_current_index = MagicMock(return_value=0)
+        with patch("arxiv_browser._ascii.is_ascii_mode", return_value=True):
+            assert app._format_details_header_text() == " Paper Details - 1/1 - scan"
+            assert "Search - graph search - page 3" in app._build_subtitle_text()
+        app._get_current_index = MagicMock(return_value=None)
         with patch("arxiv_browser._ascii.is_ascii_mode", return_value=True):
             assert app._format_details_header_text() == " Paper Details - scan"
-            assert "Search - graph search - page 3" in app._build_subtitle_text()
         app._in_arxiv_api_mode = False
         app._get_active_query = MagicMock(return_value="graph")
         with patch("arxiv_browser._ascii.is_ascii_mode", return_value=True):

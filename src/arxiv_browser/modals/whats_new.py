@@ -40,6 +40,7 @@ class WhatsNewScreen(ModalBase[None]):
 
     #whats-new-dialog {
         width: 70;
+        max-width: 90%;
         max-height: 80%;
         background: $th-background;
         border: tall $th-accent;

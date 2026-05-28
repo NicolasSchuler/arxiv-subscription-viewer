@@ -313,22 +313,21 @@ class TestHfAppState:
         app = ArxivBrowser([paper], restore_session=False)
 
         with patch_save_config(return_value=True):
-            async with app.run_test() as pilot:
-                track_calls = 0
+            async with app.run_test():
+                await app.workers.wait_for_complete()
+                app._hf_loading = False
 
-                def fake_track_task(coro):
-                    nonlocal track_calls
-                    track_calls += 1
-                    coro.close()
-                    return MagicMock()
+                async def fake_fetch() -> None:
+                    await asyncio.sleep(0)
 
-                app._fetch_hf_daily_async = AsyncMock(return_value=None)
-                app._track_task = fake_track_task
-                await asyncio.gather(app._fetch_hf_daily(), app._fetch_hf_daily())
-                await pilot.pause(0)
+                with patch(
+                    "arxiv_browser.actions.ui_actions._fetch_hf_daily_async",
+                    new=AsyncMock(side_effect=fake_fetch),
+                ) as fetch_mock:
+                    await asyncio.gather(app._fetch_hf_daily(), app._fetch_hf_daily())
+                    await app.workers.wait_for_complete()
 
-                assert track_calls == 1
-                assert app._fetch_hf_daily_async.call_count == 1
+                assert fetch_mock.call_count == 1
 
 
 class TestBadgeCoalescing:

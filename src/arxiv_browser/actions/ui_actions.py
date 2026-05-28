@@ -13,6 +13,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import httpx
+from textual import work
 from textual.css.query import NoMatches
 
 from arxiv_browser.action_messages import (
@@ -137,18 +138,31 @@ async def action_fetch_s2(app: "ArxivBrowser") -> None:
         app.notify("S2 data already loaded", title="S2")
         return
     app._s2_loading.add(aid)
+    app._set_details_loading(True)
     app._update_status_bar()
     app._get_ui_refresh_coordinator().refresh_detail_pane()  # Show loading indicator immediately
     try:
-        app._track_dataset_task(app._fetch_s2_paper_async(aid))
+        app._start_dataset_worker_compat(
+            app._fetch_s2_paper_worker,
+            lambda: app._fetch_s2_paper_async(aid),
+            aid,
+        )
     except _RECOVERABLE_ACTION_ERRORS as exc:
         app._s2_loading.discard(aid)
+        app._set_details_loading(False)
         _log_action_failure(f"S2 fetch scheduling for {aid}", exc)
         raise
     except Exception as exc:
         app._s2_loading.discard(aid)
+        app._set_details_loading(False)
         _log_action_failure(f"S2 fetch scheduling for {aid}", exc, unexpected=True)
         raise
+
+
+@work(exclusive=True, group="s2-paper", exit_on_error=False)
+async def _fetch_s2_paper_worker(app: "ArxivBrowser", arxiv_id: str) -> None:
+    """Worker wrapper for the current-paper Semantic Scholar fetch."""
+    await _fetch_s2_paper_async(app, arxiv_id)
 
 
 async def _fetch_s2_paper_async(app: "ArxivBrowser", arxiv_id: str) -> None:
@@ -242,7 +256,10 @@ def _finish_s2_fetch(app: "ArxivBrowser", arxiv_id: str, task_epoch: int) -> Non
     if not app._is_current_dataset_epoch(task_epoch):
         return
     app._s2_loading.discard(arxiv_id)
+    if not app._s2_loading:
+        app._set_details_loading(False)
     app._update_status_bar()
+    app._get_ui_refresh_coordinator().refresh_detail_pane()
 
 
 async def action_toggle_hf(app: "ArxivBrowser") -> None:
@@ -276,14 +293,23 @@ async def action_toggle_hf(app: "ArxivBrowser") -> None:
     app._mark_badges_dirty("hf", immediate=True)
 
 
-async def _fetch_hf_daily(app: "ArxivBrowser") -> None:
-    """Fetch HF daily papers list and update caches."""
-    if app._hf_loading:
-        return
-    app._hf_loading = True
-    app._update_status_bar()
+def _safe_update_status_bar(app: "ArxivBrowser") -> None:
     try:
-        app._track_dataset_task(app._fetch_hf_daily_async())
+        app._update_status_bar()
+    except Exception:
+        logger.debug("Status bar refresh failed during async scheduling", exc_info=True)
+
+
+def _queue_hf_daily(app: "ArxivBrowser"):
+    """Start the HF daily worker if one is not already active."""
+    if app._hf_loading:
+        return None
+    app._hf_loading = True
+    _safe_update_status_bar(app)
+    try:
+        return app._start_dataset_worker_compat(
+            app._fetch_hf_daily_worker, app._fetch_hf_daily_async
+        )
     except _RECOVERABLE_ACTION_ERRORS as exc:
         app._hf_loading = False
         app._hf_api_error = True
@@ -303,6 +329,17 @@ async def _fetch_hf_daily(app: "ArxivBrowser") -> None:
         app._update_status_bar()
         _log_action_failure("HF fetch scheduling", exc, unexpected=True)
         raise
+
+
+async def _fetch_hf_daily(app: "ArxivBrowser") -> None:
+    """Fetch HF daily papers list and update caches."""
+    _queue_hf_daily(app)
+
+
+@work(exclusive=True, group="hf-daily", exit_on_error=False)
+async def _fetch_hf_daily_worker(app: "ArxivBrowser") -> None:
+    """Worker wrapper for HF daily enrichment."""
+    await _fetch_hf_daily_async(app)
 
 
 async def _fetch_hf_daily_async(app: "ArxivBrowser") -> None:
@@ -444,7 +481,17 @@ async def action_check_versions(app: "ArxivBrowser") -> None:
         f"Checking {len(starred_ids)} starred papers...",
         title="Versions",
     )
-    app._track_dataset_task(app._check_versions_async(starred_ids))
+    app._start_dataset_worker_compat(
+        app._check_versions_worker,
+        lambda: app._check_versions_async(starred_ids),
+        starred_ids,
+    )
+
+
+@work(exclusive=True, group="version-check", exit_on_error=False)
+async def _check_versions_worker(app: "ArxivBrowser", arxiv_ids: set[str]) -> None:
+    """Worker wrapper for arXiv version checks."""
+    await app._check_versions_async(arxiv_ids)
 
 
 def action_show_similar(app: "ArxivBrowser") -> None:
@@ -493,11 +540,16 @@ def action_serendipity(app: "ArxivBrowser") -> None:
     if tfidf_index is None or tfidf_corpus_key != corpus_key:
         app._pending_serendipity = True
         build_task = getattr(app, "_tfidf_build_task", None)
-        if build_task is not None and not build_task.done():
+        if app._is_background_work_running(build_task):
             app.notify("Similarity indexing in progress...", title="Surprise Me")
             return
         app.notify("Indexing papers for serendipity...", title="Surprise Me")
-        app._tfidf_build_task = app._track_dataset_task(app._build_tfidf_index_async(corpus_key))
+        app._set_paper_list_loading(True)
+        app._tfidf_build_task = app._start_dataset_worker_compat(
+            app._build_tfidf_index_worker,
+            lambda: app._build_tfidf_index_async(corpus_key),
+            corpus_key,
+        )
         return
 
     app._pending_serendipity = False
@@ -652,13 +704,18 @@ def action_citation_graph(app: "ArxivBrowser") -> None:
     s2_data = app._s2_cache.get(paper.arxiv_id)
     paper_id = s2_data.s2_paper_id if s2_data else f"ARXIV:{paper.arxiv_id}"
     app.notify("Fetching citation graph...", title="Citations")
-    app._track_dataset_task(
-        app._show_citation_graph(
+    app._start_dataset_worker_compat(
+        app._show_citation_graph_worker,
+        lambda: app._show_citation_graph(
             paper_id,
             paper.title,
             root_arxiv_id=paper.arxiv_id,
             root_s2_data=s2_data,
-        )
+        ),
+        paper_id,
+        paper.title,
+        root_arxiv_id=paper.arxiv_id,
+        root_s2_data=s2_data,
     )
 
 
@@ -748,6 +805,37 @@ async def _fetch_citation_graph(
             cites_ok,
         )
     return refs, cites
+
+
+@work(exclusive=True, group="tfidf-index", exit_on_error=False)
+async def _build_tfidf_index_worker(app: "ArxivBrowser", corpus_key: str) -> None:
+    """Worker wrapper for similarity index builds."""
+    try:
+        await app._build_tfidf_index_async(corpus_key)
+    finally:
+        app._set_paper_list_loading(False)
+
+
+@work(exclusive=True, group="citation-graph", exit_on_error=False)
+async def _show_citation_graph_worker(
+    app: "ArxivBrowser",
+    paper_id: str,
+    title: str,
+    *,
+    root_arxiv_id: str = "",
+    root_s2_data: SemanticScholarPaper | None = None,
+) -> None:
+    """Worker wrapper for loading the citation graph modal."""
+    app._set_details_loading(True)
+    try:
+        await app._show_citation_graph(
+            paper_id,
+            title,
+            root_arxiv_id=root_arxiv_id,
+            root_s2_data=root_s2_data,
+        )
+    finally:
+        app._set_details_loading(False)
 
 
 def action_cycle_theme(app: "ArxivBrowser") -> None:

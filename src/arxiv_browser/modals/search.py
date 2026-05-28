@@ -53,6 +53,7 @@ class ArxivSearchModal(ModalBase[ArxivSearchRequest | None]):
 
     #arxiv-search-dialog {
         width: 70;
+        max-width: 90%;
         height: auto;
         background: $th-background;
         border: tall $th-accent;
@@ -208,6 +209,7 @@ class CommandPaletteModal(ModalBase[str]):
 
     CommandPaletteModal > Vertical {
         width: 70;
+        max-width: 90%;
         max-height: 28;
         background: $th-panel;
         border: thick $th-accent;

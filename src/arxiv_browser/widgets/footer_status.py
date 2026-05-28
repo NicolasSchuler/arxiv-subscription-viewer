@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
+
+from rich.text import Span, Text
 
 from arxiv_browser.query import escape_rich_text
 from arxiv_browser.themes import DEFAULT_THEME
@@ -557,45 +558,35 @@ def _render_compact_status(parts: list[str], max_width: int) -> str:
 
 
 def _truncate_rich_text(text: str, max_width: int | None) -> str:
-    """Truncate rendered Rich markup by visible width when constrained.
-
-    Walks the string preserving Rich ``[tag]`` sequences (which contribute
-    zero visible width) so that formatting is retained in the truncated
-    output.  Escaped brackets (``\\[``) are correctly counted as visible
-    characters.
-    """
+    """Truncate rendered Rich markup by cell width when constrained."""
     if max_width is None or max_width <= 0:
         return text
-    if _rich_visible_width(text) <= max_width:
+
+    rich_text = Text.from_markup(text)
+    if rich_text.cell_len <= max_width:
         return text
-    target = max(0, max_width - 3)
-    result: list[str] = []
-    visible_count = 0
-    i = 0
-    n = len(text)
-    while i < n and visible_count < target:
-        chunk, next_i, visible_delta = _next_rich_text_chunk(text, i)
-        result.append(chunk)
-        visible_count += visible_delta
-        i = next_i
-    return "".join(result) + "..."
+
+    truncated = rich_text.copy()
+    truncated.truncate(max(0, max_width - 3), overflow="crop")
+    _append_truncation_ellipsis(truncated, rich_text)
+    return truncated.markup
 
 
-def _rich_visible_width(text: str) -> int:
-    """Return visible width after ignoring Rich tags."""
-    escaped_brackets = re.sub(r"\\\[", "X", text)
-    return len(re.sub(r"\[[^\]]*]", "", escaped_brackets))
+def _append_truncation_ellipsis(truncated: Text, source: Text) -> None:
+    """Append ASCII ellipsis and extend active spans over it."""
+    end = len(truncated.plain)
+    ellipsis_end = end + 3
+    truncated.append("...")
+    if end == 0:
+        truncated.spans.extend(
+            Span(0, ellipsis_end, span.style) for span in source.spans if span.start == 0
+        )
+        return
 
-
-def _next_rich_text_chunk(text: str, index: int) -> tuple[str, int, int]:
-    """Return the next Rich-aware chunk, next index, and visible width delta."""
-    if text[index] == "\\" and index + 1 < len(text) and text[index + 1] == "[":
-        return text[index : index + 2], index + 2, 1
-    if text[index] == "[":
-        end = text.find("]", index)
-        if end != -1:
-            return text[index : end + 1], end + 1, 0
-    return text[index], index + 1, 1
+    truncated.spans[:] = [
+        Span(span.start, ellipsis_end, span.style) if span.start < end <= span.end else span
+        for span in truncated.spans
+    ]
 
 
 __all__ = [

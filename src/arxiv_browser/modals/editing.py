@@ -78,6 +78,7 @@ class PaperEditModal(ModalBase["PaperEditResult | None"]):
 
     #edit-dialog {
         width: 70;
+        max-width: 90%;
         height: 70%;
         min-height: 20;
         background: $th-background;

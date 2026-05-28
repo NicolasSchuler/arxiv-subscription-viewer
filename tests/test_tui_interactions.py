@@ -623,28 +623,51 @@ class TestRichTextTruncation:
 
         assert _truncate_rich_text("short", 10) == "short"
 
+    def test_plain_truncation_uses_ascii_ellipsis(self):
+        from rich.text import Text
+
+        from arxiv_browser.widgets.chrome import _truncate_rich_text
+
+        result = _truncate_rich_text("Hello world", 8)
+        parsed = Text.from_markup(result)
+        assert result == "Hello..."
+        assert parsed.cell_len == 8
+
     def test_truncation_preserves_rich_tags(self):
+        from rich.text import Text
+
         from arxiv_browser.widgets.chrome import _truncate_rich_text
 
         text = "[bold]Hello world long text here[/bold]"
         result = _truncate_rich_text(text, 12)
-        assert result.endswith("...")
+        parsed = Text.from_markup(result)
+        assert result.endswith("[/bold]")
         assert "[bold]" in result
+        assert parsed.plain.endswith("...")
+        assert parsed.cell_len == 12
+        assert parsed.spans
 
     def test_truncation_with_escaped_brackets(self):
-        """Escaped brackets (\\[) count as 1 visible char, not as Rich tags."""
+        """Escaped brackets (\\[) count as 1 visible cell, not as Rich tags."""
+        from rich.text import Text
+
         from arxiv_browser.widgets.chrome import _truncate_rich_text
 
-        # Rich renders \[ as literal [  →  "ABC [tag]XYZ" = 12 visible chars
         text = r"ABC \[tag]XYZ"
         result = _truncate_rich_text(text, 9)
-        assert result.endswith("...")
-        # Visible content before "..." should be ≤ 6 chars (9 - 3 for "...")
-        import re
+        parsed = Text.from_markup(result)
+        assert parsed.plain == "ABC [t..."
+        assert parsed.cell_len == 9
 
-        stripped = re.sub(r"\\\[", "X", result.removesuffix("..."))
-        stripped = re.sub(r"\[[^\]]*]", "", stripped)
-        assert len(stripped) <= 6
+    def test_truncation_counts_double_width_cells(self):
+        from rich.text import Text
+
+        from arxiv_browser.widgets.chrome import _truncate_rich_text
+
+        result = _truncate_rich_text("你好abc", 5)
+        parsed = Text.from_markup(result)
+        assert parsed.plain == "你..."
+        assert parsed.cell_len == 5
 
     def test_no_truncation_for_none_width(self):
         from arxiv_browser.widgets.chrome import _truncate_rich_text

@@ -53,6 +53,7 @@ class ConfirmModal(ModalBase[bool]):
 
     #confirm-dialog {
         width: 52;
+        max-width: 90%;
         height: auto;
         background: $th-background;
         border: tall $th-orange;
@@ -142,6 +143,7 @@ class ExportMenuModal(ModalBase[str]):
 
     #export-dialog {
         width: 52;
+        max-width: 90%;
         height: auto;
         background: $th-background;
         border: tall $th-orange;
@@ -269,6 +271,7 @@ class MetadataSnapshotPickerModal(ModalBase[Path | None]):
 
     #metadata-snapshot-dialog {
         width: 52;
+        max-width: 90%;
         height: 24;
         background: $th-background;
         border: tall $th-orange;
@@ -405,6 +408,7 @@ class SectionToggleModal(ModalBase[list[str] | None]):
 
     #section-toggle-dialog {
         width: 52;
+        max-width: 90%;
         height: auto;
         background: $th-background;
         border: tall $th-accent;

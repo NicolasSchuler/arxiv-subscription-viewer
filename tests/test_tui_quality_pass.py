@@ -398,6 +398,7 @@ async def test_citation_graph_drill_down_success_and_back(make_paper):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
             await modal.action_drill_down()
+            await modal.workers.wait_for_complete()
             assert len(modal._stack) == 1
             assert modal._current_paper_id == "s2:child"
             assert len(modal._current_refs) == 1
@@ -435,6 +436,7 @@ async def test_citation_graph_drill_down_failure_restores_state(make_paper):
             await _open_modal(app, pilot, modal)
             app.notify = MagicMock()
             await modal.action_drill_down()
+            await modal.workers.wait_for_complete()
             assert modal._stack == []
             assert modal._current_paper_id == root.arxiv_id
             app.notify.assert_called_once()
@@ -528,6 +530,8 @@ async def test_citation_graph_genealogy_modes_go_open_and_cache(make_paper):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
             await modal.action_show_ancestors()
+            await modal.workers.wait_for_complete()
+            await modal.workers.wait_for_complete()
             assert modal._view_mode == "ancestors"
             assert modal.query_one("#genealogy-tree").display is True
             assert modal.query_one("#citation-graph-panels").display is False
@@ -540,12 +544,15 @@ async def test_citation_graph_genealogy_modes_go_open_and_cache(make_paper):
             modal.dismiss.assert_called_once_with("2401.00002")
 
             await modal.action_show_descendants()
+            await modal.workers.wait_for_complete()
             remote_node = modal.query_one("#genealogy-tree").root.children[0].data
             modal._get_highlighted_genealogy_node = MagicMock(return_value=remote_node)
             await modal.action_drill_down()
+            await modal.workers.wait_for_complete()
             browser_open.assert_called_once_with("https://www.semanticscholar.org/paper/s2:remote")
 
             await modal.action_show_descendants()
+            await modal.workers.wait_for_complete()
             assert calls.count("s2:root") == 2  # one ancestors build, one descendants build
 
 
@@ -571,6 +578,8 @@ async def test_citation_graph_genealogy_fetch_error_restores_graph(make_paper):
             await _open_modal(app, pilot, modal)
             app.notify = MagicMock()
             await modal.action_show_ancestors()
+            await modal.workers.wait_for_complete()
+            await modal.workers.wait_for_complete()
             assert modal._view_mode == "graph"
             app.notify.assert_called_once()
             assert "Could not load citation genealogy data." in app.notify.call_args[0][0]
@@ -615,6 +624,7 @@ async def test_citation_graph_genealogy_tree_controls_and_labels(make_paper):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
             await modal.action_show_descendants()
+            await modal.workers.wait_for_complete()
 
             modal.action_switch_panel()
             modal.action_cursor_down()
@@ -638,6 +648,7 @@ async def test_citation_graph_genealogy_tree_controls_and_labels(make_paper):
 
             modal._loading = True
             await modal.action_show_ancestors()
+            await modal.workers.wait_for_complete()
             modal._loading = False
             assert modal._view_mode == "graph"
 

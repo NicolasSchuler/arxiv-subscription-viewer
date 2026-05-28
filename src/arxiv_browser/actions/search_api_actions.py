@@ -7,6 +7,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 import httpx
+from textual import work
 from textual.css.query import NoMatches
 
 from arxiv_browser.action_messages import build_actionable_error, build_actionable_warning
@@ -33,7 +34,12 @@ def action_toggle_search(app: "ArxivBrowser") -> None:
             'Search mode: try cat:cs.AI, author:hinton, review-due, or "large language".',
             title="Search",
         )
-    app._update_footer()
+    _safe_update_footer(app)
+
+
+def _safe_update_footer(app: "ArxivBrowser") -> None:
+    if not hasattr(app, "_thread_id"):
+        app._update_footer()
 
 
 def action_cancel_search(app: "ArxivBrowser") -> None:
@@ -46,7 +52,7 @@ def action_cancel_search(app: "ArxivBrowser") -> None:
             app._get_paper_list_widget().focus()
         except NoMatches:
             pass
-        app._update_footer()
+        _safe_update_footer(app)
     if app._in_arxiv_api_mode:
         app.action_exit_arxiv_search_mode()
 
@@ -68,6 +74,7 @@ def action_exit_arxiv_search_mode(app: "ArxivBrowser") -> None:
     app._arxiv_search_state = None
     app._arxiv_api_fetch_inflight = False
     app._arxiv_api_loading = False
+    app._set_paper_list_loading(False)
     app._restore_local_browse_snapshot()
     app._local_browse_snapshot = None
     app._update_header()
@@ -191,7 +198,17 @@ def _apply_arxiv_search_results(
         pass
 
 
-async def _run_arxiv_search(app: "ArxivBrowser", request: ArxivSearchRequest, start: int) -> None:
+@work(exclusive=True, group="arxiv-api", exit_on_error=False)
+async def _run_arxiv_search_worker(
+    app: "ArxivBrowser", request: ArxivSearchRequest, start: int
+) -> None:
+    """Worker wrapper for arXiv API searches."""
+    await _run_arxiv_search(app, request, start, replace=True)
+
+
+async def _run_arxiv_search(
+    app: "ArxivBrowser", request: ArxivSearchRequest, start: int, *, replace: bool = False
+) -> None:
     """Execute an arXiv API search and display one results page.
 
     Uses an incrementing ``_arxiv_api_request_token`` to discard stale
@@ -207,9 +224,11 @@ async def _run_arxiv_search(app: "ArxivBrowser", request: ArxivSearchRequest, st
         request: Encapsulates the query, field, and category to search.
         start: Zero-based result offset for pagination (0 for the first page).
     """
-    if app._arxiv_api_fetch_inflight:
+    if app._arxiv_api_fetch_inflight and not replace:
         app.notify("Search already in progress", title="arXiv Search")
         return
+    if replace:
+        app._arxiv_api_fetch_inflight = False
 
     start, max_results = _normalize_arxiv_search_page(app, start)
     request_token = _begin_arxiv_search_request(app)
@@ -251,6 +270,7 @@ def _begin_arxiv_search_request(app: "ArxivBrowser") -> int:
     request_token = app._arxiv_api_request_token
     app._arxiv_api_fetch_inflight = True
     app._arxiv_api_loading = True
+    app._set_paper_list_loading(True)
     app._update_status_bar()
     return request_token
 
@@ -261,6 +281,7 @@ def _finish_arxiv_search_request(app: "ArxivBrowser", request_token: int) -> Non
         return
     app._arxiv_api_fetch_inflight = False
     app._arxiv_api_loading = False
+    app._set_paper_list_loading(False)
     app._update_status_bar()
 
 

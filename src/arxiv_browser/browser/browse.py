@@ -12,6 +12,7 @@ from datetime import date
 from typing import Any, cast
 
 import httpx
+from textual import work
 from textual.css.query import NoMatches
 from textual.widgets.option_list import Option, OptionDoesNotExist
 
@@ -216,17 +217,13 @@ class BrowseMixin:
 
     def _cancel_semantic_search_task(self) -> None:
         """Cancel any in-flight semantic search for the current dataset."""
-        task = getattr(self, "_semantic_search_task", None)
-        try:
-            current_task = asyncio.current_task()
-        except RuntimeError:
-            current_task = None
-        if task is not None and task is current_task:
-            self._semantic_search_task = None
-            return
-        if task is not None and not task.done():
-            task.cancel()
-        self._semantic_search_task = None
+        worker = getattr(self, "_semantic_search_worker", None)
+        if worker is not None and self._is_background_work_running(worker):
+            worker.cancel()
+        self._cancel_worker_group("semantic-search")
+        self._semantic_search_worker = None
+        self._semantic_search_token = getattr(self, "_semantic_search_token", 0) + 1
+        self._set_paper_list_loading(False)
 
     def _apply_semantic_filter(self, query: str) -> None:
         """Apply explicit semantic search mode without blocking the UI thread."""
@@ -258,8 +255,33 @@ class BrowseMixin:
 
         epoch = self._capture_dataset_epoch()
         papers_snapshot = list(self.all_papers)
-        self._semantic_search_task = self._track_dataset_task(
-            self._run_semantic_search_async(query, semantic_text, epoch, papers_snapshot)
+        self._semantic_search_token = getattr(self, "_semantic_search_token", 0) + 1
+        token = self._semantic_search_token
+        self._set_paper_list_loading(True)
+        self._semantic_search_worker = self._start_dataset_worker_compat(
+            self._run_semantic_search_worker,
+            lambda: self._run_semantic_search_async(
+                query, semantic_text, epoch, papers_snapshot, token
+            ),
+            query,
+            semantic_text,
+            epoch,
+            papers_snapshot,
+            token,
+        )
+
+    @work(exclusive=True, group="semantic-search", exit_on_error=False)
+    async def _run_semantic_search_worker(
+        self,
+        original_query: str,
+        semantic_text: str,
+        epoch: int,
+        papers_snapshot: list[Paper],
+        token: int,
+    ) -> None:
+        """Worker wrapper for semantic search."""
+        await self._run_semantic_search_async(
+            original_query, semantic_text, epoch, papers_snapshot, token
         )
 
     async def _run_semantic_search_async(
@@ -268,6 +290,7 @@ class BrowseMixin:
         semantic_text: str,
         epoch: int,
         papers_snapshot: list[Paper],
+        token: int,
     ) -> None:
         """Run semantic search in the background and publish only fresh results."""
         try:
@@ -300,9 +323,9 @@ class BrowseMixin:
                 self._fallback_from_semantic_search(semantic_text, exc)
             return
         finally:
-            current_task = asyncio.current_task()
-            if getattr(self, "_semantic_search_task", None) is current_task:
-                self._semantic_search_task = None
+            if getattr(self, "_semantic_search_token", None) == token:
+                self._semantic_search_worker = None
+                self._set_paper_list_loading(False)
 
         if not self._semantic_search_is_current(original_query, epoch):
             return
@@ -842,7 +865,7 @@ class BrowseMixin:
         self._tfidf_corpus_key = None
         self._pending_similarity_paper_id = None
         self._cancel_semantic_search_task()
-        if self._tfidf_build_task is not None and not self._tfidf_build_task.done():
+        if self._is_background_work_running(self._tfidf_build_task):
             self._tfidf_build_task.cancel()
         self._tfidf_build_task = None
 
@@ -887,7 +910,7 @@ class BrowseMixin:
         self._apply_filter(query)
         # Re-fetch HF data if active (since HF data is date-specific)
         if self._hf_active:
-            self._track_dataset_task(self._fetch_hf_daily())
+            self._queue_hf_daily()
         # Update subtitle
         self._update_subtitle()
         # Update date navigator

@@ -8,6 +8,7 @@ from datetime import date, timedelta
 from unittest.mock import MagicMock
 
 import pytest
+from rich.text import Text
 from textual.css.query import NoMatches
 
 from arxiv_browser.huggingface import HuggingFacePaper
@@ -582,7 +583,9 @@ def test_chrome_helper_branches_cover_status_and_date_navigation_helpers():
     assert all("Checking versions" not in part for part in full_parts)
 
     assert chrome_mod._render_compact_status(["a", "b", "c"], 6).endswith("...")
-    assert chrome_mod._truncate_rich_text("[bold]hello[/] world", 5).endswith("...")
+    _truncated = chrome_mod._truncate_rich_text("[bold]hello[/] world", 5)
+    assert Text.from_markup(_truncated).plain.endswith("...")
+    assert Text.from_markup(_truncated).cell_len <= 5
     assert chrome_mod._truncate_rich_text("[bold]hello[/]", None) == "[bold]hello[/]"
 
     assert chrome_mod.build_selection_footer_bindings(3)[0] == ("o", "open(3)")
@@ -805,7 +808,6 @@ def test_status_bar_helper_edge_branches():
     assert "2 updated" in "".join(
         footer_status._full_version_segments(replace(state, version_update_count=2))
     )
-    assert footer_status._next_rich_text_chunk(r"\[", 0) == (r"\[", 2, 1)
 
 
 # ============================================================================

@@ -51,6 +51,10 @@ quality-budget:
 test-quick:
     uv run pytest -x -q
 
+# Run theme contrast checks
+contrast:
+    uv run pytest tests/test_theme_contrast.py -q --no-cov
+
 # Run performance benchmarks
 bench:
     uv run pytest tests/test_benchmarks.py -v -m slow -s

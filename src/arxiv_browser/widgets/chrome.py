@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -53,6 +53,35 @@ DATE_NAV_LABEL_MODES: tuple[str, ...] = (
     DATE_NAV_LABEL_MONTH_DAY,
     DATE_NAV_LABEL_NUMERIC,
 )
+MAX_FOOTER_HINTS = 9
+
+_FOOTER_ACTION_BY_KEY: dict[str, str] = {
+    "/": "toggle_search",
+    "A": "arxiv_search",
+    "Esc": "cancel_search",
+    "o": "open_url",
+    "P": "open_pdf",
+    "F": "preview_pdf",
+    "I": "preview_figure",
+    "c": "copy_selected",
+    "s": "cycle_sort",
+    "Tab": "toggle_focus_pane",
+    "Space": "toggle_select",
+    "u": "clear_selection",
+    "r": "toggle_read",
+    "x": "toggle_star",
+    "n": "edit_notes",
+    "t": "edit_tags",
+    "w": "toggle_watch_filter",
+    "W": "manage_watch_list",
+    "Ctrl+b": "add_bookmark",
+    "E": "export_menu",
+    "d": "download_pdf",
+    "v": "toggle_detail_mode",
+    "Ctrl+d": "toggle_sections",
+    "?": "show_help",
+    "Ctrl+p": "command_palette",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,10 +91,18 @@ class FilterPillSpec:
     item_id: str
     text: str
     class_name: str
+    tooltip: str
 
 
 class ContextFooter(Static):
-    """Context-sensitive footer showing relevant keybindings."""
+    """Context-sensitive footer showing relevant keybindings.
+
+    Hints render as a single ``Static`` renderable. Clickable hints use
+    Textual ``@click`` action-link markup so a click invokes the bound app
+    action directly, without mounting per-hint child widgets (re-mounting on
+    every state-driven footer refresh churns the message queue and can stall
+    the UI).
+    """
 
     DEFAULT_CSS = """
     ContextFooter {
@@ -81,22 +118,48 @@ class ContextFooter(Static):
     def render_bindings(self, bindings: list[tuple[str, str]], mode_badge: str = "") -> None:
         """Update the footer with a list of (key, label) binding hints."""
         colors = theme_colors_for(self)
-        accent = colors["accent"]
-        muted = colors["muted"]
-        parts = []
-        if mode_badge:
-            parts.append(mode_badge)
-        for key, label in bindings:
-            safe_key = escape_rich_text(key)
-            if key and label:
-                parts.append(f"[bold {accent}]{safe_key}[/] [{muted}]{label}[/]")
-            elif label:
-                # Label-only entry (e.g., progress indicator)
-                parts.append(f"[italic {muted}]{label}[/]")
-            else:
-                # Key-only entry (e.g., "type to filter" hint)
-                parts.append(f"[italic {muted}]{safe_key}[/]")
+        parts = _build_footer_parts(bindings[:MAX_FOOTER_HINTS], mode_badge, colors)
         self.update("  ".join(parts))
+
+
+def _chrome_label(content: str, classes: str, item_id: str, tooltip: str) -> Label:
+    label = Label(content, classes=classes, id=item_id)
+    label.tooltip = tooltip
+    return label
+
+
+def _build_footer_parts(
+    bindings: list[tuple[str, str]],
+    mode_badge: str,
+    colors: Mapping[str, str],
+) -> list[str]:
+    """Build footer markup parts: an optional mode badge then hint strings."""
+    accent = colors["accent"]
+    muted = colors["muted"]
+    parts: list[str] = []
+    if mode_badge:
+        parts.append(mode_badge)
+    parts.extend(_format_footer_hint(key, label, accent, muted) for key, label in bindings)
+    return parts
+
+
+def _format_footer_hint(key: str, label: str, accent: str, muted: str) -> str:
+    """Format one footer hint, wrapping clickable hints in @click action links."""
+    safe_key = escape_rich_text(key)
+    if key and label:
+        hint = f"[bold {accent}]{safe_key}[/] [{muted}]{label}[/]"
+    elif label:
+        hint = f"[italic {muted}]{label}[/]"
+    else:
+        hint = f"[italic {muted}]{safe_key}[/]"
+    action = _footer_action(key)
+    if action is not None:
+        return f"[@click=app.{action}]{hint}[/]"
+    return hint
+
+
+def _footer_action(key: str) -> str | None:
+    return _FOOTER_ACTION_BY_KEY.get(key)
 
 
 def _compute_window_bounds(total: int, current_index: int, window_size: int) -> tuple[int, int]:
@@ -246,8 +309,8 @@ class DateNavigator(Horizontal):
     def compose(self) -> ComposeResult:
         """Compose the static label and navigation arrow widgets."""
         yield Label("History", classes="chrome-label", id="date-nav-label")
-        yield Label("<", classes="date-nav-arrow", id="date-nav-prev")
-        yield Label(">", classes="date-nav-arrow", id="date-nav-next")
+        yield _chrome_label("<", "date-nav-arrow", "date-nav-prev", "Older (])")
+        yield _chrome_label(">", "date-nav-arrow", "date-nav-next", "Newer ([)")
 
     def _get_paper_count(self, index: int) -> int:
         """Return the cached paper count for the history file at index."""
@@ -278,14 +341,15 @@ class DateNavigator(Horizontal):
         start: int,
         end: int,
         label_mode: str,
-    ) -> list[tuple[str, str, bool]]:
+    ) -> list[tuple[str, str, bool, str]]:
         """Build desired date labels for the visible window."""
-        desired: list[tuple[str, str, bool]] = []
+        desired: list[tuple[str, str, bool, str]] = []
         for i in range(start, end):
             d, _ = history_files[i]
             count = self._get_paper_count(i) if label_mode == DATE_NAV_LABEL_WITH_COUNTS else None
             label_text = _format_date_nav_label(d, count=count, mode=label_mode)
-            desired.append((f"date-nav-{i}", label_text, i == current_index))
+            tooltip = f"Jump to {d.isoformat()}"
+            desired.append((f"date-nav-{i}", label_text, i == current_index, tooltip))
         return desired
 
     def _get_existing_date_items(self) -> list[Label]:
@@ -299,11 +363,11 @@ class DateNavigator(Horizontal):
     def _can_patch_in_place(
         self,
         existing_items: list[Label],
-        desired: list[tuple[str, str, bool]],
+        desired: list[tuple[str, str, bool, str]],
     ) -> bool:
         """Return True when existing and desired IDs match in order."""
         existing_order = [child.id for child in existing_items if child.id is not None]
-        desired_order = [item_id for item_id, _, _ in desired]
+        desired_order = [item_id for item_id, _, _, _ in desired]
         return existing_order == desired_order
 
     @staticmethod
@@ -314,15 +378,16 @@ class DateNavigator(Horizontal):
     def _patch_items_in_place(
         self,
         existing_items: list[Label],
-        desired: list[tuple[str, str, bool]],
+        desired: list[tuple[str, str, bool, str]],
     ) -> None:
         """Patch existing date labels without unmount/remount churn."""
         existing_by_id = {child.id: child for child in existing_items}
-        for item_id, label_text, is_current in desired:
+        for item_id, label_text, is_current, tooltip in desired:
             child = existing_by_id.get(item_id)
             if child is None:
                 continue
             child.update(self._render_label_text(label_text, is_current))
+            child.tooltip = tooltip
             if is_current:
                 child.add_class("current")
             else:
@@ -331,18 +396,21 @@ class DateNavigator(Horizontal):
     async def _rebuild_items(
         self,
         existing_items: list[Label],
-        desired: list[tuple[str, str, bool]],
+        desired: list[tuple[str, str, bool, str]],
     ) -> None:
         """Rebuild date labels when the visible window changed."""
         for child in existing_items:
             await child.remove()
         next_arrow = self.query_one("#date-nav-next")
-        for item_id, label_text, is_current in desired:
+        for item_id, label_text, is_current, tooltip in desired:
             classes = "date-nav-item current" if is_current else "date-nav-item"
-            self.mount(
-                Label(self._render_label_text(label_text, is_current), classes=classes, id=item_id),
-                before=next_arrow,
+            label = _chrome_label(
+                self._render_label_text(label_text, is_current),
+                classes,
+                item_id,
+                tooltip,
             )
+            self.mount(label, before=next_arrow)
 
     async def update_dates(
         self,
@@ -476,10 +544,20 @@ class BookmarkTabBar(Horizontal):
         if self._bookmarks:
             for i, bookmark in enumerate(self._bookmarks[:9]):  # Max 9 bookmarks
                 classes = "bookmark-tab active" if i == self._active_index else "bookmark-tab"
-                yield Label(f"{i + 1}: {bookmark.name}", classes=classes, id=f"bookmark-{i}")
-            yield Label("Ctrl+b save", classes="bookmark-add", id="bookmark-add")
+                yield _chrome_label(
+                    f"{i + 1}: {bookmark.name}",
+                    classes,
+                    f"bookmark-{i}",
+                    f"Saved search {i + 1} - press {i + 1} to load",
+                )
+            yield _chrome_label("Ctrl+b save", "bookmark-add", "bookmark-add", "Save search")
         elif self._active_search:
-            yield Label("Ctrl+b save current search", classes="bookmark-hint", id="bookmark-hint")
+            yield _chrome_label(
+                "Ctrl+b save current search",
+                "bookmark-hint",
+                "bookmark-hint",
+                "Save current search",
+            )
 
     async def update_bookmarks(
         self,
@@ -501,11 +579,23 @@ class BookmarkTabBar(Horizontal):
         if bookmarks:
             for i, bookmark in enumerate(bookmarks[:9]):
                 classes = "bookmark-tab active" if i == self._active_index else "bookmark-tab"
-                self.mount(Label(f"{i + 1}: {bookmark.name}", classes=classes, id=f"bookmark-{i}"))
-            self.mount(Label("Ctrl+b save", classes="bookmark-add", id="bookmark-add"))
+                self.mount(
+                    _chrome_label(
+                        f"{i + 1}: {bookmark.name}",
+                        classes,
+                        f"bookmark-{i}",
+                        f"Saved search {i + 1} - press {i + 1} to load",
+                    )
+                )
+            self.mount(_chrome_label("Ctrl+b save", "bookmark-add", "bookmark-add", "Save search"))
         else:
             self.mount(
-                Label("Ctrl+b save current search", classes="bookmark-hint", id="bookmark-hint")
+                _chrome_label(
+                    "Ctrl+b save current search",
+                    "bookmark-hint",
+                    "bookmark-hint",
+                    "Save current search",
+                )
             )
 
 
@@ -602,6 +692,7 @@ class FilterPillBar(Horizontal):
             item_id=f"pill-{index}",
             text=f"{label_text} {get_filter_pill_remove_glyph()}",
             class_name="filter-pill",
+            tooltip="Click to remove filter",
         )
 
     def _existing_filter_pills(self) -> list[Label]:
@@ -630,7 +721,7 @@ class FilterPillBar(Horizontal):
         for child in existing_items:
             await child.remove()
         for pill in desired:
-            self.mount(Label(pill.text, classes=pill.class_name, id=pill.item_id))
+            self.mount(_chrome_label(pill.text, pill.class_name, pill.item_id, pill.tooltip))
 
     def on_click(self, event: object) -> None:
         """Handle click on a filter pill to remove it."""
@@ -661,6 +752,7 @@ def _update_filter_pill(label: Label, pill: FilterPillSpec) -> None:
     label.remove_class("filter-pill-watch")
     label.remove_class("filter-pill")
     label.add_class(pill.class_name)
+    label.tooltip = pill.tooltip
 
 
 def _watch_filter_pill_spec() -> FilterPillSpec:
@@ -668,6 +760,7 @@ def _watch_filter_pill_spec() -> FilterPillSpec:
         item_id="pill-watch",
         text=f"watched {get_filter_pill_remove_glyph()}",
         class_name="filter-pill-watch",
+        tooltip="Click to remove watch filter",
     )
 
 

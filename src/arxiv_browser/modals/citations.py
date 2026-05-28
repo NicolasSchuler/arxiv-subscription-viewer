@@ -9,7 +9,7 @@ from collections.abc import Callable
 from typing import Literal, cast
 
 import httpx
-from textual import on
+from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -673,11 +673,23 @@ class CitationGraphScreen(ModalBase[str | None]):
 
     async def action_show_ancestors(self) -> None:
         """Build or show the ancestor genealogy tree."""
-        await self._show_genealogy("ancestors")
+        self._show_genealogy_worker("ancestors")
 
     async def action_show_descendants(self) -> None:
         """Build or show the descendant genealogy tree."""
-        await self._show_genealogy("descendants")
+        self._show_genealogy_worker("descendants")
+
+    def _set_loading_state(self, loading: bool) -> None:
+        self._loading = loading
+        try:
+            self.query_one("#citation-graph-dialog").loading = loading
+        except Exception:
+            pass
+
+    @work(exclusive=True, group="citation-genealogy", exit_on_error=False)
+    async def _show_genealogy_worker(self, direction: GenealogyDirection) -> None:
+        """Worker wrapper for citation genealogy fetches."""
+        await self._show_genealogy(direction)
 
     async def _show_genealogy(self, direction: GenealogyDirection) -> None:
         """Build the requested genealogy view, respecting S2 cache/fetch bounds."""
@@ -686,7 +698,7 @@ class CitationGraphScreen(ModalBase[str | None]):
         self._set_view_mode(direction)
         cached = self._genealogy_cache.get(direction)
         if cached is None:
-            self._loading = True
+            self._set_loading_state(True)
             self._update_status()
             try:
                 cached = await build_genealogy_tree(
@@ -718,7 +730,7 @@ class CitationGraphScreen(ModalBase[str | None]):
                 self._set_view_mode("graph")
                 return
             finally:
-                self._loading = False
+                self._set_loading_state(False)
                 self._update_status()
         self._render_genealogy_tree(cached)
         self._get_genealogy_tree().focus()
@@ -783,7 +795,12 @@ class CitationGraphScreen(ModalBase[str | None]):
                 self._current_cites,
             )
         )
-        self._loading = True
+        self._drill_down_worker(entry)
+
+    @work(exclusive=True, group="citation-drill", exit_on_error=False)
+    async def _drill_down_worker(self, entry: CitationEntry) -> None:
+        """Worker wrapper for citation graph drill-down fetches."""
+        self._set_loading_state(True)
         self._update_status()
         try:
             refs, cites = await self._fetch_callback(entry.s2_paper_id)
@@ -810,7 +827,7 @@ class CitationGraphScreen(ModalBase[str | None]):
             # Undo the push
             self._stack.pop()
         finally:
-            self._loading = False
+            self._set_loading_state(False)
             self._update_status()
             self._get_active_list().focus()
 

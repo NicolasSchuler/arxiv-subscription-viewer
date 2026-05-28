@@ -41,7 +41,7 @@ All modals use one of three standard widths. Pick the smallest size that fits th
 | **Medium** | `70` (fixed cols) | keep existing | Form dialogs, editors, search, list management |
 | **Large** | `80%` | `85%` | Full content views, help, recommendations, citations |
 
-Large modals also keep `min-width: 60; min-height: 20;` for small-terminal safety.
+Small/Medium modals also cap at `max-width: 90%` for narrow-terminal safety. Large modals keep `min-width: 60; min-height: 20;` for small-terminal safety.
 
 **Current assignments:**
 
@@ -60,6 +60,7 @@ Large modals also keep `min-width: 60; min-height: 20;` for small-terminal safet
 ## 5. Footer Hierarchy Rules
 
 - Default browse footer is capped at 9 hints.
+- Footer hints are mouse-clickable: each hint with a bound action uses Textual `@click` action-link markup (single `Static`, no per-hint child widgets) so a click invokes the same app action as the key. Hints without a bound action (e.g. `[/] dates`) render as plain text.
 - Always include these core hints in order:
   - `/ search`, `Space select`, `o open`, `s sort`, `r read`, context slot, `E export`, `Ctrl+p commands`, `? help`.
 - The context slot is:

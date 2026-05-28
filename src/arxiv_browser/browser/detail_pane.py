@@ -294,7 +294,9 @@ class DetailPaneMixin(DetailAnnotationMixin):
         from arxiv_browser._ascii import is_ascii_mode
 
         sep = " - " if is_ascii_mode() else " \u00b7 "
-        return f" Paper Details{sep}{self._detail_mode}"
+        index = self._get_current_index()
+        position = f"{sep}{index + 1}/{len(self.filtered_papers)}" if index is not None else ""
+        return f" Paper Details{position}{sep}{self._detail_mode}"
 
     def _update_details_header(self) -> None:
         """Refresh the detail pane header text."""

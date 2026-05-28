@@ -61,6 +61,7 @@ class CollectionsModal(ModalBase[str | None]):
     /* ── shared dialog chrome ────────────────────────────── */
     #col-dialog {
         width: 70;
+        max-width: 90%;
         height: 70%;
         min-height: 20;
         background: $th-background;

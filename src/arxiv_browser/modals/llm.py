@@ -46,6 +46,7 @@ class SummaryModeModal(ModalBase[str]):
 
     #summary-mode-dialog {
         width: 52;
+        max-width: 90%;
         height: auto;
         background: $th-background;
         border: tall $th-purple;
@@ -142,6 +143,7 @@ class ResearchInterestsModal(ModalBase[str]):
 
     #interests-dialog {
         width: 70;
+        max-width: 90%;
         height: 60%;
         min-height: 15;
         background: $th-background;
