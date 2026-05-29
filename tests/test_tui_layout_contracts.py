@@ -198,7 +198,13 @@ async def test_semantic_omni_submit_hides_input_and_focuses_list(make_paper):
             assert app._applied_query == "~ transformer"
             assert scheduled
             assert omni.is_open is False
-            assert app.query_one("#paper-list", OptionList).has_focus
+
+            paper_list = app.query_one("#paper-list", OptionList)
+            for _ in range(20):
+                if paper_list.has_focus:
+                    break
+                await pilot.pause()
+            assert paper_list.has_focus
 
 
 @pytest.mark.asyncio
