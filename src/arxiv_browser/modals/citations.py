@@ -13,6 +13,7 @@ from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.widgets import Button, Label, ListItem, ListView, Static, Tree
 
 from arxiv_browser.action_messages import build_actionable_error
@@ -683,8 +684,8 @@ class CitationGraphScreen(ModalBase[str | None]):
         self._loading = loading
         try:
             self.query_one("#citation-graph-dialog").loading = loading
-        except Exception:
-            pass
+        except NoMatches:
+            return
 
     @work(exclusive=True, group="citation-genealogy", exit_on_error=False)
     async def _show_genealogy_worker(self, direction: GenealogyDirection) -> None:

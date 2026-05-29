@@ -66,8 +66,8 @@ class BrowseMixin:
 
         def _start_dataset_worker_compat(
             self,
-            worker: Callable[..., Any],
-            async_factory: Callable[[], Any],
+            _worker: Callable[..., Any],
+            _async_factory: Callable[[], Any],
             *args: Any,
             **kwargs: Any,
         ) -> Any: ...

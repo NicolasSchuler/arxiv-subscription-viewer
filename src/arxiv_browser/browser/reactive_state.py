@@ -98,72 +98,72 @@ class ReactiveStateMixin:
         if self._reactive_ui_ready():
             self._safe_update_status_bar()
 
-    def watch_selected_ids(self, old: set[str], new: set[str]) -> None:
+    def watch_selected_ids(self, _old: set[str], _new: set[str]) -> None:
         if self._reactive_ui_ready():
             self._update_header()
 
-    def watch__sort_index(self, old: int, new: int) -> None:
+    def watch__sort_index(self, _old: int, _new: int) -> None:
         if not self._reactive_ui_ready():
             return
         self._sort_papers()
         self._refresh_list_view()
         self._update_header()
 
-    def watch__watch_filter_active(self, old: bool, new: bool) -> None:
+    def watch__watch_filter_active(self, _old: bool, _new: bool) -> None:
         if self._reactive_ui_ready():
             self._apply_filter(self._get_live_query())
 
-    def watch__show_abstract_preview(self, old: bool, new: bool) -> None:
+    def watch__show_abstract_preview(self, _old: bool, _new: bool) -> None:
         if not self._reactive_ui_ready():
             return
         self._refresh_list_view()
         self._safe_update_status_bar()
 
-    def watch__detail_mode(self, old: str, new: str) -> None:
+    def watch__detail_mode(self, _old: str, _new: str) -> None:
         if not self._reactive_ui_ready():
             return
         self._update_details_header()
         self._refresh_detail_pane()
 
-    def watch__in_arxiv_api_mode(self, old: bool, new: bool) -> None:
+    def watch__in_arxiv_api_mode(self, _old: bool, _new: bool) -> None:
         if not self._reactive_ui_ready():
             return
         self._update_header()
         self._update_subtitle()
         self._update_filter_pills(self._get_active_query())
 
-    def watch__arxiv_api_loading(self, old: bool, new: bool) -> None:
+    def watch__arxiv_api_loading(self, _old: bool, _new: bool) -> None:
         self._refresh_reactive_status()
 
-    def watch__s2_active(self, old: bool, new: bool) -> None:
+    def watch__s2_active(self, _old: bool, _new: bool) -> None:
         if not self._reactive_ui_ready():
             return
         self._safe_update_status_bar()
         self._get_ui_refresh_coordinator().refresh_detail_pane()
         self._mark_badges_dirty("s2", immediate=True)
 
-    def watch__s2_loading(self, old: set[str], new: set[str]) -> None:
+    def watch__s2_loading(self, _old: set[str], _new: set[str]) -> None:
         if not self._reactive_ui_ready():
             return
         self._safe_update_status_bar()
         self._get_ui_refresh_coordinator().refresh_detail_pane()
 
-    def watch__hf_active(self, old: bool, new: bool) -> None:
+    def watch__hf_active(self, _old: bool, _new: bool) -> None:
         if not self._reactive_ui_ready():
             return
         self._safe_update_status_bar()
         self._get_ui_refresh_coordinator().refresh_detail_pane()
         self._mark_badges_dirty("hf", immediate=True)
 
-    def watch__hf_loading(self, old: bool, new: bool) -> None:
+    def watch__hf_loading(self, _old: bool, _new: bool) -> None:
         self._refresh_reactive_status()
 
-    def watch__version_checking(self, old: bool, new: bool) -> None:
+    def watch__version_checking(self, _old: bool, _new: bool) -> None:
         self._refresh_reactive_status()
 
     def watch__version_progress(
         self,
-        old: tuple[int, int] | None,
-        new: tuple[int, int] | None,
+        _old: tuple[int, int] | None,
+        _new: tuple[int, int] | None,
     ) -> None:
         self._refresh_reactive_status()
