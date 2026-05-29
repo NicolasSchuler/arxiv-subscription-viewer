@@ -53,6 +53,12 @@ Small/Medium modals also cap at `max-width: 90%` for narrow-terminal safety. Lar
   - Header: context and active dataset/date.
   - Content: list + details with selection/focus state.
   - Footer: immediate action hints and mode badges.
+
+### Responsive Pane Layout
+
+- The list/detail content area is responsive to terminal width via Textual horizontal breakpoints (`HORIZONTAL_BREAKPOINTS`).
+- At **80 cols and wider** the panes keep the side-by-side split (`#left-pane` / `#right-pane`).
+- **Below 80 cols** the screen gains the `-narrow` class and the panes stack vertically, list first, so neither pane is squeezed below its readable minimum.
 - Narrow-width behavior:
   - Prefer compact status tokens and shorter labels before removing high-value hints.
   - Keep `? help` visible in all contexts.

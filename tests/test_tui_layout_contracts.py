@@ -391,3 +391,22 @@ async def test_major_modal_footer_contracts(make_paper):
             app.push_screen(watch_modal)
             await pilot.pause(0.05)
             assert "Ctrl+S save" in str(watch_modal.query_one("#watch-help", Static).content)
+
+
+@pytest.mark.asyncio
+async def test_responsive_layout_stacks_panes_on_narrow_terminals(make_paper):
+    """Below the narrow breakpoint the panes stack vertically; wide keeps the split."""
+    app = ArxivBrowser([make_paper(arxiv_id="2401.00001")], restore_session=False)
+
+    with patch_save_config(return_value=True):
+        async with app.run_test(size=(70, 24)) as pilot:
+            await pilot.pause(0.1)
+            assert app.screen.has_class("-narrow")
+            assert not app.screen.has_class("-wide")
+            assert "vertical" in str(app.query_one("#main-container").styles.layout)
+
+            await pilot.resize_terminal(120, 40)
+            await pilot.pause(0.1)
+            assert app.screen.has_class("-wide")
+            assert not app.screen.has_class("-narrow")
+            assert "horizontal" in str(app.query_one("#main-container").styles.layout)

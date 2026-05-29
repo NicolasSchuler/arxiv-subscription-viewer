@@ -45,6 +45,19 @@ Header {
     border: tall $th-accent;
 }
 
+/* Narrow terminals (< 80 cols): stack panes vertically, list first. */
+Screen.-narrow #main-container {
+    layout: vertical;
+}
+
+Screen.-narrow #left-pane,
+Screen.-narrow #right-pane {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    height: 1fr;
+}
+
 #list-header {
     padding: 1 1;
     background: $th-panel;
@@ -127,6 +140,16 @@ VerticalScroll {
     color: $th-muted;
 }
 """
+
+# Horizontal breakpoints (terminal width in cells) used to toggle responsive
+# layout classes on the active screen. Below ``NARROW_BREAKPOINT`` cells the
+# list/detail panes stack vertically (list first); at or above it they keep the
+# side-by-side split.
+NARROW_BREAKPOINT = 80
+APP_HORIZONTAL_BREAKPOINTS: list[tuple[int, str]] = [
+    (0, "-narrow"),
+    (NARROW_BREAKPOINT, "-wide"),
+]
 
 # ---------------------------------------------------------------------------
 # Keybinding Tiers
@@ -252,4 +275,6 @@ APP_BINDINGS: list[BindingType] = [
 __all__ = [
     "APP_BINDINGS",
     "APP_CSS",
+    "APP_HORIZONTAL_BREAKPOINTS",
+    "NARROW_BREAKPOINT",
 ]
