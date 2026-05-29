@@ -179,7 +179,6 @@ class TestVersionCheckCoverage:
         assert app._version_checking is False
         assert app._version_progress is None
         app._mark_badges_dirty.assert_called_once_with("version")
-        app._update_status_bar.assert_called()
 
     @pytest.mark.asyncio
     async def test_check_versions_async_continues_when_one_batch_fails(self):
@@ -248,7 +247,6 @@ class TestVersionCheckCoverage:
 
         assert app._version_checking is False
         assert app._version_progress is None
-        app._update_status_bar.assert_called_once()
 
 
 class TestAutoTagCoverage:

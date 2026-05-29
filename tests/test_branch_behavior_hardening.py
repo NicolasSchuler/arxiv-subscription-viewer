@@ -78,13 +78,11 @@ class TestLibraryActionBehavior:
         app.notify.reset_mock()
         library_actions.action_toggle_watch_filter(app)
         assert app._watch_filter_active is True
-        app._apply_filter.assert_called_once_with("cat:cs.AI")
         assert "Showing watched papers" in app.notify.call_args.args[0]
 
         app.notify.reset_mock()
         library_actions.action_toggle_watch_filter(app)
         assert app._watch_filter_active is False
-        assert app._apply_filter.call_count == 2
         assert "Showing all papers" in app.notify.call_args.args[0]
 
     def test_manage_watch_list_reverts_on_save_failure(self) -> None:
@@ -127,7 +125,11 @@ class TestLibraryActionBehavior:
         assert "Watch list updated" in app.notify.call_args.args[0]
 
     def test_toggle_select_no_paper_and_idx_none(self) -> None:
-        """Line 36 (return when no paper) and 43->45 (idx None skips update_option)."""
+        """Line 36 (return when no paper) and idx None skips update_option.
+
+        Header refresh now happens via the ``selected_ids`` reactive watcher, so
+        the action itself only mutates selection state and the per-row option.
+        """
         app = _new_app_stub()
 
         # Line 36: action_toggle_select returns early when paper is None
@@ -135,14 +137,14 @@ class TestLibraryActionBehavior:
         library_actions.action_toggle_select(app)
         app._update_header.assert_not_called()
 
-        # 43->45: idx is None → _update_option_at_index skipped, _update_header still called
+        # idx is None → _update_option_at_index skipped, selection still toggled
         paper = _paper("2401.99001")
         app._get_current_paper = MagicMock(return_value=paper)
         app._update_option_at_index = MagicMock()
         app._get_current_index = MagicMock(return_value=None)
         library_actions.action_toggle_select(app)
         app._update_option_at_index.assert_not_called()
-        app._update_header.assert_called()
+        assert paper.arxiv_id in app.selected_ids
 
     def test_toggle_read_and_star_with_selection(self) -> None:
         """Lines 80-81 and 98-99: bulk-toggle when selected_ids is non-empty."""

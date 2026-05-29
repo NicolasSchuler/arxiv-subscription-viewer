@@ -53,6 +53,56 @@ from tests.support.patch_helpers import patch_save_config
 
 
 class TestAppHelperCoverage:
+    def test_reactive_watchers_refresh_expected_surfaces(self) -> None:
+        app = _new_app_stub()
+        app._reactive_ui_ready = MagicMock(return_value=True)
+        app._sort_papers = MagicMock()
+        app._apply_filter = MagicMock()
+        app._get_live_query = MagicMock(return_value="cat:cs.AI")
+        app._get_active_query = MagicMock(return_value="")
+        app._update_filter_pills = MagicMock()
+        app._update_details_header = MagicMock()
+
+        app.watch_selected_ids(set(), {"2401.00001"})
+        app._update_header.assert_called_once()
+
+        app.watch__sort_index(0, 1)
+        app._sort_papers.assert_called_once()
+        app._refresh_list_view.assert_called_once()
+        assert app._update_header.call_count == 2
+
+        app.watch__watch_filter_active(False, True)
+        app._apply_filter.assert_called_once_with("cat:cs.AI")
+
+        app.watch__show_abstract_preview(False, True)
+        assert app._refresh_list_view.call_count == 2
+        app._update_status_bar.assert_called_once()
+
+        app.watch__detail_mode("scan", "full")
+        app._refresh_detail_pane.assert_called_once()
+
+        app.watch__in_arxiv_api_mode(False, True)
+        app._update_subtitle.assert_called_once()
+        app._update_filter_pills.assert_called_once_with("")
+
+    def test_reactive_enrichment_watchers_refresh_status_and_badges(self) -> None:
+        app = _new_app_stub()
+        app._reactive_ui_ready = MagicMock(return_value=True)
+        coordinator = app._get_ui_refresh_coordinator.return_value
+
+        app.watch__arxiv_api_loading(False, True)
+        app.watch__hf_loading(False, True)
+        app.watch__version_checking(False, True)
+        app.watch__version_progress(None, (1, 2))
+        assert app._update_status_bar.call_count == 4
+
+        app.watch__s2_active(False, True)
+        app._mark_badges_dirty.assert_called_once_with("s2", immediate=True)
+        app.watch__s2_loading(set(), {"2401.00001"})
+        app.watch__hf_active(False, True)
+        app._mark_badges_dirty.assert_called_with("hf", immediate=True)
+        assert coordinator.refresh_detail_pane.call_count == 3
+
     def test_list_message_and_paper_content_branches(self) -> None:
         assert "No papers match your search" in build_list_empty_message(
             query="x",

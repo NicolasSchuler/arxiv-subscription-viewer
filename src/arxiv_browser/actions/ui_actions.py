@@ -89,18 +89,17 @@ def action_ctrl_e_dispatch(app: "ArxivBrowser") -> None:
 
 def action_toggle_s2(app: "ArxivBrowser") -> None:
     """Toggle Semantic Scholar enrichment and persist the setting."""
-    prev_state = app._s2_active
-    app._s2_active = not app._s2_active
-    app._config.s2_enabled = app._s2_active
+    next_state = not app._s2_active
+    app._config.s2_enabled = next_state
     if not save_config(app._config):
-        app._s2_active = prev_state
-        app._config.s2_enabled = prev_state
+        app._config.s2_enabled = app._s2_active
         app.notify(
             "Failed to save Semantic Scholar setting",
             title="S2",
             severity="error",
         )
         return
+    app._s2_active = next_state
     if app._s2_active:
         app.notify(
             build_actionable_success(
@@ -111,9 +110,6 @@ def action_toggle_s2(app: "ArxivBrowser") -> None:
         )
     else:
         app.notify("Semantic Scholar disabled", title="S2")
-    app._update_status_bar()
-    app._get_ui_refresh_coordinator().refresh_detail_pane()
-    app._mark_badges_dirty("s2", immediate=True)
 
 
 async def action_fetch_s2(app: "ArxivBrowser") -> None:
@@ -137,10 +133,8 @@ async def action_fetch_s2(app: "ArxivBrowser") -> None:
     if aid in app._s2_cache:
         app.notify("S2 data already loaded", title="S2")
         return
-    app._s2_loading.add(aid)
     app._set_details_loading(True)
-    app._update_status_bar()
-    app._get_ui_refresh_coordinator().refresh_detail_pane()  # Show loading indicator immediately
+    app._s2_loading = {*app._s2_loading, aid}
     try:
         app._start_dataset_worker_compat(
             app._fetch_s2_paper_worker,
@@ -148,13 +142,13 @@ async def action_fetch_s2(app: "ArxivBrowser") -> None:
             aid,
         )
     except _RECOVERABLE_ACTION_ERRORS as exc:
-        app._s2_loading.discard(aid)
         app._set_details_loading(False)
+        app._s2_loading = app._s2_loading - {aid}
         _log_action_failure(f"S2 fetch scheduling for {aid}", exc)
         raise
     except Exception as exc:
-        app._s2_loading.discard(aid)
         app._set_details_loading(False)
+        app._s2_loading = app._s2_loading - {aid}
         _log_action_failure(f"S2 fetch scheduling for {aid}", exc, unexpected=True)
         raise
 
@@ -255,27 +249,25 @@ def _handle_s2_fetch_exception(
 def _finish_s2_fetch(app: "ArxivBrowser", arxiv_id: str, task_epoch: int) -> None:
     if not app._is_current_dataset_epoch(task_epoch):
         return
-    app._s2_loading.discard(arxiv_id)
-    if not app._s2_loading:
+    next_loading = app._s2_loading - {arxiv_id}
+    if not next_loading:
         app._set_details_loading(False)
-    app._update_status_bar()
-    app._get_ui_refresh_coordinator().refresh_detail_pane()
+    app._s2_loading = next_loading
 
 
 async def action_toggle_hf(app: "ArxivBrowser") -> None:
     """Toggle HuggingFace trending on/off and persist the setting."""
-    prev_state = app._hf_active
-    app._hf_active = not app._hf_active
-    app._config.hf_enabled = app._hf_active
+    next_state = not app._hf_active
+    app._config.hf_enabled = next_state
     if not save_config(app._config):
-        app._hf_active = prev_state
-        app._config.hf_enabled = prev_state
+        app._config.hf_enabled = app._hf_active
         app.notify(
             "Failed to save HuggingFace setting",
             title="HF",
             severity="error",
         )
         return
+    app._hf_active = next_state
     if app._hf_active:
         app.notify(
             build_actionable_success(
@@ -288,9 +280,6 @@ async def action_toggle_hf(app: "ArxivBrowser") -> None:
             await app._fetch_hf_daily()
     else:
         app.notify("HuggingFace trending disabled", title="HF")
-    app._update_status_bar()
-    app._get_ui_refresh_coordinator().refresh_detail_pane()
-    app._mark_badges_dirty("hf", immediate=True)
 
 
 def _safe_update_status_bar(app: "ArxivBrowser") -> None:
@@ -305,15 +294,13 @@ def _queue_hf_daily(app: "ArxivBrowser"):
     if app._hf_loading:
         return None
     app._hf_loading = True
-    _safe_update_status_bar(app)
     try:
         return app._start_dataset_worker_compat(
             app._fetch_hf_daily_worker, app._fetch_hf_daily_async
         )
     except _RECOVERABLE_ACTION_ERRORS as exc:
-        app._hf_loading = False
         app._hf_api_error = True
-        app._update_status_bar()
+        app._hf_loading = False
         _log_action_failure("HF cache lookup", exc)
         app.notify(
             build_actionable_error(
@@ -326,7 +313,6 @@ def _queue_hf_daily(app: "ArxivBrowser"):
         )
     except Exception as exc:
         app._hf_loading = False
-        app._update_status_bar()
         _log_action_failure("HF fetch scheduling", exc, unexpected=True)
         raise
 
@@ -438,7 +424,6 @@ def _finish_hf_fetch(app: "ArxivBrowser", task_epoch: int) -> None:
     if not app._is_current_dataset_epoch(task_epoch):
         return
     app._hf_loading = False
-    app._update_status_bar()
 
 
 async def action_check_versions(app: "ArxivBrowser") -> None:
@@ -476,7 +461,6 @@ async def action_check_versions(app: "ArxivBrowser") -> None:
         return
 
     app._version_checking = True
-    app._update_status_bar()
     app.notify(
         f"Checking {len(starred_ids)} starred papers...",
         title="Versions",

@@ -100,7 +100,6 @@ class TestS2AndHfCoverage:
         await app.action_fetch_s2()
         app._track_dataset_task.assert_called_once()
         assert paper.arxiv_id in app._s2_loading
-        app._update_status_bar.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_fetch_s2_paper_async_success_and_no_data(self, tmp_path):
@@ -137,7 +136,6 @@ class TestS2AndHfCoverage:
         assert "2401.30003" in app._s2_cache
         assert "2401.30003" not in app._s2_loading
         assert app._s2_api_error is False
-        app._update_status_bar.assert_called_once()
         app._mark_badges_dirty.assert_called_once_with("s2")
 
         app._s2_loading.add("2401.30004")
@@ -155,7 +153,6 @@ class TestS2AndHfCoverage:
         assert "No Semantic Scholar data was found for this paper." in app.notify.call_args[0][0]
         assert "2401.30004" not in app._s2_loading
         assert app._s2_api_error is False
-        app._update_status_bar.assert_called_once()
 
         app._s2_loading.add("2401.30005")
         app._update_status_bar.reset_mock()
@@ -171,7 +168,6 @@ class TestS2AndHfCoverage:
         assert "Could not fetch Semantic Scholar data." in app.notify.call_args[0][0]
         assert "2401.30005" not in app._s2_loading
         assert app._s2_api_error is True
-        app._update_status_bar.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_fetch_hf_daily_cache_hit_error_and_schedule(self, tmp_path):

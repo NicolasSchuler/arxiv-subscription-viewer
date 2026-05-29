@@ -67,7 +67,6 @@ class DiscoveryMixin:
                     return
                 batch_num = i // self.VERSION_CHECK_BATCH_SIZE + 1
                 self._version_progress = (batch_num, total_batches)
-                self._update_footer()
                 batch = id_list[i : i + self.VERSION_CHECK_BATCH_SIZE]
                 await self._apply_arxiv_rate_limit()
                 try:
@@ -132,7 +131,6 @@ class DiscoveryMixin:
             if self._is_current_dataset_epoch(task_epoch):
                 self._version_checking = False
                 self._version_progress = None
-                self._update_status_bar()
 
     def _version_update_for(self, arxiv_id: str) -> tuple[int, int] | None:
         """Return version update tuple if paper has an update, else None."""

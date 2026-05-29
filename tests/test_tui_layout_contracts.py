@@ -180,13 +180,12 @@ async def test_semantic_omni_submit_hides_input_and_focuses_list(make_paper):
             await pilot.pause(0.1)
             scheduled: list[object] = []
 
-            def track_dataset_task(coro: object) -> None:
-                scheduled.append(coro)
-                close = getattr(coro, "close", None)
-                if callable(close):
-                    close()
+            def fake_worker(*args: object, **kwargs: object) -> object:
+                scheduled.append(args)
+                app._set_paper_list_loading(False)
+                return None
 
-            app._track_dataset_task = track_dataset_task  # type: ignore[method-assign]
+            app._run_semantic_search_worker = fake_worker  # type: ignore[method-assign]
             omni = app.query_one(OmniInput)
             omni.open("~ transformer")
             await pilot.pause(0.05)

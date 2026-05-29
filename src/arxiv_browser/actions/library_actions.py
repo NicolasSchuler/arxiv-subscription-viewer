@@ -44,33 +44,31 @@ def action_toggle_select(app: "ArxivBrowser") -> None:
     if not paper:
         return
     aid = paper.arxiv_id
-    if aid in app.selected_ids:
-        app.selected_ids.discard(aid)
+    selected_ids = set(app.selected_ids)
+    if aid in selected_ids:
+        selected_ids.discard(aid)
     else:
-        app.selected_ids.add(aid)
+        selected_ids.add(aid)
+    app.selected_ids = selected_ids
     idx = app._get_current_index()
     if idx is not None:
         app._update_option_at_index(idx)
-    app._update_header()
 
 
 def action_select_all(app: "ArxivBrowser") -> None:
     """Select all currently visible papers."""
     if app._open_line_annotation_modal():
         return
-    for paper in app.filtered_papers:
-        app.selected_ids.add(paper.arxiv_id)
+    app.selected_ids = {paper.arxiv_id for paper in app.filtered_papers}
     for i in range(len(app.filtered_papers)):
         app._update_option_at_index(i)
-    app._update_header()
 
 
 def action_clear_selection(app: "ArxivBrowser") -> None:
     """Clear all selections."""
-    app.selected_ids.clear()
+    app.selected_ids = set()
     for i in range(len(app.filtered_papers)):
         app._update_option_at_index(i)
-    app._update_header()
 
 
 def action_cycle_sort(app: "ArxivBrowser") -> None:
@@ -78,11 +76,6 @@ def action_cycle_sort(app: "ArxivBrowser") -> None:
     app._sort_index = (app._sort_index + 1) % len(SORT_OPTIONS)
     sort_key = SORT_OPTIONS[app._sort_index]
     app.notify(f"Sorted by {sort_key}", title="Sort")
-
-    # Re-sort and refresh the list
-    app._sort_papers()
-    app._refresh_list_view()
-    app._update_header()
 
 
 def action_toggle_read(app: "ArxivBrowser") -> None:
@@ -209,20 +202,15 @@ def action_edit_tags(app: "ArxivBrowser") -> None:
 
 def action_toggle_watch_filter(app: "ArxivBrowser") -> None:
     """Toggle filtering to show only watched papers."""
-    app._watch_filter_active = not app._watch_filter_active
-
+    next_state = not app._watch_filter_active
+    if next_state and not app._watched_paper_ids:
+        app.notify("Watch list is empty", title="Watch", severity="warning")
+        return
+    app._watch_filter_active = next_state
     if app._watch_filter_active:
-        if not app._watched_paper_ids:
-            app.notify("Watch list is empty", title="Watch", severity="warning")
-            app._watch_filter_active = False
-            return
         app.notify("Showing watched papers", title="Watch")
     else:
         app.notify("Showing all papers", title="Watch")
-
-    # Re-apply current filter with watch list consideration
-    query = app._get_search_input_widget().value.strip()
-    app._apply_filter(query)
 
 
 def action_manage_watch_list(app: "ArxivBrowser") -> None:
@@ -242,10 +230,13 @@ def action_manage_watch_list(app: "ArxivBrowser") -> None:
             )
             return
         app._compute_watched_papers()
+        query = app._get_search_input_widget().value.strip()
         if app._watch_filter_active and not app._watched_paper_ids:
             app._watch_filter_active = False
-        query = app._get_search_input_widget().value.strip()
-        app._apply_filter(query)
+            if not app._reactive_ui_ready():
+                app._apply_filter(query)
+        else:
+            app._apply_filter(query)
         app.notify("Watch list updated", title="Watch")
 
     app.push_screen(WatchListModal(app._config.watch_list), on_watch_list_updated)

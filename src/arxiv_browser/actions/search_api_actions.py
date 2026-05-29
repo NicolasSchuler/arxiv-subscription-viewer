@@ -70,13 +70,17 @@ def action_exit_arxiv_search_mode(app: "ArxivBrowser") -> None:
     # Invalidate in-flight responses from older requests.
     app._arxiv_api_request_token += 1
 
-    app._in_arxiv_api_mode = False
-    app._arxiv_search_state = None
-    app._arxiv_api_fetch_inflight = False
-    app._arxiv_api_loading = False
-    app._set_paper_list_loading(False)
-    app._restore_local_browse_snapshot()
-    app._local_browse_snapshot = None
+    app._reactive_watchers_suspended = True
+    try:
+        app._in_arxiv_api_mode = False
+        app._arxiv_search_state = None
+        app._arxiv_api_fetch_inflight = False
+        app._arxiv_api_loading = False
+        app._set_paper_list_loading(False)
+        app._restore_local_browse_snapshot()
+        app._local_browse_snapshot = None
+    finally:
+        app._reactive_watchers_suspended = False
     app._update_header()
     app._update_subtitle()
     app.notify("Exited arXiv API mode", title="arXiv Search")
@@ -156,26 +160,30 @@ def _apply_arxiv_search_results(
         app._local_browse_snapshot = app._capture_local_browse_snapshot()
 
     app._advance_dataset_epoch()
-    app._in_arxiv_api_mode = True
-    app._arxiv_search_state = ArxivSearchModeState(
-        request=request,
-        start=start,
-        max_results=max_results,
-    )
+    app._reactive_watchers_suspended = True
+    try:
+        app._arxiv_search_state = ArxivSearchModeState(
+            request=request,
+            start=start,
+            max_results=max_results,
+        )
+        app._in_arxiv_api_mode = True
 
-    # API mode has its own paper set and selection state.
-    app.all_papers = papers
-    app.filtered_papers = papers.copy()
-    app._reset_dataset_view_state()
-    app._papers_by_id = {paper.arxiv_id: paper for paper in papers}
-    app.selected_ids.clear()
-    if not was_in_api_mode:
-        # First API entry starts unfiltered; subsequent pages preserve user choice.
-        app._watch_filter_active = False
-    app._pending_query = ""
-    app._applied_query = ""
-    app._highlight_terms = {"title": [], "author": [], "abstract": []}
-    app._match_scores.clear()
+        # API mode has its own paper set and selection state.
+        app.all_papers = papers
+        app.filtered_papers = papers.copy()
+        app._reset_dataset_view_state()
+        app._papers_by_id = {paper.arxiv_id: paper for paper in papers}
+        app.selected_ids = set()
+        if not was_in_api_mode:
+            # First API entry starts unfiltered; subsequent pages preserve user choice.
+            app._watch_filter_active = False
+        app._pending_query = ""
+        app._applied_query = ""
+        app._highlight_terms = {"title": [], "author": [], "abstract": []}
+        app._match_scores.clear()
+    finally:
+        app._reactive_watchers_suspended = False
     try:
         app._get_search_input_widget().value = ""
     except NoMatches:
@@ -271,7 +279,6 @@ def _begin_arxiv_search_request(app: "ArxivBrowser") -> int:
     app._arxiv_api_fetch_inflight = True
     app._arxiv_api_loading = True
     app._set_paper_list_loading(True)
-    app._update_status_bar()
     return request_token
 
 
@@ -282,7 +289,6 @@ def _finish_arxiv_search_request(app: "ArxivBrowser", request_token: int) -> Non
     app._arxiv_api_fetch_inflight = False
     app._arxiv_api_loading = False
     app._set_paper_list_loading(False)
-    app._update_status_bar()
 
 
 def _is_stale_arxiv_search_response(app: "ArxivBrowser", request_token: int) -> bool:

@@ -17,6 +17,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.events import Key
+from textual.reactive import reactive
 from textual.timer import Timer
 from textual.widgets import Header, Input, Label, OptionList
 
@@ -37,6 +38,8 @@ from arxiv_browser.browser.browse import BrowseMixin
 from arxiv_browser.browser.detail_pane import DetailPaneMixin
 from arxiv_browser.browser.discovery import DiscoveryMixin
 from arxiv_browser.browser.options import ArxivBrowserOptions, _coerce_browser_options
+from arxiv_browser.browser.reactive_state import ReactiveStateMixin
+from arxiv_browser.browser.worker_runtime import WorkerRuntimeMixin
 from arxiv_browser.config import _coerce_arxiv_api_max_results, get_user_tcss_path
 from arxiv_browser.database import get_cache_db_path, init_cache_db
 from arxiv_browser.huggingface import HuggingFacePaper
@@ -103,11 +106,34 @@ def _resolve_user_css_path() -> Path | None:
     return None
 
 
-class ArxivBrowser(AudioActionMixin, DetailPaneMixin, BrowseMixin, DiscoveryMixin, App):
+class ArxivBrowser(
+    ReactiveStateMixin,
+    WorkerRuntimeMixin,
+    AudioActionMixin,
+    DetailPaneMixin,
+    BrowseMixin,
+    DiscoveryMixin,
+    App,
+):
     """A TUI application to browse arXiv papers."""
 
     TITLE, CSS, BINDINGS = "arXiv Paper Browser", APP_CSS, APP_BINDINGS
     VERSION_CHECK_BATCH_SIZE = 40
+
+    selected_ids: reactive[set[str]] = reactive(set, init=False, always_update=True)  # type: ignore[bad-override]
+    _sort_index: reactive[int] = reactive(0, init=False)  # type: ignore[bad-override]
+    _watch_filter_active: reactive[bool] = reactive(False, init=False)  # type: ignore[bad-override]
+    _show_abstract_preview: reactive[bool] = reactive(False, init=False)  # type: ignore[bad-override]
+    _detail_mode: reactive[str] = reactive("scan", init=False)  # type: ignore[bad-override]
+    _in_arxiv_api_mode: reactive[bool] = reactive(False, init=False)
+    _arxiv_api_loading: reactive[bool] = reactive(False, init=False)
+    _s2_active: reactive[bool] = reactive(False, init=False)
+    _s2_loading: reactive[set[str]] = reactive(set, init=False, always_update=True)  # type: ignore[bad-override]
+    _hf_active: reactive[bool] = reactive(False, init=False)
+    _hf_loading: reactive[bool] = reactive(False, init=False)  # type: ignore[bad-override]
+    _version_checking: reactive[bool] = reactive(False, init=False)  # type: ignore[bad-override]
+    _version_progress: reactive[tuple[int, int] | None] = reactive(None, init=False)  # type: ignore[bad-override]
+
     action_toggle_search = _search_api_actions.action_toggle_search
     action_cancel_search = _search_api_actions.action_cancel_search
     action_ctrl_e_dispatch = _ui_actions.action_ctrl_e_dispatch
@@ -243,18 +269,22 @@ class ArxivBrowser(AudioActionMixin, DetailPaneMixin, BrowseMixin, DiscoveryMixi
     ) -> None:
         """Initialize the app with papers, config, and optional history/service overrides."""
         super().__init__()
-        self._user_css_path = _resolve_user_css_path()
-        resolved_options = _coerce_browser_options(options, legacy_args, legacy_kwargs)
-        self._register_textual_themes()
-        self._init_dataset_state(papers, resolved_options.services)
-        self._init_config_state(resolved_options)
-        self._init_history_and_watch_state(resolved_options)
-        self._init_preview_and_search_state()
-        self._init_task_and_io_state()
-        self._init_llm_and_api_state()
-        self._init_enrichment_and_scoring_state()
-        self._configure_ascii_mode(resolved_options.ascii_icons)
-        self._init_ui_runtime()
+        self._reactive_watchers_suspended = True
+        try:
+            self._user_css_path = _resolve_user_css_path()
+            resolved_options = _coerce_browser_options(options, legacy_args, legacy_kwargs)
+            self._register_textual_themes()
+            self._init_dataset_state(papers, resolved_options.services)
+            self._init_config_state(resolved_options)
+            self._init_history_and_watch_state(resolved_options)
+            self._init_preview_and_search_state()
+            self._init_task_and_io_state()
+            self._init_llm_and_api_state()
+            self._init_enrichment_and_scoring_state()
+            self._configure_ascii_mode(resolved_options.ascii_icons)
+            self._init_ui_runtime()
+        finally:
+            self._reactive_watchers_suspended = False
 
     def _register_textual_themes(self) -> None:
         """Register Textual themes before compose() resolves CSS variables."""
@@ -273,7 +303,7 @@ class ArxivBrowser(AudioActionMixin, DetailPaneMixin, BrowseMixin, DiscoveryMixi
         self._visible_index_by_id = {
             paper.arxiv_id: idx for idx, paper in enumerate(self.filtered_papers)
         }
-        self.selected_ids: set[str] = set()
+        self.selected_ids = set()
         self._search_timer: Timer | None = None
         self._pending_query = ""
         self._applied_query = ""
@@ -359,7 +389,7 @@ class ArxivBrowser(AudioActionMixin, DetailPaneMixin, BrowseMixin, DiscoveryMixi
         """Initialize enrichment caches, scoring state, and similarity state."""
         self._s2_active = False
         self._s2_cache: dict[str, SemanticScholarPaper] = {}
-        self._s2_loading: set[str] = set()
+        self._s2_loading = set()
         self._s2_db_path = self._cache_db_path
         self._s2_api_error = False
         self._hf_active = False
@@ -370,7 +400,7 @@ class ArxivBrowser(AudioActionMixin, DetailPaneMixin, BrowseMixin, DiscoveryMixi
         _deadline_ui.init_conference_deadline_state(self)
         self._version_updates: dict[str, tuple[int, int]] = {}
         self._version_checking = False
-        self._version_progress: tuple[int, int] | None = None
+        self._version_progress = None
         self._relevance_scores: dict[str, tuple[int, str]] = {}
         self._relevance_scoring_active = False
         self._scoring_progress: tuple[int, int] | None = None
@@ -591,121 +621,6 @@ class ArxivBrowser(AudioActionMixin, DetailPaneMixin, BrowseMixin, DiscoveryMixi
         from arxiv_browser.modals.whats_new import WhatsNewScreen
 
         self.push_screen(WhatsNewScreen(), callback=self._on_whats_new_dismissed)
-
-    async def on_unmount(self) -> None:
-        """Save session state and clean up timers/tasks when unmounted."""
-        self._shutting_down = True
-        self._stop_shutdown_timers()
-        self._save_session_state()
-        self._cancel_dataset_tasks()
-        await self._cancel_background_tasks()
-        self._tfidf_build_task = None
-        await self._cancel_textual_workers()
-        await self._close_http_client()
-        self._reset_ui_refs()
-
-    def _stop_shutdown_timers(self) -> None:
-        for attr in ("_search_timer", "_detail_timer", "_badge_timer", "_sort_refresh_timer"):
-            self._stop_timer_attr(attr)
-
-    def _stop_timer_attr(self, attr: str) -> None:
-        timer = getattr(self, attr, None)
-        setattr(self, attr, None)
-        if timer is not None:
-            timer.stop()
-
-    async def _cancel_background_tasks(self) -> None:
-        background_tasks = getattr(self, "_background_tasks", set())
-        pending = [task for task in background_tasks if not task.done()]
-        for task in pending:
-            task.cancel()
-        if pending:
-            _, still_pending = await asyncio.wait(pending, timeout=0.5)
-            for task in still_pending:
-                logger.debug("Background task did not cancel before shutdown: %r", task)
-        if hasattr(self, "_background_tasks"):
-            self._background_tasks.clear()
-
-    def _safe_update_status_bar(self) -> None:
-        try:
-            self._update_status_bar()
-        except Exception:
-            logger.debug("Status bar refresh failed", exc_info=True)
-
-    async def _cancel_textual_workers(self) -> None:
-        workers = getattr(self, "workers", None)
-        if workers is None:
-            return
-        try:
-            workers.cancel_node(self)
-            await workers.wait_for_complete()
-        except Exception:
-            logger.debug("Failed while waiting for Textual workers during shutdown", exc_info=True)
-
-    def _cancel_worker_group(self, group: str) -> None:
-        workers = getattr(self, "workers", None)
-        if workers is None:
-            return
-        try:
-            workers.cancel_group(self, group)
-        except Exception:
-            logger.debug("Failed to cancel worker group %s", group, exc_info=True)
-
-    @staticmethod
-    def _is_background_work_running(work_item: Any) -> bool:
-        if work_item is None:
-            return False
-        if isinstance(work_item, asyncio.Task):
-            return not work_item.done()
-        is_running = getattr(work_item, "is_running", None)
-        if isinstance(is_running, bool):
-            return is_running
-        is_finished = getattr(work_item, "is_finished", None)
-        if isinstance(is_finished, bool):
-            return not is_finished
-        done = getattr(work_item, "done", None)
-        if callable(done):
-            return not bool(done())
-        return False
-
-    def _start_dataset_worker_compat(
-        self,
-        worker_method: Callable[..., Any],
-        coro_factory: Callable[[], Coroutine[Any, Any, None]],
-        *args: Any,
-        **kwargs: Any,
-    ) -> Any:
-        if hasattr(self, "_thread_id"):
-            return worker_method(*args, **kwargs)
-        return self._track_dataset_task(coro_factory())
-
-    def _set_paper_list_loading(self, loading: bool) -> None:
-        try:
-            self._get_paper_list_widget().loading = loading
-        except (AttributeError, NoMatches):
-            return
-
-    def _set_details_loading(self, loading: bool) -> None:
-        try:
-            self._get_paper_details_widget().loading = loading
-        except (AttributeError, NoMatches):
-            return
-
-    async def _close_http_client(self) -> None:
-        client = self._http_client
-        self._http_client = None
-        if client is not None:
-            try:
-                await client.aclose()
-            except Exception as e:
-                logger.debug(
-                    "Failed to close shared HTTP client during shutdown: %s", e, exc_info=True
-                )
-
-    def _reset_ui_refs(self) -> None:
-        ui_refs = getattr(self, "_ui_refs", None)
-        if ui_refs is not None:
-            ui_refs.reset()
 
     @staticmethod
     def _is_live_widget(widget: Any) -> bool:

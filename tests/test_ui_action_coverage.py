@@ -119,8 +119,6 @@ class TestUiActionCoverage:
         assert app._s2_active is True
         assert app._config.s2_enabled is True
         assert "Semantic Scholar enabled" in app.notify.call_args[0][0]
-        assert app._mark_badges_dirty.call_args.args == ("s2",)
-        assert app._mark_badges_dirty.call_args.kwargs["immediate"] is True
 
         app.notify.reset_mock()
         with patch_save_config(return_value=False):
@@ -167,7 +165,6 @@ class TestUiActionCoverage:
         app._track_dataset_task = MagicMock(side_effect=lambda coro: coro.close())
         await ui_actions.action_fetch_s2(app)
         assert paper.arxiv_id in app._s2_loading
-        assert app._get_ui_refresh_coordinator.return_value.refresh_detail_pane.called
 
     @pytest.mark.asyncio
     async def test_fetch_s2_track_failure_cleans_loading_set(self, make_paper, tmp_path) -> None:
@@ -288,7 +285,6 @@ class TestUiActionCoverage:
             await ui_actions.action_toggle_hf(app)
         assert app._hf_active is True
         assert app._fetch_hf_daily.await_count == 1
-        assert app._mark_badges_dirty.call_args.args[0] == "hf"
 
         app.notify.reset_mock()
         app._hf_active = True

@@ -9,7 +9,7 @@ import time
 import webbrowser
 from collections.abc import Callable
 from datetime import date
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 from textual import work
@@ -61,6 +61,16 @@ from arxiv_browser.widgets import render_paper_option
 
 class BrowseMixin:
     """Dataset and filter state transitions shared by the main browser app."""
+
+    if TYPE_CHECKING:
+
+        def _start_dataset_worker_compat(
+            self,
+            worker: Callable[..., Any],
+            async_factory: Callable[[], Any],
+            *args: Any,
+            **kwargs: Any,
+        ) -> Any: ...
 
     action_train_triage_model = _triage_model_actions.action_train_triage_model
     action_clear_triage_model = _triage_model_actions.action_clear_triage_model
@@ -746,17 +756,12 @@ class BrowseMixin:
         self._config.show_abstract_preview = self._show_abstract_preview
         status = "on" if self._show_abstract_preview else "off"
         self.notify(f"Abstract preview {status}", title="Preview")
-        # Refresh list to show/hide previews
-        self._refresh_list_view()
-        self._update_status_bar()
 
     def action_toggle_detail_mode(self) -> None:
         """Toggle the detail pane between scan and full reading modes."""
         self._detail_mode = "full" if self._detail_mode == "scan" else "scan"
         self._config.detail_mode = self._detail_mode
         self._save_config_or_warn("detail density preference")
-        self._update_details_header()
-        self._refresh_detail_pane()
         self.notify(f"Detail view: {self._detail_mode}", title="Details")
 
     def action_start_mark(self) -> None:
@@ -842,7 +847,7 @@ class BrowseMixin:
         self._summary_mode_label.clear()
         self._summary_command_hash.clear()
         self._s2_cache.clear()
-        self._s2_loading.clear()
+        self._s2_loading = set()
         self._s2_api_error = False
         self._hf_cache.clear()
         self._hf_loading = False
@@ -899,7 +904,7 @@ class BrowseMixin:
         self.filtered_papers = self.all_papers.copy()
         self._reset_dataset_view_state()
         # Clear selection when switching dates
-        self.selected_ids.clear()
+        self.selected_ids = set()
         # Recompute watched papers for new paper set
         self._compute_watched_papers()
         self._load_triage_predictions_for_current_dataset(refresh=False)

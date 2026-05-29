@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 from textual.css.query import NoMatches
 
@@ -105,26 +105,16 @@ def test_lazy_ui_refresh_coordinator_invokes_current_methods() -> None:
 
 def test_on_omni_api_search_constructs_default_request_and_tracks_task() -> None:
     app = ArxivBrowser.__new__(ArxivBrowser)
-    scheduled: list[object] = []
-
-    def track_task(coro: object) -> None:
-        scheduled.append(coro)
-        close = getattr(coro, "close", None)
-        if callable(close):
-            close()
-
-    app._run_arxiv_search = AsyncMock(return_value=None)  # type: ignore[method-assign]
-    app._track_task = MagicMock(side_effect=track_task)  # type: ignore[method-assign]
+    app._run_arxiv_search_worker = MagicMock()  # type: ignore[method-assign]
 
     app.on_omni_api_search(OmniInput.ApiSearch("graph transformers"))
 
-    app._track_task.assert_called_once()
-    assert len(scheduled) == 1
-    request = app._run_arxiv_search.call_args.args[0]
+    app._run_arxiv_search_worker.assert_called_once()
+    request = app._run_arxiv_search_worker.call_args.args[0]
     assert request.query == "graph transformers"
     assert request.field == "all"
     assert request.category == ""
-    assert app._run_arxiv_search.call_args.kwargs == {"start": 0}
+    assert app._run_arxiv_search_worker.call_args.kwargs == {"start": 0}
 
 
 def test_on_omni_command_selected_restores_chrome_before_dispatch_failure(caplog) -> None:

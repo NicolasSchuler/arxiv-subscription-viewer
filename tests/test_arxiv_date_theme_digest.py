@@ -389,7 +389,7 @@ class TestChromeWidgetBranches:
         existing_label = MagicMock()
         existing_label.id = "date-nav-0"
         # desired has an ID absent from existing_by_id → child is None → continue
-        nav._patch_items_in_place([existing_label], [("date-nav-99", "text", True)])
+        nav._patch_items_in_place([existing_label], [("date-nav-99", "text", True, "tip")])
         # existing_label.update should NOT have been called (child was None, continue hit)
         existing_label.update.assert_not_called()
 
@@ -405,7 +405,7 @@ class TestChromeWidgetBranches:
         mock_label.remove = AsyncMock()
         nav.query_one = MagicMock(return_value=MagicMock())
         nav.mount = MagicMock()
-        await nav._rebuild_items([mock_label], [("date-nav-1", "Jan 02", True)])
+        await nav._rebuild_items([mock_label], [("date-nav-1", "Jan 02", True, "tip")])
         mock_label.remove.assert_awaited_once()
         nav.mount.assert_called_once()
 

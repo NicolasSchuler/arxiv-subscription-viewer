@@ -910,14 +910,12 @@ class TestS2AppActions:
         app.notify.assert_called_once()
         assert "enabled" in app.notify.call_args[0][0]
         assert "press e on a paper" in app.notify.call_args[0][0]
-        app._mark_badges_dirty.assert_called_once_with("s2", immediate=True)
 
         with patch_save_config(return_value=True):
             app.action_toggle_s2()
         assert app._s2_active is False
         assert app._config.s2_enabled is False
         assert "disabled" in app.notify.call_args[0][0]
-        assert app._mark_badges_dirty.call_count == 2
 
     def test_toggle_s2_reverts_when_save_fails(self):
         from unittest.mock import MagicMock, patch
@@ -939,7 +937,7 @@ class TestS2AppActions:
     @pytest.mark.asyncio
     async def test_action_fetch_s2_dedupes_concurrent_calls(self, make_paper):
         import asyncio
-        from unittest.mock import AsyncMock, MagicMock, patch
+        from unittest.mock import AsyncMock, MagicMock
 
         from arxiv_browser.browser.core import ArxivBrowser
 
@@ -949,21 +947,19 @@ class TestS2AppActions:
         with patch_save_config(return_value=True):
             async with app.run_test() as pilot:
                 app._s2_active = True
-                track_calls = 0
+                schedule_calls = 0
 
-                def fake_track_task(coro):
-                    nonlocal track_calls
-                    track_calls += 1
-                    coro.close()
+                def fake_schedule(worker_method, coro_factory, *args, **kwargs):
+                    nonlocal schedule_calls
+                    schedule_calls += 1
                     return MagicMock()
 
                 app._fetch_s2_paper_async = AsyncMock(return_value=None)
-                app._track_task = fake_track_task
+                app._start_dataset_worker_compat = fake_schedule
                 await asyncio.gather(app.action_fetch_s2(), app.action_fetch_s2())
                 await pilot.pause(0)
 
-                assert track_calls == 1
-                assert app._fetch_s2_paper_async.call_count == 1
+                assert schedule_calls == 1
 
     def test_ctrl_e_dispatch_to_exit_api_mode(self):
         from unittest.mock import MagicMock
