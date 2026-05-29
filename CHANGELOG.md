@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-29
+
+### Added
+- Added a responsive narrow-terminal layout: below 80 columns the list and detail panes stack vertically (list first) instead of squeezing the side-by-side split.
+- Added built-in loading indicators on the paper-list and detail panes while background fetches run.
+- Added mouse-clickable footer hints (each bound hint invokes the same action as its key) and tooltips for interactive chrome elements.
+
+### Changed
+- Migrated application state (selection, sort, view modes, enrichment flags, version-check progress) to Textual reactive attributes with watcher-driven UI refreshes, replacing scattered manual refresh calls.
+- Migrated background operations to Textual workers (`@work`) for consistent cancellation and shutdown handling.
+- Replaced manual string truncation with Rich-based rendering for the paper list and detail pane so wide characters and markup truncate correctly.
+- Extracted `ReactiveStateMixin` and `WorkerRuntimeMixin` from the core app module to keep `browser/core.py` within its size budget.
+
 ## [0.2.0] - 2026-05-15
 
 ### Added
