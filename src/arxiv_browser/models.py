@@ -285,6 +285,7 @@ class UserConfig:
     marks: dict[str, str] = field(default_factory=dict)  # letter -> arxiv_id
     session: SessionState = field(default_factory=SessionState)
     show_abstract_preview: bool = False
+    compact_list: bool = False
     detail_mode: str = "scan"
     bibtex_export_dir: str = ""  # Empty = use ~/arxiv-exports/
     pdf_download_dir: str = ""  # Empty = use ~/arxiv-pdfs/

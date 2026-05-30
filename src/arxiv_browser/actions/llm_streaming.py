@@ -47,6 +47,7 @@ async def request_summary_streaming(
     provider: LLMProvider,
     use_full_paper_content: bool,
 ) -> tuple[str | None, str | None]:
+    """Stream a paper summary into app state and return the final text or error."""
     paper_content = await _summary_prompt_content(
         app,
         paper,

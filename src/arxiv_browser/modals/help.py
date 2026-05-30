@@ -93,6 +93,7 @@ class HelpScreen(ModalBase[None]):
                 ("F", "Preview PDF"),
                 ("E", "Export menu"),
                 ("d", "Download PDFs"),
+                ("z", "Compact list (titles only)"),
                 ("v", "Toggle detail density (scan/full)"),
                 ("?", "Help overlay"),
             ],

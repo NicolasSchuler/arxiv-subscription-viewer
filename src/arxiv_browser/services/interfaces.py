@@ -138,7 +138,9 @@ class DownloadService(Protocol):
         config: UserConfig,
         client: httpx.AsyncClient,
         timeout_seconds: int,
-    ) -> DownloadResult: ...
+    ) -> DownloadResult:
+        """Download a paper PDF and return the local result metadata."""
+        ...
 
 
 @runtime_checkable
@@ -354,6 +356,7 @@ class DefaultDownloadService:
         client: httpx.AsyncClient,
         timeout_seconds: int,
     ) -> DownloadResult:
+        """Download a paper PDF using the default function adapter."""
         return await _download.download_pdf(
             paper=paper,
             config=config,

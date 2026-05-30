@@ -116,6 +116,7 @@ class DetailAnnotationMixin:
         line = max(1, min(self._detail_line_count(), int(self._detail_line_cursor or 1)))
 
         def on_annotation(result: LineAnnotationResult | None) -> None:
+            """Save a line annotation from the annotation modal."""
             if result is None:
                 return
             metadata = self._get_or_create_metadata(paper.arxiv_id)

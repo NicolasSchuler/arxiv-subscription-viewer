@@ -167,6 +167,97 @@ def test_meta_badges_honor_row_budget(make_paper):
     assert len(_visible_text(meta_line)) <= 38
 
 
+def test_dense_tags_compress_after_high_signal_badges(make_paper):
+    from arxiv_browser.triage_model import TRIAGE_BUCKET_LIKELY_STAR, TriagePrediction
+
+    paper = make_paper(arxiv_id="2401.12345", categories="cs.AI")
+    text = render_paper_option(
+        PaperRowRenderState(
+            paper=paper,
+            metadata=PaperMetadata(
+                arxiv_id=paper.arxiv_id,
+                next_review_date=date.today().isoformat(),
+                review_stage=0,
+                tags=[
+                    "topic:transformers",
+                    "topic:reasoning",
+                    "status:to-read",
+                    "method:distillation",
+                ],
+            ),
+            s2_data=SemanticScholarPaper(
+                arxiv_id=paper.arxiv_id,
+                s2_paper_id="s2id",
+                citation_count=123,
+                influential_citation_count=7,
+                tldr="",
+                fields_of_study=(),
+                year=2024,
+                url="https://s2.example",
+            ),
+            hf_data=HuggingFacePaper(
+                arxiv_id=paper.arxiv_id,
+                title=paper.title,
+                upvotes=42,
+                num_comments=2,
+                ai_summary="",
+                ai_keywords=(),
+                github_repo="",
+                github_stars=0,
+            ),
+            version_update=(1, 3),
+            relevance_score=(8, "strong"),
+            triage_prediction=TriagePrediction(
+                paper.arxiv_id,
+                0.82,
+                TRIAGE_BUCKET_LIKELY_STAR,
+            ),
+            meta_line_budget=76,
+        )
+    )
+
+    meta_line = text.splitlines()[2]
+    visible_meta = _visible_text(meta_line)
+    assert len(visible_meta) <= 76
+    assert paper.arxiv_id in visible_meta
+    assert "cs.AI" in visible_meta
+    assert "Review:due" in visible_meta
+    assert "S2:123" in visible_meta
+    assert "HF:↑42" in visible_meta
+    assert "v1→v3" in visible_meta
+    assert "Rel:★8/10" in visible_meta
+    assert "ML:★82%" in visible_meta
+    assert "+1" in visible_meta
+    assert "#topic:transformers" not in visible_meta
+
+
+def test_narrow_meta_budget_keeps_identifiers_before_bulk_tags(make_paper):
+    paper = make_paper(arxiv_id="2401.12345", categories="cs.AI")
+    text = render_paper_option(
+        PaperRowRenderState(
+            paper=paper,
+            metadata=PaperMetadata(
+                arxiv_id=paper.arxiv_id,
+                tags=[
+                    "topic:transformers",
+                    "topic:reasoning",
+                    "status:to-read",
+                ],
+            ),
+            relevance_score=(9, "strong"),
+            meta_line_budget=28,
+        )
+    )
+
+    meta_line = text.splitlines()[2]
+    visible_meta = _visible_text(meta_line)
+    assert len(visible_meta) <= 28
+    assert paper.arxiv_id in visible_meta
+    assert "cs.AI" in visible_meta
+    assert "#topic:transformers" not in visible_meta
+    assert "+2" in visible_meta
+
+
 def test_review_badges_render_due_and_future_states(make_paper):
     paper = make_paper()
     due = render_paper_option(
@@ -597,6 +688,24 @@ def test_chrome_helper_branches_cover_status_and_date_navigation_helpers():
         llm_configured=True,
         has_history_navigation=True,
     )[5] == ("[/]", "dates")
+    assert chrome_mod.build_browse_footer_bindings(
+        s2_active=True,
+        has_starred=True,
+        llm_configured=True,
+        has_history_navigation=False,
+    )[5] == ("e", "S2")
+    assert chrome_mod.build_browse_footer_bindings(
+        s2_active=False,
+        has_starred=True,
+        llm_configured=True,
+        has_history_navigation=False,
+    )[5] == ("L", "relevance")
+    assert chrome_mod.build_browse_footer_bindings(
+        s2_active=False,
+        has_starred=True,
+        llm_configured=False,
+        has_history_navigation=False,
+    )[5] == ("V", "versions")
     browse_keys = [
         key
         for key, _label in chrome_mod.build_browse_footer_bindings(
@@ -607,6 +716,7 @@ def test_chrome_helper_branches_cover_status_and_date_navigation_helpers():
         )
     ]
     assert "Space" in browse_keys
+    assert "x" in browse_keys
     assert "Ctrl+p" in browse_keys
     assert chrome_mod.build_detail_focus_footer_bindings()[0] == ("Tab", "list")
     assert chrome_mod.build_footer_mode_badge(

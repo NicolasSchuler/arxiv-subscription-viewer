@@ -2,6 +2,14 @@
 
 Complete schema reference for `config.json`. The app reads and writes this file automatically — you can also edit it by hand while the app is not running.
 
+Use this page when you are ready to tune the workflow after the first scan:
+
+1. Install the CLI and run `arxiv-viewer doctor`.
+2. Scan papers with `arxiv-viewer search ...` or `arxiv-viewer browse`.
+3. Enrich papers with LLM, Semantic Scholar, HuggingFace, semantic search, or conference-deadline features.
+4. Organize local review state with stars, tags, notes, bookmarks, collections, marks, and spaced review.
+5. Export papers, then configure paths, API keys, and themes once you know your defaults.
+
 ## File Location
 
 Determined by [platformdirs](https://pypi.org/project/platformdirs/):
@@ -12,7 +20,45 @@ Determined by [platformdirs](https://pypi.org/project/platformdirs/):
 | macOS | `~/Library/Application Support/arxiv-browser/config.json` |
 | Windows | `%APPDATA%/arxiv-browser/config.json` |
 
-The file is created on first run. If it becomes corrupt (invalid JSON), the app backs it up to `config.json.corrupt` and starts with defaults.
+Run `arxiv-viewer config-path` to print the exact path for the current machine.
+
+## Loading And Recovery Behavior
+
+- The config file is created on the first successful save. A missing file means "use defaults".
+- Reads are tolerant: missing keys use defaults, wrong-type values are ignored or sanitized, and malformed collection/watch entries are skipped where possible.
+- Invalid JSON or an invalid top-level structure is backed up to `config.json.corrupt`; the app then starts from defaults and marks the in-memory config as defaulted.
+- Saves are atomic: the app writes a temporary file in the same directory, then replaces `config.json`.
+- Avoid editing `config.json` while the app is running because session state is written on exit and can overwrite manual changes.
+
+## Sanitization And Bounds
+
+The loader validates data before it reaches the TUI. Important rules:
+
+| Area | Rule |
+|------|------|
+| Type checks | Strings, booleans, integers, lists, and dicts must match the expected JSON type; invalid scalar values fall back to defaults. |
+| Integers | JSON booleans are not accepted as integers. |
+| `arxiv_api_max_results` | Clamped to `1..200`. |
+| `llm_max_retries` | Clamped to `0..5`. |
+| `llm_timeout` | Clamped to `10..600` seconds. |
+| `paper_content_cache_ttl_days` | Clamped to `1..365`. |
+| `pdf_preview_max_pages` | Clamped to `1..20`. |
+| `semantic_search_top_k` | Clamped to `1..500`. |
+| `semantic_search_min_score` | Clamped to `0..100`. |
+| `conference_deadlines_cache_ttl_hours` | Clamped to `1..168`. |
+| Session sort index | Reset to `0` when outside the known sort range. |
+| `detail_mode` | Must be `"scan"` or `"full"`; otherwise resets to `"scan"`. |
+| `collapsed_sections` | Keeps only known detail-section keys. |
+| `watch_list[].match_type` | Must be `"author"`, `"title"`, or `"keyword"`; invalid values default to `"author"`. |
+| `collections` | Limited to 20 collections and 500 paper IDs per collection. |
+| `llm_prompt_template` | Unknown placeholders are rejected and the built-in prompt is used. |
+
+## API Keys And Security Notes
+
+- `llm_api_key`, `s2_api_key`, and `semantic_search_api_key` are stored in plain JSON on your local machine. Protect the config directory with normal OS permissions and do not commit or share the file.
+- `llm_command` and `pdf_viewer` can execute local commands. The app records trusted command hashes in `trusted_llm_command_hashes` and `trusted_pdf_viewer_hashes`; those lists are managed by the app and should not be edited by hand.
+- Prefer `llm_preset` when one of the built-in CLI providers is enough. Use `llm_command` only when you need a custom local command template.
+- For local HTTP services, leave API key fields empty when the endpoint does not require authentication.
 
 ## General
 
@@ -23,6 +69,7 @@ The file is created on first run. If it becomes corrupt (invalid JSON), the app 
 | `onboarding_seen` | `bool` | `false` | Tracks whether the first-run help overlay has been dismissed. Managed by the app. |
 | `last_seen_whats_new` | `string` | `""` | Tag of the last "What's New" release notes the user dismissed. Managed by the app. |
 | `show_abstract_preview` | `bool` | `false` | Show inline abstract preview in the paper list. Toggle with `p`. |
+| `compact_list` | `bool` | `false` | Show one line (title only) per paper in the list for faster title skimming. Toggle with `z`. |
 | `detail_mode` | `string` | `"scan"` | Detail pane density. `"scan"` (compact) or `"full"` (expanded). |
 | `prefer_pdf_url` | `bool` | `false` | When `true`, `o` opens the PDF URL instead of the abstract page. |
 | `arxiv_api_max_results` | `int` | `50` | Default page size for arXiv API searches (`A`). Clamped to `1..200`. |
@@ -113,6 +160,30 @@ Configure file exports and PDF handling. See [export.md](export.md) for detailed
 | `theme` | `dict[str, str]` | `{}` | Legacy theme color overrides. Prefer `theme_name` for new configs. |
 | `collapsed_sections` | `list[str]` | `["tags", "relevance", "summary", "s2", "hf", "version"]` | Detail pane sections that start collapsed. Valid keys: `"authors"`, `"abstract"`, `"tags"`, `"relevance"`, `"deadlines"`, `"summary"`, `"s2"`, `"hf"`, `"version"`. Toggle with `Ctrl+d`. |
 
+### `user.tcss`
+
+Advanced users can create a `user.tcss` file next to `config.json` to layer custom Textual CSS over the embedded app stylesheet:
+
+| Platform | Path |
+|----------|------|
+| Linux | `~/.config/arxiv-browser/user.tcss` |
+| macOS | `~/Library/Application Support/arxiv-browser/user.tcss` |
+| Windows | `%APPDATA%/arxiv-browser/user.tcss` |
+
+The file is optional and loaded after the built-in CSS, so selectors in `user.tcss` win. Keep overrides small: internal widget IDs and classes may change across releases.
+
+```tcss
+/* Brighter accent for the current theme */
+Screen {
+    --th-accent: #ffd75f;
+}
+
+/* Slightly darker details pane */
+PaperDetails {
+    background: #181818;
+}
+```
+
 ## Session State
 
 Restored automatically on next run. **Managed by the app** — generally no need to edit by hand.
@@ -152,6 +223,42 @@ Collections of user-created data. **Managed by the app** via dedicated UI — ed
 ```
 
 All other keys use their defaults and are populated by the app as needed.
+
+## Examples
+
+### Live Search With Enrichment
+
+```json
+{
+  "arxiv_api_max_results": 100,
+  "s2_enabled": true,
+  "hf_enabled": true,
+  "research_interests": "efficient LLM inference, quantization, speculative decoding"
+}
+```
+
+### Local HTTP LLM Provider
+
+```json
+{
+  "llm_provider_type": "http",
+  "llm_api_base_url": "http://localhost:11434",
+  "llm_api_model": "llama3",
+  "llm_timeout": 180,
+  "llm_streaming_enabled": true
+}
+```
+
+### Export And PDF Defaults
+
+```json
+{
+  "bibtex_export_dir": "~/papers/exports",
+  "pdf_download_dir": "~/papers/pdfs",
+  "pdf_preview_max_pages": 5,
+  "prefer_pdf_url": true
+}
+```
 
 ## See Also
 

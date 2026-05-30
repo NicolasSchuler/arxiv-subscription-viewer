@@ -155,6 +155,7 @@ def ensure_deadline_countdown_timer(app: Any) -> None:
 
 
 def apply_conference_deadlines_result(app: Any, result: ConferenceDeadlinesFetchResult) -> None:
+    """Apply fetched conference deadlines and update deadline UI state."""
     if not result.complete or result.state == "unavailable":
         notify_conference_deadlines_error(app)
         return
@@ -185,6 +186,7 @@ def apply_conference_deadlines_result(app: Any, result: ConferenceDeadlinesFetch
 
 
 def notify_conference_deadlines_error(app: Any) -> None:
+    """Mark deadline enrichment as failed and show recovery guidance."""
     app._conference_deadlines_api_error = True
     app.notify(
         build_actionable_error(
@@ -204,6 +206,7 @@ def handle_conference_deadlines_exception(
     *,
     unexpected: bool = False,
 ) -> None:
+    """Handle deadline-fetch exceptions for the current dataset epoch."""
     if not app._is_current_dataset_epoch(task_epoch):
         return
     log_action_failure("conference deadline refresh", exc, unexpected=unexpected)
@@ -211,6 +214,7 @@ def handle_conference_deadlines_exception(
 
 
 def finish_conference_deadlines_fetch(app: Any, task_epoch: int) -> None:
+    """Clear deadline loading state for the current dataset epoch."""
     if not app._is_current_dataset_epoch(task_epoch):
         return
     app._conference_deadlines_loading = False

@@ -99,9 +99,24 @@ async def test_context_footer_clickable_hints_use_action_links_and_cap_items() -
         assert "@click=app.cycle_sort" in content
         assert "@click=app.command_palette" in content
         assert "@click=app.show_help" in content
+        assert "@click=app.fetch_s2" not in content
 
         # Hints without a bound action (e.g. "[/] dates") are not links.
         assert "@click=app.dates" not in content
+
+
+@pytest.mark.asyncio
+async def test_contextual_footer_hints_are_clickable_when_actionable() -> None:
+    app = FooterHarness([("e", "S2"), ("L", "relevance"), ("V", "versions"), ("x", "star")])
+
+    async with app.run_test(size=(80, 5)) as pilot:
+        await pilot.pause()
+        content = str(app.query_one(ContextFooter).content)
+
+        assert "@click=app.fetch_s2" in content
+        assert "@click=app.score_relevance" in content
+        assert "@click=app.check_versions" in content
+        assert "@click=app.toggle_star" in content
 
 
 def test_context_footer_unmounted_content_remains_markup_compatible() -> None:

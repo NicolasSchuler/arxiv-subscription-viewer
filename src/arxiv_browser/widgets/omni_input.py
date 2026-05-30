@@ -189,6 +189,7 @@ class OmniInput(Vertical):
 
     @value.setter
     def value(self, text: str) -> None:
+        """Replace the current input text."""
         self.query_one("#omni-input", Input).value = text
 
     def hide(self) -> None:

@@ -562,7 +562,7 @@ class TestFooterDiscoverability:
             ("o", "open"),
             ("s", "sort"),
             ("r", "read"),
-            ("n", "notes"),
+            ("x", "star"),
             ("E", "export"),
             ("Ctrl+p", "commands"),
             ("?", "help"),
@@ -589,7 +589,7 @@ class TestFooterDiscoverability:
         assert "?" in keys
         assert "Ctrl+p" in keys
 
-    def test_footer_keeps_core_actions_when_s2_active(self):
+    def test_footer_uses_contextual_slot_when_s2_active(self):
         from arxiv_browser.models import UserConfig
 
         config = UserConfig()
@@ -602,7 +602,7 @@ class TestFooterDiscoverability:
             ("o", "open"),
             ("s", "sort"),
             ("r", "read"),
-            ("n", "notes"),
+            ("e", "S2"),
             ("E", "export"),
             ("Ctrl+p", "commands"),
             ("?", "help"),

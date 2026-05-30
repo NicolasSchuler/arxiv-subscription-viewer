@@ -23,6 +23,7 @@ class ReactiveStateMixin:
             "_sort_index",
             "_watch_filter_active",
             "_show_abstract_preview",
+            "_compact_list",
             "_detail_mode",
             "_in_arxiv_api_mode",
             "_arxiv_api_loading",
@@ -53,6 +54,7 @@ class ReactiveStateMixin:
                     if name in {
                         "_watch_filter_active",
                         "_show_abstract_preview",
+                        "_compact_list",
                         "_in_arxiv_api_mode",
                         "_arxiv_api_loading",
                         "_s2_active",
@@ -99,10 +101,12 @@ class ReactiveStateMixin:
             self._safe_update_status_bar()
 
     def watch_selected_ids(self, _old: set[str], _new: set[str]) -> None:
+        """Refresh header counts when selected paper IDs change."""
         if self._reactive_ui_ready():
             self._update_header()
 
     def watch__sort_index(self, _old: int, _new: int) -> None:
+        """Resort and redraw the list when the active sort changes."""
         if not self._reactive_ui_ready():
             return
         self._sort_papers()
@@ -110,22 +114,33 @@ class ReactiveStateMixin:
         self._update_header()
 
     def watch__watch_filter_active(self, _old: bool, _new: bool) -> None:
+        """Reapply the live query when the watch-only filter toggles."""
         if self._reactive_ui_ready():
             self._apply_filter(self._get_live_query())
 
     def watch__show_abstract_preview(self, _old: bool, _new: bool) -> None:
+        """Refresh list rows when inline abstract previews toggle."""
+        if not self._reactive_ui_ready():
+            return
+        self._refresh_list_view()
+        self._safe_update_status_bar()
+
+    def watch__compact_list(self, _old: bool, _new: bool) -> None:
+        """Refresh list rows when compact title-only mode toggles."""
         if not self._reactive_ui_ready():
             return
         self._refresh_list_view()
         self._safe_update_status_bar()
 
     def watch__detail_mode(self, _old: str, _new: str) -> None:
+        """Refresh detail-pane chrome and content when density changes."""
         if not self._reactive_ui_ready():
             return
         self._update_details_header()
         self._refresh_detail_pane()
 
     def watch__in_arxiv_api_mode(self, _old: bool, _new: bool) -> None:
+        """Refresh mode-aware header, subtitle, and filter pills."""
         if not self._reactive_ui_ready():
             return
         self._update_header()
@@ -133,9 +148,11 @@ class ReactiveStateMixin:
         self._update_filter_pills(self._get_active_query())
 
     def watch__arxiv_api_loading(self, _old: bool, _new: bool) -> None:
+        """Refresh compact status when API loading state changes."""
         self._refresh_reactive_status()
 
     def watch__s2_active(self, _old: bool, _new: bool) -> None:
+        """Refresh Semantic Scholar status, details, and badges."""
         if not self._reactive_ui_ready():
             return
         self._safe_update_status_bar()
@@ -143,12 +160,14 @@ class ReactiveStateMixin:
         self._mark_badges_dirty("s2", immediate=True)
 
     def watch__s2_loading(self, _old: set[str], _new: set[str]) -> None:
+        """Refresh status and details while S2 paper fetches change."""
         if not self._reactive_ui_ready():
             return
         self._safe_update_status_bar()
         self._get_ui_refresh_coordinator().refresh_detail_pane()
 
     def watch__hf_active(self, _old: bool, _new: bool) -> None:
+        """Refresh HuggingFace status, details, and badges."""
         if not self._reactive_ui_ready():
             return
         self._safe_update_status_bar()
@@ -156,9 +175,11 @@ class ReactiveStateMixin:
         self._mark_badges_dirty("hf", immediate=True)
 
     def watch__hf_loading(self, _old: bool, _new: bool) -> None:
+        """Refresh compact status while HuggingFace data loads."""
         self._refresh_reactive_status()
 
     def watch__version_checking(self, _old: bool, _new: bool) -> None:
+        """Refresh compact status while version checks run."""
         self._refresh_reactive_status()
 
     def watch__version_progress(
@@ -166,4 +187,5 @@ class ReactiveStateMixin:
         _old: tuple[int, int] | None,
         _new: tuple[int, int] | None,
     ) -> None:
+        """Refresh compact status when version-check progress changes."""
         self._refresh_reactive_status()

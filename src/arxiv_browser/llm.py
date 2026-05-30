@@ -881,6 +881,7 @@ def resolve_summary_prompt_template(
 
 
 def summary_mode_display_label(mode: str) -> str:
+    """Return a human-readable label for a summary mode id."""
     return _SUMMARY_MODE_DISPLAY_LABELS.get(mode, mode.upper())
 
 

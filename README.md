@@ -30,28 +30,51 @@
 
 ## 🚀 Getting Started
 
-Use whichever entry path matches how you already follow papers:
+Pick the entry path that matches how you already follow papers:
 
 - **`history/` workflow**: review local daily digests with persistent date navigation, bookmarks, notes, and collections.
 - **Live arXiv search**: start directly from the API when you want the newest matching papers without preparing local files first.
 
+Requires Python 3.13+.
+
+### Install
+
 ```bash
-# Confirm Python support
 python3.13 --version
 
-# Install as a CLI tool
 uv tool install arxiv-subscription-viewer
 # or: python3.13 -m pip install --user arxiv-subscription-viewer
 
 # Optional faster fuzzy matching
 uv tool install "arxiv-subscription-viewer[fuzzy]"
+```
 
-# Check environment & config health
+### First Run
+
+```bash
 arxiv-viewer doctor
 
-# Search arXiv API directly
+# Start from live arXiv results
 arxiv-viewer search --category cs.AI
 
+# Or review a local history/ archive from its parent directory
+arxiv-viewer browse
+```
+
+Press `?` in-app for help and `Ctrl+p` for the command palette.
+
+### Typical Flow
+
+1. **Install** the CLI and run `arxiv-viewer doctor`.
+2. **Scan** papers with `arxiv-viewer search ...` or `arxiv-viewer browse` from a `history/` archive.
+3. **Enrich** promising papers with Semantic Scholar (`e`/`Ctrl+e`), HuggingFace (`Ctrl+h`), version checks (`V`), or LLM summaries (`Ctrl+s`).
+4. **Organize** the queue with read state, stars, tags, notes, bookmarks, marks, collections, and spaced-review scheduling.
+5. **Export** selected papers or collections as BibTeX, RIS, CSV, Markdown, or PDFs.
+6. **Configure** defaults, API keys, export paths, and themes in `config.json` when the built-in defaults stop being enough.
+
+### Common Commands
+
+```bash
 # Search by topic
 arxiv-viewer search --query "diffusion transformer" --field title
 
@@ -60,9 +83,6 @@ arxiv-viewer search --query "attention" --mode page --max-results 100
 
 # Generate a cron-friendly Markdown digest
 arxiv-viewer digest --category cs.AI --period weekly --output digest.md
-
-# Browse from a local history/ archive (see docs/history-mode.md)
-arxiv-viewer browse
 
 # List local history dates
 arxiv-viewer dates
@@ -77,7 +97,7 @@ arxiv-viewer config-path
 python -m arxiv_browser --version
 ```
 
-> **Requires Python 3.13+** · Press `?` in-app for help · `Ctrl+p` opens commands
+> `history/` setup details live in [docs/history-mode.md](docs/history-mode.md).
 >
 > Global options: `--version` · `--debug` (log to file) · `--ascii` (ASCII-only icons) · `--color auto|always|never` · `--no-color` · `--theme {monokai|catppuccin-mocha|solarized-dark|solarized-light|high-contrast}`
 >
@@ -130,7 +150,7 @@ If something looks off, run `arxiv-viewer doctor` to check config, history disco
 | 🎯 | **Relevance scoring** — LLM scores papers against your interests | `L` |
 | 📅 | **History mode** — navigate daily email digests with `[` / `]` | |
 | ⌨️ | **Command palette** — quick access to all commands | `Ctrl+p` |
-| 🎨 | **4 themes** — Monokai, Catppuccin, Solarized, High Contrast | `Ctrl+t` |
+| 🎨 | **5 themes** — Monokai, Catppuccin, Solarized Dark/Light, High Contrast | `Ctrl+t` |
 
 ## ⌨️ Key Bindings
 
@@ -147,13 +167,14 @@ If something looks off, run `arxiv-viewer doctor` to check config, history disco
 | `n` | Notes | | `Ctrl+k` | Collections |
 | `Ctrl+v` | Compare papers | | `C` | Chat with paper |
 | `p` | Abstract preview | | `y` | Read abstract aloud |
+| `z` | Compact list (titles only) | | `v` | Detail mode |
 | `L` | Relevance score | | `t` | Tags |
 | `Ctrl+p` | Command palette | | `V` | Check versions |
 | `Ctrl+g` | Auto-tag (LLM) | | `Ctrl+b` | Save bookmark |
 | `G` | Citation graph | | `m` / `'` | Set / jump to mark |
 | `R` | Recommendations | | `Ctrl+l` | Edit interests |
 | `1-9` | Jump to bookmark | | `Ctrl+d` | Detail pane sections |
-| `w` / `W` | Watch list | | `v` | Detail mode |
+| `w` / `W` | Watch list | | `Ctrl+t` | Cycle theme |
 | `Ctrl+e` | Toggle S2 / Exit API mode | | `Ctrl+r` | Mark visible as read |
 | `Ctrl+h` | HuggingFace trending | | `Ctrl+Shift+b` | Remove bookmark |
 | | | | `?` | Help / shortcuts |
@@ -167,6 +188,8 @@ making it easy to navigate between papers you're comparing or revisiting.
 ## ⚙️ Configuration
 
 Config lives at `~/.config/arxiv-browser/config.json` (Linux), `~/Library/Application Support/arxiv-browser/config.json` (macOS), or `%APPDATA%/arxiv-browser/config.json` (Windows).
+
+Run `arxiv-viewer config-path` to print the exact path on your machine. API keys for HTTP LLM providers, Semantic Scholar, and embedding services are stored locally in this file; use normal filesystem permissions and avoid committing it.
 
 If you want the best documentation entry point for your context:
 

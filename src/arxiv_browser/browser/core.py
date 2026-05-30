@@ -125,6 +125,7 @@ class ArxivBrowser(
     _sort_index: reactive[int] = reactive(0, init=False)  # type: ignore[bad-override]
     _watch_filter_active: reactive[bool] = reactive(False, init=False)  # type: ignore[bad-override]
     _show_abstract_preview: reactive[bool] = reactive(False, init=False)  # type: ignore[bad-override]
+    _compact_list: reactive[bool] = reactive(False, init=False)  # type: ignore[bad-override]
     _detail_mode: reactive[str] = reactive("scan", init=False)  # type: ignore[bad-override]
     _in_arxiv_api_mode: reactive[bool] = reactive(False, init=False)
     _arxiv_api_loading: reactive[bool] = reactive(False, init=False)
@@ -343,6 +344,7 @@ class ArxivBrowser(
     def _init_preview_and_search_state(self) -> None:
         """Initialize preview, search, and abstract-loading state."""
         self._show_abstract_preview = self._config.show_abstract_preview
+        self._compact_list = self._config.compact_list
         self._detail_mode = (
             self._config.detail_mode if self._config.detail_mode in DETAIL_MODES else "scan"
         )

@@ -103,6 +103,7 @@ class PaperRowRenderState:
     metadata: PaperMetadata | None = None
     watched: bool = False
     show_preview: bool = False
+    compact: bool = False
     abstract_text: str | None = None
     highlight_terms: PaperHighlightTerms = field(default_factory=PaperHighlightTerms)
     s2_data: SemanticScholarPaper | None = None
@@ -220,13 +221,6 @@ def _build_meta_parts(state: PaperRowRenderState) -> list[str]:
             format_categories(state.paper.categories, state.category_colors),
         ]
     )
-    tags = state.metadata.tags if state.metadata else None
-    if tags:
-        tag_str = " ".join(
-            f"[{get_tag_color(tag, state.tag_namespace_colors)}]#{escape_rich_text(tag)}[/]"
-            for tag in tags
-        )
-        parts.append(tag_str)
     review_label = review_status_label(state.metadata, date.today())
     if review_label:
         color = (
@@ -255,6 +249,13 @@ def _build_meta_parts(state: PaperRowRenderState) -> list[str]:
             )
         )
         parts.append(f"[{color}]{badge}[/]")
+    tags = state.metadata.tags if state.metadata else None
+    if tags:
+        tag_str = " ".join(
+            f"[{get_tag_color(tag, state.tag_namespace_colors)}]#{escape_rich_text(tag)}[/]"
+            for tag in tags
+        )
+        parts.append(tag_str)
     return parts
 
 
@@ -347,6 +348,8 @@ def render_paper_option(
 ) -> str:
     """Render a paper as Rich markup for OptionList display."""
     state = _coerce_paper_row_state(state_or_paper, legacy_kwargs)
+    if state.compact:
+        return _render_title_line(state)
     lines = [
         _render_title_line(state),
         highlight_text(
@@ -394,10 +397,12 @@ class PaperListItem(ListItem):
 
     @property
     def is_selected(self) -> bool:
+        """Whether this row is currently selected."""
         return self._state.selected
 
     @property
     def metadata(self) -> PaperMetadata | None:
+        """Metadata used to render this paper row, if available."""
         return self._state.metadata
 
     @property
@@ -549,6 +554,7 @@ class PaperListItem(ListItem):
             return
 
     def compose(self) -> ComposeResult:
+        """Compose the paper row widgets."""
         yield Static(self._get_title_text(), classes="paper-title")
         yield Static(self._get_authors_text(), classes="paper-authors")
         yield Static(self._get_meta_text(), classes="paper-meta")

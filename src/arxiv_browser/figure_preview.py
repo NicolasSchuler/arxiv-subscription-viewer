@@ -68,6 +68,7 @@ class _FirstFigureParser(HTMLParser):
         self.caption = ""
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        """Track LaTeXML figure, caption, and image start tags."""
         if self._done:
             return
         attr_map = {name.lower(): value or "" for name, value in attrs}
@@ -86,6 +87,7 @@ class _FirstFigureParser(HTMLParser):
                 self.image_url = urljoin(self._base_url, src)
 
     def handle_endtag(self, tag: str) -> None:
+        """Close tracked figure/caption scopes and finalize captions."""
         if self._figure_depth <= 0:
             return
         if tag == "figcaption" and self._caption_depth > 0:
@@ -98,6 +100,7 @@ class _FirstFigureParser(HTMLParser):
                 self._done = True
 
     def handle_data(self, data: str) -> None:
+        """Collect text while inside the first figure caption."""
         if self._caption_depth > 0:
             self._caption_parts.append(data)
 

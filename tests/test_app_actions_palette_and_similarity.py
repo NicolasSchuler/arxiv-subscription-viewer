@@ -419,6 +419,7 @@ class TestArxivApiAndSimilarityCoverage:
             hf_active=False,
             watch_filter_active=False,
             show_abstract_preview=False,
+            compact_list=False,
             detail_mode="scan",
             active_query="",
             has_history_files=False,

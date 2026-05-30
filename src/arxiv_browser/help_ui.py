@@ -80,6 +80,7 @@ HELP_SECTION_ACTIONS: list[tuple[str, list[str]]] = [
             "prev_date",
             "next_date",
             "toggle_preview",
+            "toggle_compact_list",
             "toggle_detail_mode",
             "cycle_theme",
             "toggle_sections",
@@ -121,9 +122,9 @@ HELP_GETTING_STARTED: list[tuple[str, str]] = [
     ("r / x", "Read or star the current paper"),
     ("Tab", "Focus the detail pane"),
     ("E", "Export current or selected papers"),
-    ("Ctrl+p", "Open commands"),
+    ("Ctrl+p", "Open command palette"),
     ("[ / ]", "Change dates (history mode)"),
-    ("?", "Show full shortcuts"),
+    ("?", "Show help overlay"),
 ]
 
 HELP_DESCRIPTION_OVERRIDES: dict[str, str] = {
@@ -144,6 +145,7 @@ HELP_DESCRIPTION_OVERRIDES: dict[str, str] = {
     "preview_figure": "Preview first HTML figure",
     "read_abstract_aloud": "Read abstract aloud",
     "toggle_detail_mode": "Toggle detail density (scan/full)",
+    "toggle_compact_list": "Toggle compact list (titles only)",
     "toggle_focus_pane": "Focus details / paper list",
 }
 

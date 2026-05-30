@@ -736,3 +736,88 @@ class TestAbstractPreviewIntegration:
                 await pilot.press("p")
                 await pilot.pause(0.1)
                 assert app._config.show_abstract_preview is not initial
+
+
+@pytest.mark.integration
+class TestCompactListIntegration:
+    """Integration tests for compact (titles-only) list toggle via 'z' key."""
+
+    @staticmethod
+    def _make_papers(make_paper, count: int = 3) -> list:
+        return [
+            make_paper(
+                arxiv_id=f"2401.{20000 + i}",
+                title=f"Paper Title {chr(65 + i)}",
+                authors=f"Author {chr(65 + i)}",
+                categories="cs.AI",
+                abstract=f"Abstract for paper {chr(65 + i)}.",
+            )
+            for i in range(count)
+        ]
+
+    async def test_toggle_compact_list_flips_state(self, make_paper):
+        """Pressing 'z' should toggle _compact_list."""
+        from arxiv_browser.browser.core import ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=3)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch_save_config(return_value=True):
+            async with app.run_test() as pilot:
+                initial = app._compact_list
+                await pilot.press("z")
+                await pilot.pause(0.1)
+                assert app._compact_list is not initial
+
+                await pilot.press("z")
+                await pilot.pause(0.1)
+                assert app._compact_list is initial
+
+    async def test_toggle_compact_list_updates_config(self, make_paper):
+        """Compact toggle should sync to config for persistence."""
+        from arxiv_browser.browser.core import ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=1)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch_save_config(return_value=True):
+            async with app.run_test() as pilot:
+                initial = app._config.compact_list
+                await pilot.press("z")
+                await pilot.pause(0.1)
+                assert app._config.compact_list is not initial
+
+    async def test_compact_list_preserves_paper_count(self, make_paper):
+        """Toggling compact mode should not change the number of papers shown."""
+        from textual.widgets import OptionList
+
+        from arxiv_browser.browser.core import ArxivBrowser
+
+        papers = self._make_papers(make_paper, count=3)
+        app = ArxivBrowser(papers, restore_session=False)
+        with patch_save_config(return_value=True):
+            async with app.run_test() as pilot:
+                option_list = app.query_one("#paper-list", OptionList)
+                assert option_list.option_count == 3
+
+                await pilot.press("z")
+                await pilot.pause(0.1)
+                assert option_list.option_count == 3
+
+
+def test_compact_render_is_single_title_line():
+    """Compact render state should emit only the title line."""
+    from arxiv_browser.widgets.listing import PaperRowRenderState, render_paper_option
+
+    paper = Paper(
+        arxiv_id="2401.30001",
+        date="2024-01-01",
+        title="A Compact Title",
+        authors="Doe, J.",
+        categories=["cs.AI"],
+        comments="",
+        abstract="An abstract.",
+        url="http://example.com",
+        abstract_raw="An abstract.",
+    )
+    rendered = render_paper_option(PaperRowRenderState(paper=paper, compact=True))
+    assert "\n" not in rendered
+    assert "A Compact Title" in rendered

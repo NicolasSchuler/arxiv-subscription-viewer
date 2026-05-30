@@ -868,9 +868,9 @@ async def _auto_tag_single_async(
             current_notes = app._config.paper_metadata[paper.arxiv_id].notes
 
         def on_edit_result(result: PaperEditResult | None) -> None:
+            """Accept AI tag suggestions after optional user edits."""
             if result is None:
                 return
-            # Save notes if the user edited them
             metadata = app._get_or_create_metadata(paper.arxiv_id)
             metadata.notes = result.notes
             # Delegate tag saving to existing handler

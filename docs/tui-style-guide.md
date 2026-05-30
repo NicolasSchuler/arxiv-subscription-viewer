@@ -7,6 +7,7 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 - Purpose: Keep the app discoverable for newcomers while preserving high-speed keyboard workflows for frequent users.
 - Primary audience: Intermediate and power users who live in terminal workflows.
 - Secondary audience: First-time users who need clear guidance without reading full docs first.
+- Core user path: install, scan papers, enrich the shortlist, organize a durable queue, export selected work, then configure defaults.
 
 ## 2. Voice And Copy Rules
 
@@ -25,9 +26,9 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 - Use `Semantic Scholar` in help text and `S2` in compact status/footer hints.
 - Use `History` for date navigation context.
 - Compact-vs-long naming policy:
-- Footer stays compact (`o open`, `Ctrl+p commands`) for 80-col scan speed.
-- Help/modals/binding descriptions use long-form labels (`Open in Browser`, `Command palette`).
-- `Ctrl+e` is context-sensitive: `Toggle S2` in browse mode and `Exit Search Results` in arXiv search-results mode.
+  - Footer stays compact (`o open`, `Ctrl+p commands`) for 80-col scan speed.
+  - Help/modals/binding descriptions use long-form labels (`Open in Browser`, `Command palette`).
+  - `Ctrl+e` is context-sensitive: `Toggle S2` in browse mode and `Exit Search Results` in arXiv search-results mode.
 
 ## 4. Layout Hierarchy Rules
 
@@ -70,7 +71,11 @@ Small/Medium modals also cap at `max-width: 90%` for narrow-terminal safety. Lar
 - Always include these core hints in order:
   - `/ search`, `Space select`, `o open`, `s sort`, `r read`, context slot, `E export`, `Ctrl+p commands`, `? help`.
 - The context slot is:
-  - `[/] dates` if history navigation is available, else `x star`.
+  - `[/] dates` if history navigation is available.
+  - Otherwise `e S2` when Semantic Scholar is active.
+  - Otherwise `L relevance` when LLM scoring is configured.
+  - Otherwise `V versions` when starred papers exist.
+  - Otherwise `x star`.
 - Search footer should emphasize immediate flow:
   - `type to search`, `Enter apply`, `Esc close`, `↑↓ move`, `? help`.
 - API footer should emphasize mode exits and paging:
@@ -89,8 +94,8 @@ Small/Medium modals also cap at `max-width: 90%` for narrow-terminal safety. Lar
 - Ensure all key states remain readable with `--color never`.
 - Ensure status/list indicators remain readable with `--ascii`.
 - Keep color use semantic:
-- Accent for interactive controls and key hints.
-- Green/yellow/orange/pink for status meaning, not decoration.
+  - Accent for interactive controls and key hints.
+  - Green/yellow/orange/pink for status meaning, not decoration.
 
 ### ASCII Glyph Pattern
 
@@ -157,19 +162,30 @@ When adding any non-ASCII character to the UI, follow the established glyph-set 
 - Use a deterministic metadata-line budget of 78 visible characters in list rows.
 - When metadata overflows, drop lowest-priority trailing badges and append `+N` to show hidden items.
 - Preserve key metadata visibility under width pressure:
-- arXiv ID, category, and high-value badges (for example relevance/version).
+  - arXiv ID, category, and high-value badges (for example relevance/version).
 - In compact status mode, keep only immediate context:
-- primary count/query, API page/loading, selection count, sort, S2, HF.
+  - primary count/query, API page/loading, selection count, sort, S2, HF.
 - Compact token casing rules:
-- Use `API p<N> loading` for active API fetches.
-- Omit lower-priority compact tokens such as preview/version details.
+  - Use `API p<N> loading` for active API fetches.
+  - Omit lower-priority compact tokens such as preview/version details.
 - Visual status tokens:
-- Render enrichment progress, reading velocity, and category histogram only when the status bar has enough width.
-- Drop visual tokens before dropping core paper count, query/watch context, selection count, API page/loading, and sort context.
+  - Render enrichment progress, reading velocity, and category histogram only when the status bar has enough width.
+  - Drop visual tokens before dropping core paper count, query/watch context, selection count, API page/loading, and sort context.
 - Do not duplicate active progress text; when a visual token shows `Versions`, suppress the separate `Checking versions...` text.
 - Use Unicode sparklines/histograms by default and ASCII-safe ramps (`#`, `-`, punctuation) when ASCII mode is active.
 
-## 9. Help And Discoverability
+## 9. TUI Clarity Checklist
+
+Use this before changing visible TUI behavior:
+
+- **Primary task**: the current screen should make the next useful action obvious without showing the whole command surface.
+- **Footer**: keep browse mode to the fixed core hints plus one contextual slot; do not add a second row of shortcuts.
+- **Help overlay**: explain features with long-form names and keep the top `Getting Started` list aligned with README and the footer.
+- **Rows**: preserve title, authors, and highest-value badges before adding optional enrichment signals.
+- **State**: empty, loading, disabled, error, selected, detail-focus, and ASCII/no-color modes need explicit copy or non-color indicators.
+- **Verification**: cover changed footer/help/status/empty-state strings with tests and run a constrained-width layout check when the change affects scanning.
+
+## 10. Help And Discoverability
 
 ### Keybinding Tiers
 
@@ -190,7 +206,7 @@ Rules:
 ### General discoverability rules
 
 - Help overlay must include a top `Getting Started` section with the core flow:
-  - Search, move, select, open, command palette, full help.
+  - Scan, move, select, open/enrich, organize/export, command palette, full help.
 - Footer should prioritize immediate next actions for the current mode.
 - Modals should use consistent close/cancel hints:
   - `Close: Esc/q` for read-only views and `Cancel: Esc` for edit/confirm flows.
@@ -201,7 +217,7 @@ Rules:
 - Keep close instructions concise in modals (for example `Close: ? / Esc / q`).
 - Command palette must provide a clear empty-state message with next-step guidance.
 
-## 10. Keybinding Conventions
+## 11. Keybinding Conventions
 
 ### Shift-Key Mnemonic Pattern
 
@@ -253,7 +269,7 @@ When adding a new keybinding:
 4. **All keybindings must be discoverable** via the help overlay (`?`) and the command palette (`Ctrl+P`).
 5. **Check for conflicts** before assigning — the `APP_BINDINGS` list in `ui_constants.py` is the single source of truth.
 
-## 11. PR Checklist
+## 12. PR Checklist
 
 - [ ] New or changed UI copy uses the terminology canon.
 - [ ] `Ctrl+e` copy uses canonical browse/API wording.
@@ -269,7 +285,7 @@ When adding a new keybinding:
 - [ ] Tests cover changed help/footer/status/empty/error strings.
 - [ ] No keybinding behavior changed unless explicitly intended.
 
-## 12. UI Direction Options
+## 13. UI Direction Options
 
 ### Minimalist Direction (default)
 
@@ -284,7 +300,7 @@ When adding a new keybinding:
 - Keep advanced features visible in footer/status with short labels.
 - Tradeoff: Higher discoverability for power features, but denser visual load.
 
-## 13. User Theme Overrides (`user.tcss`)
+## 14. User Theme Overrides (`user.tcss`)
 
 Power users can layer their own Textual CSS on top of the embedded stylesheet
 by creating a `user.tcss` file next to `config.json` in the platform-specific

@@ -131,6 +131,7 @@ def action_edit_notes(app: "ArxivBrowser") -> None:
     all_tags = app._collect_all_tags()
 
     def on_edit_result(result: PaperEditResult | None) -> None:
+        """Persist notes and tags returned by the paper editor."""
         if result is None:
             return
         metadata = app._get_or_create_metadata(arxiv_id)
@@ -175,6 +176,7 @@ def action_edit_tags(app: "ArxivBrowser") -> None:
     all_tags = app._collect_all_tags()
 
     def on_edit_result(result: PaperEditResult | None) -> None:
+        """Persist tag-editor changes for the active paper."""
         if result is None:
             return
         metadata = app._get_or_create_metadata(arxiv_id)
@@ -217,6 +219,7 @@ def action_manage_watch_list(app: "ArxivBrowser") -> None:
     """Open the watch list manager."""
 
     def on_watch_list_updated(entries: list[WatchListEntry] | None) -> None:
+        """Save watch-list edits and refresh dependent UI state."""
         if entries is None:
             return
         old_entries = list(app._config.watch_list)

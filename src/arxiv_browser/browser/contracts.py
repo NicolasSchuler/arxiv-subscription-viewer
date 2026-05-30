@@ -30,6 +30,7 @@ class _PaletteAppState:
     hf_active: bool
     watch_filter_active: bool
     show_abstract_preview: bool
+    compact_list: bool
     detail_mode: str
     active_query: str
     has_history_files: bool
@@ -112,6 +113,7 @@ COMMAND_PALETTE_GROUPS: dict[str, str] = {
     "toggle_watch_filter": "Organize",
     "manage_watch_list": "Organize",
     "toggle_preview": "Advanced",
+    "toggle_compact_list": "Advanced",
     "export_menu": "Core",
     "export_metadata": "Advanced",
     "import_metadata": "Advanced",
@@ -168,6 +170,12 @@ def _palette_preview_copy(state: _PaletteAppState) -> tuple[str, str]:
     if state.show_abstract_preview:
         return "Hide Abstract Preview", "Return to a denser paper list without snippets"
     return "Show Abstract Preview", "Reveal abstract snippets in the paper list"
+
+
+def _palette_compact_list_copy(state: _PaletteAppState) -> tuple[str, str]:
+    if state.compact_list:
+        return "Show Full Rows", "Return to title, authors, and metadata per paper"
+    return "Compact List (Titles Only)", "Show one line per paper to skim more titles at once"
 
 
 def _palette_detail_mode_copy(state: _PaletteAppState) -> tuple[str, str]:
@@ -285,6 +293,12 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
     ),
     ("Manage Watch List", "Add/remove watch list patterns", "W", "manage_watch_list"),
     ("Show Abstract Preview", "Reveal abstract snippets in the paper list", "p", "toggle_preview"),
+    (
+        "Compact List (Titles Only)",
+        "Show one line per paper to skim more titles at once",
+        "z",
+        "toggle_compact_list",
+    ),
     ("Export Menu", "Export as BibTeX, Markdown, RIS, or CSV", "E", "export_menu"),
     ("Export Metadata", "Export all annotations to a JSON snapshot", "", "export_metadata"),
     ("Import Metadata", "Import annotations from a chosen JSON snapshot", "", "import_metadata"),

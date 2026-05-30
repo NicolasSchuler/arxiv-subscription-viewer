@@ -55,6 +55,14 @@ test-quick:
 contrast:
     uv run pytest tests/test_theme_contrast.py -q --no-cov
 
+# Check committed Textual SVG screenshots against deterministic baselines
+snapshots:
+    uv run python scripts/render_tui_snapshots.py
+
+# Regenerate Textual SVG screenshot baselines after visual inspection
+snapshots-update:
+    uv run python scripts/render_tui_snapshots.py --update
+
 # Run performance benchmarks
 bench:
     uv run pytest tests/test_benchmarks.py -v -m slow -s
@@ -88,8 +96,8 @@ deps-audit:
 
 # ── Composite targets ────────────────────────────────────────────────
 
-# Run all fast checks (docs drift + lint + types + tests)
-check: docs-check lint typecheck-all test quality-budget
+# Run all fast checks (docs drift + snapshots + lint + types + tests)
+check: docs-check snapshots lint typecheck-all test quality-budget
 
 # Run all checks including quality tools
 quality: check complexity security dead-code deps

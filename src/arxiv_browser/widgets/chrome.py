@@ -79,6 +79,9 @@ _FOOTER_ACTION_BY_KEY: dict[str, str] = {
     "d": "download_pdf",
     "v": "toggle_detail_mode",
     "Ctrl+d": "toggle_sections",
+    "e": "fetch_s2",
+    "L": "score_relevance",
+    "V": "check_versions",
     "?": "show_help",
     "Ctrl+p": "command_palette",
 }

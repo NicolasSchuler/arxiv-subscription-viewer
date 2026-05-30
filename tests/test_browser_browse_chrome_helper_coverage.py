@@ -845,6 +845,19 @@ class TestBrowserHelperCoverage:
         app._auto_tag_progress = (4, 6)
         assert app._status_enrichment_progress() == ("Auto-tag", 4, 6)
 
+    def test_compact_row_state_skips_abstract_preview_work(self, make_paper) -> None:
+        app, paper1, _paper2, _theme_runtime = self._build_chrome_state_app(make_paper)
+        app._compact_list = True
+        app._show_abstract_preview = True
+        app._get_abstract_text.reset_mock()
+
+        row_state = app._build_paper_row_state(paper1)
+
+        assert row_state.compact is True
+        assert row_state.show_preview is False
+        assert row_state.abstract_text is None
+        app._get_abstract_text.assert_not_called()
+
     def test_chrome_subtitle_header_and_save_config_paths(self, make_paper) -> None:
         app, paper1, _paper2, _theme_runtime = self._build_chrome_state_app(make_paper)
         app._get_current_index = MagicMock(return_value=0)

@@ -114,7 +114,9 @@ async def fetch_hf_daily_papers(
     client: httpx.AsyncClient,
     timeout: int = ...,
     include_status: Literal[False] = ...,
-) -> list[HuggingFacePaper]: ...
+) -> list[HuggingFacePaper]:
+    """Fetch HuggingFace daily papers without a completion flag."""
+    ...
 
 
 @overload
@@ -122,7 +124,9 @@ async def fetch_hf_daily_papers(
     client: httpx.AsyncClient,
     timeout: int = ...,
     include_status: Literal[True] = ...,
-) -> tuple[list[HuggingFacePaper], bool]: ...
+) -> tuple[list[HuggingFacePaper], bool]:
+    """Fetch HuggingFace daily papers with a completion status flag."""
+    ...
 
 
 async def fetch_hf_daily_papers(

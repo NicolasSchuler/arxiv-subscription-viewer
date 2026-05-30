@@ -167,7 +167,7 @@ APP_HORIZONTAL_BREAKPOINTS: list[tuple[int, str]] = [
 #   a  select all      u  clear selection  n  notes       t  tags
 #   T  quick triage
 #   c  copy            d  download         P  PDF         F  preview PDF
-#   I  preview figure
+#   I  preview figure  z  compact list
 #   v  detail mode     w  watch filter     W  watch list  A  API search
 #   y  read aloud      1-9  bookmarks      Ctrl+b  add bookmark
 #
@@ -228,6 +228,7 @@ APP_BINDINGS: list[BindingType] = [
     Binding("ctrl+shift+b", "remove_bookmark", "Del Bookmark", show=False),
     # Abstract preview
     Binding("p", "toggle_preview", "Preview", show=False),
+    Binding("z", "toggle_compact_list", "Compact List", show=False),
     Binding("v", "toggle_detail_mode", "Detail Mode", show=False),
     Binding("y", "read_abstract_aloud", "Read Abstract", show=False),
     # Vim-style marks

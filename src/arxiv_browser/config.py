@@ -96,6 +96,7 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
     return {
         "version": config.version,
         "show_abstract_preview": config.show_abstract_preview,
+        "compact_list": config.compact_list,
         "detail_mode": config.detail_mode,
         "bibtex_export_dir": config.bibtex_export_dir,
         "pdf_download_dir": config.pdf_download_dir,
@@ -570,6 +571,7 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         marks=marks,
         session=_parse_session_state(data),
         show_abstract_preview=_safe_get(data, "show_abstract_preview", False, bool),
+        compact_list=_safe_get(data, "compact_list", False, bool),
         detail_mode=_coerce_detail_mode(data.get("detail_mode")),
         bibtex_export_dir=_safe_get(data, "bibtex_export_dir", "", str),
         pdf_download_dir=_safe_get(data, "pdf_download_dir", "", str),

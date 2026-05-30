@@ -200,8 +200,12 @@ def build_browse_footer_bindings(
     has_history_navigation: bool,
 ) -> list[tuple[str, str]]:
     """Build the default browsing footer with deterministic priority."""
-    _ = (s2_active, has_starred, llm_configured)
-    slot_a = ("[/]", "dates") if has_history_navigation else ("n", "notes")
+    slot_a = _browse_context_slot(
+        s2_active=s2_active,
+        has_starred=has_starred,
+        llm_configured=llm_configured,
+        has_history_navigation=has_history_navigation,
+    )
     return [
         ("/", "search"),
         ("Space", "select"),
@@ -213,6 +217,29 @@ def build_browse_footer_bindings(
         ("Ctrl+p", "commands"),
         ("?", "help"),
     ]
+
+
+def _browse_context_slot(
+    *,
+    s2_active: bool,
+    has_starred: bool,
+    llm_configured: bool,
+    has_history_navigation: bool,
+) -> tuple[str, str]:
+    """Return the single contextual default-footer slot.
+
+    Keep the default footer capped and predictable: core workflow hints stay
+    fixed, while one slot surfaces the best next action for the current mode.
+    """
+    if has_history_navigation:
+        return ("[/]", "dates")
+    if s2_active:
+        return ("e", "S2")
+    if llm_configured:
+        return ("L", "relevance")
+    if has_starred:
+        return ("V", "versions")
+    return ("x", "star")
 
 
 def build_footer_mode_badge(

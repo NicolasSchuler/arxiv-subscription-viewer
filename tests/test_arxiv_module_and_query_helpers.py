@@ -168,9 +168,9 @@ class TestStatusFilterRegressions:
         assert ("Space", "Select current paper") in getting_started_entries
         assert ("A", "Search all arXiv") in getting_started_entries
         assert ("E", "Export current or selected papers") in getting_started_entries
-        assert ("Ctrl+p", "Open commands") in getting_started_entries
+        assert ("Ctrl+p", "Open command palette") in getting_started_entries
         assert ("[ / ]", "Change dates (history mode)") in getting_started_entries
-        assert ("?", "Show full shortcuts") in getting_started_entries
+        assert ("?", "Show help overlay") in getting_started_entries
 
     def test_binding_labels_use_long_form_naming(self):
         """Binding descriptions should use long-form action names."""

@@ -58,6 +58,7 @@ class TrendRadarModal(ModalBase[None]):
         self._report = report
 
     def compose(self) -> ComposeResult:
+        """Compose the trend-radar dialog."""
         with Vertical(id="trend-radar-dialog"):
             yield Label("Trend Radar", id="trend-radar-title")
             yield Static(_render_trend_report(self._report), id="trend-radar-body")
@@ -118,12 +119,14 @@ class AuthorPickerModal(ModalBase[str | None]):
         self._title = title
 
     def compose(self) -> ComposeResult:
+        """Compose the author picker dialog."""
         with Vertical(id="author-picker-dialog"):
             yield Label(self._title, id="author-picker-title")
             yield ListView(id="author-picker-list")
             yield Static("Enter choose | Esc/q cancel", id="author-picker-footer")
 
     def on_mount(self) -> None:
+        """Populate and focus the author list after mount."""
         list_view = self.query_one("#author-picker-list", ListView)
         for author in self._authors:
             list_view.mount(AuthorListItem(author, Label(escape_rich_text(author))))
@@ -132,6 +135,7 @@ class AuthorPickerModal(ModalBase[str | None]):
             list_view.focus()
 
     def action_choose(self) -> None:
+        """Dismiss with the highlighted author."""
         list_view = self.query_one("#author-picker-list", ListView)
         item = list_view.highlighted_child
         if isinstance(item, AuthorListItem):
@@ -139,6 +143,7 @@ class AuthorPickerModal(ModalBase[str | None]):
 
     @on(ListView.Selected, "#author-picker-list")
     def on_author_selected(self, event: ListView.Selected) -> None:
+        """Dismiss when an author row is selected."""
         if isinstance(event.item, AuthorListItem):
             self.dismiss(event.item.author)
 
@@ -187,6 +192,7 @@ class AuthorProfileModal(ModalBase[None]):
         self._profile = profile
 
     def compose(self) -> ComposeResult:
+        """Compose the author-profile dialog."""
         with Vertical(id="author-profile-dialog"):
             yield Label(f"Author Profile: {self._profile.author}", id="author-profile-title")
             yield Static(_render_author_profile(self._profile), id="author-profile-body")

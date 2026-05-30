@@ -22,6 +22,7 @@ from arxiv_browser.browser.contracts import (
     TARGET_PAPER_PALETTE_ACTIONS,
     _first_failed_palette_requirement,
     _palette_blocked_copy,
+    _palette_compact_list_copy,
     _palette_ctrl_e_copy,
     _palette_detail_mode_copy,
     _palette_hf_copy,
@@ -223,6 +224,8 @@ class DetailPaneMixin(DetailAnnotationMixin):
         """Build the list-row render state for one visible paper."""
         aid = paper.arxiv_id
         theme_runtime = self._resolved_theme_runtime()
+        compact = getattr(self, "_compact_list", False)
+        show_preview = self._show_abstract_preview and not compact
         meta_line_budget = 78
         try:
             list_width = getattr(self._get_paper_list_widget().size, "width", 0)
@@ -235,8 +238,11 @@ class DetailPaneMixin(DetailAnnotationMixin):
             selected=aid in self.selected_ids,
             metadata=self._config.paper_metadata.get(aid),
             watched=aid in self._watched_paper_ids,
-            show_preview=self._show_abstract_preview,
-            abstract_text=self._get_abstract_text(paper, allow_async=self._show_abstract_preview),
+            show_preview=show_preview,
+            compact=compact,
+            abstract_text=(
+                self._get_abstract_text(paper, allow_async=show_preview) if show_preview else None
+            ),
             highlight_terms=PaperHighlightTerms(
                 title=tuple(self._highlight_terms.get("title", [])),
                 author=tuple(self._highlight_terms.get("author", [])),
@@ -640,6 +646,7 @@ class DetailPaneMixin(DetailAnnotationMixin):
             hf_active=bool(getattr(self, "_hf_active", False)),
             watch_filter_active=bool(getattr(self, "_watch_filter_active", False)),
             show_abstract_preview=bool(getattr(config, "show_abstract_preview", False)),
+            compact_list=bool(getattr(config, "compact_list", False)),
             detail_mode=getattr(self, "_detail_mode", "scan"),
             active_query=self._get_active_query(),
             has_history_files=bool(history_files),
@@ -690,6 +697,8 @@ class DetailPaneMixin(DetailAnnotationMixin):
             return "Show All Papers", "Return to the full paper list"
         if action_name == "toggle_preview":
             return _palette_preview_copy(state)
+        if action_name == "toggle_compact_list":
+            return _palette_compact_list_copy(state)
         if action_name == "toggle_detail_mode":
             return _palette_detail_mode_copy(state)
         return name, description

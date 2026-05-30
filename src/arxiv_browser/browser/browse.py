@@ -672,6 +672,7 @@ class BrowseMixin:
         target_ids = set(self.selected_ids)
 
         def on_bulk_tags_saved(result: PaperEditResult | None) -> None:
+            """Apply bulk tag additions/removals to the selected papers."""
             if result is None:
                 return
             tags = result.tags
@@ -756,6 +757,13 @@ class BrowseMixin:
         self._config.show_abstract_preview = self._show_abstract_preview
         status = "on" if self._show_abstract_preview else "off"
         self.notify(f"Abstract preview {status}", title="Preview")
+
+    def action_toggle_compact_list(self) -> None:
+        """Toggle compact (titles-only) list density for fast skimming."""
+        self._compact_list = not self._compact_list
+        self._config.compact_list = self._compact_list
+        self._save_config_or_warn("compact list preference")
+        self.notify(f"Compact list {'on' if self._compact_list else 'off'}", title="Density")
 
     def action_toggle_detail_mode(self) -> None:
         """Toggle the detail pane between scan and full reading modes."""

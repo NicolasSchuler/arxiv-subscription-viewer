@@ -388,7 +388,9 @@ async def fetch_conference_deadlines(
     source_url: str = ...,
     timeout: int = ...,
     include_status: Literal[False] = ...,
-) -> list[ConferenceDeadline]: ...
+) -> list[ConferenceDeadline]:
+    """Fetch conference deadlines and return parsed entries."""
+    ...
 
 
 @overload
@@ -397,7 +399,9 @@ async def fetch_conference_deadlines(
     source_url: str = ...,
     timeout: int = ...,
     include_status: Literal[True] = ...,
-) -> tuple[list[ConferenceDeadline], bool]: ...
+) -> tuple[list[ConferenceDeadline], bool]:
+    """Fetch conference deadlines with a completion status flag."""
+    ...
 
 
 async def fetch_conference_deadlines(

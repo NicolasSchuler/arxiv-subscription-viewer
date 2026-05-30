@@ -287,6 +287,7 @@ def _list_metadata_snapshots(export_dir: Path) -> list[Path]:
     """Return metadata snapshots newest-first by modified time."""
 
     def sort_key(path: Path) -> tuple[float, str]:
+        """Sort metadata snapshots by mtime and filename."""
         try:
             modified = path.stat().st_mtime
         except OSError:

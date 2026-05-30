@@ -59,9 +59,11 @@ class FastEmbedBackend:
             raise EmbeddingBackendUnavailable(f"FastEmbed model unavailable: {exc}") from exc
 
     async def encode_documents(self, texts: Sequence[str], *, batch_size: int) -> list[list[float]]:
+        """Encode document texts with FastEmbed in a worker thread."""
         return await asyncio.to_thread(self._encode_documents_sync, list(texts), batch_size)
 
     async def encode_query(self, text: str) -> list[float]:
+        """Encode one query with FastEmbed in a worker thread."""
         return await asyncio.to_thread(self._encode_query_sync, text)
 
     def _encode_documents_sync(self, texts: list[str], batch_size: int) -> list[list[float]]:
@@ -95,6 +97,7 @@ class SentenceTransformersBackend:
             ) from exc
 
     async def encode_documents(self, texts: Sequence[str], *, batch_size: int) -> list[list[float]]:
+        """Encode document texts with sentence-transformers."""
         return await asyncio.to_thread(
             self._encode_sync,
             list(texts),
@@ -103,6 +106,7 @@ class SentenceTransformersBackend:
         )
 
     async def encode_query(self, text: str) -> list[float]:
+        """Encode one query with sentence-transformers."""
         vectors = await asyncio.to_thread(self._encode_sync, [text], 1, True)
         return vectors[0] if vectors else []
 
@@ -131,12 +135,14 @@ class HttpEmbeddingBackend:
         self._api_key = api_key.strip()
 
     async def encode_documents(self, texts: Sequence[str], *, batch_size: int) -> list[list[float]]:
+        """Encode document texts through the HTTP embeddings endpoint."""
         vectors: list[list[float]] = []
         for start in range(0, len(texts), batch_size):
             vectors.extend(await self._request_embeddings(list(texts[start : start + batch_size])))
         return vectors
 
     async def encode_query(self, text: str) -> list[float]:
+        """Encode one query through the HTTP embeddings endpoint."""
         vectors = await self._request_embeddings([text])
         return vectors[0] if vectors else []
 
