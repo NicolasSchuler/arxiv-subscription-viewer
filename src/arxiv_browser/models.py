@@ -293,6 +293,7 @@ class UserConfig:
     category_colors: dict[str, str] = field(default_factory=dict)
     theme: dict[str, str] = field(default_factory=dict)
     theme_name: str = "monokai"
+    custom_themes: dict[str, dict[str, str]] = field(default_factory=dict)
     llm_command: str = ""  # Shell command template, e.g. 'claude -p {prompt}'
     llm_prompt_template: str = ""  # Empty = use DEFAULT_LLM_PROMPT
     llm_phd_explainer_field: str = "physics"  # Target field for cross-field PhD summaries
@@ -339,6 +340,24 @@ class UserConfig:
     onboarding_seen: bool = False  # True after user has dismissed the first-run help overlay
     last_seen_whats_new: str = ""  # Tag of the last What's New notes the user dismissed
     config_defaulted: bool = False  # True when config was corrupt and defaults were used
+
+    @staticmethod
+    def parse_custom_themes(raw: object) -> dict[str, dict[str, str]]:
+        """Return a sanitized custom theme registry from untrusted config data."""
+        if not isinstance(raw, dict):
+            return {}
+        themes: dict[str, dict[str, str]] = {}
+        for name, palette in raw.items():
+            if not isinstance(name, str) or not name.strip() or not isinstance(palette, dict):
+                continue
+            colors = {
+                color_key: color_value
+                for color_key, color_value in palette.items()
+                if isinstance(color_key, str) and isinstance(color_value, str)
+            }
+            if colors:
+                themes[name] = colors
+        return themes
 
 
 @dataclass(slots=True)

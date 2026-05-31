@@ -616,7 +616,7 @@ class TestUiActionCoverage:
 
         app._config.theme_name = "not-a-theme"
         ui_actions.action_cycle_theme(app)
-        assert app._config.theme_name in ui_actions.THEME_NAMES
+        assert app._config.theme_name in ui_actions.available_theme_names(app._config.custom_themes)
         assert app._save_config_or_warn.call_args.args[0] == "theme preference"
 
     def test_theme_cycle_clears_runtime_override(self) -> None:
@@ -636,11 +636,34 @@ class TestUiActionCoverage:
 
         ui_actions.action_cycle_theme(app)
 
-        expected_index = (ui_actions.THEME_NAMES.index("high-contrast") + 1) % len(
-            ui_actions.THEME_NAMES
-        )
+        theme_names = ui_actions.available_theme_names(app._config.custom_themes)
+        expected_index = (theme_names.index("high-contrast") + 1) % len(theme_names)
         assert app._theme_override is None
-        assert app._config.theme_name == ui_actions.THEME_NAMES[expected_index]
+        assert app._config.theme_name == theme_names[expected_index]
+        app._save_config_or_warn.assert_called_once_with("theme preference")
+
+    def test_theme_cycle_includes_custom_themes(self) -> None:
+        app = _new_app_stub()
+        theme_names = ui_actions.available_theme_names({"paper-night": {"accent": "#7dcfff"}})
+        app._config = _make_app_config(
+            theme_name=theme_names[-2],
+            custom_themes={"paper-night": {"accent": "#7dcfff"}},
+        )
+        app._theme_override = None
+        app._apply_theme_overrides = MagicMock()
+        app._apply_category_overrides = MagicMock()
+        app._refresh_list_view = MagicMock()
+        app._refresh_detail_pane = MagicMock()
+        app._update_status_bar = MagicMock()
+        app._save_config_or_warn = MagicMock()
+        app._get_paper_details_widget = MagicMock(
+            return_value=SimpleNamespace(clear_cache=MagicMock())
+        )
+        app.notify = MagicMock()
+
+        ui_actions.action_cycle_theme(app)
+
+        assert app._config.theme_name == "paper-night"
         app._save_config_or_warn.assert_called_once_with("theme preference")
 
     @pytest.mark.asyncio
@@ -764,7 +787,7 @@ class TestUiActionCoverage:
         app.notify.assert_not_called()
 
         ui_actions.action_cycle_theme(app)
-        assert app._config.theme_name in ui_actions.THEME_NAMES
+        assert app._config.theme_name in ui_actions.available_theme_names(app._config.custom_themes)
         app._refresh_list_view.assert_called_once()
         app._refresh_detail_pane.assert_called_once()
         app._save_config_or_warn.assert_called_once_with("theme preference")

@@ -362,7 +362,7 @@ class TestTextualThemes:
         from arxiv_browser.themes import TEXTUAL_THEMES
 
         theme_names = list(TEXTUAL_THEMES.keys())
-        assert len(theme_names) == 5
+        assert len(theme_names) == len(THEME_NAMES)
         keys_0 = set(TEXTUAL_THEMES[theme_names[0]].variables.keys())
         for name in theme_names[1:]:
             assert set(TEXTUAL_THEMES[name].variables.keys()) == keys_0

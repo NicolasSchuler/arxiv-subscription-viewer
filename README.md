@@ -99,7 +99,7 @@ python -m arxiv_browser --version
 
 > `history/` setup details live in [docs/history-mode.md](docs/history-mode.md).
 >
-> Global options: `--version` · `--debug` (log to file) · `--ascii` (ASCII-only icons) · `--color auto|always|never` · `--no-color` · `--theme {monokai|catppuccin-mocha|solarized-dark|solarized-light|high-contrast}`
+> Global options: `--version` · `--debug` (log to file) · `--ascii` (ASCII-only icons) · `--color auto|always|never` · `--no-color` · `--theme NAME` (built-in or `custom_themes` entry)
 >
 > Debug log paths: `~/.config/arxiv-browser/debug.log` (Linux) · `~/Library/Application Support/arxiv-browser/debug.log` (macOS) · `%APPDATA%/arxiv-browser/debug.log` (Windows)
 

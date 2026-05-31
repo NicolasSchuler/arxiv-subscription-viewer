@@ -5,8 +5,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import pytest
-
 from arxiv_browser.cli import CliDependencies, _build_cli_parser, _normalize_cli_argv, main
 from arxiv_browser.models import UserConfig
 from arxiv_browser.themes import THEME_NAMES
@@ -19,10 +17,10 @@ def test_theme_flag_accepts_each_known_theme() -> None:
         assert args.theme == name
 
 
-def test_theme_flag_rejects_unknown_theme() -> None:
+def test_theme_flag_accepts_custom_theme_name() -> None:
     parser = _build_cli_parser()
-    with pytest.raises(SystemExit):
-        parser.parse_args(["--theme", "does-not-exist"])
+    args = parser.parse_args(["--theme", "paper-night"])
+    assert args.theme == "paper-night"
 
 
 def test_theme_flag_defaults_to_none() -> None:

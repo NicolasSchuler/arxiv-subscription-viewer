@@ -206,9 +206,12 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--theme",
-        choices=sorted(THEME_NAMES),
         default=None,
-        help=("Override the UI color theme for this session (does not persist to config)"),
+        metavar="NAME",
+        help=(
+            "Override the UI color theme for this session; accepts built-ins "
+            f"({', '.join(sorted(THEME_NAMES))}) or a custom_themes entry"
+        ),
     )
 
     subparsers = parser.add_subparsers(dest="command", metavar="command")

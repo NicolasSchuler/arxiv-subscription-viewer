@@ -717,6 +717,61 @@ class TestThemeSwitcher:
         app._apply_theme_overrides()
         assert app._theme_runtime.colors["accent"] == DEFAULT_THEME["accent"]
 
+    def test_custom_theme_roundtrip(self):
+        from arxiv_browser.config import (
+            _config_to_dict,
+            _dict_to_config,
+        )
+
+        config = UserConfig(
+            theme_name="paper-night",
+            custom_themes={"paper-night": {"background": "#11131a", "accent": "#7dcfff"}},
+        )
+        data = _config_to_dict(config)
+        assert data["custom_themes"] == config.custom_themes
+        restored = _dict_to_config(data)
+        assert restored.theme_name == "paper-night"
+        assert restored.custom_themes == config.custom_themes
+
+    def test_custom_theme_filters_non_string_entries(self):
+        from arxiv_browser.config import _dict_to_config
+
+        config = _dict_to_config(
+            {
+                "custom_themes": {
+                    "paper-night": {"accent": "#7dcfff", "ignored": 1},
+                    2: {"accent": "#000000"},
+                    "empty": {},
+                    "bad": "not-a-palette",
+                }
+            }
+        )
+        assert config.custom_themes == {"paper-night": {"accent": "#7dcfff"}}
+
+    def test_custom_theme_layers_on_default_palette(self):
+        from arxiv_browser.browser.core import ArxivBrowser
+        from arxiv_browser.themes import DEFAULT_THEME
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        app._config = UserConfig(
+            theme_name="paper-night",
+            custom_themes={"paper-night": {"background": "#11131a", "accent": "#7dcfff"}},
+        )
+        app._http_client = None
+        app._apply_theme_overrides()
+
+        assert app._theme_runtime.colors["background"] == "#11131a"
+        assert app._theme_runtime.colors["accent"] == "#7dcfff"
+        assert app._theme_runtime.colors["green"] == DEFAULT_THEME["green"]
+
+    def test_available_theme_names_include_custom_names_after_builtins(self):
+        from arxiv_browser.themes import THEME_NAMES as APP_THEME_NAMES
+        from arxiv_browser.themes import available_theme_names
+
+        names = available_theme_names({"paper-night": {"accent": "#7dcfff"}})
+        assert names[: len(APP_THEME_NAMES)] == APP_THEME_NAMES
+        assert names[-1] == "paper-night"
+
     def test_category_overrides_rebuild_current_theme(self):
         from arxiv_browser.browser.core import ArxivBrowser
         from arxiv_browser.themes import SOLARIZED_DARK_THEME
@@ -1003,15 +1058,21 @@ class TestSolarizedDarkTheme:
         assert SOLARIZED_DARK_THEME["green"] == "#859900"
         assert SOLARIZED_DARK_THEME["pink"] == "#e85da0"  # WCAG AA adjusted
 
-    def test_four_themes_in_cycle(self):
+    def test_theme_cycle_has_expanded_builtin_choices(self):
         from arxiv_browser.themes import THEME_NAMES as APP_THEME_NAMES
 
-        assert len(APP_THEME_NAMES) == 5
+        assert len(APP_THEME_NAMES) == 11
         assert "monokai" in APP_THEME_NAMES
         assert "catppuccin-mocha" in APP_THEME_NAMES
         assert "solarized-dark" in APP_THEME_NAMES
         assert "solarized-light" in APP_THEME_NAMES
         assert "high-contrast" in APP_THEME_NAMES
+        assert "dracula" in APP_THEME_NAMES
+        assert "nord" in APP_THEME_NAMES
+        assert "gruvbox-dark" in APP_THEME_NAMES
+        assert "tokyo-night" in APP_THEME_NAMES
+        assert "everforest-dark" in APP_THEME_NAMES
+        assert "github-light" in APP_THEME_NAMES
 
     def test_solarized_light_theme_exists(self):
         from arxiv_browser.themes import SOLARIZED_LIGHT_THEME

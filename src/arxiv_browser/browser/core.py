@@ -466,6 +466,7 @@ class ArxivBrowser(
             self._effective_theme_name(),
             theme_overrides=config.theme,
             category_overrides=config.category_colors,
+            custom_themes=config.custom_themes,
         )
         self._theme_runtime = runtime
         return runtime

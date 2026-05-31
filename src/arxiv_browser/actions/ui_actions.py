@@ -51,7 +51,7 @@ from arxiv_browser.similarity import (
     build_similarity_corpus_key,
     find_serendipitous_papers,
 )
-from arxiv_browser.themes import THEME_NAMES
+from arxiv_browser.themes import available_theme_names
 from arxiv_browser.trend_radar import build_trend_report
 
 if TYPE_CHECKING:
@@ -824,13 +824,14 @@ async def _show_citation_graph_worker(
 
 def action_cycle_theme(app: "ArxivBrowser") -> None:
     """Cycle through available color themes."""
+    theme_names = available_theme_names(app._config.custom_themes)
     current = app._effective_theme_name()
     try:
-        idx = THEME_NAMES.index(current)
+        idx = theme_names.index(current)
     except ValueError:
         idx = 0
-    next_idx = (idx + 1) % len(THEME_NAMES)
-    next_theme = THEME_NAMES[next_idx]
+    next_idx = (idx + 1) % len(theme_names)
+    next_theme = theme_names[next_idx]
     app._theme_override = None
     app._config.theme_name = next_theme
     app._apply_theme_overrides()

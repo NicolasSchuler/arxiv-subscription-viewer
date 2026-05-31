@@ -162,14 +162,192 @@ HIGH_CONTRAST_THEME: dict[str, str] = {
     "scrollbar_corner_color": "#1a1a1a",
 }
 
+DRACULA_THEME: dict[str, str] = {
+    "background": "#282a36",
+    "panel": "#21222c",
+    "panel_alt": "#343746",
+    "border": "#6272a4",
+    "text": "#f8f8f2",
+    "muted": "#c0c4df",
+    "accent": "#8be9fd",
+    "accent_alt": "#f1fa8c",
+    "green": "#50fa7b",
+    "yellow": "#f1fa8c",
+    "orange": "#ffb86c",
+    "pink": "#ff79c6",
+    "purple": "#bd93f9",
+    "highlight": "#343746",
+    "highlight_focus": "#44475a",
+    "selection": "#3d4658",
+    "selection_highlight": "#4a5568",
+    "scrollbar_background": "#343746",
+    "scrollbar_background_hover": "#44475a",
+    "scrollbar_background_active": "#6272a4",
+    "scrollbar": "#6272a4",
+    "scrollbar_active": "#8be9fd",
+    "scrollbar_hover": "#c0c4df",
+    "scrollbar_corner_color": "#343746",
+}
+
+NORD_THEME: dict[str, str] = {
+    "background": "#2e3440",
+    "panel": "#242933",
+    "panel_alt": "#3b4252",
+    "border": "#6d788c",
+    "text": "#eceff4",
+    "muted": "#d8dee9",
+    "accent": "#88c0d0",
+    "accent_alt": "#ebcb8b",
+    "green": "#a3be8c",
+    "yellow": "#ebcb8b",
+    "orange": "#d79784",
+    "pink": "#d687b7",
+    "purple": "#c39ac4",
+    "highlight": "#3b4252",
+    "highlight_focus": "#4c566a",
+    "selection": "#374456",
+    "selection_highlight": "#45566e",
+    "scrollbar_background": "#3b4252",
+    "scrollbar_background_hover": "#4c566a",
+    "scrollbar_background_active": "#5e6a7d",
+    "scrollbar": "#6d788c",
+    "scrollbar_active": "#88c0d0",
+    "scrollbar_hover": "#d8dee9",
+    "scrollbar_corner_color": "#3b4252",
+}
+
+GRUVBOX_DARK_THEME: dict[str, str] = {
+    "background": "#282828",
+    "panel": "#1d2021",
+    "panel_alt": "#3c3836",
+    "border": "#7c6f64",
+    "text": "#ebdbb2",
+    "muted": "#d5c4a1",
+    "accent": "#83a598",
+    "accent_alt": "#fabd2f",
+    "green": "#b8bb26",
+    "yellow": "#fabd2f",
+    "orange": "#fe8019",
+    "pink": "#fb6a55",
+    "purple": "#d3869b",
+    "highlight": "#3c3836",
+    "highlight_focus": "#504945",
+    "selection": "#3f4f24",
+    "selection_highlight": "#505f2e",
+    "scrollbar_background": "#3c3836",
+    "scrollbar_background_hover": "#504945",
+    "scrollbar_background_active": "#665c54",
+    "scrollbar": "#7c6f64",
+    "scrollbar_active": "#83a598",
+    "scrollbar_hover": "#d5c4a1",
+    "scrollbar_corner_color": "#3c3836",
+}
+
+TOKYO_NIGHT_THEME: dict[str, str] = {
+    "background": "#1a1b26",
+    "panel": "#16161e",
+    "panel_alt": "#24283b",
+    "border": "#565f89",
+    "text": "#c0caf5",
+    "muted": "#a9b1d6",
+    "accent": "#7dcfff",
+    "accent_alt": "#e0af68",
+    "green": "#9ece6a",
+    "yellow": "#e0af68",
+    "orange": "#ff9e64",
+    "pink": "#f7768e",
+    "purple": "#bb9af7",
+    "highlight": "#24283b",
+    "highlight_focus": "#414868",
+    "selection": "#283457",
+    "selection_highlight": "#35436b",
+    "scrollbar_background": "#24283b",
+    "scrollbar_background_hover": "#414868",
+    "scrollbar_background_active": "#565f89",
+    "scrollbar": "#565f89",
+    "scrollbar_active": "#7dcfff",
+    "scrollbar_hover": "#a9b1d6",
+    "scrollbar_corner_color": "#24283b",
+}
+
+EVERFOREST_DARK_THEME: dict[str, str] = {
+    "background": "#2d353b",
+    "panel": "#232a2e",
+    "panel_alt": "#343f44",
+    "border": "#859289",
+    "text": "#d3c6aa",
+    "muted": "#c0b999",
+    "accent": "#7fbbb3",
+    "accent_alt": "#dbbc7f",
+    "green": "#a7c080",
+    "yellow": "#dbbc7f",
+    "orange": "#e69875",
+    "pink": "#e67e80",
+    "purple": "#d699b6",
+    "highlight": "#343f44",
+    "highlight_focus": "#475258",
+    "selection": "#3f4f3c",
+    "selection_highlight": "#4d6048",
+    "scrollbar_background": "#343f44",
+    "scrollbar_background_hover": "#475258",
+    "scrollbar_background_active": "#5b686d",
+    "scrollbar": "#859289",
+    "scrollbar_active": "#7fbbb3",
+    "scrollbar_hover": "#c0b999",
+    "scrollbar_corner_color": "#343f44",
+}
+
+GITHUB_LIGHT_THEME: dict[str, str] = {
+    "background": "#ffffff",
+    "panel": "#f6f8fa",
+    "panel_alt": "#eaeef2",
+    "border": "#8c959f",
+    "text": "#24292f",
+    "muted": "#57606a",
+    "accent": "#0969da",
+    "accent_alt": "#8250df",
+    "green": "#1a7f37",
+    "yellow": "#7d4e00",
+    "orange": "#bc4c00",
+    "pink": "#bf3989",
+    "purple": "#8250df",
+    "highlight": "#eaeef2",
+    "highlight_focus": "#d0d7de",
+    "selection": "#ddf4ff",
+    "selection_highlight": "#b6e3ff",
+    "scrollbar_background": "#eaeef2",
+    "scrollbar_background_hover": "#d0d7de",
+    "scrollbar_background_active": "#afb8c1",
+    "scrollbar": "#8c959f",
+    "scrollbar_active": "#0969da",
+    "scrollbar_hover": "#57606a",
+    "scrollbar_corner_color": "#eaeef2",
+}
+
 THEMES: dict[str, dict[str, str]] = {
     "monokai": DEFAULT_THEME,
     "catppuccin-mocha": CATPPUCCIN_MOCHA_THEME,
     "solarized-dark": SOLARIZED_DARK_THEME,
     "solarized-light": SOLARIZED_LIGHT_THEME,
     "high-contrast": HIGH_CONTRAST_THEME,
+    "dracula": DRACULA_THEME,
+    "nord": NORD_THEME,
+    "gruvbox-dark": GRUVBOX_DARK_THEME,
+    "tokyo-night": TOKYO_NIGHT_THEME,
+    "everforest-dark": EVERFOREST_DARK_THEME,
+    "github-light": GITHUB_LIGHT_THEME,
 }
 THEME_NAMES: list[str] = list(THEMES.keys())
+
+
+def available_theme_names(
+    custom_themes: Mapping[str, Mapping[str, str]] | None = None,
+) -> list[str]:
+    """Return built-in theme names plus user-defined theme names for cycling."""
+    names = list(THEME_NAMES)
+    if custom_themes:
+        names.extend(sorted(name for name in custom_themes if name not in THEMES))
+    return names
 
 
 def _build_textual_theme(name: str, colors: dict[str, str]) -> TextualTheme:
@@ -270,6 +448,78 @@ THEME_CATEGORY_COLORS: dict[str, dict[str, str]] = {
         "cs.IR": "#b4a7ff",  # purple (WCAG AAA)
         "cs.CR": "#ffaa44",  # orange (WCAG AAA)
     },
+    "dracula": {
+        "cs.AI": "#ff79c6",
+        "cs.CL": "#8be9fd",
+        "cs.LG": "#50fa7b",
+        "cs.CV": "#f1fa8c",
+        "cs.SE": "#bd93f9",
+        "cs.HC": "#ffb86c",
+        "cs.RO": "#8be9fd",
+        "cs.NE": "#ff79c6",
+        "cs.IR": "#bd93f9",
+        "cs.CR": "#ffb86c",
+    },
+    "nord": {
+        "cs.AI": "#d687b7",
+        "cs.CL": "#88c0d0",
+        "cs.LG": "#a3be8c",
+        "cs.CV": "#ebcb8b",
+        "cs.SE": "#c39ac4",
+        "cs.HC": "#d79784",
+        "cs.RO": "#88c0d0",
+        "cs.NE": "#d687b7",
+        "cs.IR": "#c39ac4",
+        "cs.CR": "#d79784",
+    },
+    "gruvbox-dark": {
+        "cs.AI": "#fb6a55",
+        "cs.CL": "#83a598",
+        "cs.LG": "#b8bb26",
+        "cs.CV": "#fabd2f",
+        "cs.SE": "#d3869b",
+        "cs.HC": "#fe8019",
+        "cs.RO": "#83a598",
+        "cs.NE": "#fb6a55",
+        "cs.IR": "#d3869b",
+        "cs.CR": "#fe8019",
+    },
+    "tokyo-night": {
+        "cs.AI": "#f7768e",
+        "cs.CL": "#7dcfff",
+        "cs.LG": "#9ece6a",
+        "cs.CV": "#e0af68",
+        "cs.SE": "#bb9af7",
+        "cs.HC": "#ff9e64",
+        "cs.RO": "#7dcfff",
+        "cs.NE": "#f7768e",
+        "cs.IR": "#bb9af7",
+        "cs.CR": "#ff9e64",
+    },
+    "everforest-dark": {
+        "cs.AI": "#e67e80",
+        "cs.CL": "#7fbbb3",
+        "cs.LG": "#a7c080",
+        "cs.CV": "#dbbc7f",
+        "cs.SE": "#d699b6",
+        "cs.HC": "#e69875",
+        "cs.RO": "#7fbbb3",
+        "cs.NE": "#e67e80",
+        "cs.IR": "#d699b6",
+        "cs.CR": "#e69875",
+    },
+    "github-light": {
+        "cs.AI": "#bf3989",
+        "cs.CL": "#0969da",
+        "cs.LG": "#1a7f37",
+        "cs.CV": "#7d4e00",
+        "cs.SE": "#8250df",
+        "cs.HC": "#bc4c00",
+        "cs.RO": "#0969da",
+        "cs.NE": "#bf3989",
+        "cs.IR": "#8250df",
+        "cs.CR": "#bc4c00",
+    },
 }
 
 # Per-theme tag namespace colors
@@ -302,6 +552,48 @@ THEME_TAG_NAMESPACE_COLORS: dict[str, dict[str, str]] = {
         "method": "#b4a7ff",  # WCAG AAA
         "priority": "#ff7ab2",  # WCAG AAA
     },
+    "dracula": {
+        "topic": "#8be9fd",
+        "status": "#50fa7b",
+        "project": "#ffb86c",
+        "method": "#bd93f9",
+        "priority": "#ff79c6",
+    },
+    "nord": {
+        "topic": "#88c0d0",
+        "status": "#a3be8c",
+        "project": "#d79784",
+        "method": "#c39ac4",
+        "priority": "#d687b7",
+    },
+    "gruvbox-dark": {
+        "topic": "#83a598",
+        "status": "#b8bb26",
+        "project": "#fe8019",
+        "method": "#d3869b",
+        "priority": "#fb6a55",
+    },
+    "tokyo-night": {
+        "topic": "#7dcfff",
+        "status": "#9ece6a",
+        "project": "#ff9e64",
+        "method": "#bb9af7",
+        "priority": "#f7768e",
+    },
+    "everforest-dark": {
+        "topic": "#7fbbb3",
+        "status": "#a7c080",
+        "project": "#e69875",
+        "method": "#d699b6",
+        "priority": "#e67e80",
+    },
+    "github-light": {
+        "topic": "#0969da",
+        "status": "#1a7f37",
+        "project": "#bc4c00",
+        "method": "#8250df",
+        "priority": "#bf3989",
+    },
 }
 
 # Tag namespace colors (Monokai palette)
@@ -332,9 +624,15 @@ class ThemeRuntime:
 def resolve_theme_colors(
     theme_name: str,
     overrides: Mapping[str, str] | None = None,
+    custom_themes: Mapping[str, Mapping[str, str]] | None = None,
 ) -> dict[str, str]:
     """Resolve display colors for a theme name plus user overrides."""
-    resolved = dict(THEMES.get(theme_name, DEFAULT_THEME))
+    custom_theme = (custom_themes or {}).get(theme_name)
+    if custom_theme is not None:
+        resolved = dict(DEFAULT_THEME)
+        resolved.update(custom_theme)
+    else:
+        resolved = dict(THEMES.get(theme_name, DEFAULT_THEME))
     if overrides:
         resolved.update(overrides)
     return resolved
@@ -368,11 +666,12 @@ def build_theme_runtime(
     *,
     theme_overrides: Mapping[str, str] | None = None,
     category_overrides: Mapping[str, str] | None = None,
+    custom_themes: Mapping[str, Mapping[str, str]] | None = None,
 ) -> ThemeRuntime:
     """Build resolved runtime theme state for the current app config."""
     return ThemeRuntime(
         name=theme_name,
-        colors=resolve_theme_colors(theme_name, theme_overrides),
+        colors=resolve_theme_colors(theme_name, theme_overrides, custom_themes),
         category_colors=resolve_category_colors(theme_name, category_overrides),
         tag_namespace_colors=resolve_tag_namespace_colors(theme_name),
     )
@@ -464,7 +763,12 @@ __all__ = [
     "DEFAULT_CATEGORY_COLORS",
     "DEFAULT_TAG_NAMESPACE_COLORS",
     "DEFAULT_THEME",
+    "DRACULA_THEME",
+    "EVERFOREST_DARK_THEME",
+    "GITHUB_LIGHT_THEME",
+    "GRUVBOX_DARK_THEME",
     "HIGH_CONTRAST_THEME",
+    "NORD_THEME",
     "SOLARIZED_DARK_THEME",
     "SOLARIZED_LIGHT_THEME",
     "TAG_NAMESPACE_COLORS",
@@ -474,7 +778,9 @@ __all__ = [
     "THEME_COLORS",
     "THEME_NAMES",
     "THEME_TAG_NAMESPACE_COLORS",
+    "TOKYO_NIGHT_THEME",
     "ThemeRuntime",
+    "available_theme_names",
     "build_theme_runtime",
     "category_colors_for",
     "get_tag_color",

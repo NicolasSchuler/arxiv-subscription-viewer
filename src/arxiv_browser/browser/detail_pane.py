@@ -76,11 +76,13 @@ class DetailPaneMixin(DetailAnnotationMixin):
         """Apply category color overrides from config.
         Layers: default → per-theme → user overrides.
         """
+        config = getattr(self, "_config", UserConfig())
         theme_name = self._effective_theme_name()
         theme_runtime = build_theme_runtime(
             theme_name,
-            theme_overrides=self._config.theme,
-            category_overrides=self._config.category_colors,
+            theme_overrides=config.theme,
+            category_overrides=config.category_colors,
+            custom_themes=config.custom_themes,
         )
         self._theme_runtime = theme_runtime
         format_categories.cache_clear()
@@ -90,15 +92,17 @@ class DetailPaneMixin(DetailAnnotationMixin):
         Layers: named base theme → per-key overrides from config.
         Also refreshes app-owned runtime theme state for tag/category styling.
         """
+        config = getattr(self, "_config", UserConfig())
         theme_name = self._effective_theme_name()
         theme_runtime = build_theme_runtime(
             theme_name,
-            theme_overrides=self._config.theme,
-            category_overrides=self._config.category_colors,
+            theme_overrides=config.theme,
+            category_overrides=config.category_colors,
+            custom_themes=config.custom_themes,
         )
         self._theme_runtime = theme_runtime
         # Rebuild and activate Textual theme for CSS variable resolution
-        if self._config.theme:
+        if config.theme or theme_name in config.custom_themes:
             try:
                 self.register_theme(_build_textual_theme(theme_name, theme_runtime.colors))
             except Exception as e:

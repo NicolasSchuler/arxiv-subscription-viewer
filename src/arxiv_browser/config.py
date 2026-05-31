@@ -104,6 +104,7 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
         "category_colors": config.category_colors,
         "theme": config.theme,
         "theme_name": config.theme_name,
+        "custom_themes": config.custom_themes,
         "llm_command": config.llm_command,
         "llm_prompt_template": config.llm_prompt_template,
         "llm_phd_explainer_field": config.llm_phd_explainer_field,
@@ -496,9 +497,8 @@ def _parse_str_dict(data: dict[str, Any], key: str) -> dict[str, str]:
         key: The config key whose value is expected to be a ``dict[str, str]``.
 
     Returns:
-        A ``dict[str, str]`` containing only entries where both key and value
-        are strings.  Returns an empty dict if the value is absent or has the
-        wrong type.
+        Only entries where both key and value are strings, or an empty dict if
+        the value is absent or has the wrong type.
     """
     raw = _safe_get(data, key, {}, dict)
     return {str(k): str(v) for k, v in raw.items() if isinstance(k, str) and isinstance(v, str)}
@@ -579,6 +579,7 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         category_colors=_parse_str_dict(data, "category_colors"),
         theme=_parse_str_dict(data, "theme"),
         theme_name=_safe_get(data, "theme_name", "monokai", str),
+        custom_themes=UserConfig.parse_custom_themes(data.get("custom_themes", {})),
         llm_command=_safe_get(data, "llm_command", "", str),
         llm_prompt_template=_validate_llm_prompt_template(
             _safe_get(data, "llm_prompt_template", "", str)
