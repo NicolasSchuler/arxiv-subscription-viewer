@@ -32,6 +32,7 @@ from arxiv_browser.modals.editing import PaperEditResult
 from arxiv_browser.models import (
     MAX_COLLECTIONS,
     SORT_OPTIONS,
+    DigestInboxContext,
     PaperCollection,
     PaperMetadata,
     SearchBookmark,
@@ -868,6 +869,11 @@ class TestBrowserHelperCoverage:
         with patch("arxiv_browser._ascii.is_ascii_mode", return_value=True):
             assert app._format_details_header_text() == " Paper Details - scan"
         app._in_arxiv_api_mode = False
+        app._digest_inbox_context = DigestInboxContext("digest source")
+        with patch("arxiv_browser._ascii.is_ascii_mode", return_value=True):
+            assert app._build_subtitle_text() == "Inbox - digest source - 2 papers"
+            assert "Inbox" in app._format_header_text("")
+        app._digest_inbox_context = None
         app._get_active_query = MagicMock(return_value="graph")
         with patch("arxiv_browser._ascii.is_ascii_mode", return_value=True):
             assert app._build_subtitle_text() == "Filtered - 1/2 papers"

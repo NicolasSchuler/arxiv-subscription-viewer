@@ -13,10 +13,12 @@ from textual.css.query import NoMatches
 
 from arxiv_browser.parsing import parse_arxiv_file
 from arxiv_browser.triage_model import (
+    TRIAGE_INSTALL_HINT,
     InsufficientTriageTrainingDataError,
     MissingTriageModelDependencyError,
     TriageModelInfo,
     TriagePrediction,
+    build_triage_model_diagnostics,
     clear_triage_model,
     load_triage_model,
     predict_triage,
@@ -56,6 +58,45 @@ def action_clear_triage_model(app: ArxivBrowser) -> None:
     _apply_triage_predictions(app, {}, None, refresh=True)
     message = "Cleared triage model" if changed else "No triage model to clear"
     app.notify(message, title="Triage Model")
+
+
+def action_triage_model_diagnostics(app: ArxivBrowser) -> None:
+    """Open read-only diagnostics for the current local triage model."""
+    from arxiv_browser.modals import TriageDiagnosticsModal
+
+    try:
+        loaded = load_triage_model()
+    except MissingTriageModelDependencyError:
+        diagnostics = build_triage_model_diagnostics(
+            None,
+            None,
+            {},
+            status="dependency unavailable",
+            message=TRIAGE_INSTALL_HINT,
+        )
+    except (OSError, ValueError, RuntimeError) as exc:
+        logger.warning("Failed to load triage model diagnostics", exc_info=True)
+        diagnostics = build_triage_model_diagnostics(
+            None,
+            None,
+            {},
+            status="load error",
+            message=f"Could not load triage model: {exc}",
+        )
+    else:
+        if loaded is None:
+            diagnostics = build_triage_model_diagnostics(
+                None,
+                None,
+                {},
+                status="missing",
+                message="No trained model found.",
+            )
+        else:
+            model, info = loaded
+            predictions = _diagnostic_predictions(app, model)
+            diagnostics = build_triage_model_diagnostics(model, info, predictions)
+    app.push_screen(TriageDiagnosticsModal(diagnostics, dict(app._papers_by_id)))
 
 
 def load_triage_predictions_for_current_dataset(
@@ -183,8 +224,20 @@ def _handle_triage_prediction_error(
         app.notify(message, title="Triage Model", severity="warning", timeout=10)
 
 
+def _diagnostic_predictions(app: ArxivBrowser, model: Any) -> dict[str, TriagePrediction]:
+    current = getattr(app, "_triage_predictions", {})
+    if current:
+        return dict(current)
+    try:
+        return predict_triage(list(app.all_papers), model)
+    except (OSError, ValueError, RuntimeError):
+        logger.warning("Failed to score triage model diagnostics", exc_info=True)
+        return {}
+
+
 __all__ = [
     "action_clear_triage_model",
     "action_train_triage_model",
+    "action_triage_model_diagnostics",
     "load_triage_predictions_for_current_dataset",
 ]

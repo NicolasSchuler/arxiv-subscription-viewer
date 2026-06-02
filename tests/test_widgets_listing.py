@@ -88,6 +88,17 @@ def test_set_ascii_icons_changes_rendered_selection_marker(make_paper):
     assert "Rel:★9/10" in unicode_meta
 
 
+def test_paper_row_renders_ephemeral_inbox_badges(make_paper):
+    paper = make_paper()
+
+    rendered = render_paper_option(
+        PaperRowRenderState(paper=paper, inbox_labels=("High Relevance", "Likely Star"))
+    )
+
+    assert "Inbox:High Relevance" in rendered
+    assert "Inbox:Likely Star" in rendered
+
+
 def test_paper_list_item_title_and_authors_text(make_paper):
     paper = make_paper(title="Transformer Study", authors="Alice Author")
     metadata = PaperMetadata(arxiv_id=paper.arxiv_id, starred=True, is_read=True)

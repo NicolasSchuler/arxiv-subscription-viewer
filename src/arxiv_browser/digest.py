@@ -99,6 +99,24 @@ class DigestResult:
     warnings: list[str]
     paper_count: int
     source_label: str
+    papers: list[Paper] = field(default_factory=list)
+    sections: list[DigestSection] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class DigestSectionItem:
+    """One paper entry in a structured digest section."""
+
+    arxiv_id: str
+    suffix: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class DigestSection:
+    """Structured digest section shared by Markdown and TUI inbox rendering."""
+
+    title: str
+    items: tuple[DigestSectionItem, ...]
 
 
 @dataclass(slots=True)
@@ -181,12 +199,21 @@ def generate_digest(
         hf_matches=hf_matches,
         version_updates=version_updates,
     )
-    markdown = render_digest_markdown(data, options, config, generated_at=resolved_deps.clock())
+    sections = build_digest_sections(data, options)
+    markdown = render_digest_markdown(
+        data,
+        options,
+        config,
+        generated_at=resolved_deps.clock(),
+        sections=sections,
+    )
     return DigestResult(
         markdown=markdown,
         warnings=warnings,
         paper_count=len(papers),
         source_label=source_label,
+        papers=papers,
+        sections=sections,
     )
 
 
@@ -500,6 +527,7 @@ def render_digest_markdown(
     config: UserConfig,
     *,
     generated_at: datetime,
+    sections: list[DigestSection] | None = None,
 ) -> str:
     """Render resolved digest data as Markdown."""
     lines = [
@@ -515,12 +543,8 @@ def render_digest_markdown(
 
     lines.append(build_daily_digest(data.papers, data.watched_ids, config.paper_metadata))
     lines.append("")
-    _append_paper_section(lines, "Watch List Matches", _watched_papers(data), options.limit)
-    _append_relevance_section(lines, data, options)
-    _append_triage_sections(lines, data, options.limit)
-    _append_hf_section(lines, data, options.limit)
-    _append_version_section(lines, data, options.limit)
-    _append_paper_section(lines, "New Papers", data.papers, options.limit)
+    for section in sections or build_digest_sections(data, options):
+        _append_structured_section(lines, section, data, options.limit)
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -534,22 +558,31 @@ def _watched_papers(data: _DigestData) -> list[Paper]:
     return [paper for paper in data.papers if paper.arxiv_id in data.watched_ids]
 
 
-def _append_paper_section(
-    lines: list[str],
+def build_digest_sections(data: _DigestData, options: DigestOptions) -> list[DigestSection]:
+    """Return structured digest sections in the same order Markdown renders them."""
+    sections: list[DigestSection] = []
+    _add_paper_section(sections, "Watch List Matches", _watched_papers(data))
+    _add_relevance_section(sections, data, options)
+    _add_triage_sections(sections, data)
+    _add_hf_section(sections, data)
+    _add_version_section(sections, data)
+    _add_paper_section(sections, "New Papers", data.papers)
+    return sections
+
+
+def _add_paper_section(
+    sections: list[DigestSection],
     title: str,
     papers: list[Paper],
-    limit: int,
 ) -> None:
-    if not papers:
-        return
-    lines.extend([f"## {title}", ""])
-    lines.extend(_render_paper_item(paper) for paper in papers[:limit])
-    _append_omitted_count(lines, len(papers), limit)
-    lines.append("")
+    if papers:
+        sections.append(
+            DigestSection(title, tuple(DigestSectionItem(paper.arxiv_id) for paper in papers))
+        )
 
 
-def _append_relevance_section(
-    lines: list[str],
+def _add_relevance_section(
+    sections: list[DigestSection],
     data: _DigestData,
     options: DigestOptions,
 ) -> None:
@@ -564,18 +597,17 @@ def _append_relevance_section(
     scored.sort(key=lambda paper: data.relevance_scores[paper.arxiv_id][0], reverse=True)
     if not scored:
         return
-    lines.extend(["## High Relevance", ""])
-    for paper in scored[: options.limit]:
+    items = []
+    for paper in scored:
         score, reason = data.relevance_scores[paper.arxiv_id]
         suffix = f"relevance {score}/10"
         if reason:
             suffix += f" - {_escape_markdown(reason)}"
-        lines.append(_render_paper_item(paper, suffix=suffix))
-    _append_omitted_count(lines, len(scored), options.limit)
-    lines.append("")
+        items.append(DigestSectionItem(paper.arxiv_id, suffix))
+    sections.append(DigestSection("High Relevance", tuple(items)))
 
 
-def _append_triage_sections(lines: list[str], data: _DigestData, limit: int) -> None:
+def _add_triage_sections(sections: list[DigestSection], data: _DigestData) -> None:
     if not data.triage_predictions:
         return
     likely_star = _triage_bucket_papers(data, TRIAGE_BUCKET_LIKELY_STAR)
@@ -585,8 +617,83 @@ def _append_triage_sections(lines: list[str], data: _DigestData, limit: int) -> 
     )
     unsure = _triage_bucket_papers(data, TRIAGE_BUCKET_UNSURE)
     unsure.sort(key=lambda paper: abs(data.triage_predictions[paper.arxiv_id].probability - 0.5))
-    _append_triage_section(lines, "Likely Star", likely_star, data, limit)
-    _append_triage_section(lines, "Unsure Review Queue", unsure, data, limit)
+    _add_triage_section(sections, "Likely Star", likely_star, data)
+    _add_triage_section(sections, "Unsure Review Queue", unsure, data)
+
+
+def _add_triage_section(
+    sections: list[DigestSection],
+    title: str,
+    papers: list[Paper],
+    data: _DigestData,
+) -> None:
+    if not papers:
+        return
+    sections.append(
+        DigestSection(
+            title,
+            tuple(
+                DigestSectionItem(
+                    paper.arxiv_id,
+                    format_triage_prediction(data.triage_predictions[paper.arxiv_id]),
+                )
+                for paper in papers
+            ),
+        )
+    )
+
+
+def _add_hf_section(sections: list[DigestSection], data: _DigestData) -> None:
+    if not data.hf_matches:
+        return
+    papers = [paper for paper in data.papers if paper.arxiv_id in data.hf_matches]
+    papers.sort(key=lambda paper: data.hf_matches[paper.arxiv_id].upvotes, reverse=True)
+    items = []
+    for paper in papers:
+        hf = data.hf_matches[paper.arxiv_id]
+        suffix = f"{hf.upvotes} upvotes"
+        if hf.num_comments:
+            suffix += f", {hf.num_comments} comments"
+        if hf.github_repo:
+            suffix += f", GitHub: {_escape_markdown(hf.github_repo)}"
+        items.append(DigestSectionItem(paper.arxiv_id, suffix))
+    sections.append(DigestSection("Trending on Hugging Face", tuple(items)))
+
+
+def _add_version_section(sections: list[DigestSection], data: _DigestData) -> None:
+    if not data.version_updates:
+        return
+    items = tuple(
+        DigestSectionItem(arxiv_id, f"v{old_version} -> v{new_version}")
+        for arxiv_id, (old_version, new_version) in sorted(data.version_updates.items())
+    )
+    sections.append(DigestSection("Version Updates", items))
+
+
+def _append_structured_section(
+    lines: list[str],
+    section: DigestSection,
+    data: _DigestData,
+    limit: int,
+) -> None:
+    if not section.items:
+        return
+    papers_by_id = {paper.arxiv_id: paper for paper in data.papers}
+    lines.extend([f"## {section.title}", ""])
+    for item in section.items[:limit]:
+        paper = papers_by_id.get(item.arxiv_id)
+        if section.title == "Version Updates":
+            lines.append(_render_version_item(item, paper))
+        elif paper is not None:
+            lines.append(_render_paper_item(paper, suffix=item.suffix))
+    _append_omitted_count(lines, len(section.items), limit)
+    lines.append("")
+
+
+def _render_version_item(item: DigestSectionItem, paper: Paper | None) -> str:
+    label = _escape_markdown(paper.title) if paper else _escape_markdown(item.arxiv_id)
+    url = _paper_url(paper) if paper else f"https://arxiv.org/abs/{item.arxiv_id}"
+    return f"- [{label}]({url}) ({item.arxiv_id}) - {item.suffix}"
 
 
 def _triage_bucket_papers(data: _DigestData, bucket: str) -> list[Paper]:
@@ -596,56 +703,6 @@ def _triage_bucket_papers(data: _DigestData, bucket: str) -> list[Paper]:
         if (prediction := data.triage_predictions.get(paper.arxiv_id))
         and prediction.bucket == bucket
     ]
-
-
-def _append_triage_section(
-    lines: list[str],
-    title: str,
-    papers: list[Paper],
-    data: _DigestData,
-    limit: int,
-) -> None:
-    if not papers:
-        return
-    lines.extend([f"## {title}", ""])
-    for paper in papers[:limit]:
-        prediction = data.triage_predictions[paper.arxiv_id]
-        lines.append(_render_paper_item(paper, suffix=format_triage_prediction(prediction)))
-    _append_omitted_count(lines, len(papers), limit)
-    lines.append("")
-
-
-def _append_hf_section(lines: list[str], data: _DigestData, limit: int) -> None:
-    if not data.hf_matches:
-        return
-    papers = [paper for paper in data.papers if paper.arxiv_id in data.hf_matches]
-    papers.sort(key=lambda paper: data.hf_matches[paper.arxiv_id].upvotes, reverse=True)
-    lines.extend(["## Trending on Hugging Face", ""])
-    for paper in papers[:limit]:
-        hf = data.hf_matches[paper.arxiv_id]
-        suffix = f"{hf.upvotes} upvotes"
-        if hf.num_comments:
-            suffix += f", {hf.num_comments} comments"
-        if hf.github_repo:
-            suffix += f", GitHub: {_escape_markdown(hf.github_repo)}"
-        lines.append(_render_paper_item(paper, suffix=suffix))
-    _append_omitted_count(lines, len(papers), limit)
-    lines.append("")
-
-
-def _append_version_section(lines: list[str], data: _DigestData, limit: int) -> None:
-    if not data.version_updates:
-        return
-    papers_by_id = {paper.arxiv_id: paper for paper in data.papers}
-    updates = sorted(data.version_updates.items())
-    lines.extend(["## Version Updates", ""])
-    for arxiv_id, (old_version, new_version) in updates[:limit]:
-        paper = papers_by_id.get(arxiv_id)
-        label = _escape_markdown(paper.title) if paper else _escape_markdown(arxiv_id)
-        url = _paper_url(paper) if paper else f"https://arxiv.org/abs/{arxiv_id}"
-        lines.append(f"- [{label}]({url}) ({arxiv_id}) - v{old_version} -> v{new_version}")
-    _append_omitted_count(lines, len(updates), limit)
-    lines.append("")
 
 
 def _append_omitted_count(lines: list[str], total: int, limit: int) -> None:
@@ -686,7 +743,10 @@ __all__ = [
     "DigestError",
     "DigestOptions",
     "DigestResult",
+    "DigestSection",
+    "DigestSectionItem",
     "VersionFetchResult",
+    "build_digest_sections",
     "fetch_arxiv_versions",
     "generate_digest",
     "render_digest_markdown",

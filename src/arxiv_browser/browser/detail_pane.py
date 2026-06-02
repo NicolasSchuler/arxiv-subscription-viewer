@@ -228,6 +228,7 @@ class DetailPaneMixin(DetailAnnotationMixin):
         """Build the list-row render state for one visible paper."""
         aid = paper.arxiv_id
         theme_runtime = self._resolved_theme_runtime()
+        inbox_context = getattr(self, "_digest_inbox_context", None)
         compact = getattr(self, "_compact_list", False)
         show_preview = self._show_abstract_preview and not compact
         meta_line_budget = 78
@@ -257,6 +258,9 @@ class DetailPaneMixin(DetailAnnotationMixin):
             version_update=self._version_updates.get(aid),
             relevance_score=self._relevance_scores.get(aid),
             triage_prediction=getattr(self, "_triage_predictions", {}).get(aid),
+            inbox_labels=tuple(
+                inbox_context.section_labels_by_id.get(aid, ()) if inbox_context else ()
+            ),
             meta_line_budget=meta_line_budget,
             theme_colors=theme_runtime.colors,
             category_colors=theme_runtime.category_colors,
@@ -325,6 +329,10 @@ class DetailPaneMixin(DetailAnnotationMixin):
             page = (state.start // state.max_results) + 1
             query_label = truncate_text(self._format_arxiv_search_label(state.request), 60)
             return f"Search{sep}{query_label}{sep}page {page}"
+        inbox_context = getattr(self, "_digest_inbox_context", None)
+        if inbox_context is not None:
+            source = truncate_text(inbox_context.source_label, 60)
+            return f"Inbox{sep}{source}{sep}{len(getattr(self, 'all_papers', []))} papers"
         query = self._get_active_query()
         if query:
             return f"Filtered{sep}{len(self.filtered_papers)}/{len(self.all_papers)} papers"
@@ -365,6 +373,8 @@ class DetailPaneMixin(DetailAnnotationMixin):
         """Save current session state to config.
         Handles the case where DOM widgets may already be destroyed during unmount.
         """
+        if getattr(self, "_digest_inbox_context", None) is not None:
+            return
         # API mode is intentionally session-ephemeral; persist the underlying local state.
         snapshot = self._local_browse_snapshot if self._in_arxiv_api_mode else None
         # Get current date for history mode

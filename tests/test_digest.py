@@ -18,6 +18,8 @@ from arxiv_browser.digest import (
     DigestError,
     DigestOptions,
     DigestResult,
+    DigestSection,
+    DigestSectionItem,
     VersionFetchResult,
     fetch_arxiv_versions,
     generate_digest,
@@ -127,6 +129,13 @@ def test_digest_renders_sections_escapes_markdown_and_caps_limits(make_paper) ->
     assert "Strong \\[fit\\]\\_reason" in markdown
     assert "GitHub: org/repo" in markdown
     assert "- ... 2 more" in markdown
+    assert [section.title for section in result.sections] == [
+        "Watch List Matches",
+        "High Relevance",
+        "Trending on Hugging Face",
+        "New Papers",
+    ]
+    assert result.sections[1].items[0].suffix == "relevance 9/10 - Strong \\[fit\\]\\_reason"
 
 
 def test_digest_ascii_overview_uses_ascii_separator(make_paper) -> None:
@@ -324,6 +333,11 @@ def test_digest_include_triage_renders_likely_star_and_unsure_sections(make_pape
     assert "## Unsure Review Queue" in result.markdown
     assert "Unsure Paper" in result.markdown
     assert "## New Papers" in result.markdown
+    assert [section.title for section in result.sections] == [
+        "Likely Star",
+        "Unsure Review Queue",
+        "New Papers",
+    ]
 
 
 def test_digest_include_triage_warns_without_model_or_sklearn(make_paper) -> None:
@@ -592,6 +606,65 @@ def test_digest_cli_output_file_and_conflicting_source_flags(tmp_path, capsys) -
     assert "--input cannot be combined" in captured.err
 
 
+def test_digest_cli_tui_launches_app_with_inbox_context(make_paper, capsys) -> None:
+    paper = make_paper(arxiv_id="2605.00001")
+    run = MagicMock()
+    app_factory = MagicMock(return_value=SimpleNamespace(run=run))
+    deps = CliDependencies(
+        load_config_fn=UserConfig,
+        discover_history_files_fn=lambda _base: [],
+        validate_interactive_tty_fn=lambda: True,
+        app_factory=app_factory,
+        app_factory_supports_options=True,
+    )
+    generated = DigestResult(
+        "# Digest\n",
+        ["side warning"],
+        1,
+        "source",
+        papers=[paper],
+        sections=[
+            DigestSection(
+                "High Relevance",
+                (DigestSectionItem(paper.arxiv_id, "relevance 9/10"),),
+            ),
+            DigestSection("New Papers", (DigestSectionItem(paper.arxiv_id),)),
+        ],
+    )
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("arxiv_browser.digest.generate_digest", lambda _options, _config: generated)
+        exit_code = main(["digest", "--category", "cs.AI", "--tui"], deps=deps)
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "Warning: side warning" in captured.err
+    app_factory.assert_called_once()
+    assert app_factory.call_args.args[0] == [paper]
+    options = app_factory.call_args.kwargs["options"]
+    assert options.restore_session is False
+    assert options.digest_inbox_context.source_label == "source"
+    assert options.digest_inbox_context.section_labels_by_id[paper.arxiv_id] == [
+        "High Relevance",
+        "New Papers",
+    ]
+    run.assert_called_once()
+
+
+def test_digest_cli_tui_rejects_output_and_non_tty(capsys) -> None:
+    deps = CliDependencies(
+        load_config_fn=UserConfig,
+        discover_history_files_fn=lambda _base: [],
+        validate_interactive_tty_fn=lambda: False,
+    )
+
+    assert main(["digest", "--category", "cs.AI", "--tui", "--output", "x.md"], deps=deps) == 2
+    assert "--tui cannot be combined" in capsys.readouterr().err
+
+    assert main(["digest", "--category", "cs.AI", "--tui"], deps=deps) == 2
+    assert "requires an interactive TTY" in capsys.readouterr().err
+
+
 def test_digest_cli_source_and_output_errors(tmp_path, capsys) -> None:
     deps = CliDependencies(load_config_fn=UserConfig, discover_history_files_fn=lambda _base: [])
 
@@ -655,6 +728,7 @@ def test_digest_help_and_completions_expose_flags(capsys) -> None:
     for flag in (
         "--period",
         "--output",
+        "--tui",
         "--include-triage",
         "--include-hf",
         "--cached-relevance-only",
@@ -664,5 +738,6 @@ def test_digest_help_and_completions_expose_flags(capsys) -> None:
     for shell in ("bash", "zsh", "fish"):
         script = get_completion_script(shell)
         assert "digest" in script
+        assert "tui" in script
         assert "include-triage" in script
         assert "cached-relevance-only" in script

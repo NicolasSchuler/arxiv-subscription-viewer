@@ -2,6 +2,9 @@
 
 Use `arxiv-viewer digest` when you want a non-interactive daily or weekly paper brief that can run from cron. The command prints Markdown to stdout by default, or writes it to a file with `--output`.
 
+Add `--tui` when you want the same digest source and enrichment sections as an
+interactive inbox instead of Markdown output.
+
 ## Quick Examples
 
 ```bash
@@ -16,6 +19,9 @@ arxiv-viewer digest --input history/2026-02-13.txt
 
 # Save Markdown to a file
 arxiv-viewer digest --category cs.CL --period weekly --output ~/digests/arxiv-weekly.md
+
+# Open a weekly digest as an interactive inbox
+arxiv-viewer digest --category cs.AI --period weekly --include-triage --tui
 ```
 
 ## Cron
@@ -37,6 +43,24 @@ arxiv-viewer digest --category cs.AI \
   | jq -Rs '{text: .}' \
   | curl -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"
 ```
+
+## TUI Inbox
+
+`--tui` runs the same source loading and optional enrichment pipeline, then opens
+the existing browser with papers ordered by digest section priority. Rows show
+ephemeral `Inbox:` badges such as `Inbox:High Relevance`, `Inbox:Likely Star`,
+or `Inbox:Trending on Hugging Face`.
+
+```bash
+arxiv-viewer digest --category cs.AI --period weekly --tui
+arxiv-viewer digest --input history/2026-02-13.txt --include-triage --tui
+```
+
+The inbox is intentionally flat, so normal search, sorting, quick triage,
+enrichment, selection, and export workflows still work. Inbox badges are not
+saved as tags and the inbox launch does not restore or overwrite the regular
+browse session. `--tui` requires an interactive terminal and cannot be combined
+with `--output`.
 
 ## Sources
 

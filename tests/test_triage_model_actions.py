@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -13,7 +14,7 @@ from arxiv_browser.triage_model import (
     TriageModelInfo,
     TriagePrediction,
 )
-from tests.support.app_stubs import _new_app_stub
+from tests.support.app_stubs import _new_app_stub, _paper
 
 
 def _info() -> TriageModelInfo:
@@ -83,6 +84,36 @@ def test_action_clear_triage_model_reports_io_error(monkeypatch):
     triage_model_actions.action_clear_triage_model(app)
 
     assert "Could not clear" in app.notify.call_args.args[0]
+
+
+def test_action_triage_model_diagnostics_opens_missing_model_modal(monkeypatch):
+    app = _new_app_stub()
+    app.push_screen = MagicMock()
+    monkeypatch.setattr(triage_model_actions, "load_triage_model", lambda: None)
+
+    triage_model_actions.action_triage_model_diagnostics(app)
+
+    modal = app.push_screen.call_args.args[0]
+    assert modal._diagnostics.status == "missing"
+    assert modal._diagnostics.info is None
+
+
+def test_action_triage_model_diagnostics_loaded_model_uses_existing_predictions(monkeypatch):
+    app = _new_app_stub()
+    app.push_screen = MagicMock()
+    paper = _paper("2401.00001")
+    app.all_papers = [paper]
+    app._papers_by_id = {paper.arxiv_id: paper}
+    prediction = TriagePrediction(paper.arxiv_id, 0.51, "unsure")
+    app._triage_predictions = {paper.arxiv_id: prediction}
+    monkeypatch.setattr(triage_model_actions, "load_triage_model", lambda: (object(), _info()))
+
+    triage_model_actions.action_triage_model_diagnostics(app)
+
+    modal = app.push_screen.call_args.args[0]
+    assert modal._diagnostics.status == "loaded"
+    assert modal._diagnostics.predicted_count == 1
+    assert modal._diagnostics.uncertain_predictions == (prediction,)
 
 
 def test_load_triage_predictions_handles_absent_model(monkeypatch, make_paper):

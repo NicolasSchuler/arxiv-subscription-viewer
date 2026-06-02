@@ -14,7 +14,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from arxiv_browser.models import UserConfig
+from arxiv_browser.models import DigestInboxContext, UserConfig
 from arxiv_browser.services.interfaces import AppServices
 
 
@@ -34,6 +34,7 @@ class ArxivBrowserOptions:
     ascii_icons: bool = False
     services: AppServices | None = None
     theme_override: str | None = None
+    digest_inbox_context: DigestInboxContext | None = None
 
 
 _LEGACY_BROWSER_OPTION_FIELDS = (
@@ -44,6 +45,7 @@ _LEGACY_BROWSER_OPTION_FIELDS = (
     "ascii_icons",
     "services",
     "theme_override",
+    "digest_inbox_context",
 )
 
 
@@ -73,6 +75,7 @@ def _coerce_browser_options(
                 ascii_icons=options.ascii_icons,
                 services=options.services,
                 theme_override=options.theme_override,
+                digest_inbox_context=options.digest_inbox_context,
             )
         legacy_args = (options, *legacy_args)
     if legacy_args:

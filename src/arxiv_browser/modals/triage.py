@@ -20,7 +20,10 @@ from arxiv_browser.themes import theme_colors_for
 from arxiv_browser.triage_model import (
     TRIAGE_BUCKET_LIKELY_SKIP,
     TRIAGE_BUCKET_LIKELY_STAR,
+    TRIAGE_BUCKET_UNSURE,
+    TriageModelDiagnostics,
     TriagePrediction,
+    TriageWeightedTerm,
     format_triage_prediction,
 )
 
@@ -84,6 +87,65 @@ class QuickTriageRequest:
     papers_by_id: dict[str, Paper]
 
 
+class TriageDiagnosticsModal(ModalBase[None]):
+    """Read-only diagnostics for the local triage model."""
+
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+        Binding("q", "close", "Close", show=False),
+    ]
+
+    CSS = """
+    TriageDiagnosticsModal {
+        align: center middle;
+    }
+
+    #triage-diagnostics-dialog {
+        width: 88;
+        max-width: 95%;
+        height: 82%;
+        background: $th-background;
+        border: tall $th-accent;
+        padding: 0 2;
+    }
+
+    #triage-diagnostics-title {
+        text-style: bold;
+        color: $th-accent;
+        margin-bottom: 1;
+    }
+
+    #triage-diagnostics-body {
+        height: 1fr;
+        overflow-y: auto;
+    }
+
+    #triage-diagnostics-footer {
+        color: $th-muted;
+        margin-top: 1;
+    }
+    """
+
+    def __init__(self, diagnostics: TriageModelDiagnostics, papers_by_id: dict[str, Paper]) -> None:
+        super().__init__()
+        self._diagnostics = diagnostics
+        self._papers_by_id = papers_by_id
+
+    def compose(self) -> ComposeResult:
+        """Compose the diagnostics dialog."""
+        with Vertical(id="triage-diagnostics-dialog"):
+            yield Label("Triage Model Diagnostics", id="triage-diagnostics-title")
+            yield Static(
+                _render_triage_diagnostics(self._diagnostics, self._papers_by_id),
+                id="triage-diagnostics-body",
+            )
+            yield Static("Esc/q close", id="triage-diagnostics-footer")
+
+    def action_close(self) -> None:
+        """Close the overlay."""
+        self.dismiss(None)
+
+
 def format_quick_triage_summary(result: QuickTriageResult) -> str:
     """Return concise user-facing quick triage summary text."""
     counts = result.counts
@@ -110,6 +172,70 @@ def first_two_abstract_lines(abstract_text: str) -> str:
         lines[-1] = f"{last}{suffix}"
     escaped = "\n".join(escape_rich_text(line) for line in lines)
     return f"[dim italic]{escaped}[/]"
+
+
+def _render_triage_diagnostics(
+    diagnostics: TriageModelDiagnostics,
+    papers_by_id: dict[str, Paper],
+) -> str:
+    lines = [
+        f"[bold]Status[/] {escape_rich_text(diagnostics.status)}",
+        escape_rich_text(diagnostics.message),
+    ]
+    info = diagnostics.info
+    if info is None:
+        lines.extend(["", "[dim]Use Train Triage Model once you have enough decisions.[/]"])
+        return "\n".join(lines)
+
+    lines.extend(
+        [
+            "",
+            "[bold]Training[/]",
+            f"  trained: {escape_rich_text(info.trained_at)}",
+            f"  labels: {info.total_count} total | {info.positive_count} positive | "
+            f"{info.negative_count} negative",
+            f"  sklearn: {escape_rich_text(info.sklearn_version)}",
+            f"  thresholds: likely-star >= {info.likely_star_threshold:.2f}, "
+            f"likely-skip <= {info.likely_skip_threshold:.2f}",
+            "",
+            "[bold]Current Dataset[/]",
+            f"  predicted: {diagnostics.predicted_count}",
+            "  buckets: "
+            f"likely-star {diagnostics.bucket_counts.get(TRIAGE_BUCKET_LIKELY_STAR, 0)}, "
+            f"unsure {diagnostics.bucket_counts.get(TRIAGE_BUCKET_UNSURE, 0)}, "
+            f"likely-skip {diagnostics.bucket_counts.get(TRIAGE_BUCKET_LIKELY_SKIP, 0)}",
+            "",
+            "[bold]Most Uncertain[/]",
+        ]
+    )
+    lines.extend(_uncertain_prediction_lines(diagnostics.uncertain_predictions, papers_by_id))
+    lines.extend(["", "[bold]Terms Favoring Star[/]"])
+    lines.extend(_weighted_term_lines(diagnostics.positive_terms))
+    lines.extend(["", "[bold]Terms Favoring Skip[/]"])
+    lines.extend(_weighted_term_lines(diagnostics.negative_terms))
+    return "\n".join(lines)
+
+
+def _uncertain_prediction_lines(
+    predictions: tuple[TriagePrediction, ...],
+    papers_by_id: dict[str, Paper],
+) -> list[str]:
+    if not predictions:
+        return ["  [dim]No predictions for the current dataset.[/]"]
+    lines: list[str] = []
+    for prediction in predictions:
+        paper = papers_by_id.get(prediction.arxiv_id)
+        title = paper.title if paper else prediction.arxiv_id
+        lines.append(
+            f"  {escape_rich_text(format_triage_prediction(prediction))} {escape_rich_text(title)}"
+        )
+    return lines
+
+
+def _weighted_term_lines(terms: tuple[TriageWeightedTerm, ...]) -> list[str]:
+    if not terms:
+        return ["  [dim]Term weights are unavailable for this model shape.[/]"]
+    return [f"  {escape_rich_text(term.term)} [dim]{term.weight:+.3f}[/]" for term in terms]
 
 
 class QuickTriageScreen(ModalBase[QuickTriageResult]):

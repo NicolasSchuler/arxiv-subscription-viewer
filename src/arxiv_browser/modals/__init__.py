@@ -66,7 +66,7 @@ from arxiv_browser.modals.search import (
 )
 
 # triage.py — rapid unread-paper triage
-from arxiv_browser.modals.triage import QuickTriageScreen
+from arxiv_browser.modals.triage import QuickTriageScreen, TriageDiagnosticsModal
 
 # watchlist.py — watch list management modals
 from arxiv_browser.modals.watchlist import WatchListItem, WatchListModal
@@ -109,6 +109,7 @@ __all__ = [
     "SectionToggleModal",
     "SummaryModeModal",
     "TrendRadarModal",
+    "TriageDiagnosticsModal",
     "WatchListItem",
     "WatchListModal",
     "WelcomeScreen",

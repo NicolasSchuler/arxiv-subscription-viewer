@@ -13,9 +13,11 @@ from arxiv_browser.triage_model import (
     TRIAGE_BUCKET_UNSURE,
     InsufficientTriageTrainingDataError,
     MissingTriageModelDependencyError,
+    TriageModelInfo,
     TriagePrediction,
     bucket_for_probability,
     build_training_examples,
+    build_triage_model_diagnostics,
     clear_triage_model,
     fit_triage_model,
     format_triage_prediction,
@@ -165,6 +167,43 @@ def test_predict_triage_handles_empty_and_one_class_models(make_paper):
     predictions = predict_triage([paper], OneClassModel())
 
     assert predictions["only-class"].probability == pytest.approx(0.73)
+
+
+def test_triage_model_diagnostics_counts_uncertain_and_terms(make_paper):
+    papers, metadata = _training_corpus(make_paper)
+    model, info = fit_triage_model(papers, metadata, [])
+    predictions = predict_triage(papers[:3], model)
+
+    diagnostics = build_triage_model_diagnostics(model, info, predictions, top_n=3)
+
+    assert diagnostics.status == "loaded"
+    assert diagnostics.predicted_count == 3
+    assert sum(diagnostics.bucket_counts.values()) == 3
+    assert len(diagnostics.uncertain_predictions) == 3
+    assert diagnostics.positive_terms
+    assert diagnostics.negative_terms
+    assert diagnostics.positive_terms[0].weight >= diagnostics.positive_terms[-1].weight
+    assert diagnostics.negative_terms[0].weight <= diagnostics.negative_terms[-1].weight
+
+
+def test_triage_model_diagnostics_missing_and_unsupported_model_shapes():
+    missing = build_triage_model_diagnostics(None, None, {}, status="missing", message="none")
+
+    assert missing.info is None
+    assert missing.message == "none"
+
+    info = TriageModelInfo(
+        model_version=1,
+        trained_at="now",
+        positive_count=5,
+        negative_count=5,
+        total_count=10,
+        sklearn_version="x",
+    )
+    diagnostics = build_triage_model_diagnostics(object(), info, {})
+
+    assert diagnostics.positive_terms == ()
+    assert diagnostics.negative_terms == ()
 
 
 def test_missing_sklearn_dependency_is_actionable(monkeypatch):

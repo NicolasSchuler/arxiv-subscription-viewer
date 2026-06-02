@@ -111,6 +111,7 @@ class PaperRowRenderState:
     version_update: tuple[int, int] | None = None
     relevance_score: tuple[int, str] | None = None
     triage_prediction: TriagePrediction | None = None
+    inbox_labels: tuple[str, ...] = ()
     meta_line_budget: int = META_LINE_BUDGET
     theme_colors: Mapping[str, str] = field(default_factory=lambda: dict(DEFAULT_THEME))
     category_colors: Mapping[str, str] = field(
@@ -143,6 +144,7 @@ def _normalize_paper_row_state(state: PaperRowRenderState) -> PaperRowRenderStat
         theme_colors=dict(state.theme_colors or DEFAULT_THEME),
         category_colors=dict(state.category_colors or category_colors_for(None)),
         tag_namespace_colors=dict(state.tag_namespace_colors or DEFAULT_TAG_NAMESPACE_COLORS),
+        inbox_labels=tuple(state.inbox_labels or ()),
     )
 
 
@@ -249,6 +251,10 @@ def _build_meta_parts(state: PaperRowRenderState) -> list[str]:
             )
         )
         parts.append(f"[{color}]{badge}[/]")
+    parts.extend(
+        f"[{state.theme_colors['purple']}]Inbox:{escape_rich_text(label)}[/]"
+        for label in state.inbox_labels
+    )
     tags = state.metadata.tags if state.metadata else None
     if tags:
         tag_str = " ".join(

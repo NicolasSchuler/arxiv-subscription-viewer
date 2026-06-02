@@ -38,6 +38,11 @@ Once you have enough saved decisions, open `Ctrl+p` and run **Train Triage Model
 
 Use **Clear Triage Model** from the command palette to delete the local model artifacts.
 
+Use **Triage Model Diagnostics** from the command palette to inspect the saved
+model without retraining it. The modal shows training label balance, prediction
+bucket counts for the current dataset, most uncertain papers, and learned terms
+when the sklearn pipeline exposes them.
+
 ## Quick Triage
 
 Press `T` to review the current visible unread queue one paper at a time. Each card shows the title, the first two abstract lines, any existing relevance score, local ML triage badge, and a watch-list badge when matched.

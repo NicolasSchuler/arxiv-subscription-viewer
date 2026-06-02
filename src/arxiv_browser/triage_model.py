@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -21,6 +21,7 @@ TRIAGE_LIKELY_STAR_THRESHOLD = 0.70
 TRIAGE_LIKELY_SKIP_THRESHOLD = 0.20
 TRIAGE_MIN_EXAMPLES = 20
 TRIAGE_MIN_CLASS_EXAMPLES = 5
+TRIAGE_DIAGNOSTIC_TOP_N = 8
 TRIAGE_INSTALL_HINT = (
     "Install ML extras with `uv sync --extra ml` or `pip install arxiv-subscription-viewer[ml]`."
 )
@@ -42,6 +43,28 @@ class TriagePrediction:
     arxiv_id: str
     probability: float
     bucket: str
+
+
+@dataclass(frozen=True, slots=True)
+class TriageWeightedTerm:
+    """One learned term weight from the triage classifier."""
+
+    term: str
+    weight: float
+
+
+@dataclass(frozen=True, slots=True)
+class TriageModelDiagnostics:
+    """Read-only diagnostic summary for the local triage model."""
+
+    status: str
+    message: str
+    info: TriageModelInfo | None = None
+    predicted_count: int = 0
+    bucket_counts: dict[str, int] = field(default_factory=dict)
+    uncertain_predictions: tuple[TriagePrediction, ...] = ()
+    positive_terms: tuple[TriageWeightedTerm, ...] = ()
+    negative_terms: tuple[TriageWeightedTerm, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,6 +269,81 @@ def predict_triage(
     return result
 
 
+def build_triage_model_diagnostics(
+    model: Any | None,
+    info: TriageModelInfo | None,
+    predictions: dict[str, TriagePrediction],
+    *,
+    status: str = "loaded",
+    message: str = "",
+    top_n: int = TRIAGE_DIAGNOSTIC_TOP_N,
+) -> TriageModelDiagnostics:
+    """Build a read-only summary for display in the diagnostics modal."""
+    if model is None or info is None:
+        return TriageModelDiagnostics(status=status, message=message or "No trained model found.")
+    bucket_counts = _prediction_bucket_counts(predictions)
+    uncertain = tuple(
+        sorted(predictions.values(), key=lambda item: abs(item.probability - 0.5))[:top_n]
+    )
+    positive_terms, negative_terms = _extract_model_terms(model, top_n)
+    return TriageModelDiagnostics(
+        status=status,
+        message=message or "Loaded triage model.",
+        info=info,
+        predicted_count=len(predictions),
+        bucket_counts=bucket_counts,
+        uncertain_predictions=uncertain,
+        positive_terms=positive_terms,
+        negative_terms=negative_terms,
+    )
+
+
+def _prediction_bucket_counts(predictions: dict[str, TriagePrediction]) -> dict[str, int]:
+    counts = {
+        TRIAGE_BUCKET_LIKELY_STAR: 0,
+        TRIAGE_BUCKET_UNSURE: 0,
+        TRIAGE_BUCKET_LIKELY_SKIP: 0,
+    }
+    for prediction in predictions.values():
+        counts[prediction.bucket] = counts.get(prediction.bucket, 0) + 1
+    return counts
+
+
+def _extract_model_terms(
+    model: Any,
+    top_n: int,
+) -> tuple[tuple[TriageWeightedTerm, ...], tuple[TriageWeightedTerm, ...]]:
+    try:
+        tfidf = model.named_steps["tfidf"]
+        classifier = model.named_steps["classifier"]
+        features = list(tfidf.get_feature_names_out())
+        coefficients = _positive_class_coefficients(classifier)
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return (), ()
+    if len(features) != len(coefficients):
+        return (), ()
+    weighted = [
+        TriageWeightedTerm(term, float(weight))
+        for term, weight in zip(features, coefficients, strict=True)
+    ]
+    positive = tuple(sorted(weighted, key=lambda item: item.weight, reverse=True)[:top_n])
+    negative = tuple(sorted(weighted, key=lambda item: item.weight)[:top_n])
+    return positive, negative
+
+
+def _positive_class_coefficients(classifier: Any) -> list[float]:
+    classes = list(getattr(classifier, "classes_", []))
+    coef = getattr(classifier, "coef_", None)
+    if not classes or coef is None:
+        raise ValueError("missing classifier coefficients")
+    rows = coef.tolist() if hasattr(coef, "tolist") else coef
+    if len(rows) == 1:
+        return [float(value) for value in rows[0]]
+    if 1 not in classes:
+        raise ValueError("positive class is unavailable")
+    return [float(value) for value in rows[classes.index(1)]]
+
+
 def _load_ml_dependencies() -> dict[str, Any]:
     try:
         import joblib
@@ -331,6 +429,7 @@ __all__ = [
     "TRIAGE_BUCKET_LIKELY_SKIP",
     "TRIAGE_BUCKET_LIKELY_STAR",
     "TRIAGE_BUCKET_UNSURE",
+    "TRIAGE_DIAGNOSTIC_TOP_N",
     "TRIAGE_INSTALL_HINT",
     "TRIAGE_LIKELY_SKIP_THRESHOLD",
     "TRIAGE_LIKELY_STAR_THRESHOLD",
@@ -338,11 +437,14 @@ __all__ = [
     "TRIAGE_MIN_EXAMPLES",
     "InsufficientTriageTrainingDataError",
     "MissingTriageModelDependencyError",
+    "TriageModelDiagnostics",
     "TriageModelInfo",
     "TriagePrediction",
     "TriageTrainingExample",
+    "TriageWeightedTerm",
     "bucket_for_probability",
     "build_training_examples",
+    "build_triage_model_diagnostics",
     "clear_triage_model",
     "fit_triage_model",
     "format_triage_prediction",

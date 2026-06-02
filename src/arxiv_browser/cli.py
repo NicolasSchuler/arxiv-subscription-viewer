@@ -48,7 +48,13 @@ from arxiv_browser.cli_resolver import (
     _resolve_papers,
 )
 from arxiv_browser.config import CONFIG_APP_NAME, _coerce_arxiv_api_max_results, load_config
-from arxiv_browser.models import ARXIV_API_MAX_RESULTS_LIMIT, ArxivSearchRequest, Paper, UserConfig
+from arxiv_browser.models import (
+    ARXIV_API_MAX_RESULTS_LIMIT,
+    ArxivSearchRequest,
+    DigestInboxContext,
+    Paper,
+    UserConfig,
+)
 from arxiv_browser.parsing import (
     ARXIV_QUERY_FIELDS,
     HISTORY_DATE_FORMAT,
@@ -347,6 +353,11 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         help="Write Markdown to this file instead of stdout",
     )
     digest_parser.add_argument(
+        "--tui",
+        action="store_true",
+        help="Open the generated digest as an interactive TUI inbox",
+    )
+    digest_parser.add_argument(
         "--limit",
         type=_positive_int,
         default=10,
@@ -503,6 +514,18 @@ class CliDependencies:
     app_factory_supports_options: bool | None = None
 
 
+@dataclass(slots=True)
+class BrowserLaunchRequest:
+    """Inputs needed to start the interactive browser."""
+
+    args: argparse.Namespace
+    papers: list[Paper]
+    config: UserConfig
+    history_files: list[tuple[date, Path]]
+    current_date_index: int
+    digest_inbox_context: DigestInboxContext | None = None
+
+
 def _app_factory_accepts_options(app_factory: Callable[..., Any]) -> bool:
     """Return whether the factory explicitly opts into the new `options=` seam."""
     try:
@@ -557,6 +580,14 @@ def _run_dates_command(history_files: list[tuple[date, Path]]) -> int:
 
 
 def _run_digest_command(args: argparse.Namespace, config: UserConfig) -> int:
+    return _run_digest_command_with_deps(args, config, CliDependencies())
+
+
+def _run_digest_command_with_deps(
+    args: argparse.Namespace,
+    config: UserConfig,
+    dependencies: CliDependencies,
+) -> int:
     from arxiv_browser._ascii import set_ascii_mode
     from arxiv_browser.digest import (
         DigestError,
@@ -571,6 +602,12 @@ def _run_digest_command(args: argparse.Namespace, config: UserConfig) -> int:
     conflict = _digest_input_source_conflict(args)
     if conflict:
         print(f"Error: {conflict}", file=sys.stderr)
+        return 2
+    if bool(getattr(args, "tui", False)) and getattr(args, "output", None) is not None:
+        print("Error: --tui cannot be combined with --output", file=sys.stderr)
+        return 2
+    if bool(getattr(args, "tui", False)) and not dependencies.validate_interactive_tty_fn():
+        _print_non_interactive_error()
         return 2
 
     max_results_arg = getattr(args, "max_results", None)
@@ -601,7 +638,46 @@ def _run_digest_command(args: argparse.Namespace, config: UserConfig) -> int:
 
     for warning in result.warnings:
         print(f"Warning: {warning}", file=sys.stderr)
+    if bool(getattr(args, "tui", False)):
+        if not result.papers:
+            _print_empty_papers_error()
+            return 1
+        papers, context = _digest_tui_dataset(result)
+        return _run_browser_app(
+            dependencies,
+            BrowserLaunchRequest(
+                args=args,
+                papers=papers,
+                config=config,
+                history_files=[],
+                current_date_index=0,
+                digest_inbox_context=context,
+            ),
+        )
     return _write_digest_output(result.markdown, getattr(args, "output", None))
+
+
+def _digest_tui_dataset(result: Any) -> tuple[list[Paper], DigestInboxContext]:
+    """Return ordered TUI papers plus ephemeral digest section labels."""
+    papers_by_id = {paper.arxiv_id: paper for paper in result.papers}
+    ordered_ids: list[str] = []
+    labels_by_id: dict[str, list[str]] = {}
+    for section in result.sections:
+        for item in section.items:
+            if item.arxiv_id not in papers_by_id:
+                continue
+            if item.arxiv_id not in ordered_ids:
+                ordered_ids.append(item.arxiv_id)
+            labels = labels_by_id.setdefault(item.arxiv_id, [])
+            if section.title not in labels:
+                labels.append(section.title)
+    for paper in result.papers:
+        if paper.arxiv_id not in ordered_ids:
+            ordered_ids.append(paper.arxiv_id)
+    return [papers_by_id[arxiv_id] for arxiv_id in ordered_ids], DigestInboxContext(
+        source_label=result.source_label,
+        section_labels_by_id=labels_by_id,
+    )
 
 
 def _digest_input_source_conflict(args: argparse.Namespace) -> str:
@@ -672,16 +748,13 @@ def _print_non_interactive_error() -> None:
 
 
 def _run_browser_app(
-    args: argparse.Namespace,
     dependencies: CliDependencies,
-    papers: list[Paper],
-    config: UserConfig,
-    history_files: list[tuple[date, Path]],
-    current_date_index: int,
+    request: BrowserLaunchRequest,
 ) -> int:
     """Create and run the Textual browser app."""
     from arxiv_browser.browser.core import ArxivBrowserOptions as _ArxivBrowserOptions
 
+    args = request.args
     app_factory = dependencies.app_factory
     if app_factory is None:
         from arxiv_browser.browser.core import ArxivBrowser as _ArxivBrowser
@@ -690,16 +763,17 @@ def _run_browser_app(
 
     restore_session = (
         False
-        if getattr(args, "command", None) == "search"
+        if getattr(args, "command", None) == "search" or request.digest_inbox_context is not None
         else not bool(getattr(args, "no_restore", False))
     )
     browser_options = _ArxivBrowserOptions(
-        config=config,
+        config=request.config,
         restore_session=restore_session,
-        history_files=history_files,
-        current_date_index=current_date_index,
+        history_files=request.history_files,
+        current_date_index=request.current_date_index,
         ascii_icons=args.ascii,
         theme_override=getattr(args, "theme", None),
+        digest_inbox_context=request.digest_inbox_context,
     )
 
     supports_options = dependencies.app_factory_supports_options
@@ -707,14 +781,14 @@ def _run_browser_app(
         supports_options = _app_factory_accepts_options(app_factory)
 
     if supports_options:
-        app = app_factory(papers, options=browser_options)
+        app = app_factory(request.papers, options=browser_options)
     else:
         app = app_factory(
-            papers,
-            config=config,
+            request.papers,
+            config=request.config,
             restore_session=restore_session,
-            history_files=history_files,
-            current_date_index=current_date_index,
+            history_files=request.history_files,
+            current_date_index=request.current_date_index,
             ascii_icons=args.ascii,
         )
     app.run()
@@ -754,7 +828,7 @@ def main(
         return _run_dates_command(history_files)
 
     if getattr(args, "command", None) == "digest":
-        return _run_digest_command(args, config)
+        return _run_digest_command_with_deps(args, config, dependencies)
 
     result = dependencies.resolve_papers_fn(args, base_dir, config, history_files)
     if isinstance(result, int):
@@ -772,12 +846,14 @@ def main(
     # Sort papers alphabetically by title
     papers.sort(key=lambda p: p.title.lower())
     return _run_browser_app(
-        args,
         dependencies,
-        papers,
-        config,
-        history_files,
-        current_date_index,
+        BrowserLaunchRequest(
+            args=args,
+            papers=papers,
+            config=config,
+            history_files=history_files,
+            current_date_index=current_date_index,
+        ),
     )
 
 

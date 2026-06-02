@@ -19,6 +19,7 @@ from textual.widgets.option_list import Option, OptionDoesNotExist
 from arxiv_browser.action_messages import build_actionable_error
 from arxiv_browser.actions import triage_model_actions as _triage_model_actions
 from arxiv_browser.authors import paper_matches_tracked_author
+from arxiv_browser.browser.browse_header import format_header_text
 from arxiv_browser.browser.constants import (
     FUZZY_LIMIT,
     FUZZY_SCORE_CUTOFF,
@@ -74,6 +75,7 @@ class BrowseMixin:
 
     action_train_triage_model = _triage_model_actions.action_train_triage_model
     action_clear_triage_model = _triage_model_actions.action_clear_triage_model
+    action_triage_model_diagnostics = _triage_model_actions.action_triage_model_diagnostics
     _load_triage_predictions_for_current_dataset = (
         _triage_model_actions.load_triage_predictions_for_current_dataset
     )
@@ -177,21 +179,7 @@ class BrowseMixin:
 
     def _format_header_text(self, query: str = "") -> str:
         """Format the left-pane header text."""
-        from arxiv_browser._ascii import is_ascii_mode
-
-        sep = " - " if is_ascii_mode() else " \u00b7 "
-        if getattr(self, "_in_arxiv_api_mode", False) and self._arxiv_search_state is not None:
-            page = (self._arxiv_search_state.start // self._arxiv_search_state.max_results) + 1
-            return f" [bold]Papers[/]{sep}API results{sep}page {page}"
-        if self.selected_ids:
-            return f" [bold]Papers[/]{sep}{len(self.selected_ids)} selected"
-        if getattr(self, "_watch_filter_active", False):
-            return (
-                f" [bold]Papers[/]{sep}Watched {len(self.filtered_papers)}/{len(self.all_papers)}"
-            )
-        if query:
-            return f" [bold]Papers[/]{sep}Filtered ({len(self.filtered_papers)}/{len(self.all_papers)})"
-        return f" [bold]Papers[/]{sep}Browse {len(self.all_papers)}"
+        return format_header_text(self, query)
 
     def _matches_advanced_query(self, paper: Paper, rpn: list[QueryToken]) -> bool:
         """Test whether a paper matches an advanced RPN query with metadata context."""

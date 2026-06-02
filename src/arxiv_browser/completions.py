@@ -56,7 +56,7 @@ _arxiv_viewer() {
                     COMPREPLY=($(compgen -W "daily weekly" -- "$cur"))
                     return ;;
             esac
-            COMPREPLY=($(compgen -W "--input --query --field --category --period --max-results --output --limit --min-relevance --include-triage --include-hf --no-hf --cached-relevance-only --no-relevance --no-versions --help -h" -- "$cur"))
+            COMPREPLY=($(compgen -W "--input --query --field --category --period --max-results --output --tui --limit --min-relevance --include-triage --include-hf --no-hf --cached-relevance-only --no-relevance --no-versions --help -h" -- "$cur"))
             ;;
         dates|config-path|doctor)
             COMPREPLY=($(compgen -W "--help -h" -- "$cur"))
@@ -144,6 +144,7 @@ _arxiv_viewer() {
                         '--period[Digest period]:period:(daily weekly)' \
                         '--max-results[API page size]:number:' \
                         '--output[Markdown output file]:file:_files' \
+                        '--tui[Open digest as an interactive TUI inbox]' \
                         '--limit[Maximum papers per section]:number:' \
                         '--min-relevance[Minimum relevance score]:number:' \
                         '--include-triage[Include local ML triage sections]' \
@@ -217,6 +218,7 @@ complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l category -x 
 complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l period -x -a 'daily weekly' -d 'Digest period'
 complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l max-results -x -d 'API page size'
 complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l output -r -d 'Markdown output file'
+complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l tui -d 'Open digest as an interactive TUI inbox'
 complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l limit -x -d 'Maximum papers per section'
 complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l min-relevance -x -d 'Minimum relevance score'
 complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l include-triage -d 'Include local ML triage sections'

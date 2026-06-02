@@ -214,7 +214,7 @@ class TestAppHelperCoverage:
                 {"config": UserConfig()},
             )
         with pytest.raises(TypeError):
-            browser_core._coerce_browser_options(None, tuple(range(8)), {})
+            browser_core._coerce_browser_options(None, tuple(range(9)), {})
 
         class _Response:
             def __init__(self, status_code: int, text: str) -> None:

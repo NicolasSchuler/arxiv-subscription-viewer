@@ -337,6 +337,7 @@ class ArxivBrowser(
         """Initialize history navigation and watch-list derived state."""
         self._history_files = options.history_files or []
         self._current_date_index = options.current_date_index
+        self._digest_inbox_context = options.digest_inbox_context
         self._watched_paper_ids: set[str] = set()
         self._watch_filter_active = False
         self._compute_watched_papers()

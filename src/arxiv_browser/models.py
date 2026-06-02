@@ -242,6 +242,14 @@ class PaperCollection:
 
 
 @dataclass(slots=True)
+class DigestInboxContext:
+    """Ephemeral display metadata for a digest-backed TUI inbox."""
+
+    source_label: str
+    section_labels_by_id: dict[str, list[str]] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class SessionState:
     """State to restore on next run (scroll position, filters, etc.)."""
 

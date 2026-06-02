@@ -104,6 +104,7 @@ COMMAND_PALETTE_GROUPS: dict[str, str] = {
     "quick_triage": "Organize",
     "train_triage_model": "Organize",
     "clear_triage_model": "Organize",
+    "triage_model_diagnostics": "Organize",
     "edit_notes": "Organize",
     "edit_tags": "Organize",
     "select_all": "Core",
@@ -248,6 +249,12 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
         "Delete the local ML triage model and hide prediction badges",
         "",
         "clear_triage_model",
+    ),
+    (
+        "Triage Model Diagnostics",
+        "Explain local ML triage training, buckets, uncertainty, and learned terms",
+        "",
+        "triage_model_diagnostics",
     ),
     (
         "Schedule Review",

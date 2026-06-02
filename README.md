@@ -84,6 +84,9 @@ arxiv-viewer search --query "attention" --mode page --max-results 100
 # Generate a cron-friendly Markdown digest
 arxiv-viewer digest --category cs.AI --period weekly --output digest.md
 
+# Open the same digest pipeline as an interactive inbox
+arxiv-viewer digest --category cs.AI --period weekly --tui
+
 # List local history dates
 arxiv-viewer dates
 
@@ -141,7 +144,7 @@ If something looks off, run `arxiv-viewer doctor` to check config, history disco
 | 🔥 | **HuggingFace trending** — upvotes, keywords, GitHub links | `Ctrl+h` |
 | 🧭 | **Smart Reading Queue** — priority sort from relevance, watch matches, recency, HF, and S2 signals | `s` |
 | 🧪 | **Local triage model** — sklearn buckets for likely stars, unsure papers, and likely skips | `Ctrl+p` |
-| 📨 | **Markdown digests** — cron-friendly daily/weekly briefs | `arxiv-viewer digest` |
+| 📨 | **Markdown digests & inboxes** — cron-friendly briefs or interactive digest review | `arxiv-viewer digest` / `--tui` |
 | 🏷️ | **Tags, notes, stars** — organize your reading | `t` / `n` / `x` |
 | 📁 | **Collections** — curate reading lists | `Ctrl+k` |
 | 📥 | **Export** — BibTeX, Markdown, RIS, CSV, PDF download/preview | `E` / `d` / `F` |
