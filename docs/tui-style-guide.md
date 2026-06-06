@@ -58,8 +58,8 @@ Small/Medium modals also cap at `max-width: 90%` for narrow-terminal safety. Lar
 ### Responsive Pane Layout
 
 - The list/detail content area is responsive to terminal width via Textual horizontal breakpoints (`HORIZONTAL_BREAKPOINTS`).
-- At **80 cols and wider** the panes keep the side-by-side split (`#left-pane` / `#right-pane`).
-- **Below 80 cols** the screen gains the `-narrow` class and the panes stack vertically, list first, so neither pane is squeezed below its readable minimum.
+- At **96 cols and wider** the panes keep the side-by-side split (`#left-pane` / `#right-pane`).
+- **Below 96 cols** the screen gains the `-narrow` class and the panes stack vertically, list first, so neither pane is squeezed below its readable minimum.
 - Narrow-width behavior:
   - Prefer compact status tokens and shorter labels before removing high-value hints.
   - Keep `? help` visible in all contexts.
@@ -183,7 +183,8 @@ Use this before changing visible TUI behavior:
 - **Help overlay**: explain features with long-form names and keep the top `Getting Started` list aligned with README and the footer.
 - **Rows**: preserve title, authors, and highest-value badges before adding optional enrichment signals.
 - **State**: empty, loading, disabled, error, selected, detail-focus, and ASCII/no-color modes need explicit copy or non-color indicators.
-- **Verification**: cover changed footer/help/status/empty-state strings with tests and run a constrained-width layout check when the change affects scanning.
+- **Verification**: cover changed footer/help/status/empty-state strings with tests and run constrained-width layout checks when the change affects scanning.
+- **Snapshots**: keep browse, 96-col breakpoint, narrow browse, detail focus, command palette, light theme, and ASCII high-contrast baselines visually inspected before accepting snapshot updates.
 
 ## 10. Help And Discoverability
 
@@ -216,6 +217,7 @@ Rules:
   - Footer uses compact tokens while help/modal copy uses expanded phrasing.
 - Keep close instructions concise in modals (for example `Close: ? / Esc / q`).
 - Command palette must provide a clear empty-state message with next-step guidance.
+- Command palette group headers are scan aids only; arrow/Enter selection must skip headers and disabled commands.
 
 ## 11. Keybinding Conventions
 

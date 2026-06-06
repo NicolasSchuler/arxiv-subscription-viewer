@@ -346,6 +346,17 @@ def _render_line_annotations(
     return "\n".join(lines)
 
 
+def _detail_kv_line(label: str, value: str, colors: Mapping[str, str]) -> str:
+    """Return one aligned detail-pane key/value row."""
+    key = f"{label}:"
+    return f"  [bold {colors['accent']}]{key:<12}[/] {value}"
+
+
+def _decision_part(label: str, value: str, color: str) -> str:
+    """Return one compact decision-strip token."""
+    return f"[{color}]{label}:[/] {value}"
+
+
 class PaperDetails(Static):
     """Widget to display full paper details."""
 
@@ -513,21 +524,37 @@ class PaperDetails(Static):
         safe_date = escape_rich_text(paper.date)
         safe_comments = escape_rich_text(paper.comments or "")
         lines = [
-            f"  [bold {colors['accent']}]arXiv:[/] [{colors['purple']}]{paper.arxiv_id}[/]",
-            f"  [bold {colors['accent']}]Date:[/] {safe_date}",
-            f"  [bold {colors['accent']}]Categories:[/] {format_categories(paper.categories, resolved_category_colors)}",
+            _detail_kv_line("arXiv", f"[{colors['purple']}]{paper.arxiv_id}[/]", colors),
+            _detail_kv_line("Date", safe_date, colors),
+            _detail_kv_line(
+                "Categories",
+                format_categories(paper.categories, resolved_category_colors),
+                colors,
+            ),
         ]
         if paper.comments:
-            lines.append(f"  [bold {colors['accent']}]Comments:[/] [dim]{safe_comments}[/]")
+            lines.append(_detail_kv_line("Comments", f"[dim]{safe_comments}[/]", colors))
         return "\n".join(lines)
 
     def _render_decision_strip(self, state: DetailRenderState) -> str:
         """Return a compact triage strip with the current decision signals."""
         colors = theme_colors_for(self, self._theme_colors)
         parts = [
-            f"[bold {colors['accent']}]Read:[/] {'yes' if state.is_read else 'no'}",
-            f"[bold {colors['accent']}]Star:[/] {'yes' if state.starred else 'no'}",
-            f"[bold {colors['accent']}]Tags:[/] {len(state.tags) if state.tags else 'none'}",
+            _decision_part(
+                "Read",
+                "yes" if state.is_read else "no",
+                colors["green"] if state.is_read else colors["muted"],
+            ),
+            _decision_part(
+                "Star",
+                "yes" if state.starred else "no",
+                colors["yellow"] if state.starred else colors["muted"],
+            ),
+            _decision_part(
+                "Tags",
+                str(len(state.tags)) if state.tags else "none",
+                colors["purple"] if state.tags else colors["muted"],
+            ),
         ]
         review_label = review_status_label_for_schedule(
             state.next_review_date,
@@ -535,13 +562,13 @@ class PaperDetails(Static):
             date.today(),
         )
         if review_label:
-            parts.append(f"[bold {colors['accent']}]Review:[/] {review_label}")
+            parts.append(_decision_part("Review", review_label, colors["orange"]))
         if state.relevance is not None:
             score, _reason = state.relevance
             score_color, score_sym = _relevance_badge_parts(score, theme_colors=colors)
             score_sym = _relevance_symbol_for_mode(score_sym)
             parts.append(
-                f"[bold {colors['accent']}]Rel:[/] [{score_color}]{score_sym}{score}/10[/]"
+                _decision_part("Rel", f"[{score_color}]{score_sym}{score}/10[/]", score_color)
             )
         if state.s2_loading:
             parts.append(f"[{colors['green']}]S2:loading[/]")

@@ -18,6 +18,7 @@ Header {
 
 #main-container {
     height: 1fr;
+    background: $th-background;
 }
 
 #left-pane {
@@ -25,27 +26,31 @@ Header {
     min-width: 50;
     max-width: 100;
     height: 100%;
-    border: tall $th-highlight;
+    border: solid $th-highlight;
     background: $th-panel;
 }
 
 #left-pane:focus-within {
-    border: tall $th-accent;
+    border: solid $th-highlight;
+    border-left: solid $th-accent;
+    border-top: solid $th-accent;
 }
 
 #right-pane {
     width: 3fr;
     max-width: 100;
     height: 100%;
-    border: tall $th-highlight;
+    border: solid $th-highlight;
     background: $th-panel;
 }
 
 #right-pane:focus-within {
-    border: tall $th-accent;
+    border: solid $th-highlight;
+    border-left: solid $th-accent;
+    border-top: solid $th-accent;
 }
 
-/* Narrow terminals (< 80 cols): stack panes vertically, list first. */
+/* Narrow terminals (< 96 cols): stack panes vertically, list first. */
 Screen.-narrow #main-container {
     layout: vertical;
 }
@@ -55,6 +60,13 @@ Screen.-narrow #right-pane {
     width: 100%;
     min-width: 0;
     max-width: 100%;
+}
+
+Screen.-narrow #left-pane {
+    height: 2fr;
+}
+
+Screen.-narrow #right-pane {
     height: 1fr;
 }
 
@@ -75,11 +87,19 @@ Screen.-narrow #right-pane {
 #paper-list {
     height: 1fr;
     scrollbar-gutter: stable;
+    scrollbar-background: $th-panel;
+    scrollbar-color: $th-highlight;
+    scrollbar-color-hover: $th-muted;
+    scrollbar-color-active: $th-accent;
 }
 
 #details-scroll {
     height: 1fr;
     padding: 0 1;
+    scrollbar-background: $th-panel;
+    scrollbar-color: $th-highlight;
+    scrollbar-color-hover: $th-muted;
+    scrollbar-color-active: $th-accent;
 }
 
 OmniInput {
@@ -89,12 +109,12 @@ OmniInput {
 
 OmniInput #omni-input {
     width: 100%;
-    border: tall $th-accent;
+    border: solid $th-highlight;
     background: $th-background;
 }
 
 OmniInput #omni-input:focus {
-    border: tall $th-accent-alt;
+    border: solid $th-accent;
 }
 
 OmniInput #omni-hint {
@@ -105,15 +125,26 @@ OmniInput #omni-hint {
 OmniInput #omni-results {
     background: $th-panel;
     max-height: 12;
+    border-left: solid $th-highlight;
+    scrollbar-background: $th-panel;
+    scrollbar-color: $th-highlight;
+    scrollbar-color-hover: $th-muted;
+    scrollbar-color-active: $th-accent;
+}
+
+OmniInput #omni-results > .option-list--option-highlighted {
+    background: $th-selection;
+    border-left: solid $th-accent;
 }
 
 #paper-list > .option-list--option-highlighted {
-    background: $th-selection;
+    background: $th-panel-alt;
+    border-left: solid $th-muted;
 }
 
 #paper-list:focus > .option-list--option-highlighted {
-    background: $th-selection-highlight;
-    text-style: bold;
+    background: $th-highlight;
+    border-left: solid $th-accent;
 }
 
 #paper-list > .selected {
@@ -129,9 +160,9 @@ PaperDetails {
 }
 
 VerticalScroll {
-    scrollbar-background: $th-scrollbar-bg;
-    scrollbar-color: $th-scrollbar-thumb;
-    scrollbar-color-hover: $th-scrollbar-hover;
+    scrollbar-background: $th-panel;
+    scrollbar-color: $th-highlight;
+    scrollbar-color-hover: $th-muted;
     scrollbar-color-active: $th-scrollbar-active;
 }
 
@@ -145,7 +176,7 @@ VerticalScroll {
 # layout classes on the active screen. Below ``NARROW_BREAKPOINT`` cells the
 # list/detail panes stack vertically (list first); at or above it they keep the
 # side-by-side split.
-NARROW_BREAKPOINT = 80
+NARROW_BREAKPOINT = 96
 APP_HORIZONTAL_BREAKPOINTS: list[tuple[int, str]] = [
     (0, "-narrow"),
     (NARROW_BREAKPOINT, "-wide"),

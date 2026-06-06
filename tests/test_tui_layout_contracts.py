@@ -105,10 +105,12 @@ async def test_omni_command_executes_action_and_restores_footer(make_paper):
             input_widget = omni.query_one("#omni-input", Input)
             input_widget.value = ">preview"
             await pilot.pause(0.1)
-            preview_index = [command.action for command in omni._filtered_commands].index(
-                "toggle_preview"
+            preview_option_index = next(
+                option_index
+                for option_index, command_index in omni._command_option_indexes.items()
+                if omni._filtered_commands[command_index].action == "toggle_preview"
             )
-            omni.query_one("#omni-results", OptionList).highlighted = preview_index
+            omni.query_one("#omni-results", OptionList).highlighted = preview_option_index
 
             await input_widget.action_submit()
             await pilot.pause(0.05)

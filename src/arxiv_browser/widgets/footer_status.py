@@ -317,14 +317,22 @@ def _full_primary_segment(
     """Build the first rich segment (query/watch/default)."""
     if query:
         truncated_query = query if len(query) <= 30 else query[:27] + "..."
-        safe_query = escape_rich_text(truncated_query)
-        return (
-            f"[{theme_colors['accent']}]{filtered}[/][dim]/{total} matching [/]"
-            f'[{theme_colors["accent"]}]"{safe_query}"[/]'
+        return _status_chip(
+            f'{filtered}/{total} matching "{truncated_query}"',
+            color=theme_colors["accent"],
+            theme_colors=theme_colors,
         )
     if watch_filter_active:
-        return f"[{theme_colors['orange']}]{filtered}[/][dim]/{total} watched[/]"
-    return f"[dim]{total} papers[/]"
+        return _status_chip(
+            f"{filtered}/{total} watched",
+            color=theme_colors["orange"],
+            theme_colors=theme_colors,
+        )
+    return _status_chip(
+        f"{total} papers",
+        color=theme_colors["muted"],
+        theme_colors=theme_colors,
+    )
 
 
 def _compact_flag_segment(
@@ -411,15 +419,31 @@ def _build_full_status_parts(state: StatusBarState) -> list[str]:
             watch_filter_active=state.watch_filter_active,
             theme_colors=state.theme_colors,
         ),
-        f"[dim]Sort: {state.sort_label}[/]",
+        _status_chip(
+            f"Sort: {state.sort_label}",
+            color=state.theme_colors["accent_alt"],
+            theme_colors=state.theme_colors,
+        ),
     ]
     if state.selected_count > 0:
         parts.insert(
             1,
-            f"[bold {state.theme_colors['green']}]{state.selected_count} selected[/]",
+            _status_chip(
+                f"{state.selected_count} selected",
+                color=state.theme_colors["green"],
+                theme_colors=state.theme_colors,
+                bold=True,
+            ),
         )
     if state.detail_focus:
-        parts.insert(1, f"[{state.theme_colors['accent_alt']}]Details focus[/]")
+        parts.insert(
+            1,
+            _status_chip(
+                "Details focus",
+                color=state.theme_colors["accent_alt"],
+                theme_colors=state.theme_colors,
+            ),
+        )
     if state.in_arxiv_api_mode and state.api_page is not None:
         parts.extend(_full_api_segments(state))
     if state.show_abstract_preview:
@@ -441,12 +465,35 @@ def _build_full_status_parts(state: StatusBarState) -> list[str]:
 def _full_api_segments(state: StatusBarState) -> list[str]:
     """Return full-width arXiv API status segments."""
     segments = [
-        f"[{state.theme_colors['orange']}]API[/]",
-        f"[dim]Page: {state.api_page}[/]",
+        _status_chip("API", color=state.theme_colors["orange"], theme_colors=state.theme_colors),
+        _status_chip(
+            f"Page: {state.api_page}",
+            color=state.theme_colors["muted"],
+            theme_colors=state.theme_colors,
+        ),
     ]
     if state.arxiv_api_loading:
-        segments.append(f"[{state.theme_colors['orange']}]Loading...[/]")
+        segments.append(
+            _status_chip(
+                "Loading...",
+                color=state.theme_colors["orange"],
+                theme_colors=state.theme_colors,
+            )
+        )
     return segments
+
+
+def _status_chip(
+    text: str,
+    *,
+    color: str,
+    theme_colors: Mapping[str, str],
+    bold: bool = False,
+) -> str:
+    """Return a compact full-width status chip."""
+    emphasis = "bold " if bold else ""
+    safe_text = escape_rich_text(text)
+    return f"[{emphasis}{color} on {theme_colors['panel_alt']}] {safe_text} [/]"
 
 
 def _full_flag_segments(state: StatusBarState) -> list[str]:

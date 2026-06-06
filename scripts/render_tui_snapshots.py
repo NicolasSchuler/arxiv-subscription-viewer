@@ -27,6 +27,8 @@ class SnapshotCase:
     name: str
     size: tuple[int, int]
     setup: Callable[[object], Awaitable[None]]
+    theme_name: str = "monokai"
+    ascii_icons: bool = False
 
 
 async def _idle(_: object) -> None:
@@ -47,9 +49,18 @@ async def _open_command_palette(pilot: object) -> None:
 
 SNAPSHOT_CASES = (
     SnapshotCase("default-browse", (100, 30), _idle),
+    SnapshotCase("breakpoint-browse", (96, 30), _idle),
     SnapshotCase("narrow-browse", (80, 24), _idle),
     SnapshotCase("detail-focus", (100, 30), _focus_details),
     SnapshotCase("command-palette", (100, 30), _open_command_palette),
+    SnapshotCase("light-theme-browse", (100, 30), _idle, theme_name="github-light"),
+    SnapshotCase(
+        "ascii-high-contrast",
+        (80, 24),
+        _idle,
+        theme_name="high-contrast",
+        ascii_icons=True,
+    ),
 )
 
 
@@ -104,12 +115,13 @@ def _papers() -> list[Paper]:
     ]
 
 
-def _config() -> UserConfig:
+def _config(theme_name: str = "monokai") -> UserConfig:
     """Return persisted-state fixtures that make snapshots content-rich."""
     return UserConfig(
         onboarding_seen=True,
         last_seen_whats_new=WHATS_NEW_VERSION,
         show_abstract_preview=True,
+        theme_name=theme_name,
         bookmarks=[
             SearchBookmark(name="agents", query="agent"),
             SearchBookmark(name="unread AI", query="cat:cs.AI unread"),
@@ -133,7 +145,11 @@ async def _capture(case: SnapshotCase) -> str:
     """Render one snapshot case and return its SVG payload."""
     app = ArxivBrowser(
         _papers(),
-        ArxivBrowserOptions(config=_config(), restore_session=False),
+        ArxivBrowserOptions(
+            config=_config(theme_name=case.theme_name),
+            restore_session=False,
+            ascii_icons=case.ascii_icons,
+        ),
     )
     async with app.run_test(size=case.size) as pilot:
         await pilot.pause(0.2)

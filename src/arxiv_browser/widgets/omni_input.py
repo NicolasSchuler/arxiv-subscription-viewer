@@ -44,6 +44,9 @@ OMNI_HINT_API = "Enter to search arXiv · Esc cancel"
 OMNI_HINT_SEMANTIC = "Semantic search over titles + abstracts · Esc cancel"
 
 FUZZY_THRESHOLD = 40
+COMMAND_NAME_WIDTH = 20
+COMMAND_GROUP_WIDTH = 8
+COMMAND_DESC_WIDTH = 26
 
 CommandMatch = tuple[float, int, int, PaletteCommand]
 
@@ -142,6 +145,7 @@ class OmniInput(Vertical):
         super().__init__()
         self._commands: list[PaletteCommand] = []
         self._filtered_commands: list[PaletteCommand] = []
+        self._command_option_indexes: dict[int, int] = {}
         self._current_mode: str = "local"
 
     def compose(self) -> ComposeResult:
@@ -215,6 +219,7 @@ class OmniInput(Vertical):
         results.disabled = True
         results.clear_options()
         self._filtered_commands = []
+        self._command_option_indexes = {}
 
     def _update_hint(self, mode: str) -> None:
         hint = self.query_one("#omni-hint", Static)
@@ -225,9 +230,17 @@ class OmniInput(Vertical):
         results = self.query_one("#omni-results", OptionList)
         results.clear_options()
         self._filtered_commands = self._filter_commands(query)
+        self._command_option_indexes = {}
 
-        for cmd in self._filtered_commands:
-            results.add_option(self._command_option(cmd))
+        show_group_headers = len({cmd.group for cmd in self._filtered_commands}) > 1
+        last_group: str | None = None
+        for command_index, cmd in enumerate(self._filtered_commands):
+            if show_group_headers and cmd.group != last_group:
+                results.add_option(_command_group_header(cmd.group))
+                last_group = cmd.group
+            option_index = results.option_count
+            results.add_option(self._command_option(cmd, show_group=not show_group_headers))
+            self._command_option_indexes[option_index] = command_index
         self._add_empty_command_result(results, query)
 
         self._show_results()
@@ -265,23 +278,29 @@ class OmniInput(Vertical):
             )
         )
 
-    def _command_option(self, command: PaletteCommand) -> Option:
-        return Option(self._command_option_label(command), disabled=not command.enabled)
+    def _command_option(self, command: PaletteCommand, *, show_group: bool = True) -> Option:
+        return Option(
+            self._command_option_label(command, show_group=show_group),
+            disabled=not command.enabled,
+        )
 
-    def _command_option_label(self, command: PaletteCommand) -> str:
+    def _command_option_label(self, command: PaletteCommand, *, show_group: bool = True) -> str:
         safe_name, safe_desc, safe_hint, safe_group, safe_blocked = self._safe_command_parts(
             command
         )
         if not command.enabled:
             blocked = f"  Requires: {safe_blocked}" if safe_blocked else ""
-            return f"[dim]{safe_name}  [{safe_group}]  {safe_desc}{blocked}[/]"
+            muted = theme_colors_for(self)["muted"]
+            disabled_parts = [safe_name, safe_desc]
+            if show_group:
+                disabled_parts.insert(1, safe_group)
+            return f"[dim]{'  '.join(disabled_parts)}[/][{muted}]{blocked}[/]"
 
         colors = theme_colors_for(self)
-        parts = [
-            f"[bold {colors['accent']}]{safe_name}[/]",
-            f"[{colors['purple']}]{safe_group}[/]",
-            f"[{colors['muted']}]{safe_desc}[/]",
-        ]
+        parts = [f"[bold {colors['accent']}]{safe_name}[/]"]
+        if show_group:
+            parts.append(f"[dim {colors['purple']}]{safe_group}[/]")
+        parts.append(f"[{colors['muted']}]{safe_desc}[/]")
         if command.suggested:
             parts.append(f"[{colors['green']}]* suggested[/]")
         if safe_hint:
@@ -289,12 +308,14 @@ class OmniInput(Vertical):
         return "  ".join(parts)
 
     def _safe_command_parts(self, command: PaletteCommand) -> tuple[str, str, str, str, str]:
-        name = truncate_palette_text(command.name, PALETTE_NAME_MAX_LEN)
-        desc = truncate_palette_text(command.description, PALETTE_DESC_MAX_LEN)
+        name = _palette_cell(command.name, PALETTE_NAME_MAX_LEN, COMMAND_NAME_WIDTH)
+        desc = _palette_cell(command.description, PALETTE_DESC_MAX_LEN, COMMAND_DESC_WIDTH)
         hint = (
-            truncate_palette_text(command.key_hint, PALETTE_KEY_MAX_LEN) if command.key_hint else ""
+            _palette_cell(command.key_hint, PALETTE_KEY_MAX_LEN, PALETTE_KEY_MAX_LEN)
+            if command.key_hint
+            else ""
         )
-        group = truncate_palette_text(command.group, PALETTE_KEY_MAX_LEN)
+        group = _palette_cell(command.group, PALETTE_KEY_MAX_LEN, COMMAND_GROUP_WIDTH)
         blocked = (
             truncate_palette_text(command.blocked_reason, PALETTE_DESC_MAX_LEN)
             if command.blocked_reason
@@ -321,15 +342,26 @@ class OmniInput(Vertical):
     def _move_command_highlight(self, direction: int) -> None:
         """Move the command-result highlight to the next enabled command."""
         results = self.query_one("#omni-results", OptionList)
-        count = len(self._filtered_commands)
+        option_indexes = sorted(self._command_option_indexes)
+        count = len(option_indexes)
         if count == 0:
             return
         start = results.highlighted
-        index = (-1 if direction > 0 else count) if start is None else start
+        if start is None:
+            index = -1 if direction > 0 else count
+        elif start in self._command_option_indexes:
+            index = option_indexes.index(start)
+        else:
+            before = [
+                pos for pos, option_index in enumerate(option_indexes) if option_index < start
+            ]
+            index = len(before) - 1 if direction > 0 else len(before)
         for _ in range(count):
             index = (index + direction) % count
-            if self._filtered_commands[index].enabled:
-                results.highlighted = index
+            option_index = option_indexes[index]
+            command_index = self._command_option_indexes[option_index]
+            if self._filtered_commands[command_index].enabled:
+                results.highlighted = option_index
                 return
 
     # --- event handlers ---
@@ -373,9 +405,9 @@ class OmniInput(Vertical):
     @on(OptionList.OptionSelected, "#omni-results")
     def _on_result_selected(self, event: OptionList.OptionSelected) -> None:
         """Handle command selection from the results list."""
-        idx = event.option_index
-        if 0 <= idx < len(self._filtered_commands):
-            cmd = self._filtered_commands[idx]
+        command_index = self._command_option_indexes.get(event.option_index)
+        if command_index is not None:
+            cmd = self._filtered_commands[command_index]
             if cmd.enabled:
                 self.post_message(self.CommandSelected(cmd.action))
 
@@ -383,12 +415,31 @@ class OmniInput(Vertical):
         """Select the currently highlighted command in the results list."""
         results = self.query_one("#omni-results", OptionList)
         idx = results.highlighted
-        if idx is None and self._filtered_commands:
-            idx = 0
-        if idx is not None and 0 <= idx < len(self._filtered_commands):
-            cmd = self._filtered_commands[idx]
+        if idx is None:
+            idx = self._first_enabled_command_option_index()
+        command_index = self._command_option_indexes.get(idx) if idx is not None else None
+        if command_index is not None:
+            cmd = self._filtered_commands[command_index]
             if cmd.enabled:
                 self.post_message(self.CommandSelected(cmd.action))
+
+    def _first_enabled_command_option_index(self) -> int | None:
+        """Return the first selectable option index in command mode."""
+        for option_index, command_index in sorted(self._command_option_indexes.items()):
+            if self._filtered_commands[command_index].enabled:
+                return option_index
+        return None
+
+
+def _palette_cell(text: str, max_len: int, width: int) -> str:
+    """Return width-stable text for one command result column."""
+    return truncate_palette_text(text, max_len).ljust(width)
+
+
+def _command_group_header(group: str) -> Option:
+    """Return a non-selectable command group header row."""
+    safe_group = escape_rich_text(truncate_palette_text(group, PALETTE_KEY_MAX_LEN))
+    return Option(f"[dim]{safe_group}[/]", disabled=True)
 
 
 def _command_match_sort_key(match: CommandMatch) -> tuple[int, int, float]:

@@ -388,6 +388,59 @@ class TestOmniInputTUI:
             await pilot.press("up")
             assert results.highlighted == 0
 
+    async def test_command_mode_group_headers_are_not_selectable(self):
+        from textual.app import App
+        from textual.widgets import Input, OptionList
+
+        messages: list[OmniInput.CommandSelected] = []
+
+        class TestApp(App):
+            def compose(self):
+                yield OmniInput()
+
+            def on_omni_input_command_selected(self, msg: OmniInput.CommandSelected):
+                messages.append(msg)
+
+        async with TestApp().run_test() as pilot:
+            omni = pilot.app.query_one(OmniInput)
+            omni.set_commands(
+                [
+                    PaletteCommand(
+                        name="Open",
+                        description="Open paper",
+                        key_hint="o",
+                        action="open_url",
+                        group="Core",
+                    ),
+                    PaletteCommand(
+                        name="Edit Tags",
+                        description="Tag paper",
+                        key_hint="t",
+                        action="edit_tags",
+                        group="Organize",
+                    ),
+                ]
+            )
+            omni.open(">")
+            inp = omni.query_one("#omni-input", Input)
+            inp.value = ">"
+            await pilot.pause()
+            results = omni.query_one("#omni-results", OptionList)
+
+            assert results.option_count == 4
+            assert "Core" in str(results.get_option_at_index(0).prompt)
+            assert "Organize" in str(results.get_option_at_index(2).prompt)
+
+            results.highlighted = None
+            await pilot.press("down")
+            assert results.highlighted == 1
+            await pilot.press("down")
+            assert results.highlighted == 3
+
+            await inp.action_submit()
+            await pilot.pause()
+            assert [message.action for message in messages] == ["edit_tags"]
+
     async def test_api_mode_emits_on_enter(self):
         from textual.app import App
         from textual.widgets import Input
