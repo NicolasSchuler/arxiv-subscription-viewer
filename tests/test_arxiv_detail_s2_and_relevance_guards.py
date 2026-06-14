@@ -163,6 +163,7 @@ class TestDetailStateBuilder:
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._http_client = None
+        app._abstract_cache = {}
         app._paper_summaries = {"2401.00001": "A summary"}
         app._summary_loading = set()
         app._highlight_terms = {"abstract": ["test"]}
@@ -261,6 +262,7 @@ class TestDetailStateBuilder:
 
         app = ArxivBrowser.__new__(ArxivBrowser)
         app._http_client = None
+        app._abstract_cache = {}
         app._paper_summaries = {}
         app._summary_loading = set()
         app._highlight_terms = {"abstract": []}
@@ -430,7 +432,7 @@ class TestBatchConfirmationThreshold:
         source = inspect.getsource(ConfirmModal.compose)
         assert "Confirm (y)" in source
         assert "Cancel (Esc)" in source
-        assert "Confirm: y  Cancel: n / Esc" in source
+        assert "y confirm | Esc/n cancel" in source
 
 
 @pytest.mark.integration

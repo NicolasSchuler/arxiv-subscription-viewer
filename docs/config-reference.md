@@ -67,6 +67,8 @@ The loader validates data before it reaches the TUI. Important rules:
 | `version` | `int` | `1` | Config schema version. Managed by the app. |
 | `config_defaulted` | `bool` | `false` | Set to `true` when a corrupt config was replaced with defaults. Not persisted. |
 | `onboarding_seen` | `bool` | `false` | Tracks whether the first-run help overlay has been dismissed. Managed by the app. |
+| `shortcuts_hint_seen` | `bool` | `false` | Tracks whether the one-time "Press ? for all shortcuts" tip has been shown. Managed by the app. |
+| `badge_legend_hint_seen` | `bool` | `false` | Tracks whether the one-time "badges explained in ? → Badge Legend" tip has been shown. Managed by the app. |
 | `last_seen_whats_new` | `string` | `""` | Tag of the last "What's New" release notes the user dismissed. Managed by the app. |
 | `show_abstract_preview` | `bool` | `false` | Show inline abstract preview in the paper list. Toggle with `p`. |
 | `compact_list` | `bool` | `false` | Show one line (title only) per paper in the list for faster title skimming. Toggle with `z`. |

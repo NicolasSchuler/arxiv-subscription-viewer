@@ -564,6 +564,18 @@ class TestUiActionCoverage:
         assert app._save_config_or_warn.called
         assert app._refresh_detail_pane.called
 
+        # Per-section header click toggles a single section in/out of collapse.
+        app._refresh_detail_pane.reset_mock()
+        app._config.collapsed_sections = ["summary"]
+        ui_actions.action_toggle_detail_section(app, "abstract")
+        assert app._config.collapsed_sections == ["abstract", "summary"]
+        ui_actions.action_toggle_detail_section(app, "summary")
+        assert app._config.collapsed_sections == ["abstract"]
+        assert app._refresh_detail_pane.call_count == 2
+        # Unknown section keys are ignored (no crash, no state change).
+        ui_actions.action_toggle_detail_section(app, "bogus")
+        assert app._config.collapsed_sections == ["abstract"]
+
         app.push_screen = MagicMock()
         ui_actions.action_show_help(app)
         assert app.push_screen.called

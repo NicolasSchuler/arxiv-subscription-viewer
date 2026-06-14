@@ -54,25 +54,14 @@ class CollectionsModal(ModalBase[str | None]):
     ]
 
     CSS = """
-    CollectionsModal {
-        align: center middle;
-    }
-
     /* ── shared dialog chrome ────────────────────────────── */
     #col-dialog {
         width: 70;
         max-width: 90%;
         height: 70%;
         min-height: 20;
-        background: $th-background;
-        border: tall $th-accent;
+        /* tighter vertical padding than the shared .modal-dialog default (1 2) */
         padding: 0 2;
-    }
-
-    #col-title {
-        text-style: bold;
-        color: $th-accent;
-        margin-bottom: 1;
     }
 
     /* ── manage-view ─────────────────────────────────────── */
@@ -119,21 +108,13 @@ class CollectionsModal(ModalBase[str | None]):
     #col-actions Button { margin-right: 1; }
 
     #col-buttons {
-        height: auto;
         margin-top: 1;
-        align: right middle;
     }
 
     #col-buttons Button { margin-left: 1; }
 
     /* ── detail-view ─────────────────────────────────────── */
     #detail-view { height: 1fr; }
-
-    #detail-title {
-        text-style: bold;
-        color: $th-accent;
-        margin-bottom: 1;
-    }
 
     #detail-list {
         height: 1fr;
@@ -142,21 +123,13 @@ class CollectionsModal(ModalBase[str | None]):
     }
 
     #detail-buttons {
-        height: auto;
         margin-top: 1;
-        align: right middle;
     }
 
     #detail-buttons Button { margin-left: 1; }
 
     /* ── pick-view ───────────────────────────────────────── */
     #pick-view { height: 1fr; }
-
-    #pick-title {
-        text-style: bold;
-        color: $th-accent;
-        margin-bottom: 1;
-    }
 
     #pick-list {
         height: 1fr;
@@ -165,9 +138,7 @@ class CollectionsModal(ModalBase[str | None]):
     }
 
     #pick-buttons {
-        height: auto;
         margin-top: 1;
-        align: right middle;
     }
 
     #pick-buttons Button { margin-left: 1; }
@@ -200,8 +171,8 @@ class CollectionsModal(ModalBase[str | None]):
 
     def compose(self) -> ComposeResult:
         """Yield all three sub-views; visibility is toggled in on_mount."""
-        with Vertical(id="col-dialog"):
-            yield Label("Collections Manager", id="col-title")
+        with Vertical(id="col-dialog", classes="modal-dialog"):
+            yield Label("Collections Manager", id="col-title", classes="modal-title")
 
             # manage-view
             with Vertical(id="manage-view"):
@@ -215,33 +186,37 @@ class CollectionsModal(ModalBase[str | None]):
                         with Horizontal(id="col-actions"):
                             yield Button("Create", variant="primary", id="col-create")
                             yield Button("Rename", variant="default", id="col-rename")
-                            yield Button("Delete", variant="default", id="col-delete")
+                            yield Button("Delete", variant="error", id="col-delete")
                             yield Button("View", variant="default", id="col-view")
-                with Horizontal(id="col-buttons"):
+                with Horizontal(id="col-buttons", classes="modal-buttons"):
                     yield Button("Close", variant="default", id="col-close")
                     yield Button("Save", variant="primary", id="col-save")
                 yield Static(
-                    "[dim]Saved | Esc close | Enter picks highlighted items[/]", id="col-help"
+                    "No unsaved changes | Save persists | Esc discards edits",
+                    id="col-help",
+                    classes="modal-footer",
                 )
 
             # detail-view (papers in a collection)
             with Vertical(id="detail-view"):
-                yield Label("", id="detail-title")
+                yield Label("", id="detail-title", classes="modal-title")
                 yield ListView(id="detail-list")
-                with Horizontal(id="detail-buttons"):
-                    yield Button("Remove Selected", variant="default", id="detail-remove")
+                with Horizontal(id="detail-buttons", classes="modal-buttons"):
+                    yield Button("Remove Selected", variant="error", id="detail-remove")
                     yield Button("Back", variant="primary", id="detail-back")
                 yield Static(
-                    "[dim]Saved | Esc back | Remove Selected edits list[/]", id="detail-help"
+                    "No unsaved changes | Remove Selected edits list | Esc discards edits",
+                    id="detail-help",
+                    classes="modal-footer",
                 )
 
             # pick-view (quick collection picker)
             with Vertical(id="pick-view"):
-                yield Label("Add to Collection", id="pick-title")
+                yield Label("Add to Collection", id="pick-title", classes="modal-title")
                 yield ListView(id="pick-list")
-                with Horizontal(id="pick-buttons"):
+                with Horizontal(id="pick-buttons", classes="modal-buttons"):
                     yield Button("Cancel (Esc/q)", variant="default", id="pick-cancel")
-                yield Static("[dim]Enter choose | Esc cancel[/]", id="pick-help")
+                yield Static("Enter choose | Esc cancel", id="pick-help", classes="modal-footer")
 
     # ── lifecycle ────────────────────────────────────────────────────
 
@@ -316,7 +291,7 @@ class CollectionsModal(ModalBase[str | None]):
     def _mark_dirty(self) -> None:
         """Mark the modal as having unsaved collection edits."""
         self._dirty = True
-        message = "[bold]Unsaved[/bold] | Save persists | Esc closes without saving"
+        message = "[bold]Unsaved changes[/bold] | Save persists | Esc discards edits"
         for selector in ("#col-help", "#detail-help"):
             try:
                 self.query_one(selector, Static).update(message)

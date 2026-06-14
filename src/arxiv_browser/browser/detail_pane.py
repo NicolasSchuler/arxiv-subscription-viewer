@@ -41,7 +41,13 @@ from arxiv_browser.themes import _build_textual_theme, build_theme_runtime
 from arxiv_browser.widgets import chrome as _widget_chrome
 from arxiv_browser.widgets.chrome import StatusBarState
 from arxiv_browser.widgets.details import DetailRenderState
-from arxiv_browser.widgets.listing import PaperHighlightTerms, PaperRowRenderState
+from arxiv_browser.widgets.listing import (
+    PaperHighlightTerms,
+    PaperRowRenderState,
+    meta_line_budget_for,
+)
+
+_LIST_PANE_WIDTH_FRACTION = 2 / 5
 
 _BADGE_REFRESH_KINDS = frozenset({"s2", "hf", "version", "relevance", "triage"})
 
@@ -155,6 +161,13 @@ class DetailPaneMixin(DetailAnnotationMixin):
         self._schedule_abstract_load(paper)
         return None
 
+    def _abstract_pending(self, paper: Paper) -> bool:
+        return (
+            self._abstract_cache.get(paper.arxiv_id) is None
+            and paper.abstract is None
+            and bool(paper.abstract_raw)
+        )
+
     async def _load_abstract_async(self, paper: Paper) -> None:
         """Clean a paper's LaTeX abstract off-thread and update the display."""
         task_epoch = self._capture_dataset_epoch()
@@ -163,7 +176,6 @@ class DetailPaneMixin(DetailAnnotationMixin):
             if not self._is_current_dataset_epoch(task_epoch):
                 return
             self._abstract_cache[paper.arxiv_id] = cleaned
-            # Only update if not already set (idempotent to avoid race conditions)
             if paper.abstract is None:
                 paper.abstract = cleaned
             self._update_abstract_display(paper.arxiv_id)
@@ -198,7 +210,7 @@ class DetailPaneMixin(DetailAnnotationMixin):
         return DetailRenderState(
             paper=paper,
             abstract_text=resolved_abstract,
-            abstract_loading=abstract_text is None and paper.abstract is None,
+            abstract_loading=self._abstract_pending(paper),
             summary=self._paper_summaries.get(arxiv_id),
             summary_loading=arxiv_id in self._summary_loading,
             highlight_terms=tuple(self._highlight_terms.get("abstract", [])),
@@ -231,13 +243,16 @@ class DetailPaneMixin(DetailAnnotationMixin):
         inbox_context = getattr(self, "_digest_inbox_context", None)
         compact = getattr(self, "_compact_list", False)
         show_preview = self._show_abstract_preview and not compact
-        meta_line_budget = 78
+        list_width = 0
         try:
-            list_width = getattr(self._get_paper_list_widget().size, "width", 0)
-            if list_width:
-                meta_line_budget = max(36, min(120, list_width - 4))
+            list_width = getattr(self._get_paper_list_widget().size, "width", 0) or 0
         except (AttributeError, NoMatches):
-            pass
+            list_width = 0
+        if not list_width:
+            screen_width = getattr(getattr(self, "size", None), "width", 0) or 0
+            if screen_width:
+                list_width = int(screen_width * _LIST_PANE_WIDTH_FRACTION)
+        meta_line_budget = meta_line_budget_for(list_width)
         return PaperRowRenderState(
             paper=paper,
             selected=aid in self.selected_ids,

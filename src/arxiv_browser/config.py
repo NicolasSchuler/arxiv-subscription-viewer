@@ -44,8 +44,6 @@ from arxiv_browser.review import normalize_review_schedule
 logger = logging.getLogger(__name__)
 
 # Validation contract — _dict_to_config() guarantees valid output for any input:
-#   Field                  Rule                            Handler
-#   ─────────────────────  ──────────────────────────────  ──────────────────
 #   sort_index             0 ≤ x < len(SORT_OPTIONS)       _parse_session_state
 #   arxiv_api_max_results  1 ≤ x ≤ 200                    _parse_session_state
 #   watch_list[].match_type  in WATCH_MATCH_TYPES          _parse_watch_list
@@ -53,7 +51,6 @@ logger = logging.getLogger(__name__)
 #   collections length     ≤ MAX_COLLECTIONS               _parse_collections
 #   collection.paper_ids   ≤ MAX_PAPERS_PER_COLLECTION     _parse_collections
 #   scalar fields          type-checked via _safe_get()    _dict_to_config
-#
 CONFIG_FILENAME = "config.json"
 USER_TCSS_FILENAME = "user.tcss"
 
@@ -184,6 +181,8 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
         ],
         "marks": config.marks,
         "onboarding_seen": config.onboarding_seen,
+        "shortcuts_hint_seen": config.shortcuts_hint_seen,
+        "badge_legend_hint_seen": config.badge_legend_hint_seen,
         "last_seen_whats_new": config.last_seen_whats_new,
     }
 
@@ -625,6 +624,8 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         trusted_pdf_viewer_hashes=_parse_str_list(data, "trusted_pdf_viewer_hashes"),
         version=_safe_get(data, "version", 1, int),
         onboarding_seen=_safe_get(data, "onboarding_seen", False, bool),
+        shortcuts_hint_seen=_safe_get(data, "shortcuts_hint_seen", False, bool),
+        badge_legend_hint_seen=_safe_get(data, "badge_legend_hint_seen", False, bool),
         last_seen_whats_new=_safe_get(data, "last_seen_whats_new", "", str),
     )
 

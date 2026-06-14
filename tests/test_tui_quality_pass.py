@@ -716,7 +716,7 @@ async def test_command_palette_modal_filters_and_executes(make_paper):
             assert "Command palette" in str(modal.query_one(Label).content)
             assert results.option_count == 4
             assert "All commands" in str(results.get_option_at_index(0).prompt)
-            assert "Esc/q close" in str(modal.query_one("#palette-footer", Static).content)
+            assert "Esc close" in str(modal.query_one("#palette-footer", Static).content)
 
             modal._populate_results("watch")
             assert results.option_count >= 1

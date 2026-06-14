@@ -96,23 +96,11 @@ class TriageDiagnosticsModal(ModalBase[None]):
     ]
 
     CSS = """
-    TriageDiagnosticsModal {
-        align: center middle;
-    }
-
     #triage-diagnostics-dialog {
-        width: 88;
+        width: 86;
         max-width: 95%;
         height: 82%;
-        background: $th-background;
-        border: tall $th-accent;
         padding: 0 2;
-    }
-
-    #triage-diagnostics-title {
-        text-style: bold;
-        color: $th-accent;
-        margin-bottom: 1;
     }
 
     #triage-diagnostics-body {
@@ -121,7 +109,6 @@ class TriageDiagnosticsModal(ModalBase[None]):
     }
 
     #triage-diagnostics-footer {
-        color: $th-muted;
         margin-top: 1;
     }
     """
@@ -133,13 +120,19 @@ class TriageDiagnosticsModal(ModalBase[None]):
 
     def compose(self) -> ComposeResult:
         """Compose the diagnostics dialog."""
-        with Vertical(id="triage-diagnostics-dialog"):
-            yield Label("Triage Model Diagnostics", id="triage-diagnostics-title")
+        with Vertical(id="triage-diagnostics-dialog", classes="modal-dialog"):
+            yield Label(
+                "Triage Model Diagnostics",
+                id="triage-diagnostics-title",
+                classes="modal-title",
+            )
             yield Static(
-                _render_triage_diagnostics(self._diagnostics, self._papers_by_id),
+                _render_triage_diagnostics(
+                    self._diagnostics, self._papers_by_id, theme_colors_for(self)["accent"]
+                ),
                 id="triage-diagnostics-body",
             )
-            yield Static("Esc/q close", id="triage-diagnostics-footer")
+            yield Static("Esc/q close", id="triage-diagnostics-footer", classes="modal-footer")
 
     def action_close(self) -> None:
         """Close the overlay."""
@@ -177,7 +170,11 @@ def first_two_abstract_lines(abstract_text: str) -> str:
 def _render_triage_diagnostics(
     diagnostics: TriageModelDiagnostics,
     papers_by_id: dict[str, Paper],
+    accent: str = "",
 ) -> str:
+    def header(text: str) -> str:
+        return f"[bold {accent}]{text}[/]" if accent else f"[bold]{text}[/]"
+
     lines = [
         f"[bold]Status[/] {escape_rich_text(diagnostics.status)}",
         escape_rich_text(diagnostics.message),
@@ -190,7 +187,7 @@ def _render_triage_diagnostics(
     lines.extend(
         [
             "",
-            "[bold]Training[/]",
+            header("Training"),
             f"  trained: {escape_rich_text(info.trained_at)}",
             f"  labels: {info.total_count} total | {info.positive_count} positive | "
             f"{info.negative_count} negative",
@@ -198,20 +195,20 @@ def _render_triage_diagnostics(
             f"  thresholds: likely-star >= {info.likely_star_threshold:.2f}, "
             f"likely-skip <= {info.likely_skip_threshold:.2f}",
             "",
-            "[bold]Current Dataset[/]",
+            header("Current Dataset"),
             f"  predicted: {diagnostics.predicted_count}",
             "  buckets: "
             f"likely-star {diagnostics.bucket_counts.get(TRIAGE_BUCKET_LIKELY_STAR, 0)}, "
             f"unsure {diagnostics.bucket_counts.get(TRIAGE_BUCKET_UNSURE, 0)}, "
             f"likely-skip {diagnostics.bucket_counts.get(TRIAGE_BUCKET_LIKELY_SKIP, 0)}",
             "",
-            "[bold]Most Uncertain[/]",
+            header("Most Uncertain"),
         ]
     )
     lines.extend(_uncertain_prediction_lines(diagnostics.uncertain_predictions, papers_by_id))
-    lines.extend(["", "[bold]Terms Favoring Star[/]"])
+    lines.extend(["", header("Terms Favoring Star")])
     lines.extend(_weighted_term_lines(diagnostics.positive_terms))
-    lines.extend(["", "[bold]Terms Favoring Skip[/]"])
+    lines.extend(["", header("Terms Favoring Skip")])
     lines.extend(_weighted_term_lines(diagnostics.negative_terms))
     return "\n".join(lines)
 
@@ -251,23 +248,10 @@ class QuickTriageScreen(ModalBase[QuickTriageResult]):
     ]
 
     CSS = """
-    QuickTriageScreen {
-        align: center middle;
-    }
-
     #triage-dialog {
         width: 96;
         max-width: 90%;
         height: auto;
-        background: $th-background;
-        border: tall $th-accent;
-        padding: 1 2;
-    }
-
-    #triage-heading {
-        text-style: bold;
-        color: $th-accent;
-        margin-bottom: 1;
     }
 
     #triage-progress {
@@ -288,12 +272,13 @@ class QuickTriageScreen(ModalBase[QuickTriageResult]):
 
     #triage-abstract {
         color: $th-muted;
-        min-height: 2;
+        /* fixed height (not min-height) so short/empty abstracts don't collapse
+           the dialog and jump the help line as the user advances papers. */
+        height: 2;
         margin-bottom: 1;
     }
 
     #triage-help {
-        color: $th-muted;
         margin-top: 1;
     }
     """
@@ -311,8 +296,8 @@ class QuickTriageScreen(ModalBase[QuickTriageResult]):
 
     def compose(self) -> ComposeResult:
         """Yield quick triage content widgets."""
-        with Vertical(id="triage-dialog"):
-            yield Label("Quick Triage", id="triage-heading")
+        with Vertical(id="triage-dialog", classes="modal-dialog"):
+            yield Label("Quick Triage", id="triage-heading", classes="modal-title")
             yield Static("", id="triage-progress")
             yield Static("", id="triage-title")
             yield Static("", id="triage-badges")
@@ -321,6 +306,7 @@ class QuickTriageScreen(ModalBase[QuickTriageResult]):
                 "[bold]y[/] star+read  [bold]n[/] skip  [bold]t[/] tag later  "
                 "[bold]s[/] save  [bold]Esc/q[/] close",
                 id="triage-help",
+                classes="modal-footer",
             )
 
     def on_mount(self) -> None:
@@ -439,16 +425,17 @@ class QuickTriageScreen(ModalBase[QuickTriageResult]):
         colors = theme_colors_for(self)
         parts = []
         if item.relevance is None:
-            parts.append(f"[{colors['muted']}]Rel: unscored[/]")
+            parts.append(f"[{colors['muted']}]\\[Rel: unscored][/]")
         else:
             score, _reason = item.relevance
-            parts.append(f"[{colors['green']}]Rel: {score}/10[/]")
+            parts.append(f"[{colors['green']}]\\[Rel: {score}/10][/]")
         if item.watched:
-            parts.append(f"[{colors['orange']}]WATCH[/]")
+            parts.append(f"[{colors['orange']}]\\[WATCH][/]")
         if item.triage_prediction is not None:
             color = _triage_badge_color(item.triage_prediction, colors)
             badge = escape_rich_text(format_triage_prediction(item.triage_prediction))
-            parts.append(f"[{color}]{badge}[/]")
+            parts.append(f"[{color}]\\[{badge}][/]")
+        # Bracketed pills joined by spaces so distinct badges don't read as a run-on.
         return "  ".join(parts)
 
 

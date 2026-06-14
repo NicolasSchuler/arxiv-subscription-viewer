@@ -11,7 +11,6 @@ from pathlib import Path
 
 import httpx
 
-from arxiv_browser.action_messages import build_actionable_error
 from arxiv_browser.config import _coerce_arxiv_api_max_results
 from arxiv_browser.models import ArxivSearchRequest, Paper, UserConfig
 from arxiv_browser.parsing import HISTORY_DATE_FORMAT, parse_arxiv_file
@@ -210,21 +209,16 @@ def _resolve_history_date(history_files: list[tuple[date, Path]], date_str: str)
 
 
 def _resolve_legacy_fallback(base_dir: Path) -> list[Paper] | int:
-    """Find and parse arxiv.txt in the current directory. Returns papers or exit code."""
+    """Find and parse arxiv.txt in the current directory. Returns papers or exit code.
+
+    A true cold start (no history files and no ``arxiv.txt``) returns an empty
+    list rather than an error code: an interactive caller launches the TUI into
+    its empty state, which guides the user (press ``A`` to search arXiv). Only
+    genuine failures (unreadable/corrupt ``arxiv.txt``) return an exit code.
+    """
     arxiv_file = base_dir / "arxiv.txt"
     if not arxiv_file.exists():
-        print(
-            build_actionable_error(
-                "find startup papers",
-                why="no history files or arxiv.txt were found in the current directory",
-                next_step=(
-                    "create history/YYYY-MM-DD.txt, create arxiv.txt, "
-                    'or run "arxiv-viewer search --category cs.AI"'
-                ),
-            ),
-            file=sys.stderr,
-        )
-        return 1
+        return []
     if not os.access(arxiv_file, os.R_OK):
         print(f"Error: {arxiv_file} is not readable (permission denied)", file=sys.stderr)
         return 1

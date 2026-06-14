@@ -95,8 +95,9 @@ def test_paper_row_renders_ephemeral_inbox_badges(make_paper):
         PaperRowRenderState(paper=paper, inbox_labels=("High Relevance", "Likely Star"))
     )
 
-    assert "Inbox:High Relevance" in rendered
-    assert "Inbox:Likely Star" in rendered
+    # Inbox section titles render as compact codes in the dense meta line.
+    assert "Inbox:HiRel" in rendered
+    assert "Inbox:Star?" in rendered
 
 
 def test_paper_list_item_title_and_authors_text(make_paper):
@@ -730,6 +731,22 @@ def test_chrome_helper_branches_cover_status_and_date_navigation_helpers():
     assert "x" in browse_keys
     assert "Ctrl+p" in browse_keys
     assert chrome_mod.build_detail_focus_footer_bindings()[0] == ("Tab", "list")
+
+    # Help must be discoverable in every footer mode, and survive the hint cap.
+    footer_modes = [
+        chrome_mod.build_browse_footer_bindings(
+            s2_active=False,
+            has_starred=False,
+            llm_configured=False,
+            has_history_navigation=False,
+        ),
+        chrome_mod.build_search_footer_bindings(),
+        chrome_mod.build_api_footer_bindings(),
+        chrome_mod.build_detail_focus_footer_bindings(),
+        chrome_mod.build_selection_footer_bindings(3),
+    ]
+    for bindings in footer_modes:
+        assert ("?", "help") in bindings[: chrome_mod.MAX_FOOTER_HINTS]
     assert chrome_mod.build_footer_mode_badge(
         relevance_scoring_active=True,
         version_checking=False,

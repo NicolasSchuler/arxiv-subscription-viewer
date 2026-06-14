@@ -34,24 +34,15 @@ class WhatsNewScreen(ModalBase[None]):
     ]
 
     CSS = """
-    WhatsNewScreen {
-        align: center middle;
-    }
-
     #whats-new-dialog {
         width: 70;
         max-width: 90%;
         max-height: 80%;
-        background: $th-background;
-        border: tall $th-accent;
-        padding: 1 2;
     }
 
     #whats-new-title {
-        text-style: bold;
         color: $th-accent-alt;
         text-align: center;
-        margin-bottom: 1;
     }
 
     #whats-new-version {
@@ -62,7 +53,6 @@ class WhatsNewScreen(ModalBase[None]):
 
     #whats-new-footer {
         text-align: center;
-        color: $th-muted;
         margin-top: 1;
         text-style: italic;
     }
@@ -70,13 +60,14 @@ class WhatsNewScreen(ModalBase[None]):
 
     def compose(self) -> ComposeResult:
         """Yield a scrolling dialog rendering the release highlights."""
-        with VerticalScroll(id="whats-new-dialog"):
-            yield Label(WHATS_NEW_HEADLINE, id="whats-new-title")
+        with VerticalScroll(id="whats-new-dialog", classes="modal-dialog"):
+            yield Label(WHATS_NEW_HEADLINE, id="whats-new-title", classes="modal-title")
             yield Label(f"Version {WHATS_NEW_VERSION}", id="whats-new-version")
             yield Static(id="whats-new-content")
             yield Label(
                 "Press Esc / Enter / Space to close",
                 id="whats-new-footer",
+                classes="modal-footer",
             )
 
     def on_mount(self) -> None:

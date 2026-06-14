@@ -65,6 +65,13 @@ from arxiv_browser.modals.search import (
     PaletteCommand,
 )
 
+# settings.py — in-app settings editor and inline LLM preset picker
+from arxiv_browser.modals.settings import (
+    LLMPresetPickerModal,
+    SettingsModal,
+    SettingsResult,
+)
+
 # triage.py — rapid unread-paper triage
 from arxiv_browser.modals.triage import QuickTriageScreen, TriageDiagnosticsModal
 
@@ -90,6 +97,7 @@ __all__ = [
     "ExportMenuModal",
     "FigurePreviewScreen",
     "HelpScreen",
+    "LLMPresetPickerModal",
     "LineAnnotationModal",
     "LineAnnotationResult",
     "MetadataSnapshotPickerModal",
@@ -107,6 +115,8 @@ __all__ = [
     "RecommendationsScreen",
     "ResearchInterestsModal",
     "SectionToggleModal",
+    "SettingsModal",
+    "SettingsResult",
     "SummaryModeModal",
     "TrendRadarModal",
     "TriageDiagnosticsModal",

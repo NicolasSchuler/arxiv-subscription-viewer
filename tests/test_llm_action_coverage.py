@@ -39,6 +39,19 @@ from tests.support.patch_helpers import patch_save_config
 
 
 class TestLlmActionCoverage:
+    def test_summary_guards_return_before_side_effects(self) -> None:
+        app = _new_app_stub()
+        app._require_llm_command = MagicMock(return_value=None)
+        app._ensure_llm_command_trusted = MagicMock()
+        llm_actions.action_generate_summary(app)
+        app._ensure_llm_command_trusted.assert_not_called()
+
+        paper = _paper()
+        app._summary_loading = {paper.arxiv_id}
+        app._config = UserConfig()
+        mode = next(iter(llm_actions.SUMMARY_MODES))
+        llm_actions._on_summary_mode_selected(app, mode, paper, "cmd {prompt}")
+
     def test_trust_and_command_resolution_branches(self, tmp_path) -> None:
         app = _new_app_stub()
         app._trust_hash = llm_actions._trust_hash

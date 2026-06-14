@@ -34,6 +34,7 @@ from arxiv_browser.actions import ui_actions as _ui_actions
 from arxiv_browser.actions.audio_actions import AudioActionMixin
 from arxiv_browser.browser import constants as _browser_constants
 from arxiv_browser.browser import content as _browser_content
+from arxiv_browser.browser import onboarding_hints as _onboarding_hints
 from arxiv_browser.browser.browse import BrowseMixin
 from arxiv_browser.browser.detail_pane import DetailPaneMixin
 from arxiv_browser.browser.discovery import DiscoveryMixin
@@ -204,7 +205,12 @@ class ArxivBrowser(
     _show_citation_graph_worker = _ui_actions._show_citation_graph_worker
     _build_tfidf_index_worker = _ui_actions._build_tfidf_index_worker
     action_cycle_theme = _ui_actions.action_cycle_theme
+    action_open_settings = _ui_actions.action_open_settings
     action_toggle_sections = _ui_actions.action_toggle_sections
+    action_toggle_detail_section = _ui_actions.action_toggle_detail_section
+    _maybe_hint_shortcuts = _onboarding_hints.maybe_hint_shortcuts
+    _paper_has_enrichment = _onboarding_hints.paper_has_enrichment
+    _maybe_hint_badge_legend = _onboarding_hints.maybe_hint_badge_legend
     action_show_help = _ui_actions.action_show_help
     action_toggle_focus_pane = _ui_actions.action_toggle_focus_pane
     action_command_palette = _ui_actions.action_command_palette
@@ -596,9 +602,6 @@ class ArxivBrowser(
     def _on_welcome_dismissed(self, result: None) -> None:
         """Mark onboarding as seen after the welcome screen is dismissed."""
         self._config.onboarding_seen = True
-        # Users who just finished onboarding have effectively seen the
-        # current release's notes; seed the tag so we don't show What's New
-        # on the very next launch.
         from arxiv_browser.whats_new import WHATS_NEW_VERSION
 
         self._config.last_seen_whats_new = WHATS_NEW_VERSION
@@ -829,6 +832,8 @@ class ArxivBrowser(
         """Handle paper highlight (keyboard navigation) with debouncing."""
         idx = event.option_index
         if idx is not None and 0 <= idx < len(self.filtered_papers):
+            self._maybe_hint_shortcuts()
+            self._maybe_hint_badge_legend(self.filtered_papers[idx])
             self._pending_detail_paper = self.filtered_papers[idx]
             self._pending_detail_started_at = (
                 time.perf_counter() if logger.isEnabledFor(logging.DEBUG) else None

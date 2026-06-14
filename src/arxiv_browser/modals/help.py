@@ -9,7 +9,7 @@ from __future__ import annotations
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Vertical
 from textual.widgets import Input, Label, Static, TabbedContent, TabPane
 
 from arxiv_browser.modals.base import ModalBase
@@ -32,11 +32,12 @@ def _classify_section(name: str) -> str:
         lower.startswith("getting started")
         or lower.startswith("search syntax")
         or lower.startswith("badge legend")
+        or lower.startswith("case-sensitive")
     ):
         return "getting-started"
     if lower.startswith("core"):
         return "core"
-    if "standard" in lower:
+    if "standard" in lower or lower.startswith("quick triage"):
         return "standard"
     if "power" in lower:
         return "power"
@@ -46,6 +47,10 @@ def _classify_section(name: str) -> str:
 class HelpScreen(ModalBase[None]):
     """Full-screen help overlay showing all keyboard shortcuts by category."""
 
+    # Fallback only — used when the screen is constructed without sections (e.g.
+    # direct instantiation or tests). The running app ALWAYS passes binding-derived
+    # sections via `action_show_help` → `HelpScreen(sections=app._build_help_sections())`,
+    # so this static copy is never shown in normal use and need not list every key.
     _DEFAULT_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         (
             "Getting Started",
@@ -117,26 +122,20 @@ class HelpScreen(ModalBase[None]):
     ]
 
     CSS = """
-    HelpScreen {
-        align: center middle;
-    }
-
     #help-dialog {
         width: 80%;
         height: 85%;
         min-width: 60;
         min-height: 20;
-        background: $th-background;
-        border: tall $th-accent;
+        /* override shared 1 2 padding: help needs tighter vertical padding */
         padding: 0 2;
-        overflow-y: auto;
+        /* The dialog itself does not scroll — title, filter, and footer stay
+           pinned; only the tab/results content below scrolls. */
     }
 
     #help-title {
-        text-style: bold;
         color: $th-accent-alt;
         text-align: center;
-        margin-bottom: 1;
     }
 
     #help-filter {
@@ -151,8 +150,14 @@ class HelpScreen(ModalBase[None]):
         padding: 0;
     }
 
+    .help-tab-body {
+        height: 1fr;
+        overflow-y: auto;
+    }
+
     #help-sections {
-        height: auto;
+        height: 1fr;
+        overflow-y: auto;
     }
 
     .help-section {
@@ -177,7 +182,6 @@ class HelpScreen(ModalBase[None]):
 
     #help-footer {
         text-align: center;
-        color: $th-muted;
         margin-top: 1;
     }
     """
@@ -244,8 +248,8 @@ class HelpScreen(ModalBase[None]):
 
     def compose(self) -> ComposeResult:
         """Yield a scrollable dialog with a filter input and tabbed shortcut sections."""
-        with VerticalScroll(id="help-dialog"):
-            yield Label("Keyboard Shortcuts", id="help-title")
+        with Vertical(id="help-dialog", classes="modal-dialog"):
+            yield Label("Keyboard Shortcuts", id="help-title", classes="modal-title")
             yield Input(
                 placeholder="Filter help... (type to search)",
                 id="help-filter",
@@ -258,7 +262,7 @@ class HelpScreen(ModalBase[None]):
             flat = Vertical(id="help-sections", classes="hidden")
             flat.display = False
             yield flat
-            yield Label(self._footer_note, id="help-footer")
+            yield Label(self._footer_note, id="help-footer", classes="modal-footer")
 
     async def on_mount(self) -> None:
         """Populate help tab panes and focus the filter input."""

@@ -12,6 +12,12 @@ Screen {
 Header {
     background: $th-panel-alt;
     color: $th-text;
+    text-style: bold;
+}
+
+HeaderTitle {
+    color: $th-accent;
+    text-style: bold;
 }
 
 
@@ -21,9 +27,12 @@ Header {
     background: $th-background;
 }
 
+/* min-width is deliberately below the 2fr share so the list never starves the
+   3fr detail pane: at the narrow end of the side-by-side range the detail pane
+   stays the wider, readable reading surface instead of being inverted. */
 #left-pane {
     width: 2fr;
-    min-width: 50;
+    min-width: 40;
     max-width: 100;
     height: 100%;
     border: solid $th-highlight;
@@ -62,12 +71,14 @@ Screen.-narrow #right-pane {
     max-width: 100%;
 }
 
+/* When stacked, favour the detail pane: once a paper is picked its denser
+   content (metadata + a long abstract) needs more rows than the list. */
 Screen.-narrow #left-pane {
-    height: 2fr;
+    height: 1fr;
 }
 
 Screen.-narrow #right-pane {
-    height: 1fr;
+    height: 2fr;
 }
 
 #list-header {
@@ -289,6 +300,8 @@ APP_BINDINGS: list[BindingType] = [
     Binding("ctrl+r", "mark_visible_read", "Mark Visible Read", show=False),
     # Theme cycling
     Binding("ctrl+t", "cycle_theme", "Theme", show=False),
+    # In-app settings editor
+    Binding("comma", "open_settings", "Settings", show=False),
     # Collapsible sections
     Binding("ctrl+d", "toggle_sections", "Sections", show=False),
     # History mode: date navigation

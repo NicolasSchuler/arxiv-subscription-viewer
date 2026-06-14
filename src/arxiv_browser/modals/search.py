@@ -47,27 +47,14 @@ class ArxivSearchModal(ModalBase[ArxivSearchRequest | None]):
     ]
 
     CSS = """
-    ArxivSearchModal {
-        align: center middle;
-    }
-
     #arxiv-search-dialog {
         width: 70;
         max-width: 90%;
         height: auto;
-        background: $th-background;
-        border: tall $th-accent;
-        padding: 0 2;
-    }
-
-    #arxiv-search-title {
-        text-style: bold;
-        color: $th-accent;
-        margin-bottom: 1;
+        padding: 0 2;  /* intentional override: 0 vertical padding (not shared 1 2) */
     }
 
     #arxiv-search-help {
-        color: $th-muted;
         margin-bottom: 1;
     }
 
@@ -84,11 +71,7 @@ class ArxivSearchModal(ModalBase[ArxivSearchRequest | None]):
     #arxiv-search-field:focus,
     #arxiv-search-category:focus {
         border-left: tall $th-accent;
-    }
-
-    #arxiv-search-buttons {
-        height: auto;
-        align: right middle;
+        background: $th-highlight;
     }
 
     #arxiv-search-buttons Button {
@@ -110,11 +93,12 @@ class ArxivSearchModal(ModalBase[ArxivSearchRequest | None]):
 
     def compose(self) -> ComposeResult:
         """Yield the search dialog with query input, field selector, category filter, and buttons."""
-        with Vertical(id="arxiv-search-dialog"):
-            yield Label("Search All arXiv", id="arxiv-search-title")
+        with Vertical(id="arxiv-search-dialog", classes="modal-dialog"):
+            yield Label("Search All arXiv", id="arxiv-search-title", classes="modal-title")
             yield Label(
                 "Query all arXiv by field, with optional category filter.",
                 id="arxiv-search-help",
+                classes="modal-footer",
             )
             yield Input(
                 value=self._initial_query,
@@ -135,7 +119,7 @@ class ArxivSearchModal(ModalBase[ArxivSearchRequest | None]):
                 placeholder="Optional category (e.g., cs.AI)",
                 id="arxiv-search-category",
             )
-            with Horizontal(id="arxiv-search-buttons"):
+            with Horizontal(id="arxiv-search-buttons", classes="modal-buttons"):
                 yield Button("Cancel (Esc)", variant="default", id="arxiv-cancel")
                 yield Button("Search (Enter)", variant="primary", id="arxiv-search")
 
@@ -198,19 +182,19 @@ class CommandPaletteModal(ModalBase[str]):
     """
 
     BINDINGS = [
+        # Esc only — the palette has a focused text input, so `q` must type a
+        # literal q rather than close the dialog.
         Binding("escape", "cancel", "Close"),
-        Binding("q", "cancel", "Close"),
     ]
 
     DEFAULT_CSS = """
-    CommandPaletteModal {
-        align: center middle;
-    }
-
-    CommandPaletteModal > Vertical {
+    CommandPaletteModal > .modal-dialog {
         width: 70;
         max-width: 90%;
         max-height: 28;
+        /* intentional override: panel body + thick accent border distinguish
+           the palette from plain dialogs (shared bg/padding would be $th-background / 1 2).
+           Selector carries a type segment so it outranks the shared .modal-dialog rule. */
         background: $th-panel;
         border: thick $th-accent;
         padding: 0 2;
@@ -229,7 +213,6 @@ class CommandPaletteModal(ModalBase[str]):
     }
 
     CommandPaletteModal #palette-footer {
-        color: $th-muted;
         margin-top: 1;
     }
     """
@@ -246,7 +229,7 @@ class CommandPaletteModal(ModalBase[str]):
 
         arrows = "^v" if is_ascii_mode() else "\u2191\u2193"
         accent = theme_colors_for(self)["accent"]
-        with Vertical():
+        with Vertical(classes="modal-dialog"):
             yield Label(f"[bold {accent}]Command palette[/]", id="palette-title")
             yield Input(
                 placeholder="Type to search command palette actions...",
@@ -254,7 +237,9 @@ class CommandPaletteModal(ModalBase[str]):
             )
             yield OptionList(id="palette-results")
             yield Static(
-                f"{arrows} move   Enter run   Esc/q close   ? shortcuts", id="palette-footer"
+                f"{arrows} move   Enter run   Esc close   ? shortcuts",
+                id="palette-footer",
+                classes="modal-footer",
             )
 
     def on_mount(self) -> None:

@@ -5,8 +5,10 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
+from textual.app import App
 
 from arxiv_browser.palette import PaletteCommand
+from arxiv_browser.themes import THEME_COLORS, _build_textual_theme
 from arxiv_browser.widgets.omni_input import (
     FUZZY_THRESHOLD,
     OMNI_HINT_API,
@@ -18,6 +20,20 @@ from arxiv_browser.widgets.omni_input import (
     OmniMode,
     parse_omni_mode,
 )
+
+
+class _ThemedApp(App):
+    """Test app exposing the ``$th-*`` CSS variables OmniInput's CSS references.
+
+    Mirrors what ``ArxivBrowser`` registers at runtime so bare-widget tests
+    resolve theme tokens (e.g. ``$th-muted``) instead of erroring on an
+    undefined variable.
+    """
+
+    def get_css_variables(self) -> dict[str, str]:
+        variables = dict(super().get_css_variables())
+        variables.update(_build_textual_theme("test", dict(THEME_COLORS)).variables)
+        return variables
 
 
 class TestParseOmniMode:
@@ -170,9 +186,8 @@ class TestOmniInputTUI:
     """Integration tests requiring a running Textual app."""
 
     async def test_open_close_visibility(self):
-        from textual.app import App
 
-        class TestApp(App):
+        class TestApp(_ThemedApp):
             def compose(self):
                 yield OmniInput()
 
@@ -185,10 +200,9 @@ class TestOmniInputTUI:
             assert not omni.is_open
 
     async def test_open_with_initial_text(self):
-        from textual.app import App
         from textual.widgets import Input
 
-        class TestApp(App):
+        class TestApp(_ThemedApp):
             def compose(self):
                 yield OmniInput()
 
@@ -200,12 +214,11 @@ class TestOmniInputTUI:
             assert inp.value == ">export"
 
     async def test_local_search_emits_message(self):
-        from textual.app import App
         from textual.widgets import Input
 
         messages: list[OmniInput.LocalSearch] = []
 
-        class TestApp(App):
+        class TestApp(_ThemedApp):
             def compose(self):
                 yield OmniInput()
 
@@ -221,10 +234,9 @@ class TestOmniInputTUI:
             assert any(m.query == "cat:cs.AI" for m in messages)
 
     async def test_command_mode_shows_results(self):
-        from textual.app import App
         from textual.widgets import Input, OptionList
 
-        class TestApp(App):
+        class TestApp(_ThemedApp):
             def compose(self):
                 yield OmniInput()
 
@@ -249,10 +261,9 @@ class TestOmniInputTUI:
             assert results.option_count > 0
 
     async def test_command_mode_no_matches_shows_disabled_empty_result(self):
-        from textual.app import App
         from textual.widgets import Input, OptionList
 
-        class TestApp(App):
+        class TestApp(_ThemedApp):
             def compose(self):
                 yield OmniInput()
 
@@ -278,15 +289,15 @@ class TestOmniInputTUI:
             assert results.has_class("visible")
             assert results.option_count == 1
             empty_prompt = str(results.get_option_at_index(0).prompt)
-            assert "Try:" in empty_prompt
-            assert "Next:" in empty_prompt
+            # Compact single-row message (Esc affordance lives in the hint line).
+            assert "No matching commands" in empty_prompt
+            assert "zzzzzz" in empty_prompt
             assert omni._filtered_commands == []
 
     async def test_disabled_command_explains_blocker(self):
-        from textual.app import App
         from textual.widgets import Input, OptionList
 
-        class TestApp(App):
+        class TestApp(_ThemedApp):
             def compose(self):
                 yield OmniInput()
 
@@ -315,10 +326,9 @@ class TestOmniInputTUI:
             assert "Requires: No papers loaded" in prompt
 
     async def test_suggested_command_label_includes_group_and_marker(self):
-        from textual.app import App
         from textual.widgets import Input, OptionList
 
-        class TestApp(App):
+        class TestApp(_ThemedApp):
             def compose(self):
                 yield OmniInput()
 
@@ -347,10 +357,9 @@ class TestOmniInputTUI:
             assert "suggested" in prompt
 
     async def test_command_mode_arrow_keys_move_highlight(self):
-        from textual.app import App
         from textual.widgets import Input, OptionList
 
-        class TestApp(App):
+        class TestApp(_ThemedApp):
             def compose(self):
                 yield OmniInput()
 
@@ -389,12 +398,11 @@ class TestOmniInputTUI:
             assert results.highlighted == 0
 
     async def test_command_mode_group_headers_are_not_selectable(self):
-        from textual.app import App
         from textual.widgets import Input, OptionList
 
         messages: list[OmniInput.CommandSelected] = []
 
-        class TestApp(App):
+        class TestApp(_ThemedApp):
             def compose(self):
                 yield OmniInput()
 
@@ -442,12 +450,11 @@ class TestOmniInputTUI:
             assert [message.action for message in messages] == ["edit_tags"]
 
     async def test_api_mode_emits_on_enter(self):
-        from textual.app import App
         from textual.widgets import Input
 
         messages: list[OmniInput.ApiSearch] = []
 
-        class TestApp(App):
+        class TestApp(_ThemedApp):
             def compose(self):
                 yield OmniInput()
 
@@ -466,13 +473,12 @@ class TestOmniInputTUI:
             assert any(m.query == "transformer" for m in messages)
 
     async def test_semantic_mode_emits_local_search_with_prefix(self):
-        from textual.app import App
         from textual.widgets import Input
 
         messages: list[OmniInput.LocalSearch] = []
         submissions: list[OmniInput.LocalSearchSubmitted] = []
 
-        class TestApp(App):
+        class TestApp(_ThemedApp):
             def compose(self):
                 yield OmniInput()
 
@@ -494,12 +500,11 @@ class TestOmniInputTUI:
             assert any(m.query == "~ RAG" for m in submissions)
 
     async def test_command_select_emits_message(self):
-        from textual.app import App
         from textual.widgets import Input
 
         messages: list[OmniInput.CommandSelected] = []
 
-        class TestApp(App):
+        class TestApp(_ThemedApp):
             def compose(self):
                 yield OmniInput()
 
@@ -528,10 +533,9 @@ class TestOmniInputTUI:
             assert any(m.action == "toggle_star" for m in messages)
 
     async def test_hint_updates_per_mode(self):
-        from textual.app import App
         from textual.widgets import Input
 
-        class TestApp(App):
+        class TestApp(_ThemedApp):
             def compose(self):
                 yield OmniInput()
 
@@ -566,10 +570,9 @@ class TestOmniInputTUI:
             assert omni._current_mode == "local"
 
     async def test_ascii_mode_uses_ascii_safe_hints(self):
-        from textual.app import App
         from textual.widgets import Input, Static
 
-        class TestApp(App):
+        class TestApp(_ThemedApp):
             def compose(self):
                 yield OmniInput()
 
@@ -584,10 +587,9 @@ class TestOmniInputTUI:
                 assert all(ord(ch) < 128 for ch in str(hint.content))
 
     async def test_close_clears_input(self):
-        from textual.app import App
         from textual.widgets import Input
 
-        class TestApp(App):
+        class TestApp(_ThemedApp):
             def compose(self):
                 yield OmniInput()
 
@@ -601,12 +603,11 @@ class TestOmniInputTUI:
             assert not omni.is_open
 
     async def test_disabled_command_not_selected(self):
-        from textual.app import App
         from textual.widgets import Input
 
         messages: list[OmniInput.CommandSelected] = []
 
-        class TestApp(App):
+        class TestApp(_ThemedApp):
             def compose(self):
                 yield OmniInput()
 
@@ -636,12 +637,11 @@ class TestOmniInputTUI:
             assert len(messages) == 0
 
     async def test_empty_api_query_no_emit(self):
-        from textual.app import App
         from textual.widgets import Input
 
         messages: list[OmniInput.ApiSearch] = []
 
-        class TestApp(App):
+        class TestApp(_ThemedApp):
             def compose(self):
                 yield OmniInput()
 

@@ -37,9 +37,9 @@ def build_list_empty_message(
             "[dim]Next: press [bold]A[/bold] to search arXiv.[/]"
         )
     return (
-        "[dim italic]No papers available.[/]\n"
+        "[dim italic]No papers loaded yet.[/]\n"
         "[dim]Try: press [bold]A[/bold] to search arXiv.[/]\n"
-        "[dim]Next: load a history file or run with [bold]-i[/bold] <file>.[/]"
+        "[dim]Next: press [bold]?[/bold] for shortcuts or [bold]Ctrl+p[/bold] for commands.[/]"
     )
 
 

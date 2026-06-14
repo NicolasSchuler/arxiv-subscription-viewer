@@ -214,7 +214,8 @@ class TestCliCoverage:
         assert cli._resolve_history_date(history_files, "2026-01-23") == 0
 
     def test_resolve_legacy_fallback_branches(self, tmp_path, make_paper) -> None:
-        assert cli._resolve_legacy_fallback(tmp_path) == 1
+        # Cold start (neither history nor arxiv.txt) is a soft empty, not an error.
+        assert cli._resolve_legacy_fallback(tmp_path) == []
 
         arxiv_txt = tmp_path / "arxiv.txt"
         arxiv_txt.write_text("placeholder", encoding="utf-8")
@@ -541,7 +542,7 @@ class TestCliCoverage:
                 deps=_deps(
                     resolve_result=([], [], 0),
                     history_files=[],
-                    tty_ok=True,
+                    tty_ok=False,
                     configure_color_mode_fn=no_papers_color,
                 ),
             )
@@ -556,7 +557,7 @@ class TestCliCoverage:
                 deps=_deps(
                     resolve_result=([], [], 0),
                     history_files=[],
-                    tty_ok=True,
+                    tty_ok=False,
                     configure_color_mode_fn=explicit_color,
                 ),
             )
@@ -572,7 +573,7 @@ class TestCliCoverage:
                 deps=_deps(
                     resolve_result=([], [], 0),
                     history_files=[],
-                    tty_ok=True,
+                    tty_ok=False,
                     configure_color_mode_fn=env_color,
                 ),
             )
@@ -625,3 +626,19 @@ class TestCliCoverage:
         legacy_factory.assert_called_once()
         assert "config" in legacy_factory.call_args.kwargs
         legacy_run.assert_called_once()
+
+        # Cold start in an interactive terminal launches the TUI into its empty
+        # state (so the user can press A to search) rather than exiting with an error.
+        empty_run = MagicMock()
+        empty_factory = MagicMock(return_value=SimpleNamespace(run=empty_run))
+        empty_tty_deps = _deps(
+            resolve_result=([], [], 0),
+            history_files=[],
+            tty_ok=True,
+            app_factory=None,
+            factory_supports_options=True,
+        )
+        empty_tty_deps.app_factory = empty_factory
+        assert cli.main(["browse"], deps=empty_tty_deps) == 0
+        empty_factory.assert_called_once()
+        empty_run.assert_called_once()

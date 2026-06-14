@@ -128,7 +128,7 @@ class TestAppHelperCoverage:
             watch_filter_active=False,
             history_mode=True,
         )
-        assert "No papers available." in build_list_empty_message(
+        assert "No papers loaded yet." in build_list_empty_message(
             query="",
             in_arxiv_api_mode=False,
             watch_filter_active=False,

@@ -180,7 +180,7 @@ If something looks off, run `arxiv-viewer doctor` to check config, history disco
 | `w` / `W` | Watch list | | `Ctrl+t` | Cycle theme |
 | `Ctrl+e` | Toggle S2 / Exit API mode | | `Ctrl+r` | Mark visible as read |
 | `Ctrl+h` | HuggingFace trending | | `Ctrl+Shift+b` | Remove bookmark |
-| | | | `?` | Help / shortcuts |
+| `,` | Settings | | `?` | Help / shortcuts |
 
 ### Marks
 

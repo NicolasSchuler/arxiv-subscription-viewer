@@ -148,6 +148,27 @@ async def test_acceptance_first_run_welcome_persists_without_stacking_whats_new(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_acceptance_welcome_shows_on_empty_cold_start(tmp_path, monkeypatch) -> None:
+    """A first-time user with no papers still sees the welcome overlay.
+
+    Regression guard for the cold-start onboarding fix: the welcome screen
+    must not be gated behind already having papers loaded.
+    """
+    _patch_cache_db(monkeypatch, tmp_path)
+    config = _config(tmp_path, onboarding_seen=False, last_seen_whats_new="")
+    app = ArxivBrowser(
+        [],
+        options=ArxivBrowserOptions(config=config, restore_session=False),
+    )
+
+    with patch_save_config(return_value=True):
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            assert app.screen.__class__.__name__ == "WelcomeScreen"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_acceptance_local_research_workflow_updates_state_and_export(
     tmp_path, monkeypatch
 ) -> None:

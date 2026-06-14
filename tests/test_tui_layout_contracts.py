@@ -389,7 +389,10 @@ async def test_major_modal_footer_contracts(make_paper):
             )
             app.push_screen(collections_modal)
             await pilot.pause(0.05)
-            assert "Saved" in str(collections_modal.query_one("#col-help", Static).content)
+            # Resting state reads neutrally until the first edit (no false "Saved").
+            assert "No unsaved changes" in str(
+                collections_modal.query_one("#col-help", Static).content
+            )
             collections_modal.dismiss(None)
             await pilot.pause(0.05)
 

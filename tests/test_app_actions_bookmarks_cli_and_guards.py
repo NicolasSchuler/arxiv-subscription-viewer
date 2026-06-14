@@ -380,8 +380,10 @@ class TestAutoTagAndPdfOpenCoverage:
 
 class TestCliResolutionCoverage:
     def test_resolve_legacy_fallback_branches(self, make_paper, tmp_path):
+        # A true cold start (no history files, no arxiv.txt) is not an error:
+        # it returns an empty list so an interactive caller opens the empty-state TUI.
         missing = _resolve_legacy_fallback(tmp_path)
-        assert missing == 1
+        assert missing == []
 
         arxiv_file = tmp_path / "arxiv.txt"
         arxiv_file.write_text("placeholder", encoding="utf-8")

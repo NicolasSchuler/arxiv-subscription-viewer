@@ -39,8 +39,49 @@ from arxiv_browser.triage_model import (
 )
 
 PREVIEW_ABSTRACT_MAX_LEN = 150  # Max abstract preview length in list items
-META_LINE_BUDGET = 78  # Visible character budget for list metadata row
+# Visible character budget for the list metadata row. ``META_LINE_BUDGET`` is the
+# pre-measurement fallback (≈ the list pane at the narrow breakpoint); once the
+# pane has a real width the budget is derived via ``meta_line_budget_for``.
+META_LINE_BUDGET = 78
+META_LINE_BUDGET_MIN = 36
+META_LINE_BUDGET_MAX = 120
+META_LINE_BORDER_PAD = 4  # list-pane border + scrollbar gutter subtracted from width
 _RICH_TAG_RE = re.compile(r"\[[^\]]*]")
+
+
+# Inbox section titles are multi-word; in the dense meta line they're shown as
+# short codes (the full titles still head the digest inbox view). Unknown
+# sections fall back to a capped first word.
+_INBOX_SHORT_CODES: dict[str, str] = {
+    "High Relevance": "HiRel",
+    "Likely Star": "Star?",
+    "New Papers": "New",
+    "Trending on Hugging Face": "HF",
+    "Unsure Review Queue": "Review",
+    "Version Updates": "Ver",
+    "Watch List Matches": "Watch",
+}
+
+
+def inbox_short_code(label: str) -> str:
+    """Return a compact code for an inbox section title for the meta-line badge."""
+    code = _INBOX_SHORT_CODES.get(label)
+    if code:
+        return code
+    words = label.split()
+    return (words[0] if words else label)[:6]
+
+
+def meta_line_budget_for(list_width: int) -> int:
+    """Return the meta-line character budget for a measured list-pane width.
+
+    Falls back to ``META_LINE_BUDGET`` before the pane has a width so the first
+    paint matches subsequent renders as closely as possible.
+    """
+    if list_width <= 0:
+        return META_LINE_BUDGET
+    return max(META_LINE_BUDGET_MIN, min(META_LINE_BUDGET_MAX, list_width - META_LINE_BORDER_PAD))
+
 
 _ICON_SETS: dict[str, dict[str, str]] = {
     "unicode": {
@@ -252,7 +293,7 @@ def _build_meta_parts(state: PaperRowRenderState) -> list[str]:
         )
         parts.append(f"[{color}]{badge}[/]")
     parts.extend(
-        f"[{state.theme_colors['purple']}]Inbox:{escape_rich_text(label)}[/]"
+        f"[{state.theme_colors['purple']}]Inbox:{escape_rich_text(inbox_short_code(label))}[/]"
         for label in state.inbox_labels
     )
     tags = state.metadata.tags if state.metadata else None
@@ -324,17 +365,18 @@ def _render_meta_badges(state: PaperRowRenderState) -> str:
 
 def _render_abstract_preview(state: PaperRowRenderState) -> str:
     """Build the abstract preview line for the paper list."""
+    muted = state.theme_colors["muted"]
     if state.abstract_text is None:
-        return "[dim italic]Loading abstract...[/]"
+        return f"[{muted} italic]Loading abstract...[/]"
     if not state.abstract_text:
-        return "[dim italic]No abstract available[/]"
+        return f"[{muted} italic]No abstract available[/]"
     if len(state.abstract_text) <= PREVIEW_ABSTRACT_MAX_LEN:
         highlighted = highlight_text(
             state.abstract_text,
             list(state.highlight_terms.abstract),
             state.theme_colors["accent"],
         )
-        return f"[dim italic]{highlighted}[/]"
+        return f"[{muted} italic]{highlighted}[/]"
     truncated = truncate_at_word_boundary(
         state.abstract_text,
         PREVIEW_ABSTRACT_MAX_LEN,
@@ -345,7 +387,7 @@ def _render_abstract_preview(state: PaperRowRenderState) -> str:
         list(state.highlight_terms.abstract),
         state.theme_colors["accent"],
     )
-    return f"[dim italic]{highlighted}[/]"
+    return f"[{muted} italic]{highlighted}[/]"
 
 
 def render_paper_option(
@@ -378,7 +420,7 @@ class PaperListItem(ListItem):
     Each item renders up to four lines depending on the current display state:
 
     1. **Title line** — paper title with optional search highlight, prefixed
-       by selection (✓), watch-list (👁), star (★), and read (·) indicators.
+       by selection (●), watch-list (👁), star (⭐), and read (✓) indicators.
     2. **Authors line** — author string, optionally highlighted.
     3. **Metadata badge line** — arXiv ID, category badges, S2 citation count,
        HF upvote count, version-update badge, and relevance score badge.

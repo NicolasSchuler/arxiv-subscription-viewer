@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from arxiv_browser.actions.constants import RECOVERABLE_ACTION_ERRORS, log_action_failure, logger
+from arxiv_browser.actions.llm_preset_prompt import prompt_llm_preset
 from arxiv_browser.actions.llm_streaming import request_summary_streaming, should_stream_summary
 from arxiv_browser.actions.trust_gate import (
     CommandTrustRequest,
@@ -137,30 +138,24 @@ def _collect_all_tags(app: ArxivBrowser) -> list[str]:
 
 
 def _require_llm_command(app: ArxivBrowser) -> str | None:
-    """Resolve the LLM command template, notifying the user if not configured.
-
-    Also refreshes ``app._llm_provider`` to stay in sync with config changes
-    since the app was started.
-
-    Args:
-        app: The running ``ArxivBrowser`` application instance.
-
-    Returns:
-        The command template string (needed for cache hashing and trust
-        checks), or ``None`` if no LLM command is configured or the command
-        is blocked by the ``allow_llm_shell_fallback`` setting.
-    """
+    """Resolve the LLM command template, notifying the user if unavailable."""
     command_template = _resolve_llm_command(app._config)
     if not command_template:
         preset = app._config.llm_preset
         if preset and preset not in LLM_PRESETS:
             valid = ", ".join(sorted(LLM_PRESETS))
-            msg = f"Unknown preset '{preset}'. Valid: {valid}"
+            app.notify(
+                f"Unknown preset '{preset}'. Valid: {valid}",
+                title="LLM not configured",
+                severity="warning",
+                timeout=_NOTIFY_TIMEOUT_DEFAULT,
+            )
         else:
-            msg = f"Set llm_command or llm_preset in config.json ({get_config_path()})"
-        app.notify(
-            msg, title="LLM not configured", severity="warning", timeout=_NOTIFY_TIMEOUT_DEFAULT
-        )
+            prompt_llm_preset(
+                app,
+                get_config_path_fn=get_config_path,
+                notify_timeout=_NOTIFY_TIMEOUT_DEFAULT,
+            )
         return None
     if not app._config.allow_llm_shell_fallback and llm_command_requires_shell(command_template):
         app.notify(

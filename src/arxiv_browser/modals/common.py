@@ -16,7 +16,7 @@ from pathlib import Path
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.widgets import (
     Button,
@@ -47,28 +47,22 @@ class ConfirmModal(ModalBase[bool]):
     ]
 
     CSS = """
-    ConfirmModal {
-        align: center middle;
-    }
-
     #confirm-dialog {
         width: 52;
         max-width: 90%;
         height: auto;
-        background: $th-background;
+        max-height: 80%;
+        /* destructive action: keep the warning-orange border, not accent */
         border: tall $th-orange;
-        padding: 0 2;
+    }
+
+    #confirm-message-scroll {
+        height: auto;
+        max-height: 16;
     }
 
     #confirm-message {
-        text-style: bold;
         color: $th-accent-alt;
-        margin-bottom: 1;
-    }
-
-    #confirm-buttons {
-        height: auto;
-        align: right middle;
     }
 
     #confirm-buttons Button {
@@ -76,7 +70,6 @@ class ConfirmModal(ModalBase[bool]):
     }
 
     #confirm-footer {
-        color: $th-muted;
         margin-top: 1;
     }
     """
@@ -88,12 +81,13 @@ class ConfirmModal(ModalBase[bool]):
 
     def compose(self) -> ComposeResult:
         """Yield the confirmation message, confirm/cancel buttons, and footer hint."""
-        with Vertical(id="confirm-dialog"):
-            yield Label(self._message, id="confirm-message")
-            with Horizontal(id="confirm-buttons"):
+        with Vertical(id="confirm-dialog", classes="modal-dialog"):
+            with VerticalScroll(id="confirm-message-scroll"):
+                yield Label(self._message, id="confirm-message", classes="modal-title")
+            with Horizontal(id="confirm-buttons", classes="modal-buttons"):
                 yield Button("Confirm (y)", variant="warning", id="confirm-yes")
                 yield Button("Cancel (Esc)", variant="default", id="confirm-no")
-            yield Static("Confirm: y  Cancel: n / Esc", id="confirm-footer")
+            yield Static("y confirm | Esc/n cancel", id="confirm-footer", classes="modal-footer")
 
     def action_confirm(self) -> None:
         """Dismiss the modal with a positive (True) result."""
@@ -137,23 +131,10 @@ class ExportMenuModal(ModalBase[str]):
     ]
 
     CSS = """
-    ExportMenuModal {
-        align: center middle;
-    }
-
     #export-dialog {
         width: 52;
         max-width: 90%;
         height: auto;
-        background: $th-background;
-        border: tall $th-orange;
-        padding: 0 2;
-    }
-
-    #export-title {
-        text-style: bold;
-        color: $th-orange;
-        margin-bottom: 1;
     }
 
     .export-section {
@@ -167,7 +148,6 @@ class ExportMenuModal(ModalBase[str]):
     }
 
     #export-footer {
-        color: $th-muted;
         margin-top: 1;
     }
     """
@@ -181,10 +161,11 @@ class ExportMenuModal(ModalBase[str]):
         """Yield the export dialog with clipboard and file format options."""
         s = "s" if self._paper_count != 1 else ""
         g = theme_colors_for(self)["green"]
-        with Vertical(id="export-dialog"):
+        with Vertical(id="export-dialog", classes="modal-dialog"):
             yield Label(
                 f"Export Papers ({self._paper_count} selected{s})",
                 id="export-title",
+                classes="modal-title",
             )
             yield Label("[bold]Clipboard[/bold]", classes="export-section")
             yield Static(
@@ -198,7 +179,7 @@ class ExportMenuModal(ModalBase[str]):
                 f"  [{g}]B[/]  BibTeX (.bib)  [{g}]R[/]  RIS (.ris)\n  [{g}]C[/]  CSV (.csv)",
                 classes="export-keys",
             )
-            yield Static("[dim]Cancel: Esc/q[/dim]", id="export-footer")
+            yield Static("Cancel: Esc/q", id="export-footer", classes="modal-footer")
 
     def action_cancel(self) -> None:
         """Close the export menu without selecting a format."""
@@ -273,15 +254,6 @@ class MetadataSnapshotPickerModal(ModalBase[Path | None]):
         width: 52;
         max-width: 90%;
         height: 24;
-        background: $th-background;
-        border: tall $th-orange;
-        padding: 0 2;
-    }
-
-    #metadata-snapshot-title {
-        text-style: bold;
-        color: $th-orange;
-        margin-bottom: 1;
     }
 
     #metadata-snapshot-subtitle {
@@ -300,7 +272,6 @@ class MetadataSnapshotPickerModal(ModalBase[Path | None]):
     }
 
     #metadata-snapshot-footer {
-        color: $th-muted;
         margin-top: 1;
     }
     """
@@ -312,16 +283,23 @@ class MetadataSnapshotPickerModal(ModalBase[Path | None]):
 
     def compose(self) -> ComposeResult:
         """Yield the snapshot list dialog with title, subtitle, and footer."""
-        with Vertical(id="metadata-snapshot-dialog"):
-            yield Label("Import Metadata Snapshot", id="metadata-snapshot-title")
-            yield Static(
-                "Choose the JSON snapshot to import. Newest snapshots appear first.",
-                id="metadata-snapshot-subtitle",
+        with Vertical(id="metadata-snapshot-dialog", classes="modal-dialog"):
+            yield Label(
+                "Import Metadata Snapshot",
+                id="metadata-snapshot-title",
+                classes="modal-title",
             )
+            subtitle = (
+                "Choose the JSON snapshot to import. Newest snapshots appear first."
+                if self._snapshots
+                else "No metadata snapshots found. They are created when you export metadata."
+            )
+            yield Static(subtitle, id="metadata-snapshot-subtitle")
             yield ListView(id="metadata-snapshot-list")
             yield Static(
-                "[dim]Select: Enter | Cancel: Esc/q[/]",
+                "Select: Enter | Cancel: Esc/q",
                 id="metadata-snapshot-footer",
+                classes="modal-footer",
             )
 
     def on_mount(self) -> None:
@@ -329,11 +307,15 @@ class MetadataSnapshotPickerModal(ModalBase[Path | None]):
         list_view = self.query_one("#metadata-snapshot-list", ListView)
         list_view.clear()
         muted = theme_colors_for(self)["muted"]
+        if not self._snapshots:
+            placeholder = ListItem(Label(f"[{muted}]No snapshots found.[/]"))
+            placeholder.disabled = True
+            list_view.mount(placeholder)
+            return
         for snapshot in self._snapshots:
             label = self._format_snapshot_label(snapshot, muted)
             list_view.mount(MetadataSnapshotItem(snapshot, Label(label)))
-        if list_view.children:
-            list_view.index = 0
+        list_view.index = 0
         list_view.focus()
 
     @staticmethod
@@ -402,23 +384,10 @@ class SectionToggleModal(ModalBase[list[str] | None]):
     ]
 
     CSS = """
-    SectionToggleModal {
-        align: center middle;
-    }
-
     #section-toggle-dialog {
         width: 52;
         max-width: 90%;
         height: auto;
-        background: $th-background;
-        border: tall $th-accent;
-        padding: 0 2;
-    }
-
-    #section-toggle-title {
-        text-style: bold;
-        color: $th-accent;
-        margin-bottom: 1;
     }
 
     .section-toggle-list {
@@ -427,7 +396,6 @@ class SectionToggleModal(ModalBase[list[str] | None]):
     }
 
     #section-toggle-footer {
-        color: $th-muted;
         margin-top: 1;
     }
     """
@@ -439,23 +407,27 @@ class SectionToggleModal(ModalBase[list[str] | None]):
 
     def compose(self) -> ComposeResult:
         """Yield the section toggle list with expand/collapse indicators."""
-        with Vertical(id="section-toggle-dialog"):
-            yield Label("Detail Pane Sections", id="section-toggle-title")
+        with Vertical(id="section-toggle-dialog", classes="modal-dialog"):
+            yield Label("Detail Pane Sections", id="section-toggle-title", classes="modal-title")
             yield Static(
                 self._render_list(), id="section-toggle-list", classes="section-toggle-list"
             )
             yield Static(
-                "[dim]Toggle: key | Save: Enter | Cancel: Esc/q[/]",
+                "Toggle: key | Save: Enter | Cancel: Esc/q",
                 id="section-toggle-footer",
+                classes="modal-footer",
             )
 
     def _render_list(self) -> str:
         """Render all section names with their current expanded/collapsed state."""
+        from arxiv_browser._ascii import is_ascii_mode
+
         g = theme_colors_for(self)["green"]
+        collapsed_glyph, expanded_glyph = (">", "v") if is_ascii_mode() else ("\u25b8", "\u25be")
         lines = []
         for key, section in _SECTION_TOGGLE_KEYS.items():
             name = DETAIL_SECTION_NAMES[section]
-            indicator = "\u25b8" if section in self._collapsed else "\u25be"
+            indicator = collapsed_glyph if section in self._collapsed else expanded_glyph
             state = "[dim]collapsed[/]" if section in self._collapsed else f"[{g}]expanded[/]"
             lines.append(f"  [{g}]{key}[/]  {indicator} {name:<18s} {state}")
         return "\n".join(lines)

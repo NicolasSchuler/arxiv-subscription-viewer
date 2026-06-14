@@ -142,6 +142,7 @@ COMMAND_PALETTE_GROUPS: dict[str, str] = {
     "add_to_collection": "Organize",
     "toggle_detail_mode": "Advanced",
     "cycle_theme": "Advanced",
+    "open_settings": "Advanced",
     "toggle_sections": "Advanced",
     "show_help": "Core",
     "start_mark": "Advanced",
@@ -423,6 +424,12 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
         "toggle_detail_mode",
     ),
     ("Cycle Theme", "Switch between installed color themes", "Ctrl+t", "cycle_theme"),
+    (
+        "Settings",
+        "Configure LLM preset, theme, enrichment, and research interests",
+        ",",
+        "open_settings",
+    ),
     ("Toggle Sections", "Show/hide detail pane sections", "Ctrl+d", "toggle_sections"),
     (
         "Focus Details",

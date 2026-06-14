@@ -40,23 +40,17 @@ class SummaryModeModal(ModalBase[str]):
     ]
 
     CSS = """
-    SummaryModeModal {
-        align: center middle;
-    }
-
     #summary-mode-dialog {
         width: 52;
         max-width: 90%;
         height: auto;
-        background: $th-background;
+        /* deliberately purple instead of the default accent border */
         border: tall $th-purple;
-        padding: 0 2;
     }
 
     #summary-mode-title {
-        text-style: bold;
+        /* deliberately purple instead of the default accent title color */
         color: $th-purple;
-        margin-bottom: 1;
     }
 
     .summary-mode-keys {
@@ -65,7 +59,6 @@ class SummaryModeModal(ModalBase[str]):
     }
 
     #summary-mode-footer {
-        color: $th-muted;
         margin-top: 1;
     }
     """
@@ -76,8 +69,8 @@ class SummaryModeModal(ModalBase[str]):
 
         dash = "--" if is_ascii_mode() else "\u2014"
         g = theme_colors_for(self)["green"]
-        with Vertical(id="summary-mode-dialog"):
-            yield Label("AI Summary Mode", id="summary-mode-title")
+        with Vertical(id="summary-mode-dialog", classes="modal-dialog"):
+            yield Label("AI Summary Mode", id="summary-mode-title", classes="modal-title")
             yield Static(
                 f"  [{g}]d[/]  Default  [dim]{dash} Full summary (Problem / Approach / Results)[/]\n"
                 f"  [{g}]q[/]  Quick    [dim]{dash} Fast abstract-only summary[/]\n"
@@ -89,7 +82,7 @@ class SummaryModeModal(ModalBase[str]):
                 f"  [{g}]p[/]  PhD      [dim]{dash} Explain for another field[/]",
                 classes="summary-mode-keys",
             )
-            yield Static("[dim]Cancel: Esc[/dim]", id="summary-mode-footer")
+            yield Static("Cancel: Esc", id="summary-mode-footer", classes="modal-footer")
 
     def action_cancel(self) -> None:
         """Dismiss the modal without selecting a summary mode."""
@@ -137,28 +130,21 @@ class ResearchInterestsModal(ModalBase[str]):
     ]
 
     CSS = """
-    ResearchInterestsModal {
-        align: center middle;
-    }
-
     #interests-dialog {
         width: 70;
         max-width: 90%;
         height: 60%;
         min-height: 15;
-        background: $th-background;
+        /* deliberately accent-alt instead of the default accent border */
         border: tall $th-accent-alt;
-        padding: 0 2;
     }
 
     #interests-title {
-        text-style: bold;
+        /* deliberately accent-alt instead of the default accent title color */
         color: $th-accent-alt;
-        margin-bottom: 1;
     }
 
     #interests-help {
-        color: $th-muted;
         margin-bottom: 1;
     }
 
@@ -170,12 +156,11 @@ class ResearchInterestsModal(ModalBase[str]):
 
     #interests-textarea:focus {
         border-left: tall $th-accent;
+        background: $th-highlight;
     }
 
     #interests-buttons {
-        height: auto;
         margin-top: 1;
-        align: right middle;
     }
 
     #interests-buttons Button {
@@ -190,17 +175,20 @@ class ResearchInterestsModal(ModalBase[str]):
 
     def compose(self) -> ComposeResult:
         """Yield the dialog with a text area for interests and Save/Cancel buttons."""
-        with Vertical(id="interests-dialog"):
-            yield Label("Research Interests", id="interests-title")
+        with Vertical(id="interests-dialog", classes="modal-dialog"):
+            yield Label("Research Interests", id="interests-title", classes="modal-title")
             yield Static(
-                "[dim]Describe your research focus. The LLM will score papers based on this.[/]",
+                "Describe your research focus. The LLM will score papers based on this.",
                 id="interests-help",
+                classes="modal-footer",
             )
             yield TextArea(self._current_interests, id="interests-textarea")
-            with Horizontal(id="interests-buttons"):
+            with Horizontal(id="interests-buttons", classes="modal-buttons"):
                 yield Button("Cancel", variant="default", id="cancel-btn")
                 yield Button("Save (Ctrl+S)", variant="primary", id="save-btn")
-            yield Static("[dim]Ctrl+S save · Esc cancel[/dim]", id="interests-keys-help")
+            yield Static(
+                "Ctrl+S save | Esc cancel", id="interests-keys-help", classes="modal-footer"
+            )
 
     def on_mount(self) -> None:
         """Focus the research interests text area on mount."""
@@ -235,24 +223,18 @@ class PaperRemixResultModal(ModalBase[None]):
     ]
 
     CSS = """
-    PaperRemixResultModal {
-        align: center middle;
-    }
-
     #paper-remix-dialog {
-        width: 82%;
+        width: 80%;
         height: 85%;
         min-width: 60;
         min-height: 20;
-        background: $th-background;
+        /* deliberately accent-alt instead of the default accent border */
         border: tall $th-accent-alt;
-        padding: 0 2;
     }
 
     #paper-remix-title {
-        text-style: bold;
+        /* deliberately accent-alt instead of the default accent title color */
         color: $th-accent-alt;
-        margin-bottom: 1;
         height: auto;
     }
 
@@ -269,7 +251,6 @@ class PaperRemixResultModal(ModalBase[None]):
     }
 
     #paper-remix-help {
-        color: $th-muted;
         margin-top: 1;
         height: auto;
     }
@@ -283,12 +264,12 @@ class PaperRemixResultModal(ModalBase[None]):
 
     def compose(self) -> ComposeResult:
         """Yield the paper-remix result dialog."""
-        with Vertical(id="paper-remix-dialog"):
-            yield Static("Paper Remix", id="paper-remix-title")
+        with Vertical(id="paper-remix-dialog", classes="modal-dialog"):
+            yield Static("Paper Remix", id="paper-remix-title", classes="modal-title")
             yield Static(self._format_sources(), id="paper-remix-sources", markup=False)
             with VerticalScroll(id="paper-remix-body"):
                 yield Static(self._result_text, markup=False)
-            yield Static("[dim]Esc/q close[/]", id="paper-remix-help")
+            yield Static("Esc/q close", id="paper-remix-help", classes="modal-footer")
 
     def _format_sources(self) -> str:
         """Return a compact plain-text source list."""
@@ -309,24 +290,18 @@ class PaperDebateResultModal(ModalBase[None]):
     ]
 
     CSS = """
-    PaperDebateResultModal {
-        align: center middle;
-    }
-
     #paper-debate-dialog {
-        width: 82%;
+        width: 80%;
         height: 85%;
         min-width: 60;
         min-height: 20;
-        background: $th-background;
+        /* deliberately purple instead of the default accent border */
         border: tall $th-purple;
-        padding: 0 2;
     }
 
     #paper-debate-title {
-        text-style: bold;
+        /* deliberately purple instead of the default accent title color */
         color: $th-purple;
-        margin-bottom: 1;
         height: auto;
     }
 
@@ -343,7 +318,6 @@ class PaperDebateResultModal(ModalBase[None]):
     }
 
     #paper-debate-help {
-        color: $th-muted;
         margin-top: 1;
         height: auto;
     }
@@ -357,12 +331,12 @@ class PaperDebateResultModal(ModalBase[None]):
 
     def compose(self) -> ComposeResult:
         """Yield the paper debate result dialog."""
-        with Vertical(id="paper-debate-dialog"):
-            yield Static("Debate Paper", id="paper-debate-title")
+        with Vertical(id="paper-debate-dialog", classes="modal-dialog"):
+            yield Static("Debate Paper", id="paper-debate-title", classes="modal-title")
             yield Static(self._format_source(), id="paper-debate-source", markup=False)
             with VerticalScroll(id="paper-debate-body"):
                 yield Static(self._format_debate_body(), id="paper-debate-thread")
-            yield Static("[dim]Esc/q close[/]", id="paper-debate-help")
+            yield Static("Esc/q close", id="paper-debate-help", classes="modal-footer")
 
     def _format_source(self) -> str:
         """Return a compact plain-text source label."""
@@ -397,24 +371,18 @@ class PaperComparisonScreen(ModalBase[None]):
     ]
 
     CSS = """
-    PaperComparisonScreen {
-        align: center middle;
-    }
-
     #paper-comparison-dialog {
         width: 92%;
         height: 90%;
         min-width: 70;
         min-height: 24;
-        background: $th-background;
+        /* deliberately purple instead of the default accent border */
         border: tall $th-purple;
-        padding: 0 2;
     }
 
     #paper-comparison-title {
-        text-style: bold;
+        /* deliberately purple instead of the default accent title color */
         color: $th-purple;
-        margin-bottom: 1;
         height: auto;
     }
 
@@ -444,7 +412,6 @@ class PaperComparisonScreen(ModalBase[None]):
     }
 
     #paper-comparison-help {
-        color: $th-muted;
         margin-top: 1;
         height: auto;
     }
@@ -470,8 +437,12 @@ class PaperComparisonScreen(ModalBase[None]):
 
     def compose(self) -> ComposeResult:
         """Yield the comparison dialog with local columns and an AI result panel."""
-        with Vertical(id="paper-comparison-dialog"):
-            yield Static(f"Compare {len(self._papers)} Papers", id="paper-comparison-title")
+        with Vertical(id="paper-comparison-dialog", classes="modal-dialog"):
+            yield Static(
+                f"Compare {len(self._papers)} Papers",
+                id="paper-comparison-title",
+                classes="modal-title",
+            )
             with Horizontal(id="paper-comparison-columns"):
                 for index, paper in enumerate(self._papers, start=1):
                     with VerticalScroll(classes="paper-comparison-column"):
@@ -482,7 +453,9 @@ class PaperComparisonScreen(ModalBase[None]):
             )
             with VerticalScroll(id="paper-comparison-ai-output"):
                 yield Static("", id="paper-comparison-ai-text")
-            yield Static("[dim]g AI compare · Esc/q close[/]", id="paper-comparison-help")
+            yield Static(
+                "g AI compare | Esc/q close", id="paper-comparison-help", classes="modal-footer"
+            )
 
     def _format_paper_column(self, index: int, paper: Paper) -> str:
         """Return Rich-safe metadata and abstract markup for one comparison column."""
@@ -536,7 +509,8 @@ class PaperComparisonScreen(ModalBase[None]):
         """Render an AI comparison error without closing the local comparison."""
         self._ai_running = False
         safe = escape_rich_text(message)
-        self._update_ai_status(f"[red]{safe}[/]")
+        pink = theme_colors_for(self)["pink"]
+        self._update_ai_status(f"[{pink}]{safe}[/]")
         self._update_ai_output("")
 
     def _update_ai_status(self, markup: str) -> None:
@@ -564,24 +538,14 @@ class PaperChatScreen(ModalBase[None]):
     ]
 
     CSS = """
-    PaperChatScreen {
-        align: center middle;
-    }
-
     #chat-dialog {
         width: 80%;
         height: 85%;
         min-width: 60;
         min-height: 20;
-        background: $th-background;
-        border: tall $th-accent;
-        padding: 0 2;
     }
 
     #chat-title {
-        text-style: bold;
-        color: $th-accent;
-        margin-bottom: 1;
         height: auto;
     }
 
@@ -649,8 +613,8 @@ class PaperChatScreen(ModalBase[None]):
     def compose(self) -> ComposeResult:
         """Yield the chat dialog with a message scroll area, status bar, and input field."""
         title = self._paper.title[:70]
-        with Vertical(id="chat-dialog"):
-            yield Static(f"Chat: {title}", id="chat-title")
+        with Vertical(id="chat-dialog", classes="modal-dialog"):
+            yield Static(f"Chat: {title}", id="chat-title", classes="modal-title")
             yield VerticalScroll(id="chat-messages")
             yield Static("", id="chat-status")
             with Horizontal(id="chat-input-row"):
@@ -658,7 +622,7 @@ class PaperChatScreen(ModalBase[None]):
                     placeholder="Ask a question about this paper... (Enter to send, Esc to close)",
                     id="chat-input",
                 )
-            yield Static("[dim]Enter send · Esc close[/dim]", id="chat-help")
+            yield Static("Enter send | Esc close", id="chat-help", classes="modal-footer")
 
     def on_mount(self) -> None:
         """Focus the chat input and display a hint about available paper content."""
@@ -687,12 +651,20 @@ class PaperChatScreen(ModalBase[None]):
         """Append a message to the conversation history and render it in the chat scroll area."""
         self._history.append((role, text))
         display = text if markup else escape_rich_text(text)
+        colors = theme_colors_for(self)
         messages = self.query_one("#chat-messages", VerticalScroll)
         if role == "user":
-            messages.mount(Static(f"[bold green]You:[/] {display}", classes="chat-user"))
+            messages.mount(
+                Static(f"[bold {colors['green']}]You:[/] {display}", classes="chat-user")
+            )
         else:
-            messages.mount(Static(f"[bold cyan]AI:[/] {display}", classes="chat-assistant"))
+            messages.mount(Static(f"{self._ai_prefix(colors)} {display}", classes="chat-assistant"))
         messages.scroll_end(animate=False)
+
+    @staticmethod
+    def _ai_prefix(colors: Mapping[str, str]) -> str:
+        """Return the themed ``AI:`` chat prefix markup."""
+        return f"[bold {colors['accent']}]AI:[/]"
 
     async def _ask_llm(self, question: str) -> None:
         """Build conversation context, send the question to the LLM, and display the response."""
@@ -721,13 +693,15 @@ class PaperChatScreen(ModalBase[None]):
                 result = await self._provider.execute(context, self._timeout)
                 if not result.success:
                     err = escape_rich_text(result.error[:200])
-                    self._add_message("assistant", f"[red]Error: {err}[/]", markup=True)
+                    pink = theme_colors_for(self)["pink"]
+                    self._add_message("assistant", f"[{pink}]Error: {err}[/]", markup=True)
                     return
                 self._add_message("assistant", result.output)
         except Exception as e:
             logger.warning("Chat LLM call failed: %s", e, exc_info=True)
+            pink = theme_colors_for(self)["pink"]
             self._add_message(
-                "assistant", f"[red]Error: {escape_rich_text(str(e))}[/]", markup=True
+                "assistant", f"[{pink}]Error: {escape_rich_text(str(e))}[/]", markup=True
             )
         finally:
             self._waiting = False
@@ -736,30 +710,54 @@ class PaperChatScreen(ModalBase[None]):
             except NoMatches:
                 pass
 
+    def _update_chat_status(self, text: str) -> None:
+        """Update the chat status line, ignoring a missing widget."""
+        try:
+            self.query_one("#chat-status", Static).update(text)
+        except NoMatches:
+            pass
+
     async def _ask_llm_streaming(self, prompt: str) -> None:
         """Stream assistant output into a single message widget."""
+        from arxiv_browser._ascii import is_ascii_mode
+
+        colors = theme_colors_for(self)
+        ai_prefix = self._ai_prefix(colors)
+        pink = colors["pink"]
+        cursor = f"[{colors['muted']}]{'|' if is_ascii_mode() else '▌'}[/]"
         messages = self.query_one("#chat-messages", VerticalScroll)
-        assistant_widget = Static("[bold cyan]AI:[/] ", classes="chat-assistant")
+        assistant_widget = Static(f"{ai_prefix} {cursor}", classes="chat-assistant")
         messages.mount(assistant_widget)
         messages.scroll_end(animate=False)
+        streaming_status_shown = False
         parts: list[str] = []
         async for chunk in self._provider.execute_stream(prompt, self._timeout):
             if chunk.error:
                 err = escape_rich_text(chunk.error[:200])
-                assistant_widget.update(f"[bold cyan]AI:[/] [red]Error: {err}[/]")
-                self._history.append(("assistant", f"Error: {chunk.error}"))
+                # Preserve any text already streamed; append the error beneath it.
+                partial = escape_rich_text("".join(parts))
+                prefix = f"{ai_prefix} {partial}\n" if partial else f"{ai_prefix} "
+                assistant_widget.update(f"{prefix}[{pink}]Error: {err}[/]")
+                self._history.append(("assistant", f"{''.join(parts)}\nError: {chunk.error}"))
                 return
             if chunk.delta:
+                if not streaming_status_shown:
+                    # Replace the contradictory "Thinking…" with a live status.
+                    self._update_chat_status("Streaming…")
+                    streaming_status_shown = True
                 parts.append(chunk.delta)
-                assistant_widget.update(f"[bold cyan]AI:[/] {escape_rich_text(''.join(parts))}")
+                # Trailing cursor distinguishes active streaming from a stall.
+                assistant_widget.update(f"{ai_prefix} {escape_rich_text(''.join(parts))}{cursor}")
                 messages.scroll_end(animate=False)
             if chunk.done:
                 break
         output = "".join(parts).strip()
         if not output:
-            assistant_widget.update("[bold cyan]AI:[/] [red]Error: Empty response content[/]")
+            assistant_widget.update(f"{ai_prefix} [{pink}]Error: Empty response content[/]")
             self._history.append(("assistant", "Error: Empty response content"))
             return
+        # Final render drops the live cursor.
+        assistant_widget.update(f"{ai_prefix} {escape_rich_text(output)}")
         self._history.append(("assistant", output))
 
     def action_close(self) -> None:

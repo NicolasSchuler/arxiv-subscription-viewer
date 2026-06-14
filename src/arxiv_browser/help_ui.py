@@ -127,6 +127,26 @@ HELP_GETTING_STARTED: list[tuple[str, str]] = [
     ("?", "Show help overlay"),
 ]
 
+# Lower/upper-case key pairs that do different things — documented together so a
+# mis-hit (e.g. p instead of P) is recognisable rather than mysterious.
+HELP_KEY_PAIRS: list[tuple[str, str]] = [
+    ("p / P", "Abstract preview / Open PDF"),
+    ("r / R", "Toggle read / Recommendations"),
+    ("v / V", "Detail density / Check versions"),
+    ("w / W", "Watch filter / Manage watch list"),
+    ("e / E", "Fetch Semantic Scholar / Export menu"),
+]
+
+# Quick Triage rebinds y/n/t/s for rapid review — these override the global
+# meanings (read-aloud / notes / tags / sort) only while the triage overlay is up.
+HELP_QUICK_TRIAGE: list[tuple[str, str]] = [
+    ("y", "Star + mark read"),
+    ("n", "Skip"),
+    ("t", "Tag later"),
+    ("s", "Save for later"),
+    ("Esc / q", "Close triage"),
+]
+
 HELP_DESCRIPTION_OVERRIDES: dict[str, str] = {
     "ctrl_e_dispatch": "Toggle S2 (browse) / Exit API (API mode)",
     "command_palette": "Commands",
@@ -247,6 +267,8 @@ def build_help_sections(
     if not search_first:
         sections.insert(1, ("Search Syntax", HELP_SEARCH_SYNTAX))
         sections.insert(2, ("Badge Legend", HELP_BADGE_LEGEND))
+    sections.append(("Case-Sensitive Keys", list(HELP_KEY_PAIRS)))
+    sections.append(("Quick Triage Keys", list(HELP_QUICK_TRIAGE)))
     return sections
 
 

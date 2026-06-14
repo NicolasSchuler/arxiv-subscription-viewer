@@ -68,11 +68,24 @@ from arxiv_browser.query import (
 from arxiv_browser.themes import (
     DEFAULT_CATEGORY_COLOR,
     TAG_NAMESPACE_COLORS,
+    THEME_COLORS,
     THEME_NAMES,
     THEMES,
     get_tag_color,
     parse_tag_namespace,
 )
+
+
+def _assert_themed_chat_error(chat_screen, expected_text: str) -> None:
+    """Assert the chat surfaced ``expected_text`` via the themed error color.
+
+    Chat errors render through the theme's ``pink`` token rather than a literal
+    ``[red]`` so they stay legible across light/high-contrast themes.
+    """
+    chat_screen._add_message.assert_called_once_with(
+        "assistant", f"[{THEME_COLORS['pink']}]{expected_text}[/]", markup=True
+    )
+
 
 # ============================================================================
 # Tests for clean_latex function
@@ -222,9 +235,7 @@ class TestAskLlm:
         )
         await chat_screen._ask_llm("question")
 
-        chat_screen._add_message.assert_called_once_with(
-            "assistant", "[red]Error: Timed out after 120s[/]", markup=True
-        )
+        _assert_themed_chat_error(chat_screen, "Error: Timed out after 120s")
         assert chat_screen._waiting is False
 
     async def test_nonzero_exit_shows_error(self, chat_screen):
@@ -235,9 +246,7 @@ class TestAskLlm:
         )
         await chat_screen._ask_llm("question")
 
-        chat_screen._add_message.assert_called_once_with(
-            "assistant", "[red]Error: Exit 1: model not found[/]", markup=True
-        )
+        _assert_themed_chat_error(chat_screen, "Error: Exit 1: model not found")
         assert chat_screen._waiting is False
 
     async def test_empty_output_shows_error(self, chat_screen):
@@ -248,18 +257,14 @@ class TestAskLlm:
         )
         await chat_screen._ask_llm("question")
 
-        chat_screen._add_message.assert_called_once_with(
-            "assistant", "[red]Error: Empty output[/]", markup=True
-        )
+        _assert_themed_chat_error(chat_screen, "Error: Empty output")
 
     async def test_exception_logged_and_shown(self, chat_screen):
         chat_screen._provider.execute.side_effect = OSError("command not found")
 
         await chat_screen._ask_llm("question")
 
-        chat_screen._add_message.assert_called_once_with(
-            "assistant", "[red]Error: command not found[/]", markup=True
-        )
+        _assert_themed_chat_error(chat_screen, "Error: command not found")
         assert chat_screen._waiting is False
 
     async def test_rich_markup_in_response_is_escaped(self, chat_screen):

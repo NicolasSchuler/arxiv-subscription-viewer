@@ -11,6 +11,7 @@ from textual.widgets import Label, ListItem, ListView, Static
 from arxiv_browser.authors import AuthorProfile
 from arxiv_browser.modals.base import ModalBase
 from arxiv_browser.query import escape_rich_text, truncate_text
+from arxiv_browser.themes import theme_colors_for
 from arxiv_browser.trend_radar import TrendRadarReport, render_sparkline
 
 
@@ -23,23 +24,11 @@ class TrendRadarModal(ModalBase[None]):
     ]
 
     CSS = """
-    TrendRadarModal {
-        align: center middle;
-    }
-
     #trend-radar-dialog {
         width: 86;
         max-width: 95%;
         height: 82%;
-        background: $th-background;
-        border: tall $th-accent;
         padding: 0 2;
-    }
-
-    #trend-radar-title {
-        text-style: bold;
-        color: $th-accent;
-        margin-bottom: 1;
     }
 
     #trend-radar-body {
@@ -48,7 +37,6 @@ class TrendRadarModal(ModalBase[None]):
     }
 
     #trend-radar-footer {
-        color: $th-muted;
         margin-top: 1;
     }
     """
@@ -59,10 +47,13 @@ class TrendRadarModal(ModalBase[None]):
 
     def compose(self) -> ComposeResult:
         """Compose the trend-radar dialog."""
-        with Vertical(id="trend-radar-dialog"):
-            yield Label("Trend Radar", id="trend-radar-title")
-            yield Static(_render_trend_report(self._report), id="trend-radar-body")
-            yield Static("Esc/q close", id="trend-radar-footer")
+        with Vertical(id="trend-radar-dialog", classes="modal-dialog"):
+            yield Label("Trend Radar", id="trend-radar-title", classes="modal-title")
+            yield Static(
+                _render_trend_report(self._report, theme_colors_for(self)["accent"]),
+                id="trend-radar-body",
+            )
+            yield Static("Esc/q close", id="trend-radar-footer", classes="modal-footer")
 
     def action_close(self) -> None:
         """Close the overlay."""
@@ -87,23 +78,11 @@ class AuthorPickerModal(ModalBase[str | None]):
     ]
 
     CSS = """
-    AuthorPickerModal {
-        align: center middle;
-    }
-
     #author-picker-dialog {
         width: 64;
         max-width: 95%;
         height: 70%;
-        background: $th-background;
-        border: tall $th-accent;
         padding: 0 2;
-    }
-
-    #author-picker-title {
-        text-style: bold;
-        color: $th-accent;
-        margin-bottom: 1;
     }
 
     #author-picker-list {
@@ -120,10 +99,14 @@ class AuthorPickerModal(ModalBase[str | None]):
 
     def compose(self) -> ComposeResult:
         """Compose the author picker dialog."""
-        with Vertical(id="author-picker-dialog"):
-            yield Label(self._title, id="author-picker-title")
+        with Vertical(id="author-picker-dialog", classes="modal-dialog"):
+            yield Label(self._title, id="author-picker-title", classes="modal-title")
             yield ListView(id="author-picker-list")
-            yield Static("Enter choose | Esc/q cancel", id="author-picker-footer")
+            yield Static(
+                "Enter choose | Esc/q cancel",
+                id="author-picker-footer",
+                classes="modal-footer",
+            )
 
     def on_mount(self) -> None:
         """Populate and focus the author list after mount."""
@@ -157,23 +140,11 @@ class AuthorProfileModal(ModalBase[None]):
     ]
 
     CSS = """
-    AuthorProfileModal {
-        align: center middle;
-    }
-
     #author-profile-dialog {
         width: 86;
         max-width: 95%;
         height: 82%;
-        background: $th-background;
-        border: tall $th-accent;
         padding: 0 2;
-    }
-
-    #author-profile-title {
-        text-style: bold;
-        color: $th-accent;
-        margin-bottom: 1;
     }
 
     #author-profile-body {
@@ -182,7 +153,6 @@ class AuthorProfileModal(ModalBase[None]):
     }
 
     #author-profile-footer {
-        color: $th-muted;
         margin-top: 1;
     }
     """
@@ -193,17 +163,27 @@ class AuthorProfileModal(ModalBase[None]):
 
     def compose(self) -> ComposeResult:
         """Compose the author-profile dialog."""
-        with Vertical(id="author-profile-dialog"):
-            yield Label(f"Author Profile: {self._profile.author}", id="author-profile-title")
-            yield Static(_render_author_profile(self._profile), id="author-profile-body")
-            yield Static("Esc/q close", id="author-profile-footer")
+        with Vertical(id="author-profile-dialog", classes="modal-dialog"):
+            yield Label(
+                f"Author Profile: {self._profile.author}",
+                id="author-profile-title",
+                classes="modal-title",
+            )
+            yield Static(
+                _render_author_profile(self._profile, theme_colors_for(self)["accent"]),
+                id="author-profile-body",
+            )
+            yield Static("Esc/q close", id="author-profile-footer", classes="modal-footer")
 
     def action_close(self) -> None:
         """Close the profile."""
         self.dismiss(None)
 
 
-def _render_trend_report(report: TrendRadarReport) -> str:
+def _render_trend_report(report: TrendRadarReport, accent: str = "") -> str:
+    def header(text: str) -> str:
+        return f"[bold {accent}]{text}[/]" if accent else f"[bold]{text}[/]"
+
     if report.history_file_count == 0:
         return "[dim]No local history files are available for Trend Radar.[/]"
     date_label = _date_range_label(report)
@@ -211,7 +191,7 @@ def _render_trend_report(report: TrendRadarReport) -> str:
         f"[bold]History[/] {report.history_file_count} files | {report.total_papers} papers",
         f"[dim]{date_label} | recent {report.recent_file_count}, previous {report.previous_file_count}[/]",
         "",
-        "[bold]Growing Categories[/]",
+        header("Growing Categories"),
     ]
     if report.category_trends:
         for trend in report.category_trends:
@@ -223,24 +203,27 @@ def _render_trend_report(report: TrendRadarReport) -> str:
             )
     else:
         lines.append("  [dim]No category data.[/]")
-    lines.extend(["", "[bold]Top Authors[/]"])
+    lines.extend(["", header("Top Authors")])
     lines.extend(_count_lines((item.name, item.count) for item in report.top_authors))
-    lines.extend(["", "[bold]Hot Topics[/]"])
+    lines.extend(["", header("Hot Topics")])
     lines.extend(_count_lines((item.bigram, item.count) for item in report.hot_bigrams))
     return "\n".join(lines)
 
 
-def _render_author_profile(profile: AuthorProfile) -> str:
+def _render_author_profile(profile: AuthorProfile, accent: str = "") -> str:
+    def header(text: str) -> str:
+        return f"[bold {accent}]{text}[/]" if accent else f"[bold]{text}[/]"
+
     paper_count = len(profile.papers)
     lines = [
         f"[bold]Papers[/] {paper_count}",
         f"[bold]Cached citations[/] {profile.total_cached_citations} "
         f"[dim]across {profile.citation_coverage} paper(s)[/]",
         "",
-        "[bold]Co-authors[/]",
+        header("Co-authors"),
     ]
     lines.extend(_count_lines((item.name, item.count) for item in profile.coauthors[:10]))
-    lines.extend(["", "[bold]Library Papers[/]"])
+    lines.extend(["", header("Library Papers")])
     if not profile.papers:
         lines.append("  [dim]No papers in the loaded library match this author.[/]")
         return "\n".join(lines)

@@ -34,24 +34,13 @@ class WatchListModal(ModalBase[list[WatchListEntry] | None]):
     ]
 
     CSS = """
-    WatchListModal {
-        align: center middle;
-    }
-
     #watch-dialog {
         width: 70;
         max-width: 90%;
         height: 70%;
         min-height: 20;
-        background: $th-background;
-        border: tall $th-accent;
+        /* tighter vertical padding than the shared .modal-dialog default (1 2) */
         padding: 0 2;
-    }
-
-    #watch-title {
-        text-style: bold;
-        color: $th-accent;
-        margin-bottom: 1;
     }
 
     #watch-body {
@@ -119,9 +108,7 @@ class WatchListModal(ModalBase[list[WatchListEntry] | None]):
     }
 
     #watch-buttons {
-        height: auto;
         margin-top: 1;
-        align: right middle;
     }
 
     #watch-buttons Button {
@@ -144,8 +131,8 @@ class WatchListModal(ModalBase[list[WatchListEntry] | None]):
 
     def compose(self) -> ComposeResult:
         """Yield the watch list view, entry form, and save/cancel buttons."""
-        with Vertical(id="watch-dialog"):
-            yield Label("Watch List Manager", id="watch-title")
+        with Vertical(id="watch-dialog", classes="modal-dialog"):
+            yield Label("Watch List Manager", id="watch-title", classes="modal-title")
             with Horizontal(id="watch-body"):
                 with Vertical(id="watch-list-column"):
                     yield ListView(id="watch-list")
@@ -165,11 +152,15 @@ class WatchListModal(ModalBase[list[WatchListEntry] | None]):
                     with Horizontal(id="watch-actions"):
                         yield Button("Add", variant="primary", id="watch-add")
                         yield Button("Update", variant="default", id="watch-update")
-                        yield Button("Delete", variant="default", id="watch-delete")
-            with Horizontal(id="watch-buttons"):
+                        yield Button("Delete", variant="error", id="watch-delete")
+            with Horizontal(id="watch-buttons", classes="modal-buttons"):
                 yield Button("Cancel", variant="default", id="watch-cancel")
                 yield Button("Save (Ctrl+S)", variant="primary", id="watch-save")
-            yield Static("[dim]Saved | Ctrl+S save | Esc cancel[/]", id="watch-help")
+            yield Static(
+                "No unsaved changes | Ctrl+S save | Esc discards edits",
+                id="watch-help",
+                classes="modal-footer",
+            )
 
     def on_mount(self) -> None:
         """Populate the list view and focus the pattern input on mount."""
@@ -232,7 +223,7 @@ class WatchListModal(ModalBase[list[WatchListEntry] | None]):
         self._dirty = True
         try:
             self.query_one("#watch-help", Static).update(
-                "[bold]Unsaved[/bold] | Ctrl+S save | Esc cancel"
+                "[bold]Unsaved changes[/bold] | Ctrl+S save | Esc discards edits"
             )
         except NoMatches:
             return

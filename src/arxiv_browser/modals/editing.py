@@ -72,24 +72,16 @@ class PaperEditModal(ModalBase["PaperEditResult | None"]):
     ]
 
     CSS = """
-    PaperEditModal {
-        align: center middle;
-    }
-
     #edit-dialog {
         width: 70;
         max-width: 90%;
         height: 70%;
         min-height: 20;
-        background: $th-background;
-        border: tall $th-accent;
         padding: 0 2;
     }
 
     #edit-title {
-        text-style: bold;
         color: $th-accent-alt;
-        margin-bottom: 1;
     }
 
     #notes-textarea {
@@ -100,6 +92,7 @@ class PaperEditModal(ModalBase["PaperEditResult | None"]):
 
     #notes-textarea:focus {
         border-left: tall $th-accent;
+        background: $th-highlight;
     }
 
     #tags-input, #autotag-input {
@@ -110,6 +103,7 @@ class PaperEditModal(ModalBase["PaperEditResult | None"]):
 
     #tags-input:focus, #autotag-input:focus {
         border-left: tall $th-green;
+        background: $th-highlight;
     }
 
     #tags-help {
@@ -122,9 +116,12 @@ class PaperEditModal(ModalBase["PaperEditResult | None"]):
         margin-bottom: 1;
     }
 
-    #tags-suggestions,
-    #edit-help {
+    #tags-suggestions {
         color: $th-muted;
+        margin-bottom: 1;
+    }
+
+    #edit-help {
         margin-bottom: 1;
     }
 
@@ -149,9 +146,7 @@ class PaperEditModal(ModalBase["PaperEditResult | None"]):
     }
 
     #edit-buttons {
-        height: auto;
         margin-top: 1;
-        align: right middle;
     }
 
     #edit-buttons Button {
@@ -202,8 +197,8 @@ class PaperEditModal(ModalBase["PaperEditResult | None"]):
 
     def compose(self) -> ComposeResult:
         """Yield the tabbed editing dialog with notes, tags, and optional AI tags."""
-        with Vertical(id="edit-dialog"):
-            yield Label(f"Edit: {self._arxiv_id}", id="edit-title")
+        with Vertical(id="edit-dialog", classes="modal-dialog"):
+            yield Label(f"Edit: {self._arxiv_id}", id="edit-title", classes="modal-title")
             with TabbedContent(initial=self._initial_tab):
                 with TabPane("Notes", id="notes"):
                     yield TextArea(self._current_notes, id="notes-textarea")
@@ -239,10 +234,14 @@ class PaperEditModal(ModalBase["PaperEditResult | None"]):
                             placeholder="Edit tags (comma-separated)",
                             id="autotag-input",
                         )
-            with Horizontal(id="edit-buttons"):
+            with Horizontal(id="edit-buttons", classes="modal-buttons"):
                 yield Button("Cancel", variant="default", id="cancel-btn")
                 yield Button("Save (Ctrl+S)", variant="primary", id="save-btn")
-            yield Static("[dim]Saved | Ctrl+S save | Esc cancel[/dim]", id="edit-help")
+            yield Static(
+                "No unsaved changes | Ctrl+S save | Esc discards edits",
+                id="edit-help",
+                classes="modal-footer",
+            )
 
     def on_mount(self) -> None:
         """Focus the appropriate widget based on the initial tab."""
@@ -298,9 +297,9 @@ class PaperEditModal(ModalBase["PaperEditResult | None"]):
             tags = self.query_one("#tags-input", Input).value
             dirty = notes != self._initial_notes or tags != self._initial_tags_value
             self.query_one("#edit-help", Static).update(
-                "[bold]Unsaved[/bold] | Ctrl+S save | Esc cancel"
+                "[bold]Unsaved changes[/bold] | Ctrl+S save | Esc discards edits"
                 if dirty
-                else "[dim]Saved | Ctrl+S save | Esc cancel[/dim]"
+                else "No unsaved changes | Ctrl+S save | Esc discards edits"
             )
         except Exception:
             return
@@ -386,22 +385,14 @@ class LineAnnotationModal(ModalBase["LineAnnotationResult | None"]):
     ]
 
     CSS = """
-    LineAnnotationModal {
-        align: center middle;
-    }
-
     #line-annotation-dialog {
-        width: 68;
+        width: 70;
+        max-width: 90%;
         height: auto;
-        background: $th-background;
-        border: tall $th-accent;
-        padding: 1 2;
     }
 
     #line-annotation-title {
-        text-style: bold;
         color: $th-accent-alt;
-        margin-bottom: 1;
     }
 
     #line-annotation-input {
@@ -412,10 +403,10 @@ class LineAnnotationModal(ModalBase["LineAnnotationResult | None"]):
 
     #line-annotation-input:focus {
         border-left: tall $th-accent;
+        background: $th-highlight;
     }
 
     #line-annotation-help {
-        color: $th-muted;
         margin-top: 1;
     }
     """
@@ -426,10 +417,16 @@ class LineAnnotationModal(ModalBase["LineAnnotationResult | None"]):
 
     def compose(self) -> ComposeResult:
         """Yield a single-line annotation input."""
-        with Vertical(id="line-annotation-dialog"):
-            yield Label(f"Annotate line {self._line}", id="line-annotation-title")
+        with Vertical(id="line-annotation-dialog", classes="modal-dialog"):
+            yield Label(
+                f"Annotate line {self._line}",
+                id="line-annotation-title",
+                classes="modal-title",
+            )
             yield Input(placeholder="Margin note...", id="line-annotation-input")
-            yield Static("[dim]Enter save | Esc cancel[/dim]", id="line-annotation-help")
+            yield Static(
+                "Enter save | Esc cancel", id="line-annotation-help", classes="modal-footer"
+            )
 
     def on_mount(self) -> None:
         """Focus the note input."""

@@ -275,6 +275,20 @@ class TestPaperDetailsCacheIntegration:
         assert "Rel:" in content
         assert "v1" in content
 
+    def test_decision_strip_hidden_for_unactioned_paper(self, make_paper):
+        from arxiv_browser.widgets.details import PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(arxiv_id="2401.00001")
+
+        details.update_paper(paper, "abstract", is_read=False, starred=False)
+
+        content = str(details.content)
+        # An untouched paper shows no muted "Read:no/Star:no/Tags:none" wall.
+        assert "Read:" not in content
+        assert "Star:" not in content
+        assert "Tags:" not in content
+
     def test_decision_strip_shows_review_status(self, make_paper):
         from arxiv_browser.widgets.details import PaperDetails
 

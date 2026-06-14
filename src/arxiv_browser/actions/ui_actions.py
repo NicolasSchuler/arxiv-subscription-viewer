@@ -21,6 +21,7 @@ from arxiv_browser.action_messages import (
     build_actionable_success,
     build_actionable_warning,
 )
+from arxiv_browser.actions import settings_actions as _settings_actions
 from arxiv_browser.actions.constants import RECOVERABLE_ACTION_ERRORS, log_action_failure, logger
 from arxiv_browser.authors import (
     build_author_profile,
@@ -34,7 +35,7 @@ from arxiv_browser.modals.collections import CollectionsModal
 from arxiv_browser.modals.common import SectionToggleModal
 from arxiv_browser.modals.discovery import AuthorPickerModal, AuthorProfileModal, TrendRadarModal
 from arxiv_browser.modals.help import HelpScreen
-from arxiv_browser.models import MAX_PAPERS_PER_COLLECTION
+from arxiv_browser.models import DETAIL_SECTION_NAMES, MAX_PAPERS_PER_COLLECTION
 from arxiv_browser.semantic_scholar import (
     S2_CITATION_GRAPH_CACHE_TTL_DAYS,
     S2_REC_CACHE_TTL_DAYS,
@@ -61,6 +62,8 @@ if TYPE_CHECKING:
 
 _RECOVERABLE_ACTION_ERRORS = RECOVERABLE_ACTION_ERRORS
 _ENRICHMENT_FETCH_ERRORS = (httpx.HTTPError, OSError, RuntimeError, ValueError, TypeError)
+action_open_settings = _settings_actions.action_open_settings
+_apply_settings = _settings_actions._apply_settings
 
 
 def _log_action_failure(action: str, exc: Exception, *, unexpected: bool = False) -> None:
@@ -857,6 +860,24 @@ def action_toggle_sections(app: "ArxivBrowser") -> None:
             app._refresh_detail_pane()
 
     app.push_screen(SectionToggleModal(app._config.collapsed_sections), _on_result)
+
+
+def action_toggle_detail_section(app: "ArxivBrowser", section: str) -> None:
+    """Toggle one detail-pane section's collapsed state.
+
+    Bound to a click on the section header in the detail pane (the per-section
+    affordance the chevron glyph implies), complementing the ``Ctrl+d`` modal.
+    """
+    if section not in DETAIL_SECTION_NAMES:
+        return
+    collapsed = list(app._config.collapsed_sections)
+    if section in collapsed:
+        collapsed.remove(section)
+    else:
+        collapsed.append(section)
+    app._config.collapsed_sections = sorted(collapsed)
+    app._save_config_or_warn("section toggle")
+    app._refresh_detail_pane()
 
 
 def action_show_help(app: "ArxivBrowser") -> None:

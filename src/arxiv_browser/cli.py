@@ -835,14 +835,18 @@ def main(
         return result
     papers, history_files, current_date_index = result
 
-    if not papers:
-        _print_empty_papers_error()
-        return 1
-
     if not dependencies.validate_interactive_tty_fn():
+        # The full UI needs a TTY. Without one we can only print: empty results
+        # and populated results each get their own actionable message.
+        if not papers:
+            _print_empty_papers_error()
+            return 1
         _print_non_interactive_error()
         return 2
 
+    # Interactive TTY: launch the browser even with no papers so the empty state
+    # can guide first-time users (press A to search arXiv, ? for shortcuts)
+    # instead of exiting to the shell with an error they can't act on.
     # Sort papers alphabetically by title
     papers.sort(key=lambda p: p.title.lower())
     return _run_browser_app(

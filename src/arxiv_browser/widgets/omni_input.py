@@ -91,7 +91,7 @@ class OmniInput(Vertical):
     }
 
     OmniInput #omni-hint {
-        color: $text-muted;
+        color: $th-muted;
         height: 1;
         padding: 0 1;
     }
@@ -271,12 +271,9 @@ class OmniInput(Vertical):
             return
 
         safe = escape_rich_text(query)
-        results.add_option(
-            Option(
-                f'[dim]No matches for "{safe}". Try: a shorter command. Next: Esc closes.[/]',
-                disabled=True,
-            )
-        )
+        # Kept short so it fits one row of the narrow results dropdown (the Esc
+        # affordance already lives in the persistent hint line below the input).
+        results.add_option(Option(f'[dim]No matching commands for "{safe}"[/]', disabled=True))
 
     def _command_option(self, command: PaletteCommand, *, show_group: bool = True) -> Option:
         return Option(

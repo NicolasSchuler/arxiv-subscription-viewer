@@ -22,23 +22,14 @@ class WelcomeScreen(ModalBase[None]):
     ]
 
     CSS = """
-    WelcomeScreen {
-        align: center middle;
-    }
-
     #welcome-dialog {
         width: 60;
         max-height: 80%;
-        background: $th-background;
-        border: tall $th-accent;
-        padding: 1 2;
     }
 
     #welcome-title {
-        text-style: bold;
         color: $th-accent-alt;
         text-align: center;
-        margin-bottom: 1;
     }
 
     #welcome-subtitle {
@@ -54,7 +45,6 @@ class WelcomeScreen(ModalBase[None]):
 
     #welcome-footer {
         text-align: center;
-        color: $th-muted;
         margin-top: 1;
         text-style: italic;
     }
@@ -62,8 +52,8 @@ class WelcomeScreen(ModalBase[None]):
 
     def compose(self) -> ComposeResult:
         """Yield a focused welcome dialog with essential keybindings."""
-        with VerticalScroll(id="welcome-dialog"):
-            yield Label("Welcome to arXiv Viewer", id="welcome-title")
+        with VerticalScroll(id="welcome-dialog", classes="modal-dialog"):
+            yield Label("Welcome to arXiv Viewer", id="welcome-title", classes="modal-title")
             yield Label(
                 "Here are the essential shortcuts to get started:",
                 id="welcome-subtitle",
@@ -72,6 +62,7 @@ class WelcomeScreen(ModalBase[None]):
             yield Label(
                 "Press Enter / Space / Esc to start, or ? for full help",
                 id="welcome-footer",
+                classes="modal-footer",
             )
 
     def on_mount(self) -> None:

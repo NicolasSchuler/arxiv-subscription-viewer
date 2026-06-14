@@ -333,11 +333,13 @@ def _render_line_annotations(
 
     lines: list[str] = []
     cursor = cursor_line if cursor_line and cursor_line > 0 else None
-    cursor_glyph = ">" if _ACTIVE_DETAIL_GLYPH_MODE == "ascii" else "\u25b8"
+    # Distinct from the collapsed-section chevron (\u25b8) and reverse-highlighted so
+    # the line cursor never reads as a second collapse marker.
+    cursor_glyph = ">" if _ACTIVE_DETAIL_GLYPH_MODE == "ascii" else "\u276f"
     note_glyph = "->" if _ACTIVE_DETAIL_GLYPH_MODE == "ascii" else "\u21b3"
     for index, line in enumerate(markup.splitlines(), start=1):
         if cursor == index:
-            lines.append(f"[{theme_colors['accent']}]{cursor_glyph}[/] {line}")
+            lines.append(f"[{theme_colors['accent']} reverse]{cursor_glyph}[/] {line}")
         else:
             lines.append(line)
         for note in notes_by_line.get(index, []):
@@ -355,6 +357,16 @@ def _detail_kv_line(label: str, value: str, colors: Mapping[str, str]) -> str:
 def _decision_part(label: str, value: str, color: str) -> str:
     """Return one compact decision-strip token."""
     return f"[{color}]{label}:[/] {value}"
+
+
+def _toggle_header(section_key: str, header_markup: str) -> str:
+    """Wrap a detail-section header in a click-to-toggle action link.
+
+    Clicking the header toggles that single section's collapsed state via the
+    app's ``toggle_detail_section`` action — delivering the per-section
+    expand/collapse the chevron glyph implies (complementing ``Ctrl+d``).
+    """
+    return f"[@click=app.toggle_detail_section('{section_key}')]{header_markup}[/]"
 
 
 class PaperDetails(Static):
@@ -507,9 +519,13 @@ class PaperDetails(Static):
     # ----------------------------------------------------------------------
 
     def _render_title(self, paper: Paper) -> str:
-        """Return Rich markup for the paper title."""
+        """Return Rich markup for the paper title.
+
+        Coloured with the accent so the title outranks its own (also-coloured)
+        section headers as the first thing the eye lands on.
+        """
         safe_title = escape_rich_text(paper.title)
-        return f"[bold {theme_colors_for(self, self._theme_colors)['text']}]{safe_title}[/]"
+        return f"[bold {theme_colors_for(self, self._theme_colors)['accent']}]{safe_title}[/]"
 
     def _render_metadata(
         self,
@@ -537,25 +553,20 @@ class PaperDetails(Static):
         return "\n".join(lines)
 
     def _render_decision_strip(self, state: DetailRenderState) -> str:
-        """Return a compact triage strip with the current decision signals."""
+        """Return a compact triage strip with the current decision signals.
+
+        Only *active* signals are shown. An untouched paper produces an empty
+        strip (filtered out by the section join) so the title and abstract lead
+        the pane instead of a muted ``Read:no Star:no Tags:none`` wall.
+        """
         colors = theme_colors_for(self, self._theme_colors)
-        parts = [
-            _decision_part(
-                "Read",
-                "yes" if state.is_read else "no",
-                colors["green"] if state.is_read else colors["muted"],
-            ),
-            _decision_part(
-                "Star",
-                "yes" if state.starred else "no",
-                colors["yellow"] if state.starred else colors["muted"],
-            ),
-            _decision_part(
-                "Tags",
-                str(len(state.tags)) if state.tags else "none",
-                colors["purple"] if state.tags else colors["muted"],
-            ),
-        ]
+        parts: list[str] = []
+        if state.is_read:
+            parts.append(_decision_part("Read", "yes", colors["green"]))
+        if state.starred:
+            parts.append(_decision_part("Star", "yes", colors["yellow"]))
+        if state.tags:
+            parts.append(_decision_part("Tags", str(len(state.tags)), colors["purple"]))
         review_label = review_status_label_for_schedule(
             state.next_review_date,
             state.review_stage,
@@ -597,7 +608,10 @@ class PaperDetails(Static):
         collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
         expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
         if is_collapsed:
-            return f"[dim]{collapsed_glyph} Abstract[/]"
+            return _toggle_header(
+                "abstract",
+                f"[{resolved_theme_colors['orange']}]{collapsed_glyph} Abstract[/]",
+            )
         if highlight_terms:
             abstract_body = (
                 _truncate_detail_text(abstract_text, DETAIL_SCAN_ABSTRACT_LEN)
@@ -616,7 +630,12 @@ class PaperDetails(Static):
                 else abstract_text
             )
             safe_abstract = escape_rich_text(abstract_body)
-        lines = [f"[bold {resolved_theme_colors['orange']}]{expanded_glyph} Abstract[/]"]
+        lines = [
+            _toggle_header(
+                "abstract",
+                f"[bold {resolved_theme_colors['orange']}]{expanded_glyph} Abstract[/]",
+            )
+        ]
         if loading:
             lines.append("  [dim italic]Loading abstract...[/]")
         elif abstract_text:
@@ -637,17 +656,19 @@ class PaperDetails(Static):
         collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
         expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
         if is_collapsed:
-            return f"[dim]{collapsed_glyph} Authors[/]"
+            return _toggle_header(
+                "authors", f"[{resolved_theme_colors['green']}]{collapsed_glyph} Authors[/]"
+            )
         authors_text = (
             _truncate_detail_text(paper.authors, DETAIL_SCAN_AUTHORS_LEN)
             if detail_mode == "scan"
             else paper.authors
         )
         safe_authors = escape_rich_text(authors_text)
-        return (
-            f"[bold {resolved_theme_colors['green']}]{expanded_glyph} Authors[/]\n"
-            f"  [{resolved_theme_colors['text']}]{safe_authors}[/]"
+        header = _toggle_header(
+            "authors", f"[bold {resolved_theme_colors['green']}]{expanded_glyph} Authors[/]"
         )
+        return f"{header}\n  [{resolved_theme_colors['text']}]{safe_authors}[/]"
 
     def _render_tags(
         self,
@@ -666,8 +687,15 @@ class PaperDetails(Static):
         if not tags:
             return ""
         if is_collapsed:
-            return f"[dim]{collapsed_glyph} Tags ({len(tags)})[/]"
-        lines = [f"[bold {resolved_theme_colors['accent']}]{expanded_glyph} Tags[/]"]
+            return _toggle_header(
+                "tags",
+                f"[{resolved_theme_colors['accent']}]{collapsed_glyph} Tags ({len(tags)})[/]",
+            )
+        lines = [
+            _toggle_header(
+                "tags", f"[bold {resolved_theme_colors['accent']}]{expanded_glyph} Tags[/]"
+            )
+        ]
         namespaced, unnamespaced = _partition_tags(tags)
         lines.extend(_namespaced_tag_lines(namespaced, resolved_tag_namespace_colors))
         if unnamespaced:
@@ -693,9 +721,16 @@ class PaperDetails(Static):
         collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
         expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
         if is_collapsed:
-            return f"[dim]{collapsed_glyph} Relevance ({score_sym}{rel_score}/10)[/]"
+            return _toggle_header(
+                "relevance",
+                f"[{resolved_theme_colors['accent']}]{collapsed_glyph} "
+                f"Relevance ({score_sym}{rel_score}/10)[/]",
+            )
         lines = [
-            f"[bold {resolved_theme_colors['accent']}]{expanded_glyph} Relevance[/]",
+            _toggle_header(
+                "relevance",
+                f"[bold {resolved_theme_colors['accent']}]{expanded_glyph} Relevance[/]",
+            ),
             f"  [bold {resolved_theme_colors['accent']}]Score:[/] [{score_color}]{score_sym}{rel_score}/10[/]",
         ]
         if rel_reason:
@@ -716,9 +751,18 @@ class PaperDetails(Static):
         collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
         expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
         if is_collapsed:
-            return f"[dim]{collapsed_glyph} Submission Targets ({len(targets)})[/]"
+            return _toggle_header(
+                "deadlines",
+                f"[{resolved_theme_colors['accent']}]{collapsed_glyph} "
+                f"Submission Targets ({len(targets)})[/]",
+            )
 
-        lines = [f"[bold {resolved_theme_colors['accent']}]{expanded_glyph} Submission Targets[/]"]
+        lines = [
+            _toggle_header(
+                "deadlines",
+                f"[bold {resolved_theme_colors['accent']}]{expanded_glyph} Submission Targets[/]",
+            )
+        ]
         for target in targets:
             deadline = target.deadline
             venue = escape_rich_text(f"{deadline.title} {deadline.year}")
@@ -758,18 +802,18 @@ class PaperDetails(Static):
         summary_loading_prefix = _ACTIVE_DETAIL_GLYPHS["summary_loading"]
         if is_collapsed:
             hint = " (loaded)" if summary else ""
-            return f"[dim]{collapsed_glyph} {summary_header}{hint}[/]"
-        if summary_loading:
-            return (
-                f"[bold {colors['purple']}]{expanded_glyph} {summary_prefix}{summary_header}[/]\n"
-                f"  [dim italic]{summary_loading_prefix}Generating summary...[/]"
+            return _toggle_header(
+                "summary", f"[{colors['purple']}]{collapsed_glyph} {summary_header}{hint}[/]"
             )
+        header = _toggle_header(
+            "summary",
+            f"[bold {colors['purple']}]{expanded_glyph} {summary_prefix}{summary_header}[/]",
+        )
+        if summary_loading:
+            return f"{header}\n  [dim italic]{summary_loading_prefix}Generating summary...[/]"
         if summary:
             rendered_summary = format_summary_as_rich(summary, theme_colors=colors)
-            return (
-                f"[bold {colors['purple']}]{expanded_glyph} {summary_prefix}{summary_header}[/]\n"
-                f"{rendered_summary}"
-            )
+            return f"{header}\n{rendered_summary}"
         return ""
 
     def _render_s2(
@@ -786,12 +830,12 @@ class PaperDetails(Static):
         collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
         expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
         if is_collapsed:
-            return self._render_s2_collapsed(s2_data, collapsed_glyph)
+            return self._render_s2_collapsed(s2_data, collapsed_glyph, resolved_theme_colors)
         if s2_loading:
-            return (
-                f"[bold {resolved_theme_colors['green']}]{expanded_glyph} Semantic Scholar[/]\n"
-                "  [dim italic]Fetching data...[/]"
+            header = _toggle_header(
+                "s2", f"[bold {resolved_theme_colors['green']}]{expanded_glyph} Semantic Scholar[/]"
             )
+            return f"{header}\n  [dim italic]Fetching data...[/]"
         if s2_data:
             return "\n".join(
                 self._render_s2_data_lines(s2_data, expanded_glyph, resolved_theme_colors)
@@ -802,9 +846,12 @@ class PaperDetails(Static):
         self,
         s2_data: SemanticScholarPaper | None,
         collapsed_glyph: str,
+        theme_colors: Mapping[str, str],
     ) -> str:
         hint = f" ({s2_data.citation_count} cites)" if s2_data else ""
-        return f"[dim]{collapsed_glyph} Semantic Scholar{hint}[/]"
+        return _toggle_header(
+            "s2", f"[{theme_colors['green']}]{collapsed_glyph} Semantic Scholar{hint}[/]"
+        )
 
     def _render_s2_data_lines(
         self,
@@ -813,7 +860,9 @@ class PaperDetails(Static):
         theme_colors: Mapping[str, str],
     ) -> list[str]:
         lines = [
-            f"[bold {theme_colors['green']}]{expanded_glyph} Semantic Scholar[/]",
+            _toggle_header(
+                "s2", f"[bold {theme_colors['green']}]{expanded_glyph} Semantic Scholar[/]"
+            ),
             f"  [bold {theme_colors['accent']}]Citations:[/] {s2_data.citation_count}",
             f"  [bold {theme_colors['accent']}]Influential:[/] {s2_data.influential_citation_count}",
         ]
@@ -853,8 +902,16 @@ class PaperDetails(Static):
         expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
         hf_upvotes = _ACTIVE_DETAIL_GLYPHS["hf_upvotes"]
         if is_collapsed:
-            return f"[dim]{collapsed_glyph} HuggingFace ({hf_upvotes}{hf_data.upvotes})[/]"
-        lines = [f"[bold {resolved_theme_colors['orange']}]{expanded_glyph} HuggingFace[/]"]
+            return _toggle_header(
+                "hf",
+                f"[{resolved_theme_colors['orange']}]{collapsed_glyph} "
+                f"HuggingFace ({hf_upvotes}{hf_data.upvotes})[/]",
+            )
+        lines = [
+            _toggle_header(
+                "hf", f"[bold {resolved_theme_colors['orange']}]{expanded_glyph} HuggingFace[/]"
+            )
+        ]
         hf_parts = [f"  [bold {resolved_theme_colors['accent']}]Upvotes:[/] {hf_data.upvotes}"]
         if hf_data.num_comments > 0:
             hf_parts.append(
@@ -894,9 +951,16 @@ class PaperDetails(Static):
         expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
         version_arrow = _ACTIVE_DETAIL_GLYPHS["version_arrow"]
         if is_collapsed:
-            return f"[dim]{collapsed_glyph} Version Update (v{old_v}{version_arrow}v{new_v})[/]"
+            return _toggle_header(
+                "version",
+                f"[{resolved_theme_colors['pink']}]{collapsed_glyph} "
+                f"Version Update (v{old_v}{version_arrow}v{new_v})[/]",
+            )
+        header = _toggle_header(
+            "version", f"[bold {resolved_theme_colors['pink']}]{expanded_glyph} Version Update[/]"
+        )
         return (
-            f"[bold {resolved_theme_colors['pink']}]{expanded_glyph} Version Update[/]\n"
+            f"{header}\n"
             f"  [bold {resolved_theme_colors['accent']}]Updated:[/] "
             f"[{resolved_theme_colors['pink']}]v{old_v} {version_arrow} v{new_v}[/]\n"
             f"  [bold {resolved_theme_colors['accent']}]View diff:[/] "

@@ -111,7 +111,9 @@ class ContextFooter(Static):
     ContextFooter {
         dock: bottom;
         height: 1;
-        background: $th-background;
+        /* panel background separates the key-hint band from the adjacent
+           status bar so the two bottom strips don't blur together. */
+        background: $th-panel;
         color: $th-muted;
         padding: 0 1;
         border-top: solid $th-panel-alt;

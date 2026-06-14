@@ -39,6 +39,7 @@ from arxiv_browser.themes import theme_colors_for
 logger = logging.getLogger(__name__)
 
 RECOMMENDATION_TITLE_MAX_LEN = 60  # Max title length in recommendations modal
+ROW_TITLE_MAX_LEN = 80  # Max title length per result row (single-line, ellipsised)
 CitationViewMode = Literal["graph", "ancestors", "descendants"]
 
 
@@ -102,24 +103,17 @@ class RecommendationsScreen(ModalBase[str | None]):
     ]
 
     CSS = """
-    RecommendationsScreen {
-        align: center middle;
-    }
-
     #recommendations-dialog {
         width: 80%;
         height: 85%;
         min-width: 60;
         min-height: 20;
-        background: $th-background;
+        /* intentional override: orange border distinguishes recommendations */
         border: tall $th-orange;
-        padding: 0 2;
     }
 
     #recommendations-title {
-        text-style: bold;
         color: $th-orange;
-        margin-bottom: 1;
     }
 
     #source-bar {
@@ -143,7 +137,7 @@ class RecommendationsScreen(ModalBase[str | None]):
     }
 
     #recommendations-list > ListItem.--highlight {
-        background: $th-highlight;
+        background: $th-highlight-focus;
     }
 
     .rec-title {
@@ -160,9 +154,7 @@ class RecommendationsScreen(ModalBase[str | None]):
     }
 
     #recommendations-buttons {
-        height: auto;
         margin-top: 1;
-        align: right middle;
     }
     """
 
@@ -182,9 +174,13 @@ class RecommendationsScreen(ModalBase[str | None]):
 
     def compose(self) -> ComposeResult:
         """Yield title label, optional source toggle, paper list, and buttons."""
-        with Vertical(id="recommendations-dialog"):
+        with Vertical(id="recommendations-dialog", classes="modal-dialog"):
             truncated_title = truncate_text(self._target_paper.title, RECOMMENDATION_TITLE_MAX_LEN)
-            yield Label(f"Similar to: {truncated_title}", id="recommendations-title")
+            yield Label(
+                f"Similar to: {truncated_title}",
+                id="recommendations-title",
+                classes="modal-title",
+            )
             if self._s2_available:
                 with Horizontal(id="source-bar"):
                     yield Button(
@@ -198,7 +194,7 @@ class RecommendationsScreen(ModalBase[str | None]):
                         id="source-s2-btn",
                     )
             yield ListView(id="recommendations-list")
-            with Horizontal(id="recommendations-buttons"):
+            with Horizontal(id="recommendations-buttons", classes="modal-buttons"):
                 yield Button("Close (Esc/q)", variant="default", id="close-btn")
                 yield Button("Go to Paper (Enter)", variant="primary", id="select-btn")
 
@@ -207,7 +203,7 @@ class RecommendationsScreen(ModalBase[str | None]):
         list_view = self.query_one("#recommendations-list", ListView)
         green = theme_colors_for(self)["green"]
         for paper, score in self._similar_papers:
-            safe_title = escape_rich_text(paper.title)
+            safe_title = escape_rich_text(truncate_text(paper.title, ROW_TITLE_MAX_LEN))
             safe_categories = escape_rich_text(paper.categories)
             item = RecommendationListItem(
                 paper,
@@ -339,24 +335,17 @@ class CitationGraphScreen(ModalBase[str | None]):
     ]
 
     CSS = """
-    CitationGraphScreen {
-        align: center middle;
-    }
-
     #citation-graph-dialog {
         width: 80%;
         height: 85%;
         min-width: 60;
         min-height: 20;
-        background: $th-background;
+        /* intentional override: purple border for the citation-graph view */
         border: tall $th-purple;
-        padding: 0 2;
     }
 
     #citation-graph-breadcrumb {
-        text-style: bold;
         color: $th-purple;
-        margin-bottom: 1;
         height: auto;
     }
 
@@ -407,7 +396,7 @@ class CitationGraphScreen(ModalBase[str | None]):
     }
 
     .citation-list > ListItem.--highlight {
-        background: $th-highlight;
+        background: $th-highlight-focus;
     }
 
     .cite-title {
@@ -419,13 +408,10 @@ class CitationGraphScreen(ModalBase[str | None]):
     }
 
     #citation-graph-buttons {
-        height: auto;
         margin-top: 1;
-        align: right middle;
     }
 
     #citation-graph-status {
-        color: $th-muted;
         height: auto;
     }
     """
@@ -491,8 +477,8 @@ class CitationGraphScreen(ModalBase[str | None]):
 
     def compose(self) -> ComposeResult:
         """Yield breadcrumb, side-by-side references/citations panels, status bar, and buttons."""
-        with Vertical(id="citation-graph-dialog"):
-            yield Static("", id="citation-graph-breadcrumb")
+        with Vertical(id="citation-graph-dialog", classes="modal-dialog"):
+            yield Static("", id="citation-graph-breadcrumb", classes="modal-title")
             with Horizontal(id="citation-mode-buttons"):
                 yield Button("Graph", variant="primary", id="cg-mode-graph")
                 yield Button("Ancestors", variant="default", id="cg-mode-ancestors")
@@ -505,8 +491,8 @@ class CitationGraphScreen(ModalBase[str | None]):
                     yield Static("", id="cites-title", classes="citation-panel-title")
                     yield ListView(id="cites-list", classes="citation-list")
             yield Tree("", id="genealogy-tree")
-            yield Static("", id="citation-graph-status")
-            with Horizontal(id="citation-graph-buttons"):
+            yield Static("", id="citation-graph-status", classes="modal-footer")
+            with Horizontal(id="citation-graph-buttons", classes="modal-buttons"):
                 yield Button("Close (Esc/q)", variant="default", id="cg-close-btn")
                 yield Button("Drill Down (Enter)", variant="primary", id="cg-drill-btn")
 
@@ -522,7 +508,7 @@ class CitationGraphScreen(ModalBase[str | None]):
         """Build a list item widget for a single citation graph entry."""
         colors = theme_colors_for(self)
         is_local = entry.arxiv_id != "" and entry.arxiv_id in self._local_arxiv_ids
-        safe_title = escape_rich_text(entry.title)
+        safe_title = escape_rich_text(truncate_text(entry.title, ROW_TITLE_MAX_LEN))
         local_badge = f" [{colors['green']}]\\[LOCAL][/]" if is_local else ""
         year_str = str(entry.year) if entry.year else "?"
         authors_short = truncate_text(entry.authors, 50) if entry.authors else ""
@@ -682,10 +668,14 @@ class CitationGraphScreen(ModalBase[str | None]):
 
     def _set_loading_state(self, loading: bool) -> None:
         self._loading = loading
-        try:
-            self.query_one("#citation-graph-dialog").loading = loading
-        except NoMatches:
-            return
+        # Show the spinner only over the content panels/tree, not the whole
+        # dialog, so the breadcrumb and status line (with the "Loading…" hint)
+        # stay visible and the user keeps their navigation context.
+        for selector in ("#citation-graph-panels", "#genealogy-tree"):
+            try:
+                self.query_one(selector).loading = loading
+            except NoMatches:
+                continue
 
     @work(exclusive=True, group="citation-genealogy", exit_on_error=False)
     async def _show_genealogy_worker(self, direction: GenealogyDirection) -> None:

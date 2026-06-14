@@ -42,12 +42,53 @@ class TestRequireLlmCommand:
         assert app._llm_provider._allow_shell is False
         assert app._llm_provider._max_retries == 3
 
-    def test_returns_none_and_notifies_when_not_configured(self):
+    def test_offers_inline_preset_picker_when_not_configured(self):
+        from unittest.mock import MagicMock
+
+        from arxiv_browser.modals.settings import LLMPresetPickerModal
+
         app = self._make_mock_app()
+        app.push_screen = MagicMock()
+        result = app._require_llm_command()
+        # Unconfigured LLM no longer dead-ends at a config.json message: it
+        # offers an inline preset picker instead.
+        assert result is None
+        app.push_screen.assert_called_once()
+        assert isinstance(app.push_screen.call_args[0][0], LLMPresetPickerModal)
+        app.notify.assert_not_called()
+
+    def test_inline_preset_picker_persists_selected_preset(self):
+        from unittest.mock import MagicMock
+
+        app = self._make_mock_app()
+        app._save_config_or_warn = MagicMock(return_value=True)
+
+        def choose_preset(_modal, callback):
+            callback("copilot")
+
+        app.push_screen = MagicMock(side_effect=choose_preset)
         result = app._require_llm_command()
         assert result is None
-        app.notify.assert_called_once()
-        assert "LLM not configured" in str(app.notify.call_args)
+        assert app._config.llm_preset == "copilot"
+        assert app._llm_provider is not None
+        app._save_config_or_warn.assert_called_once_with("LLM preset")
+        assert "LLM preset set to 'copilot'" in app.notify.call_args[0][0]
+
+    def test_inline_preset_picker_ignores_cancel(self):
+        from unittest.mock import MagicMock
+
+        app = self._make_mock_app()
+        app._save_config_or_warn = MagicMock(return_value=True)
+
+        def cancel(_modal, callback):
+            callback(None)
+
+        app.push_screen = MagicMock(side_effect=cancel)
+        result = app._require_llm_command()
+        assert result is None
+        assert app._config.llm_preset == ""
+        app._save_config_or_warn.assert_not_called()
+        app.notify.assert_not_called()
 
     def test_returns_none_with_unknown_preset(self):
         app = self._make_mock_app(llm_preset="nonexistent")

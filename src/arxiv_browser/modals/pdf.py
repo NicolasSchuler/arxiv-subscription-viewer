@@ -23,24 +23,19 @@ class PdfPreviewScreen(ModalBase[None]):
     ]
 
     CSS = """
-    PdfPreviewScreen {
-        align: center middle;
-    }
-
     #pdf-preview-dialog {
         width: 92%;
         height: 92%;
         min-width: 60;
         min-height: 20;
-        background: $th-background;
+        /* deliberately accent-alt border, not the shared accent */
         border: tall $th-accent-alt;
+        /* override shared 1 2 padding: preview needs tighter padding */
         padding: 0 1;
     }
 
     #pdf-preview-title {
-        text-style: bold;
         color: $th-accent-alt;
-        margin-bottom: 1;
         height: auto;
     }
 
@@ -61,7 +56,6 @@ class PdfPreviewScreen(ModalBase[None]):
     }
 
     #pdf-preview-footer {
-        color: $th-muted;
         text-align: center;
         height: auto;
     }
@@ -75,8 +69,8 @@ class PdfPreviewScreen(ModalBase[None]):
     def compose(self) -> ComposeResult:
         """Yield title, rendered pages, and footer."""
         title = escape_rich_text(truncate_text(self._paper.title, 90))
-        with Vertical(id="pdf-preview-dialog"):
-            yield Static(f"PDF Preview: {title}", id="pdf-preview-title")
+        with Vertical(id="pdf-preview-dialog", classes="modal-dialog"):
+            yield Static(f"PDF Preview: {title}", id="pdf-preview-title", classes="modal-title")
             with VerticalScroll(id="pdf-preview-pages"):
                 for page in self._pages:
                     yield Static(
@@ -84,7 +78,7 @@ class PdfPreviewScreen(ModalBase[None]):
                         classes="pdf-preview-page-title",
                     )
                     yield Static(page.markup, classes="pdf-preview-page")
-            yield Static("[dim]Close: Esc / q[/dim]", id="pdf-preview-footer")
+            yield Static("Close: Esc / q", id="pdf-preview-footer", classes="modal-footer")
 
     def action_close(self) -> None:
         """Close the preview."""
@@ -109,15 +103,15 @@ class FigurePreviewScreen(ModalBase[None]):
     def compose(self) -> ComposeResult:
         """Yield title, rendered figure, caption, and footer."""
         title = escape_rich_text(truncate_text(self._paper.title, 90))
-        with Vertical(id="pdf-preview-dialog"):
-            yield Static(f"Figure Preview: {title}", id="pdf-preview-title")
+        with Vertical(id="pdf-preview-dialog", classes="modal-dialog"):
+            yield Static(f"Figure Preview: {title}", id="pdf-preview-title", classes="modal-title")
             with VerticalScroll(id="pdf-preview-pages"):
                 yield Static("First HTML figure", classes="pdf-preview-page-title")
                 yield Static(self._preview.markup, classes="pdf-preview-page")
                 if self._preview.caption:
                     caption = escape_rich_text(truncate_text(self._preview.caption, 240))
                     yield Static(f"[dim]{caption}[/]", classes="pdf-preview-page")
-            yield Static("[dim]Close: Esc / q[/dim]", id="pdf-preview-footer")
+            yield Static("Close: Esc / q", id="pdf-preview-footer", classes="modal-footer")
 
     def action_close(self) -> None:
         """Close the preview."""
