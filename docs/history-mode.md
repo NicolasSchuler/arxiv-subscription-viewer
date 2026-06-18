@@ -14,7 +14,7 @@ Create a `history/` directory in the workspace where you run `arxiv-viewer`:
     └── 2026-01-23.txt
 ```
 
-Files must be named `YYYY-MM-DD.txt`. The app auto-loads the newest file on startup.
+Files must be named `YYYY-MM-DD.txt`. The app auto-loads the newest file on startup. Dates need not be contiguous — `[` / `]` step through whatever dated files exist, not calendar days. If no `history/` files are found, the app falls back to an `arxiv.txt` file in the directory where you launched `arxiv-viewer`.
 
 ## Navigation
 
@@ -24,11 +24,13 @@ Files must be named `YYYY-MM-DD.txt`. The app auto-loads the newest file on star
 | `]` | Next (newer) date |
 | `T` | Quick triage visible unread papers |
 
-Session state (including current date) persists across runs. Falls back to `arxiv.txt` if no `history/` directory exists.
+Session state (including the current date) persists across runs.
 
 ## Smart Reading Queue
 
-Cycle sorting with `s` until `sort:queue` appears to use the Smart Reading Queue. Queue mode is a priority sort over the loaded date file: relevance scores, watch-list matches, recency, HuggingFace upvotes, and Semantic Scholar citation velocity all contribute when available. It does not create a separate queue or change read/unread state.
+Cycle the sort order with `s` until the queue mode appears to use the Smart Reading Queue. Queue mode is a priority sort over the loaded date file: relevance scores, watch-list matches, recency, HuggingFace upvotes, and Semantic Scholar citation velocity all contribute when available. It does not create a separate queue or change read/unread state.
+
+The relevance, HuggingFace, and Semantic Scholar contributions only apply once those features are enabled (see [llm-setup.md](llm-setup.md), [huggingface.md](huggingface.md), and [semantic-scholar.md](semantic-scholar.md)); a default install ranks mostly by recency and watch-list matches.
 
 When queue mode is selected, it stays active as you move between date files, so each newly loaded digest is auto-ranked with the same priority formula.
 
@@ -95,22 +97,24 @@ pbpaste > "history/$(date +%F).txt"
 
 ## Input File Format
 
-The parser expects arXiv email subscription format:
+The parser expects the arXiv email subscription format. Note the **double-backslash
+(`\\`) delimiter lines** — the abstract is the block between the `\\` line after the
+metadata and the closing `\\` line (the closing marker shares the line with the
+abstract-page URL). A single backslash will not parse.
 
 ```
 ------------------------------------------------------------------------------
-\
-arXiv:2501.12345
-Date: Mon, 20 Jan 2025 00:00:00 GMT   (15kb)
+\\
+arXiv:2601.15305
+Date: Mon, 12 Jan 2026 20:33:39 GMT   (215kb)
 
 Title: Example Paper Title
 Authors: Jane Doe, John Smith
 Categories: cs.AI cs.LG
 Comments: 10 pages, 5 figures
-\
+\\
   This is the abstract text describing the paper's contributions...
-\
-( https://arxiv.org/abs/2501.12345 , 15kb)
+\\ ( https://arxiv.org/abs/2601.15305 ,  215kb)
 ------------------------------------------------------------------------------
 ```
 

@@ -10,6 +10,7 @@ labels: bug
 - **Python version**: (run `python --version`)
 - **OS**: (e.g. macOS 14, Ubuntu 22.04, Windows 11)
 - **Terminal / shell**: (e.g. iTerm2, GNOME Terminal, fish)
+- **Diagnostics** (optional but helpful): output of `arxiv-viewer doctor`
 
 ## Description
 
@@ -32,8 +33,10 @@ What actually happened. Include the full error message / traceback if available.
 <details>
 <summary>Debug log (if relevant)</summary>
 
-Run with `arxiv-viewer --debug` and paste the relevant section from
-`~/.config/arxiv-browser/debug.log` (macOS: `~/Library/Application Support/arxiv-browser/debug.log`).
+Run with `arxiv-viewer --debug` and paste the relevant section of the debug log. Run
+`arxiv-viewer config-path` to find your config/log directory, or use the per-OS paths:
+`~/.config/arxiv-browser/debug.log` (Linux), `~/Library/Application Support/arxiv-browser/debug.log`
+(macOS), `%APPDATA%\arxiv-browser\debug.log` (Windows).
 
 ```
 paste log here

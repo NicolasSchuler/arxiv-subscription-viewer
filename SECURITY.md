@@ -2,10 +2,9 @@
 
 ## Supported Versions
 
-| Version | Supported |
-| ------- | --------- |
-| Latest (`main`) | ✅ |
-| `0.1.x` | ✅ |
+Security fixes target the latest released version on PyPI and the current `main`
+branch. Older releases do not receive backported patches — please upgrade to the
+latest version (see the [README](README.md) for upgrade instructions) before reporting.
 
 ## Reporting a Vulnerability
 

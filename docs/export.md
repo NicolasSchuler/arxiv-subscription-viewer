@@ -6,10 +6,14 @@ Press `E` to open the export menu. Supported formats:
 
 | Format | Clipboard | File |
 |--------|-----------|------|
-| BibTeX | ✅ | ✅ (Zotero-compatible) |
-| Markdown | ✅ | ✅ |
-| RIS | ✅ | ✅ |
-| CSV | — | ✅ |
+| BibTeX | ✅ (`b`) | ✅ (`B`, Zotero-compatible) |
+| RIS | ✅ (`r`) | ✅ (`R`) |
+| CSV | ✅ (`v`) | ✅ (`C`) |
+| Markdown | ✅ (`m`) | — |
+| Markdown table | ✅ (`t`) | — |
+| Plain text | ✅ (`c`) | — |
+
+Markdown, Markdown-table, and plain-text exports are clipboard-only. File exports (BibTeX, RIS, CSV) are written to disk.
 
 File exports default to `~/arxiv-exports/`. Configure a custom directory:
 
@@ -69,14 +73,14 @@ By default, `P` opens PDFs in your browser. Configure a custom viewer:
 }
 ```
 
-Placeholders: `{url}` or `{path}`. If omitted, the URL is appended as the final argument. On first use, the app asks for trust confirmation.
+`{url}` and `{path}` are interchangeable and both receive the paper's PDF URL — `P` opens the remote PDF in your viewer, not a downloaded file. If neither placeholder is present, the URL is appended as the final argument. On first use, the app asks for trust confirmation. (To open an already-downloaded local file, use `d` to download, then your own tools.)
 
 ## Metadata Export & Import
 
 Use the command palette (`Ctrl+p`) to back up or migrate your annotations:
 
 - **Export Metadata** — writes a timestamped JSON snapshot to `~/arxiv-exports/`
-- **Import Metadata** — restores from a JSON snapshot (notes, tags, read/star state, watch list, bookmarks, marks, collections)
+- **Import Metadata** — restores from a JSON snapshot (notes, tags, read/star state, review schedule, line annotations, watch list, tracked authors, bookmarks, collections, research interests)
 
 ## Collections (`Ctrl+k`)
 

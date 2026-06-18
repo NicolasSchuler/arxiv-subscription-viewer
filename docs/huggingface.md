@@ -23,8 +23,8 @@ Enable at runtime with `Ctrl+h`, or add to `config.json`:
 1. Press `Ctrl+h` to toggle on/off
 2. Data is auto-fetched and cross-matched against loaded papers
 3. Trending papers show upvote badges in the list view
-4. The detail pane shows a HuggingFace section with upvotes, comments, GitHub repository, AI summary, and keywords
-5. Sort by trending with `s` (cycle sort order)
+4. The detail pane shows a HuggingFace section with upvotes, comments, the GitHub repository (with star count), keywords, and an AI summary
+5. Cycle the sort order with `s` until it reaches "trending" to rank by HuggingFace upvotes
 6. Smart Reading Queue sort uses HF upvotes as a community-interest signal when HF data is enabled and matched
 
 ---

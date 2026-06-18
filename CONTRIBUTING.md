@@ -8,6 +8,8 @@ Start with [docs/architecture.md](docs/architecture.md). It is the primary human
 
 ## Local setup
 
+Requires Python >= 3.13 plus the [`uv`](https://docs.astral.sh/uv/) and [`just`](https://just.systems) toolchains.
+
 ```bash
 uv python install 3.13
 uv sync --locked
@@ -47,7 +49,7 @@ For doc-only edits like this guide or `AGENTS.md`, keep validation targeted inst
 
 1. Update `CHANGELOG.md` under `[Unreleased]` while developing.
 2. For a release, move entries to `## [X.Y.Z] - YYYY-MM-DD`.
-3. Bump `version` in `pyproject.toml` and refresh `uv.lock` if needed.
-4. Run `just docs-check`, `just check`, and `just quality`.
+3. Bump `version` in `pyproject.toml` and refresh `uv.lock` if needed (must match the `## [X.Y.Z]` heading from step 2 — `check_version_sync.py` enforces this in `just docs-check`).
+4. Run `just quality` (the full gate set — it already includes `just check` and `just docs-check`).
 5. Tag with `vX.Y.Z` and push the tag; CI publishes tagged releases to PyPI.
 6. Verify the GitHub Actions publish job and the PyPI package page.

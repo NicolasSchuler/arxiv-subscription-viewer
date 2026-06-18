@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Final
 
-WHATS_NEW_VERSION: Final[str] = "0.1.3"
+WHATS_NEW_VERSION: Final[str] = "0.3.1"
 """Tag of the release whose notes are currently presented.
 
 When a user's ``UserConfig.last_seen_whats_new`` differs from this
@@ -32,30 +32,24 @@ WHATS_NEW_HEADLINE: Final[str] = "What's New in arXiv Viewer"
 
 WHATS_NEW_ENTRIES: Final[tuple[tuple[str, str], ...]] = (
     (
-        "User theme overrides",
-        "Drop a [bold]user.tcss[/] next to config.json to layer your own "
-        "Textual CSS over the embedded stylesheet.",
+        "More built-in themes",
+        "Cycle through 11 bundled themes with [bold]Ctrl+t[/], including "
+        "Dracula, Nord, Gruvbox Dark, Tokyo Night, Everforest Dark, and GitHub Light.",
     ),
     (
-        "Session theme flag",
-        "Launch with [bold]--theme high-contrast[/] (or any registered "
-        "theme) to override config.json for the session only.",
+        "Quick reference",
+        "A new cheat sheet in the docs collects common CLI commands, keybindings, "
+        "and search syntax in one printable page.",
     ),
     (
-        "Actionable empty states",
-        "Collections and citation graph list views now explain what to do "
-        "when they are empty, instead of showing a blank panel.",
+        "Clearer export docs",
+        "The export guide now spells out which formats support clipboard export, "
+        "which write files, and which key opens each option.",
     ),
     (
-        "First-run onboarding",
-        "A welcome overlay now shows essential shortcuts on first launch. "
-        "Press [bold]?[/] anytime for the full keybinding reference.",
-    ),
-    (
-        "doctor & completions",
-        "Run [bold]arxiv-viewer doctor[/] for environment checks and "
-        "[bold]arxiv-viewer completions bash|zsh|fish[/] to install shell "
-        "completions.",
+        "Better diagnostics",
+        "Issue templates and troubleshooting docs now point to [bold]arxiv-viewer doctor[/] "
+        "and [bold]arxiv-viewer config-path[/] for faster debugging.",
     ),
 )
 

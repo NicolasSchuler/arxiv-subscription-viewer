@@ -25,6 +25,7 @@ Review organization is local-first: use read state, stars, tags, notes, marks, b
 - **[Main README](../README.md)**: install, quick commands, highlights, and key bindings
 - **[Published guide hub](https://nicolasschuler.github.io/arxiv-subscription-viewer/)**: the static landing page used for GitHub Pages
 - **[config-reference.md](config-reference.md)**: direct configuration schema and option reference
+- **[cheatsheet.md](cheatsheet.md)**: one-page quick reference for commands, keys, and search syntax
 - **This file**: GitHub-native map of the end-user docs set
 
 ## Recommended Reading Order
@@ -44,16 +45,12 @@ Review organization is local-first: use read state, stars, tags, notes, marks, b
 | [history-mode.md](history-mode.md) | `history/` setup, date navigation, and digest-ingestion workflow |
 | [search-filters.md](search-filters.md) | Query syntax, filter prefixes, boolean operators, bookmarks, and API search |
 | [digest.md](digest.md) | Non-interactive daily/weekly Markdown digests for cron, email, or Slack piping |
-| [llm-setup.md](llm-setup.md) | AI summaries, chat, paper comparison, relevance scoring, auto-tagging |
+| [llm-setup.md](llm-setup.md) | AI summaries, chat, debate, comparison, remix, relevance scoring, auto-tagging |
 | [semantic-scholar.md](semantic-scholar.md) | Citation counts, recommendations, citation graph |
 | [huggingface.md](huggingface.md) | Trending papers, community upvotes |
 | [export.md](export.md) | BibTeX, RIS, CSV, Markdown, PDF downloads, collections |
 | [config-reference.md](config-reference.md) | Full configuration schema reference |
 | [troubleshooting.md](troubleshooting.md) | Common issues and solutions |
-
-## Getting Started
-
-See the [main README](../README.md) for installation, usage, and key bindings, then pick the guide that matches your workflow.
 
 ## Internal Development Docs
 

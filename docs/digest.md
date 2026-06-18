@@ -33,7 +33,7 @@ The digest command does not require an interactive terminal. Stdout is reserved 
 30 7 * * 1-5 cd "$HOME/research/arxiv" && arxiv-viewer digest --category cs.AI --output "$HOME/digests/arxiv-daily.md"
 ```
 
-For email or Slack in v1, pipe the generated Markdown to your own delivery tool:
+To deliver via email or Slack, pipe the generated Markdown to your own delivery tool:
 
 ```bash
 arxiv-viewer digest --category cs.AI \
@@ -48,8 +48,9 @@ arxiv-viewer digest --category cs.AI \
 
 `--tui` runs the same source loading and optional enrichment pipeline, then opens
 the existing browser with papers ordered by digest section priority. Rows show
-ephemeral `Inbox:` badges such as `Inbox:High Relevance`, `Inbox:Likely Star`,
-or `Inbox:Trending on Hugging Face`.
+ephemeral `Inbox:` badges using short codes derived from the section titles — e.g.
+`Inbox:HiRel` (High Relevance), `Inbox:Star?` (Likely Star), or `Inbox:HF`
+(Trending on Hugging Face). The full section titles head the digest view itself.
 
 ```bash
 arxiv-viewer digest --category cs.AI --period weekly --tui

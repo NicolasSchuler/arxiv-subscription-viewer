@@ -21,6 +21,8 @@ PYPROJECT = ROOT / "pyproject.toml"
 CHANGELOG = ROOT / "CHANGELOG.md"
 
 RELEASED_HEADING = re.compile(r"^##\s+\[(\d+\.\d+\.\d+)\]")
+FOOTER_LINK = re.compile(r"^\[(\d+\.\d+\.\d+)\]:\s*(\S+)", re.MULTILINE)
+UNRELEASED_LINK = re.compile(r"^\[Unreleased\]:\s*(\S+)", re.MULTILINE)
 
 
 def pyproject_version() -> str:
@@ -34,6 +36,25 @@ def latest_released_version() -> str | None:
         if match:
             return match.group(1)
     return None
+
+
+def changelog_footer_errors(latest: str) -> list[str]:
+    """Verify the footer has a link for the latest release and a current Unreleased compare."""
+    text = CHANGELOG.read_text(encoding="utf-8")
+    errors: list[str] = []
+    if latest not in {m.group(1) for m in FOOTER_LINK.finditer(text)}:
+        errors.append(
+            f"CHANGELOG.md is missing a footer reference link for released version [{latest}]"
+        )
+    unreleased = UNRELEASED_LINK.search(text)
+    if unreleased is None:
+        errors.append("CHANGELOG.md is missing the [Unreleased] footer link")
+    elif f"v{latest}...HEAD" not in unreleased.group(1):
+        errors.append(
+            f"CHANGELOG.md [Unreleased] link should compare from v{latest}...HEAD "
+            f"(found {unreleased.group(1)})"
+        )
+    return errors
 
 
 def main() -> int:
@@ -59,7 +80,13 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    print(f"ok: pyproject {pyproject} matches latest CHANGELOG entry")
+    footer_errors = changelog_footer_errors(latest)
+    if footer_errors:
+        print("ERROR: CHANGELOG.md footer links are out of sync:", file=sys.stderr)
+        for err in footer_errors:
+            print(f"- {err}", file=sys.stderr)
+        return 1
+    print(f"ok: pyproject {pyproject} matches latest CHANGELOG entry; footer links consistent")
     return 0
 
 

@@ -72,7 +72,7 @@ The loader validates data before it reaches the TUI. Important rules:
 | `last_seen_whats_new` | `string` | `""` | Tag of the last "What's New" release notes the user dismissed. Managed by the app. |
 | `show_abstract_preview` | `bool` | `false` | Show inline abstract preview in the paper list. Toggle with `p`. |
 | `compact_list` | `bool` | `false` | Show one line (title only) per paper in the list for faster title skimming. Toggle with `z`. |
-| `detail_mode` | `string` | `"scan"` | Detail pane density. `"scan"` (compact) or `"full"` (expanded). |
+| `detail_mode` | `string` | `"scan"` | Detail pane density. `"scan"` (compact) or `"full"` (expanded). Toggle with `v`. |
 | `prefer_pdf_url` | `bool` | `false` | When `true`, `o` opens the PDF URL instead of the abstract page. |
 | `arxiv_api_max_results` | `int` | `50` | Default page size for arXiv API searches (`A`). Clamped to `1..200`. |
 | `research_interests` | `string` | `""` | Free-text description of your research interests for LLM relevance scoring (`L`). |
@@ -108,7 +108,7 @@ Enrich papers with citation counts, TLDRs, recommendations, and citation graphs.
 |-----|------|---------|-------------|
 | `s2_enabled` | `bool` | `false` | Enable Semantic Scholar enrichment on startup. Toggle at runtime with `Ctrl+e`. |
 | `s2_api_key` | `string` | `""` | Optional API key for higher rate limits. Get one at [semanticscholar.org](https://www.semanticscholar.org/product/api#api-key). |
-| `s2_cache_ttl_days` | `int` | `7` | Days to cache S2 data in the local SQLite database. |
+| `s2_cache_ttl_days` | `int` | `7` | Days to cache S2 data in the unified `cache.db`. |
 
 ## HuggingFace
 
@@ -294,3 +294,4 @@ All other keys use their defaults and are populated by the app as needed.
 - [export.md](export.md) — Export formats, PDF download & viewer configuration
 - [search-filters.md](search-filters.md) — Query syntax and search bookmarks
 - [history-mode.md](history-mode.md) — History directory setup and date navigation
+- [digest.md](digest.md) — Cron-friendly Markdown digests and the TUI inbox

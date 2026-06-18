@@ -36,9 +36,8 @@ Patch at the module where a symbol is *resolved*, not where it is re-exported:
 ## Caches and Persistence
 
 - Config lives at a platformdirs-resolved path per OS (see `README.md`).
-- LLM summaries, Semantic Scholar data, and HuggingFace trending share a unified `cache.db`
-  (WAL mode, foreign keys on). Legacy installs continue to use the per-module SQLite files.
 - Summaries are invalidated when the LLM command or prompt template changes.
+- For the unified `cache.db` / legacy per-module fallback design, see `docs/architecture.md`.
 
 ## When This File Drifts
 

@@ -21,6 +21,9 @@ DOCS_DIR = ROOT / "docs"
 DOCS_README_PATH = DOCS_DIR / "README.md"
 CONFIG_REFERENCE_PATH = DOCS_DIR / "config-reference.md"
 DOCS_INDEX_PATH = DOCS_DIR / "index.html"
+THEMES_PATH = ROOT / "src/arxiv_browser/themes.py"
+EXPORT_MODAL_PATH = ROOT / "src/arxiv_browser/modals/common.py"
+EXPORT_DOC_PATH = DOCS_DIR / "export.md"
 
 NON_PERSISTED_USER_CONFIG_FIELDS = frozenset({"config_defaulted"})
 
@@ -617,6 +620,81 @@ def _check_completions(cli_text: str, completions_text: str) -> list[str]:
     return errors
 
 
+def _extract_theme_names(themes_text: str) -> list[str]:
+    """Extract built-in theme keys from the ``THEMES`` dict in ``themes.py``."""
+    module = _parse_python_module(themes_text)
+    if module is None:
+        return []
+    for node in module.body:
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+        else:
+            continue
+        if not any(isinstance(t, ast.Name) and t.id == "THEMES" for t in targets):
+            continue
+        if not isinstance(node.value, ast.Dict):
+            return []
+        return [
+            key.value
+            for key in node.value.keys
+            if isinstance(key, ast.Constant) and isinstance(key.value, str)
+        ]
+    return []
+
+
+def _check_themes(readme_text: str, themes_text: str, config_reference_text: str) -> list[str]:
+    """Verify the README theme count and config-reference theme list match ``themes.py``."""
+    theme_names = _extract_theme_names(themes_text)
+    if not theme_names:
+        return ["Could not parse THEMES from src/arxiv_browser/themes.py"]
+
+    errors: list[str] = []
+    match = re.search(r"\*\*(\d+)\s+themes\*\*", readme_text)
+    if not match:
+        errors.append("README is missing a '**N themes**' highlight entry")
+    elif int(match.group(1)) != len(theme_names):
+        errors.append(
+            f"README theme count {match.group(1)} != {len(theme_names)} built-in themes in themes.py"
+        )
+    errors.extend(
+        f"docs/config-reference.md missing built-in theme: {name}"
+        for name in theme_names
+        if f'"{name}"' not in config_reference_text
+    )
+    return errors
+
+
+def _extract_export_formats(export_modal_text: str) -> set[str]:
+    """Extract export format labels from ``ExportMenuModal`` bindings in ``modals/common.py``.
+
+    ``do_clipboard_*`` / ``do_file_*`` actions are unique to the export menu, so the binding
+    labels can be scraped directly. The trailing `` file`` qualifier is stripped so file and
+    clipboard variants of the same format collapse to one name.
+    """
+    formats: set[str] = set()
+    for label in re.findall(
+        r'Binding\("[^"]+",\s*"do_(?:clipboard|file)_\w+",\s*"([^"]+)"',
+        export_modal_text,
+    ):
+        formats.add(label.removesuffix(" file").strip())
+    return formats
+
+
+def _check_export_formats(export_modal_text: str, export_doc_text: str) -> list[str]:
+    """Verify every export format offered by the menu is documented in ``docs/export.md``."""
+    formats = _extract_export_formats(export_modal_text)
+    if not formats:
+        return ["Could not parse ExportMenuModal formats from src/arxiv_browser/modals/common.py"]
+    lowered = export_doc_text.lower()
+    return [
+        f"docs/export.md missing export format: {fmt}"
+        for fmt in sorted(formats)
+        if fmt.lower() not in lowered
+    ]
+
+
 def _check_docs_index_navigation(docs_readme_text: str, docs_index_text: str) -> list[str]:
     """Verify the landing page links to the public docs guides."""
     feature_guides = _extract_feature_guide_links(docs_readme_text)
@@ -642,6 +720,9 @@ def main() -> int:
     config_reference_text = _read(CONFIG_REFERENCE_PATH)
     docs_readme_text = _read(DOCS_README_PATH)
     docs_index_text = _read(DOCS_INDEX_PATH)
+    themes_text = _read(THEMES_PATH)
+    export_modal_text = _read(EXPORT_MODAL_PATH)
+    export_doc_text = _read(EXPORT_DOC_PATH)
 
     errors: list[str] = []
     errors.extend(_check_cli_flags(readme_text, cli_text))
@@ -652,6 +733,8 @@ def main() -> int:
     errors.extend(_check_paper_metadata_reference(models_text, config_reference_text))
     errors.extend(_check_completions(cli_text, completions_text))
     errors.extend(_check_docs_index_navigation(docs_readme_text, docs_index_text))
+    errors.extend(_check_themes(readme_text, themes_text, config_reference_text))
+    errors.extend(_check_export_formats(export_modal_text, export_doc_text))
     errors.extend(
         _check_tracked_local_links(
             [README_PATH, DOCS_README_PATH, *sorted(DOCS_DIR.glob("*.md")), DOCS_INDEX_PATH],

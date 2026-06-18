@@ -367,7 +367,18 @@ class TestCheckVersionSync:
         pyproject = tmp_path / "pyproject.toml"
         changelog = tmp_path / "CHANGELOG.md"
         pyproject.write_text('[project]\nversion = "0.1.3"\n', encoding="utf-8")
-        changelog.write_text("# Changelog\n\n## [0.1.3] - 2026-05-03\n", encoding="utf-8")
+        changelog.write_text(
+            """# Changelog
+
+## [Unreleased]
+
+## [0.1.3] - 2026-05-03
+
+[Unreleased]: https://example.test/project/compare/v0.1.3...HEAD
+[0.1.3]: https://example.test/project/compare/v0.1.2...v0.1.3
+""",
+            encoding="utf-8",
+        )
         monkeypatch.setattr(module, "PYPROJECT", pyproject)
         monkeypatch.setattr(module, "CHANGELOG", changelog)
 

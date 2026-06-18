@@ -1,6 +1,6 @@
-# 🤖 AI Summary, Chat, Comparison, Relevance & Auto-Tag
+# 🤖 AI Summary, Chat, Debate, Comparison, Remix, Relevance & Auto-Tag
 
-Generate paper summaries, chat with papers, compare selected papers, score relevance, and auto-suggest tags using either an LLM CLI tool or an OpenAI-compatible HTTP endpoint.
+Generate paper summaries, chat with papers, debate a paper, compare selected papers, remix papers into new ideas, score relevance, and auto-suggest tags using either an LLM CLI tool or an OpenAI-compatible HTTP endpoint.
 
 ## Setup
 
@@ -36,7 +36,7 @@ Or use a custom command:
 }
 ```
 
-If both `llm_command` and `llm_preset` are set, `llm_command` wins.
+If both `llm_command` and `llm_preset` are set, `llm_command` wins. A custom `llm_command` must include the `{prompt}` placeholder (where the assembled prompt is substituted); `arxiv-viewer doctor` flags commands that omit it.
 
 **Prompt placeholders:** `{title}`, `{authors}`, `{categories}`, `{abstract}`, `{arxiv_id}`, `{paper_content}`.
 
@@ -127,7 +127,7 @@ Press `Ctrl+s` on any paper to generate a summary. A mode selector lets you choo
 | `5` | ELI5 | Jargon-free analogy explanation |
 | `p` | PhD | Explain for a PhD in another field |
 
-Summaries are cached in a local SQLite database and persist across sessions.
+Summaries are cached in the local `cache.db` and persist across sessions.
 The PhD mode uses `"physics"` as its default comparison field. Set
 `llm_phd_explainer_field` in `config.json` to change it, for example
 `"quantum physics"` or `"economics"`.
@@ -162,7 +162,7 @@ Score all loaded papers 1-10 based on your research interests.
 
 - Press `L` to score all papers
 - Press `Ctrl+l` to edit interests (clears cached scores)
-- Sort by relevance with `s`
+- Cycle the sort order with `s` until it reaches the Relevance mode
 - Smart Reading Queue sort also uses these relevance scores as its strongest signal
 - Score badges: 🟢 green (8-10), 🟡 yellow (5-7), dim (1-4)
 

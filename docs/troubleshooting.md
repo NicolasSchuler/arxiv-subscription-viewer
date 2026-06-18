@@ -43,7 +43,7 @@ Check the path you passed with `-i`. In history mode (no `-i`), the viewer looks
 
 ```bash
 # Explicit file
-uv run arxiv-viewer -i ~/mail/arxiv-2025-01-15.txt
+arxiv-viewer -i ~/mail/arxiv-2026-01-15.txt
 
 # History mode — needs history/*.txt files
 ls history/
@@ -193,7 +193,7 @@ Set `paper_content_cache_ttl_days` lower if you need fresh extraction sooner, or
 **Invalid prompt template:**
 
 ```
-Invalid prompt template: ... Valid placeholders: {title}, {authors}, {categories}, {abstract}, {arxiv_id}, {paper_content}
+Invalid prompt template: ... Valid placeholders: {abstract}, {arxiv_id}, {authors}, {categories}, {paper_content}, {title}
 ```
 
 Check your `llm_prompt_template` for typos in placeholder names.
@@ -233,15 +233,7 @@ Request a key at [Semantic Scholar API](https://www.semanticscholar.org/product/
 
 **Stale cache:**
 
-S2 data is cached for 7 days (configurable via `s2_cache_ttl_days`). To force a refresh, delete the cache file:
-
-```bash
-# macOS
-rm ~/Library/Application\ Support/arxiv-browser/semantic_scholar.db
-
-# Linux
-rm ~/.config/arxiv-browser/semantic_scholar.db
-```
+S2 data is cached for 7 days (configurable via `s2_cache_ttl_days`). All enrichment lives in the unified `cache.db`, so to force a refresh either lower `s2_cache_ttl_days` or clear every cache by deleting `cache.db` (see [Clearing all caches](#clearing-all-caches)).
 
 ---
 
@@ -269,21 +261,32 @@ The HF API has a 15-second timeout and the same 3-attempt retry budget (1s → 2
 
 **Stale cache:**
 
-HF data is cached for 6 hours (configurable via `hf_cache_ttl_hours`). Delete the cache to force a refresh:
+HF data is cached for 6 hours (configurable via `hf_cache_ttl_hours`). Like all enrichment it lives in the unified `cache.db`, so to force a refresh either lower `hf_cache_ttl_hours` or clear every cache by deleting `cache.db` (see [Clearing all caches](#clearing-all-caches)).
+
+---
+
+## Clearing all caches
+
+All cached data — LLM summaries, relevance scores, Semantic Scholar enrichment, HuggingFace trending, extracted paper content, and semantic embeddings — lives in a single `cache.db` in the config directory. There is no per-source cache file on a normal install; to clear everything, delete `cache.db` (it is rebuilt on the next run):
 
 ```bash
 # macOS
-rm ~/Library/Application\ Support/arxiv-browser/huggingface.db
+rm ~/Library/Application\ Support/arxiv-browser/cache.db
 
 # Linux
-rm ~/.config/arxiv-browser/huggingface.db
+rm ~/.config/arxiv-browser/cache.db
+
+# Windows
+del %APPDATA%\arxiv-browser\cache.db
 ```
+
+Installs that predate the unified cache may also have legacy per-module files (`summaries.db`, `relevance.db`, `semantic_scholar.db`, `huggingface.db`) in the same directory; deleting those is safe too.
 
 ---
 
 ## Smart Reading Queue Looks Like Date Sort
 
-**Symptom:** `sort:queue` is active, but papers appear mostly ordered by recency or watch-list matches.
+**Symptom:** The queue sort mode (cycle to it with `s`) is active, but papers appear mostly ordered by recency or watch-list matches.
 
 Queue mode uses the signals that are currently available. Until you run relevance scoring (`L`), enable HuggingFace (`Ctrl+h`), or enrich papers with Semantic Scholar (`Ctrl+e` / `e`), the ranking is mostly recency plus watch-list matches. Missing enrichment is expected to contribute zero rather than blocking the queue.
 
@@ -441,7 +444,7 @@ The preview uses the same terminal-safe renderer as PDF preview. Unicode half-bl
 **Enable debug logging:**
 
 ```bash
-uv run arxiv-viewer --debug
+arxiv-viewer --debug
 ```
 
 This writes detailed logs to a rotating log file:
@@ -535,4 +538,4 @@ rm -rf ~/Library/Application\ Support/arxiv-browser/
 rm -rf ~/.config/arxiv-browser/
 ```
 
-This removes config, LLM summary cache (`summaries.db`), relevance scores (`relevance.db`), S2 cache (`semantic_scholar.db`), HF cache (`huggingface.db`), and semantic embeddings in unified `cache.db`.
+This removes `config.json` plus the unified `cache.db` (LLM summaries, relevance scores, Semantic Scholar enrichment, HuggingFace trending, extracted paper content, and semantic embeddings). Installs that predate the unified cache may also have legacy per-module files (`summaries.db`, `relevance.db`, `semantic_scholar.db`, `huggingface.db`) in the same directory.

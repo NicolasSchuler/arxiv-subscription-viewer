@@ -34,7 +34,7 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 
 ### Modal Sizes
 
-All modals use one of three standard widths. Pick the smallest size that fits the content.
+Most modals use one of three standard widths. Pick the smallest size that fits the content.
 
 | Size | Width | Height | Use for |
 |------|-------|--------|---------|
@@ -44,7 +44,9 @@ All modals use one of three standard widths. Pick the smallest size that fits th
 
 Small/Medium modals also cap at `max-width: 90%` for narrow-terminal safety. Large modals keep `min-width: 60; min-height: 20;` for small-terminal safety.
 
-**Current assignments:**
+Full-screen reading and diagnostic surfaces (e.g. Trend Radar, Author Profile, Quick Triage, Settings, Paper Comparison) intentionally use bespoke widths outside this set.
+
+**Example assignments** (not exhaustive — see each modal's `CSS`):
 
 - **Small**: ConfirmModal, ExportMenuModal, SummaryModeModal, SectionToggleModal, MetadataSnapshotPickerModal
 - **Medium**: PaperEditModal, ArxivSearchModal, CommandPaletteModal, WatchListModal, CollectionsModal, ResearchInterestsModal
@@ -102,7 +104,7 @@ Small/Medium modals also cap at `max-width: 90%` for narrow-terminal safety. Lar
 When adding any non-ASCII character to the UI, follow the established glyph-set pattern:
 
 1. **Centralized flag**: `src/arxiv_browser/_ascii.py` exposes `is_ascii_mode()` and `set_ascii_mode()`. Any module can import it (zero internal dependencies).
-2. **Widget glyph sets**: `widgets/listing.py`, `widgets/details.py`, and `widgets/chrome.py` each maintain `_*_GLYPH_SETS` dicts with `"unicode"` and `"ascii"` variants, toggled via `set_ascii_*()` functions called from `App.__init__`.
+2. **Widget glyph sets**: `widgets/listing.py` (`_META_GLYPH_SETS`, toggled by `set_ascii_icons()`), `widgets/details.py` (`_DETAIL_GLYPH_SETS`, `set_ascii_glyphs()`), and `widgets/footer_status.py` (`_CHROME_GLYPH_SETS`, `set_ascii_glyphs()`, re-exported through `widgets/chrome.py`) each keep `"unicode"`/`"ascii"` glyph variants, wired from `ArxivBrowser._configure_ascii_mode()` during init.
 3. **Other modules**: Import `is_ascii_mode()` and choose the appropriate character inline:
    ```python
    from arxiv_browser._ascii import is_ascii_mode
@@ -159,7 +161,7 @@ When adding any non-ASCII character to the UI, follow the established glyph-set 
 
 - Keep list rows stable: title, authors, metadata badges, optional abstract preview.
 - Favor truncation with ellipsis over hard wrapping for dense list rows.
-- Use a deterministic metadata-line budget of 78 visible characters in list rows.
+- Use a width-derived metadata-line budget (default 78, clamped to 36–120 via `meta_line_budget_for()`) so dense rows stay scannable at every pane width.
 - When metadata overflows, drop lowest-priority trailing badges and append `+N` to show hidden items.
 - Preserve key metadata visibility under width pressure:
   - arXiv ID, category, and high-value badges (for example relevance/version).
@@ -196,13 +198,13 @@ All keybindings are categorised into three progressive tiers so that new users s
 |------|------|-----------|---------|
 | **Core** | ~12 keys | Default footer | Navigation, search, open, read/star, export, sort, help, quit |
 | **Standard** | ~15-20 keys | Prominent in help overlay | Selection, notes, tags, copy, download, PDF, watch, bookmarks, API search |
-| **Power** | remaining | Command palette (`Ctrl+P`) | Marks, similarity, citations, LLM features, themes, collections, enrichment toggles |
+| **Power** | remaining | Command palette (`Ctrl+p`) | Marks, similarity, citations, LLM features, themes, collections, enrichment toggles |
 
 Rules:
 - Core keys always appear in the footer (capped at 9 visible hints per §5).
 - Standard keys appear under "Standard · _group_" headers in the help overlay.
 - Power keys appear under "Power · _group_" headers in the help overlay and are always accessible via the command palette.
-- Moving a key between tiers requires updating the tier table in `ui_constants.py` and the corresponding help sections in `help_ui.py`.
+- Moving a key between tiers means updating `HELP_SECTION_ACTIONS` in `help_ui.py` (which section a binding falls under) and, if a section name changes, `TIER_SECTION_NAMES` in `cli_keybindings.py`. Keep the explanatory tier comment in `ui_constants.py` in sync.
 
 ### General discoverability rules
 
@@ -233,7 +235,9 @@ This is a convention, not a strict rule — some exceptions exist for historical
 
 | Lower | Action | Upper | Action | Why it fits |
 |-------|--------|-------|--------|-------------|
+| `a` | Select all papers | `A` | Search all of arXiv (API mode) | Quick in-place select vs broad mode switch |
 | `e` | Fetch S2 data for current paper | `E` | Open export menu | Single-paper enrichment vs multi-format management screen |
+| `t` | Edit tags on current paper | `T` | Open quick-triage screen | Quick in-place tag edit vs review screen |
 | `w` | Toggle watch-list filter | `W` | Manage watch list | Quick filter toggle vs configuration modal |
 
 **⚠️ Partial fit:**
@@ -256,7 +260,7 @@ These have no lowercase counterpart and all represent advanced or broad-scope fe
 
 | Key | Action | Category |
 |-----|--------|----------|
-| `A` | Search all of arXiv (API mode) | Broad scope — switches mode entirely |
+| `F` | Preview the PDF inline | Advanced current-paper preview |
 | `G` | Citation graph (S2-powered) | Advanced feature — opens drill-down screen |
 | `I` | Preview first HTML figure | Advanced current-paper preview using arXiv HTML |
 | `L` | Score papers by relevance (LLM) | Multi-paper operation |
@@ -268,7 +272,7 @@ When adding a new keybinding:
 1. **Prefer lowercase for quick single-paper actions** (toggles, fetches, in-place updates).
 2. **Prefer uppercase for management screens or multi-paper operations** (modals, configuration, batch actions).
 3. **If the mnemonic letter matters more than the convention**, prioritize discoverability over consistency. A binding that users can guess is better than one that fits a pattern nobody remembers.
-4. **All keybindings must be discoverable** via the help overlay (`?`) and the command palette (`Ctrl+P`).
+4. **All keybindings must be discoverable** via the help overlay (`?`) and the command palette (`Ctrl+p`).
 5. **Check for conflicts** before assigning — the `APP_BINDINGS` list in `ui_constants.py` is the single source of truth.
 
 ## 12. PR Checklist

@@ -24,11 +24,11 @@ Enable at runtime with `Ctrl+e`, or add to `config.json`:
 
 | Key | Action |
 |-----|--------|
-| `Ctrl+e` | Toggle S2 on/off |
+| `Ctrl+e` | Toggle S2 on/off (in API-search mode, exits API mode instead) |
 | `e` | Fetch S2 data for current paper (citation count, TLDR, fields of study) |
 | `R` | Recommendations (local or S2-powered when enabled) |
 | `G` | Citation graph — drill-down through references and citations |
-| `s` | Sort by citations (cycle sort order) |
+| `s` | Cycle sort order (citations and Smart Reading Queue both use S2 data) |
 
 Smart Reading Queue sort also uses enriched S2 citation counts as a local citation-velocity proxy: citations divided by paper age, normalized within the loaded paper set. Papers without S2 data simply receive no S2 contribution.
 

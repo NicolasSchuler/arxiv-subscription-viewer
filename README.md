@@ -153,7 +153,9 @@ If something looks off, run `arxiv-viewer doctor` to check config, history disco
 | 🎯 | **Relevance scoring** — LLM scores papers against your interests | `L` |
 | 📅 | **History mode** — navigate daily email digests with `[` / `]` | |
 | ⌨️ | **Command palette** — quick access to all commands | `Ctrl+p` |
-| 🎨 | **5 themes** — Monokai, Catppuccin, Solarized Dark/Light, High Contrast | `Ctrl+t` |
+| 🎨 | **11 themes** — Monokai, Catppuccin Mocha, Solarized Dark/Light, High Contrast, Dracula, Nord, Gruvbox Dark, Tokyo Night, Everforest Dark, GitHub Light | `Ctrl+t` |
+
+> `Ctrl+p` opens the **command palette**. Trend Radar, author profiles, the local triage model, paper remix/debate, and other power features are reached through it rather than via a dedicated key.
 
 ## ⌨️ Key Bindings
 
@@ -203,6 +205,7 @@ If you want the best documentation entry point for your context:
 See the **[full documentation](docs/)** for:
 
 - 🧭 [Docs start page](docs/README.md)
+- 🗺️ [Quick reference / cheat sheet](docs/cheatsheet.md)
 - 🌐 [Published docs landing page](https://nicolasschuler.github.io/arxiv-subscription-viewer/)
 - ⚙️ [Configuration reference](docs/config-reference.md)
 - 🤖 [AI summary & LLM setup](docs/llm-setup.md)
