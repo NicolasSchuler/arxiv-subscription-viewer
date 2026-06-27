@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "arxiv-subscription-viewer"
-version = "0.3.2"
+version = "0.3.3"
 description = "Keyboard-first terminal UI for arXiv digest triage and live arXiv search"
 authors = [
     { name = "Nicolas Sebastian Schuler", email = "nicolas.schuler@kit.edu" }
@@ -32,7 +32,7 @@ dependencies = [
     "platformdirs>=3.0",
     "defusedxml>=0.7.1",
     "PyYAML>=6.0",
-    "pypdf>=6.0.0",
+    "pypdf>=6.13.3",
     "pypdfium2>=5.0.0",
     "Pillow>=12.0.0",
 ]

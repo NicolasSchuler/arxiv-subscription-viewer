@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Final
 
-WHATS_NEW_VERSION: Final[str] = "0.3.2"
+WHATS_NEW_VERSION: Final[str] = "0.3.3"
 """Tag of the release whose notes are currently presented.
 
 When a user's ``UserConfig.last_seen_whats_new`` differs from this

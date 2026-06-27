@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-06-27
+
+### Fixed
+- Updated the PDF/development dependency floor and lockfile to avoid newly reported `pypdf` and `msgpack` vulnerability advisories in the release audit.
+
 ## [0.3.2] - 2026-06-27
 
 ### Added
@@ -203,7 +208,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ASCII mode for terminals without Unicode support (`--ascii`)
 - Session persistence: scroll position, active filters, sort order
 
-[Unreleased]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.2.0...v0.3.0
