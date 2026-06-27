@@ -421,3 +421,96 @@ async def test_responsive_layout_stacks_panes_on_narrow_terminals(make_paper):
             assert app.screen.has_class("-wide")
             assert not app.screen.has_class("-narrow")
             assert "horizontal" in str(app.query_one("#main-container").styles.layout)
+
+
+@pytest.mark.asyncio
+async def test_pane_resize_keybindings_update_wide_layout(make_paper):
+    app = ArxivBrowser([make_paper(arxiv_id="2401.00001")], restore_session=False)
+
+    with patch_save_config(return_value=True):
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause(0.1)
+            left_pane = app.query_one("#left-pane")
+            right_pane = app.query_one("#right-pane")
+
+            assert str(left_pane.styles.width) == "2fr"
+            assert str(right_pane.styles.width) == "3fr"
+
+            await pilot.press("alt+right")
+            await pilot.pause(0.05)
+            assert app._pane_split == 1
+            assert app._config.pane_split == 1
+            assert str(left_pane.styles.width) == "1fr"
+            assert str(right_pane.styles.width) == "4fr"
+
+            await pilot.press("alt+right")
+            await pilot.pause(0.05)
+            assert app._pane_split == 1
+            assert str(left_pane.styles.width) == "1fr"
+            assert str(right_pane.styles.width) == "4fr"
+
+            await pilot.press("alt+left")
+            await pilot.press("alt+left")
+            await pilot.press("alt+left")
+            await pilot.pause(0.05)
+            assert app._pane_split == 4
+            assert str(left_pane.styles.width) == "4fr"
+            assert str(right_pane.styles.width) == "1fr"
+
+            await pilot.press("alt+left")
+            await pilot.pause(0.05)
+            assert app._pane_split == 4
+            assert str(left_pane.styles.width) == "4fr"
+            assert str(right_pane.styles.width) == "1fr"
+
+            await pilot.press("alt+0")
+            await pilot.pause(0.05)
+            assert app._pane_split == 2
+            assert str(left_pane.styles.width) == "2fr"
+            assert str(right_pane.styles.width) == "3fr"
+
+
+@pytest.mark.asyncio
+async def test_persisted_pane_split_applies_to_narrow_and_wide_layouts(make_paper):
+    app = ArxivBrowser(
+        [make_paper(arxiv_id="2401.00001")],
+        ArxivBrowserOptions(config=UserConfig(pane_split=3), restore_session=False),
+    )
+
+    with patch_save_config(return_value=True):
+        async with app.run_test(size=(70, 24)) as pilot:
+            await pilot.pause(0.1)
+            left_pane = app.query_one("#left-pane")
+            right_pane = app.query_one("#right-pane")
+
+            assert app.screen.has_class("-narrow")
+            assert str(left_pane.styles.width) == "100w"
+            assert str(right_pane.styles.width) == "100w"
+            assert str(left_pane.styles.height) == "2fr"
+            assert str(right_pane.styles.height) == "1fr"
+
+            await pilot.resize_terminal(120, 40)
+            await pilot.pause(0.1)
+            assert app.screen.has_class("-wide")
+            assert str(left_pane.styles.width) == "3fr"
+            assert str(right_pane.styles.width) == "2fr"
+            assert str(left_pane.styles.height) == "100h"
+            assert str(right_pane.styles.height) == "100h"
+
+
+@pytest.mark.asyncio
+async def test_pane_resize_applies_even_when_preference_save_fails(make_paper):
+    app = ArxivBrowser([make_paper(arxiv_id="2401.00001")], restore_session=False)
+
+    with patch_save_config(return_value=False):
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause(0.1)
+            await pilot.press("alt+left")
+            await pilot.pause(0.05)
+
+            left_pane = app.query_one("#left-pane")
+            right_pane = app.query_one("#right-pane")
+            assert app._pane_split == 3
+            assert app._config.pane_split == 3
+            assert str(left_pane.styles.width) == "3fr"
+            assert str(right_pane.styles.width) == "2fr"

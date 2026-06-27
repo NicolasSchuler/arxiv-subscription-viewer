@@ -15,6 +15,9 @@ from arxiv_browser.config import (
     load_config,
 )
 from arxiv_browser.models import (
+    PANE_SPLIT_DEFAULT,
+    PANE_SPLIT_MAX,
+    PANE_SPLIT_MIN,
     LineAnnotation,
     PaperCollection,
     PaperMetadata,
@@ -200,6 +203,7 @@ def test_config_parsing_helpers_cover_validation_and_bounds() -> None:
                 },
                 "show_abstract_preview": "yes",
                 "detail_mode": "invalid",
+                "pane_split": True,
                 "bibtex_export_dir": 123,
                 "pdf_download_dir": "downloads",
                 "prefer_pdf_url": True,
@@ -253,6 +257,7 @@ def test_config_parsing_helpers_cover_validation_and_bounds() -> None:
     assert config.session.current_date is None
     assert config.show_abstract_preview is False
     assert config.detail_mode == "scan"
+    assert config.pane_split == PANE_SPLIT_DEFAULT
     assert config.bibtex_export_dir == ""
     assert config.pdf_download_dir == "downloads"
     assert config.prefer_pdf_url is True
@@ -305,6 +310,7 @@ def test_config_roundtrip_includes_pdf_and_streaming_keys() -> None:
         paper_content_cache_ttl_days=12,
         paper_content_pdf_fallback=False,
         pdf_preview_max_pages=5,
+        pane_split=PANE_SPLIT_MAX,
     )
 
     data = config_mod._config_to_dict(config)
@@ -315,11 +321,26 @@ def test_config_roundtrip_includes_pdf_and_streaming_keys() -> None:
     assert data["paper_content_cache_ttl_days"] == 12
     assert data["paper_content_pdf_fallback"] is False
     assert data["pdf_preview_max_pages"] == 5
+    assert data["pane_split"] == PANE_SPLIT_MAX
     assert loaded.llm_phd_explainer_field == "quantum physics"
     assert loaded.llm_streaming_enabled is True
     assert loaded.paper_content_cache_ttl_days == 12
     assert loaded.paper_content_pdf_fallback is False
     assert loaded.pdf_preview_max_pages == 5
+    assert loaded.pane_split == PANE_SPLIT_MAX
+
+
+def test_pane_split_config_is_clamped() -> None:
+    assert config_mod._dict_to_config({"pane_split": PANE_SPLIT_MIN - 1}).pane_split == (
+        PANE_SPLIT_MIN
+    )
+    assert config_mod._dict_to_config({"pane_split": PANE_SPLIT_MAX + 1}).pane_split == (
+        PANE_SPLIT_MAX
+    )
+    assert (
+        config_mod._config_to_dict(UserConfig(pane_split=PANE_SPLIT_MAX + 1))["pane_split"]
+        == PANE_SPLIT_MAX
+    )
 
 
 def test_config_import_export_and_disk_error_paths(tmp_path, monkeypatch) -> None:

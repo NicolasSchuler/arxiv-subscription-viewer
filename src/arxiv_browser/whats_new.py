@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Final
 
-WHATS_NEW_VERSION: Final[str] = "0.3.1"
+WHATS_NEW_VERSION: Final[str] = "0.3.2"
 """Tag of the release whose notes are currently presented.
 
 When a user's ``UserConfig.last_seen_whats_new`` differs from this
@@ -32,24 +32,23 @@ WHATS_NEW_HEADLINE: Final[str] = "What's New in arXiv Viewer"
 
 WHATS_NEW_ENTRIES: Final[tuple[tuple[str, str], ...]] = (
     (
-        "More built-in themes",
-        "Cycle through 11 bundled themes with [bold]Ctrl+t[/], including "
-        "Dracula, Nord, Gruvbox Dark, Tokyo Night, Everforest Dark, and GitHub Light.",
+        "Resizable panes",
+        "Use [bold]Alt+Left[/] and [bold]Alt+Right[/] to give more room to "
+        "the paper list or detail pane without leaving the TUI.",
     ),
     (
-        "Quick reference",
-        "A new cheat sheet in the docs collects common CLI commands, keybindings, "
-        "and search syntax in one printable page.",
+        "Persistent layout",
+        "Your chosen list/detail split is saved as [bold]pane_split[/] and restored "
+        "on the next launch.",
     ),
     (
-        "Clearer export docs",
-        "The export guide now spells out which formats support clipboard export, "
-        "which write files, and which key opens each option.",
+        "Narrow-terminal support",
+        "Pane resizing also maps cleanly to stacked list/detail heights on narrow terminal widths.",
     ),
     (
-        "Better diagnostics",
-        "Issue templates and troubleshooting docs now point to [bold]arxiv-viewer doctor[/] "
-        "and [bold]arxiv-viewer config-path[/] for faster debugging.",
+        "Updated help surfaces",
+        "The README, cheat sheet, config reference, help overlay, and command palette "
+        "now all include the pane resize controls.",
     ),
 )
 

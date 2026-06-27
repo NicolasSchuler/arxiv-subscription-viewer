@@ -10,6 +10,7 @@ SAVE_CONFIG_TARGETS = (
     "arxiv_browser.actions.external_io_actions.save_config",
     "arxiv_browser.actions.library_actions.save_config",
     "arxiv_browser.actions.llm_actions.save_config",
+    "arxiv_browser.actions.pane_actions.save_config",
     "arxiv_browser.actions.search_api_actions.save_config",
     "arxiv_browser.actions.trust_gate.save_config",
     "arxiv_browser.actions.ui_actions.save_config",

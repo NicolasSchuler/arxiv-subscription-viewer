@@ -62,6 +62,7 @@ Full-screen reading and diagnostic surfaces (e.g. Trend Radar, Author Profile, Q
 - The list/detail content area is responsive to terminal width via Textual horizontal breakpoints (`HORIZONTAL_BREAKPOINTS`).
 - At **96 cols and wider** the panes keep the side-by-side split (`#left-pane` / `#right-pane`).
 - **Below 96 cols** the screen gains the `-narrow` class and the panes stack vertically, list first, so neither pane is squeezed below its readable minimum.
+- Users can adjust the list/detail split at runtime with `Alt+Left` / `Alt+Right` and restore the default with `Alt+0`. The persisted `pane_split` preset maps to pane widths in wide layouts and stacked pane heights in narrow layouts.
 - Narrow-width behavior:
   - Prefer compact status tokens and shorter labels before removing high-value hints.
   - Keep `? help` visible in all contexts.

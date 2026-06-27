@@ -38,6 +38,7 @@ from arxiv_browser.models import (
     SessionState,
     UserConfig,
     WatchListEntry,
+    coerce_pane_split,
 )
 from arxiv_browser.review import normalize_review_schedule
 
@@ -95,6 +96,7 @@ def _config_to_dict(config: UserConfig) -> dict[str, Any]:
         "show_abstract_preview": config.show_abstract_preview,
         "compact_list": config.compact_list,
         "detail_mode": config.detail_mode,
+        "pane_split": coerce_pane_split(config.pane_split),
         "bibtex_export_dir": config.bibtex_export_dir,
         "pdf_download_dir": config.pdf_download_dir,
         "prefer_pdf_url": config.prefer_pdf_url,
@@ -238,16 +240,7 @@ def _safe_get(data: dict, key: str, default: Any, expected_type: type) -> Any:
 
 
 def _coerce_arxiv_api_max_results(value: Any) -> int:
-    """Validate and clamp the configured max_results for arXiv API queries.
-
-    Args:
-        value: Raw value from the config dict (may be any type).
-
-    Returns:
-        An integer in the range ``[1, ARXIV_API_MAX_RESULTS_LIMIT]``.
-        Returns ``ARXIV_API_DEFAULT_MAX_RESULTS`` if ``value`` is not a valid
-        non-bool integer.
-    """
+    """Validate and clamp the configured max_results for arXiv API queries."""
     if not isinstance(value, int) or isinstance(value, bool):
         return ARXIV_API_DEFAULT_MAX_RESULTS
     return max(1, min(value, ARXIV_API_MAX_RESULTS_LIMIT))
@@ -572,6 +565,7 @@ def _dict_to_config(data: dict[str, Any]) -> UserConfig:
         show_abstract_preview=_safe_get(data, "show_abstract_preview", False, bool),
         compact_list=_safe_get(data, "compact_list", False, bool),
         detail_mode=_coerce_detail_mode(data.get("detail_mode")),
+        pane_split=coerce_pane_split(data.get("pane_split")),
         bibtex_export_dir=_safe_get(data, "bibtex_export_dir", "", str),
         pdf_download_dir=_safe_get(data, "pdf_download_dir", "", str),
         prefer_pdf_url=_safe_get(data, "prefer_pdf_url", False, bool),

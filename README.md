@@ -173,6 +173,7 @@ If something looks off, run `arxiv-viewer doctor` to check config, history disco
 | `Ctrl+v` | Compare papers | | `C` | Chat with paper |
 | `p` | Abstract preview | | `y` | Read abstract aloud |
 | `z` | Compact list (titles only) | | `v` | Detail mode |
+| `Alt+Left` / `Alt+Right` | Resize list/details | | `Alt+0` | Reset pane sizes |
 | `L` | Relevance score | | `t` | Tags |
 | `Ctrl+p` | Command palette | | `V` | Check versions |
 | `Ctrl+g` | Auto-tag (LLM) | | `Ctrl+b` | Save bookmark |

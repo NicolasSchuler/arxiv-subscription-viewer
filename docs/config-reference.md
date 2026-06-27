@@ -48,6 +48,7 @@ The loader validates data before it reaches the TUI. Important rules:
 | `conference_deadlines_cache_ttl_hours` | Clamped to `1..168`. |
 | Session sort index | Reset to `0` when outside the known sort range. |
 | `detail_mode` | Must be `"scan"` or `"full"`; otherwise resets to `"scan"`. |
+| `pane_split` | Clamped to `1..4`; `2` is the default list/detail split. |
 | `collapsed_sections` | Keeps only known detail-section keys. |
 | `watch_list[].match_type` | Must be `"author"`, `"title"`, or `"keyword"`; invalid values default to `"author"`. |
 | `collections` | Limited to 20 collections and 500 paper IDs per collection. |
@@ -73,6 +74,7 @@ The loader validates data before it reaches the TUI. Important rules:
 | `show_abstract_preview` | `bool` | `false` | Show inline abstract preview in the paper list. Toggle with `p`. |
 | `compact_list` | `bool` | `false` | Show one line (title only) per paper in the list for faster title skimming. Toggle with `z`. |
 | `detail_mode` | `string` | `"scan"` | Detail pane density. `"scan"` (compact) or `"full"` (expanded). Toggle with `v`. |
+| `pane_split` | `int` | `2` | Relative list/detail pane-size preset. Change with `Alt+Left` / `Alt+Right`; reset with `Alt+0`. |
 | `prefer_pdf_url` | `bool` | `false` | When `true`, `o` opens the PDF URL instead of the abstract page. |
 | `arxiv_api_max_results` | `int` | `50` | Default page size for arXiv API searches (`A`). Clamped to `1..200`. |
 | `research_interests` | `string` | `""` | Free-text description of your research interests for LLM relevance scoring (`L`). |

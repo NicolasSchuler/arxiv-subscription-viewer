@@ -32,6 +32,7 @@ from arxiv_browser.actions import search_api_actions as _search_api_actions
 from arxiv_browser.actions import triage_actions as _triage_actions
 from arxiv_browser.actions import ui_actions as _ui_actions
 from arxiv_browser.actions.audio_actions import AudioActionMixin
+from arxiv_browser.actions.pane_actions import PaneResizeMixin
 from arxiv_browser.browser import constants as _browser_constants
 from arxiv_browser.browser import content as _browser_content
 from arxiv_browser.browser import onboarding_hints as _onboarding_hints
@@ -111,13 +112,12 @@ class ArxivBrowser(
     ReactiveStateMixin,
     WorkerRuntimeMixin,
     AudioActionMixin,
+    PaneResizeMixin,
     DetailPaneMixin,
     BrowseMixin,
     DiscoveryMixin,
     App,
 ):
-    """A TUI application to browse arXiv papers."""
-
     TITLE, CSS, BINDINGS = "arXiv Paper Browser", APP_CSS, APP_BINDINGS
     HORIZONTAL_BREAKPOINTS = APP_HORIZONTAL_BREAKPOINTS
     VERSION_CHECK_BATCH_SIZE = 40
@@ -295,7 +295,6 @@ class ArxivBrowser(
             self._reactive_watchers_suspended = False
 
     def _register_textual_themes(self) -> None:
-        """Register Textual themes before compose() resolves CSS variables."""
         for textual_theme in TEXTUAL_THEMES.values():
             self.register_theme(textual_theme)
 
@@ -304,7 +303,6 @@ class ArxivBrowser(
         papers: list[Paper],
         services: AppServices | None,
     ) -> None:
-        """Initialize paper collections, timers, and core dataset-local state."""
         self.all_papers = papers
         self.filtered_papers = papers.copy()
         self._papers_by_id = {p.arxiv_id: p for p in papers}
@@ -355,6 +353,7 @@ class ArxivBrowser(
         self._detail_mode = (
             self._config.detail_mode if self._config.detail_mode in DETAIL_MODES else "scan"
         )
+        self._initialize_pane_split()
         self._abstract_cache: dict[str, str] = {}
         self._abstract_loading: set[str] = set()
         self._abstract_queue: deque[Paper] = deque()
@@ -554,6 +553,7 @@ class ArxivBrowser(
         self._update_header()
         self._update_subtitle()
         self._update_details_header()
+        self._apply_pane_split()
         self._track_task(self._update_bookmark_bar())
         self._notify_watch_list_matches()
         logger.debug(

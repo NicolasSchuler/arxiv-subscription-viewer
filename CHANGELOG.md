@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-06-27
+
+### Added
+- Added runtime list/detail pane resizing with `Alt+Left` / `Alt+Right`, plus `Alt+0` to restore the default split.
+- Persisted the `pane_split` preference so the selected split is restored on the next launch and adapts to both wide and narrow layouts.
+
+### Changed
+- Documented pane resizing in the README, cheat sheet, config reference, TUI style guide, help overlay, and command palette.
+
 ## [0.3.1] - 2026-06-18
 
 ### Added
@@ -194,7 +203,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ASCII mode for terminals without Unicode support (`--ascii`)
 - Session persistence: scroll position, active filters, sort order
 
-[Unreleased]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.1.9...v0.2.0

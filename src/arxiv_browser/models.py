@@ -58,6 +58,18 @@ DETAIL_SECTION_NAMES: dict[str, str] = {
 }
 DETAIL_MODES = ("scan", "full")
 DEFAULT_COLLAPSED_SECTIONS: list[str] = ["tags", "relevance", "summary", "s2", "hf", "version"]
+PANE_SPLIT_MIN = 1
+PANE_SPLIT_DEFAULT = 2
+PANE_SPLIT_MAX = 4
+PANE_SPLIT_TOTAL = 5
+
+
+def coerce_pane_split(value: object) -> int:
+    """Validate and clamp the persisted list/detail pane split."""
+    if not isinstance(value, int) or isinstance(value, bool):
+        return PANE_SPLIT_DEFAULT
+    return max(PANE_SPLIT_MIN, min(value, PANE_SPLIT_MAX))
+
 
 STOPWORDS = frozenset(
     {
@@ -295,6 +307,7 @@ class UserConfig:
     show_abstract_preview: bool = False
     compact_list: bool = False
     detail_mode: str = "scan"
+    pane_split: int = PANE_SPLIT_DEFAULT  # Relative list/detail pane-size preset
     bibtex_export_dir: str = ""  # Empty = use ~/arxiv-exports/
     pdf_download_dir: str = ""  # Empty = use ~/arxiv-pdfs/
     prefer_pdf_url: bool = False
@@ -461,6 +474,10 @@ __all__ = [
     "DETAIL_SECTION_NAMES",
     "MAX_COLLECTIONS",
     "MAX_PAPERS_PER_COLLECTION",
+    "PANE_SPLIT_DEFAULT",
+    "PANE_SPLIT_MAX",
+    "PANE_SPLIT_MIN",
+    "PANE_SPLIT_TOTAL",
     "SORT_OPTIONS",
     "STOPWORDS",
     "WATCH_MATCH_TYPES",
@@ -476,5 +493,6 @@ __all__ = [
     "SessionState",
     "UserConfig",
     "WatchListEntry",
+    "coerce_pane_split",
     "parse_arxiv_date",
 ]

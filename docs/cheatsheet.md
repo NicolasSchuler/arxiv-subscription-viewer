@@ -56,6 +56,7 @@ arxiv-viewer completions bash|zsh|fish          # Shell completions
 | `d` | Download PDF | | `p` | Abstract preview |
 | `F` | Preview PDF inline | | `v` | Detail mode |
 | `I` | Preview first figure | | `z` | Compact list |
+| `Alt+Left` / `Alt+Right` | Resize list/details | | `Alt+0` | Reset pane sizes |
 | `y` | Read abstract aloud | | `Ctrl+t` | Cycle theme |
 
 ## Search syntax

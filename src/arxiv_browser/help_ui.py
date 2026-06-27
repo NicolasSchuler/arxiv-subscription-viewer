@@ -82,6 +82,9 @@ HELP_SECTION_ACTIONS: list[tuple[str, list[str]]] = [
             "toggle_preview",
             "toggle_compact_list",
             "toggle_detail_mode",
+            "grow_detail_pane",
+            "grow_list_pane",
+            "reset_pane_sizes",
             "cycle_theme",
             "toggle_sections",
             "start_mark",
@@ -167,6 +170,9 @@ HELP_DESCRIPTION_OVERRIDES: dict[str, str] = {
     "toggle_detail_mode": "Toggle detail density (scan/full)",
     "toggle_compact_list": "Toggle compact list (titles only)",
     "toggle_focus_pane": "Focus details / paper list",
+    "grow_detail_pane": "Grow detail pane",
+    "grow_list_pane": "Grow paper-list pane",
+    "reset_pane_sizes": "Reset pane sizes",
 }
 
 
@@ -198,6 +204,10 @@ def _format_help_key(key: str) -> str:
         rest = key.removeprefix("ctrl+")
         rest = rest.replace("shift+", "Shift+")
         return "Ctrl+" + rest
+    if key.startswith("alt+"):
+        rest = key.removeprefix("alt+")
+        rest = {"left": "Left", "right": "Right"}.get(rest, rest)
+        return "Alt+" + rest
     return key
 
 

@@ -59,6 +59,38 @@ HeaderTitle {
     border-top: solid $th-accent;
 }
 
+Screen.pane-split-1 #left-pane {
+    width: 1fr;
+}
+
+Screen.pane-split-1 #right-pane {
+    width: 4fr;
+}
+
+Screen.pane-split-2 #left-pane {
+    width: 2fr;
+}
+
+Screen.pane-split-2 #right-pane {
+    width: 3fr;
+}
+
+Screen.pane-split-3 #left-pane {
+    width: 3fr;
+}
+
+Screen.pane-split-3 #right-pane {
+    width: 2fr;
+}
+
+Screen.pane-split-4 #left-pane {
+    width: 4fr;
+}
+
+Screen.pane-split-4 #right-pane {
+    width: 1fr;
+}
+
 /* Narrow terminals (< 96 cols): stack panes vertically, list first. */
 Screen.-narrow #main-container {
     layout: vertical;
@@ -79,6 +111,38 @@ Screen.-narrow #left-pane {
 
 Screen.-narrow #right-pane {
     height: 2fr;
+}
+
+Screen.-narrow.pane-split-1 #left-pane {
+    height: 1fr;
+}
+
+Screen.-narrow.pane-split-1 #right-pane {
+    height: 4fr;
+}
+
+Screen.-narrow.pane-split-2 #left-pane {
+    height: 1fr;
+}
+
+Screen.-narrow.pane-split-2 #right-pane {
+    height: 2fr;
+}
+
+Screen.-narrow.pane-split-3 #left-pane {
+    height: 2fr;
+}
+
+Screen.-narrow.pane-split-3 #right-pane {
+    height: 1fr;
+}
+
+Screen.-narrow.pane-split-4 #left-pane {
+    height: 4fr;
+}
+
+Screen.-narrow.pane-split-4 #right-pane {
+    height: 1fr;
 }
 
 #list-header {
@@ -222,6 +286,7 @@ APP_HORIZONTAL_BREAKPOINTS: list[tuple[int, str]] = [
 #   Ctrl+t  theme       Ctrl+d  sections    Ctrl+k  collections
 #   Ctrl+h  HF toggle   Ctrl+e  S2 toggle   Ctrl+l  interests
 #   Ctrl+Shift+b  remove bookmark
+#   Alt+Left/Right/0  resize/reset panes
 # ---------------------------------------------------------------------------
 
 APP_BINDINGS: list[BindingType] = [
@@ -272,6 +337,9 @@ APP_BINDINGS: list[BindingType] = [
     Binding("p", "toggle_preview", "Preview", show=False),
     Binding("z", "toggle_compact_list", "Compact List", show=False),
     Binding("v", "toggle_detail_mode", "Detail Mode", show=False),
+    Binding("alt+right", "grow_detail_pane", "Grow Details", show=False),
+    Binding("alt+left", "grow_list_pane", "Grow List", show=False),
+    Binding("alt+0", "reset_pane_sizes", "Reset Panes", show=False),
     Binding("y", "read_abstract_aloud", "Read Abstract", show=False),
     # Vim-style marks
     Binding("m", "start_mark", "Mark", show=False),
