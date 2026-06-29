@@ -120,7 +120,7 @@ only to re-export legacy patch surfaces, and nothing under `src/` imports it.
 - `arxiv_browser.app` is a small compatibility shim that preserves the CLI/bootstrap monkeypatch seam.
 - `browser/core.py` coordinates subsystem state and wires the browser mixins and action modules together.
 - `database.py` resolves a unified `cache.db`. When a pre-existing per-module SQLite file (`summaries.db`, `relevance.db`, `semantic_scholar.db`, `huggingface.db`) is present, `resolve_db_path()` uses it; otherwise all cached data lives in `cache.db`.
-- `Paper.source` is the local/API load origin. Cross-server identity lives separately in `Paper.provider` and `arxiv_browser.sources`, so arXiv-only workflows such as version checks reject DOI-based non-arXiv records before calling arXiv endpoints.
+- `Paper.source` is the local/API load origin. Cross-server identity lives separately in `Paper.provider` and `arxiv_browser.sources`, so arXiv-only workflows such as version checks, PDF downloads/previews, and arXiv HTML figure/full-text fetches reject DOI-based non-arXiv records before calling arXiv endpoints.
 
 ## LLM Provider Architecture
 

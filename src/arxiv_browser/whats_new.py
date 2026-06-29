@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Final
 
-WHATS_NEW_VERSION: Final[str] = "0.3.3"
+WHATS_NEW_VERSION: Final[str] = "0.3.4"
 """Tag of the release whose notes are currently presented.
 
 When a user's ``UserConfig.last_seen_whats_new`` differs from this
@@ -32,23 +32,24 @@ WHATS_NEW_HEADLINE: Final[str] = "What's New in arXiv Viewer"
 
 WHATS_NEW_ENTRIES: Final[tuple[tuple[str, str], ...]] = (
     (
-        "Resizable panes",
-        "Use [bold]Alt+Left[/] and [bold]Alt+Right[/] to give more room to "
-        "the paper list or detail pane without leaving the TUI.",
+        "Cache controls",
+        "Use [bold]arxiv-viewer cache-info[/] to inspect the local cache and "
+        "[bold]cache-clear[/] to dry-run or clear selected cache sections.",
     ),
     (
-        "Persistent layout",
-        "Your chosen list/detail split is saved as [bold]pane_split[/] and restored "
-        "on the next launch.",
+        "Richer doctor checks",
+        "[bold]arxiv-viewer doctor[/] now reports semantic-search backend readiness "
+        "and local triage-model artifact issues.",
     ),
     (
-        "Narrow-terminal support",
-        "Pane resizing also maps cleanly to stacked list/detail heights on narrow terminal widths.",
+        "Safer PDF handling",
+        "Downloads now verify that response bytes look like a PDF before replacing "
+        "an existing local file.",
     ),
     (
-        "Updated help surfaces",
-        "The README, cheat sheet, config reference, help overlay, and command palette "
-        "now all include the pane resize controls.",
+        "Provider-aware previews",
+        "PDF downloads, previews, figures, and full-text fetches now skip non-arXiv "
+        "records with clearer warnings.",
     ),
 )
 

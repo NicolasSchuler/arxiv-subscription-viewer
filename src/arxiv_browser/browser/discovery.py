@@ -33,6 +33,9 @@ class DiscoveryMixin:
     """Async discovery workflows for versions, similarity, and recommendations."""
 
     VERSION_CHECK_BATCH_SIZE = 40  # IDs per API request (URL length safe)
+    _pending_similarity_paper_id: str | None
+    _tfidf_corpus_key: str | None
+    _tfidf_index: TfidfIndex | None
 
     def action_trend_radar(self) -> None:
         """Open local-history trend analytics."""

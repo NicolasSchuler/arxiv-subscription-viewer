@@ -520,6 +520,24 @@ class TestCliCoverage:
                 == 0
             )
 
+        with patch("arxiv_browser.cache_cli.run_cache_info", return_value=0):
+            assert (
+                cli.main(
+                    ["cache-info"],
+                    deps=_deps(resolve_result=1, history_files=[], tty_ok=False),
+                )
+                == 0
+            )
+
+        with patch("arxiv_browser.cache_cli.run_cache_clear", return_value=0):
+            assert (
+                cli.main(
+                    ["cache-clear", "--semantic"],
+                    deps=_deps(resolve_result=1, history_files=[], tty_ok=False),
+                )
+                == 0
+            )
+
         assert (
             cli.main(["dates"], deps=_deps(resolve_result=1, history_files=[], tty_ok=False)) == 1
         )
@@ -642,3 +660,296 @@ class TestCliCoverage:
         assert cli.main(["browse"], deps=empty_tty_deps) == 0
         empty_factory.assert_called_once()
         empty_run.assert_called_once()
+
+    def test_doctor_semantic_and_triage_readiness(
+        self,
+        tmp_path,
+        monkeypatch,
+        capsys,
+    ) -> None:
+        cfg = UserConfig(semantic_search_backend="fastembed")
+        monkeypatch.setattr("arxiv_browser.cli_doctor._module_available", lambda _name: False)
+
+        assert (
+            cli._doctor_semantic_search_issue_count(
+                cfg,
+                ok_marker="OK",
+                warn_marker="WARN",
+                info_marker="INFO",
+            )
+            == 1
+        )
+        assert "FastEmbed" in capsys.readouterr().out
+
+        cfg.semantic_search_backend = "auto"
+        assert (
+            cli._doctor_semantic_search_issue_count(
+                cfg,
+                ok_marker="OK",
+                warn_marker="WARN",
+                info_marker="INFO",
+            )
+            == 0
+        )
+        assert "fuzzy search remains active" in capsys.readouterr().out
+
+        model_path = tmp_path / "triage_model.joblib"
+        info_path = tmp_path / "triage_model.json"
+        monkeypatch.setattr(
+            "arxiv_browser.triage_model.triage_model_paths",
+            lambda: (model_path, info_path),
+        )
+        assert (
+            cli._doctor_triage_issue_count(
+                ok_marker="OK",
+                warn_marker="WARN",
+                info_marker="INFO",
+            )
+            == 0
+        )
+        assert "no trained model" in capsys.readouterr().out
+
+        model_path.write_bytes(b"not a model")
+        assert (
+            cli._doctor_triage_issue_count(
+                ok_marker="OK",
+                warn_marker="WARN",
+                info_marker="INFO",
+            )
+            == 1
+        )
+        assert "incomplete artifacts" in capsys.readouterr().out
+
+    def test_doctor_semantic_http_and_optional_backend_paths(
+        self,
+        monkeypatch,
+        capsys,
+    ) -> None:
+        available = {"sentence_transformers"}
+        monkeypatch.setattr(
+            "arxiv_browser.cli_doctor._module_available",
+            lambda name: name in available,
+        )
+
+        cfg = UserConfig(semantic_search_backend="off")
+        assert (
+            cli._doctor_semantic_search_issue_count(
+                cfg,
+                ok_marker="OK",
+                warn_marker="WARN",
+                info_marker="INFO",
+            )
+            == 0
+        )
+        assert "disabled" in capsys.readouterr().out
+
+        cfg.semantic_search_backend = "sentence-transformers"
+        assert (
+            cli._doctor_semantic_search_issue_count(
+                cfg,
+                ok_marker="OK",
+                warn_marker="WARN",
+                info_marker="INFO",
+            )
+            == 0
+        )
+        assert "available" in capsys.readouterr().out
+
+        cfg.semantic_search_backend = "auto"
+        assert (
+            cli._doctor_semantic_search_issue_count(
+                cfg,
+                ok_marker="OK",
+                warn_marker="WARN",
+                info_marker="INFO",
+            )
+            == 0
+        )
+        assert "sentence-transformers" in capsys.readouterr().out
+
+        cfg = UserConfig(
+            semantic_search_backend="http",
+            semantic_search_api_base_url="https://embeddings.example.test",
+            semantic_search_model="model-a",
+        )
+        assert (
+            cli._doctor_semantic_search_issue_count(
+                cfg,
+                ok_marker="OK",
+                warn_marker="WARN",
+                info_marker="INFO",
+            )
+            == 0
+        )
+        out = capsys.readouterr().out
+        assert "HTTP backend" in out
+        assert "model-a" in out
+
+        cfg.semantic_search_api_base_url = "https://embeddings.example.test/v1/embeddings"
+        assert (
+            cli._doctor_semantic_http_issue_count(
+                cfg,
+                ok_marker="OK",
+                warn_marker="WARN",
+            )
+            == 1
+        )
+        assert "API root" in capsys.readouterr().out
+
+        cfg.semantic_search_api_base_url = "not a url"
+        cfg.semantic_search_model = ""
+        assert (
+            cli._doctor_semantic_http_issue_count(
+                cfg,
+                ok_marker="OK",
+                warn_marker="WARN",
+            )
+            == 2
+        )
+        out = capsys.readouterr().out
+        assert "invalid base URL" in out
+        assert "semantic_search_model is required" in out
+
+        cfg = UserConfig(
+            semantic_search_backend="auto",
+            semantic_search_api_base_url="https://embeddings.example.test",
+            semantic_search_model="model-b",
+        )
+        assert (
+            cli._doctor_semantic_search_issue_count(
+                cfg,
+                ok_marker="OK",
+                warn_marker="WARN",
+                info_marker="INFO",
+            )
+            == 0
+        )
+        assert "model-b" in capsys.readouterr().out
+
+        available = {"fastembed"}
+        cfg.semantic_search_api_base_url = ""
+        assert (
+            cli._doctor_semantic_search_issue_count(
+                cfg,
+                ok_marker="OK",
+                warn_marker="WARN",
+                info_marker="INFO",
+            )
+            == 0
+        )
+        assert "fastembed" in capsys.readouterr().out
+
+    def test_doctor_command_and_http_llm_edges(self, capsys) -> None:
+        assert cli._extract_command_binary('"unterminated') is None
+
+        cfg = UserConfig(llm_provider_type="http", llm_api_base_url="", llm_api_model="")
+        assert (
+            cli._doctor_http_llm_issue_count(
+                cfg,
+                ok_marker="OK",
+                warn_marker="WARN",
+                info_marker="INFO",
+            )
+            == 2
+        )
+        out = capsys.readouterr().out
+        assert "llm_api_base_url is required" in out
+        assert "llm_api_model is required" in out
+
+        cfg.llm_api_base_url = "not a url"
+        cfg.llm_api_model = "model"
+        cfg.llm_api_key = "key"
+        assert (
+            cli._doctor_http_llm_issue_count(
+                cfg,
+                ok_marker="OK",
+                warn_marker="WARN",
+                info_marker="INFO",
+            )
+            == 1
+        )
+        out = capsys.readouterr().out
+        assert "invalid base URL" in out
+        assert "API key: configured" in out
+
+    def test_doctor_triage_artifact_dependency_and_load_paths(
+        self,
+        tmp_path,
+        monkeypatch,
+        capsys,
+    ) -> None:
+        from arxiv_browser.triage_model import MissingTriageModelDependencyError
+
+        model_path = tmp_path / "triage_model.joblib"
+        info_path = tmp_path / "triage_model.json"
+        model_path.write_bytes(b"model")
+        info_path.write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(
+            "arxiv_browser.triage_model.triage_model_paths",
+            lambda: (model_path, info_path),
+        )
+        monkeypatch.setattr("arxiv_browser.cli_doctor._module_available", lambda _name: False)
+
+        assert (
+            cli._doctor_triage_issue_count(
+                ok_marker="OK",
+                warn_marker="WARN",
+                info_marker="INFO",
+            )
+            == 1
+        )
+        assert "missing joblib, sklearn" in capsys.readouterr().out
+
+        monkeypatch.setattr("arxiv_browser.cli_doctor._module_available", lambda _name: True)
+        monkeypatch.setattr(
+            "arxiv_browser.triage_model.load_triage_model",
+            lambda: (_ for _ in ()).throw(MissingTriageModelDependencyError("install extras")),
+        )
+        assert (
+            cli._doctor_triage_issue_count(
+                ok_marker="OK",
+                warn_marker="WARN",
+                info_marker="INFO",
+            )
+            == 1
+        )
+        assert "install extras" in capsys.readouterr().out
+
+        monkeypatch.setattr(
+            "arxiv_browser.triage_model.load_triage_model",
+            lambda: (_ for _ in ()).throw(ValueError("bad artifact")),
+        )
+        assert (
+            cli._doctor_triage_issue_count(
+                ok_marker="OK",
+                warn_marker="WARN",
+                info_marker="INFO",
+            )
+            == 1
+        )
+        assert "failed to load artifacts" in capsys.readouterr().out
+
+        monkeypatch.setattr("arxiv_browser.triage_model.load_triage_model", lambda: None)
+        assert (
+            cli._doctor_triage_issue_count(
+                ok_marker="OK",
+                warn_marker="WARN",
+                info_marker="INFO",
+            )
+            == 0
+        )
+        assert "no trained model" in capsys.readouterr().out
+
+        monkeypatch.setattr(
+            "arxiv_browser.triage_model.load_triage_model",
+            lambda: (object(), SimpleNamespace(total_count=42)),
+        )
+        assert (
+            cli._doctor_triage_issue_count(
+                ok_marker="OK",
+                warn_marker="WARN",
+                info_marker="INFO",
+            )
+            == 0
+        )
+        assert "trained on 42 examples" in capsys.readouterr().out

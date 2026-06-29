@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-06-29
+
+### Added
+- Added `arxiv-viewer cache-info` and `arxiv-viewer cache-clear` for inspecting cache row counts and clearing LLM, semantic-search, enrichment, paper-content, or all cache sections.
+- Expanded `arxiv-viewer doctor` with semantic-search backend readiness checks and local triage-model artifact diagnostics.
+- Added cross-platform CLI smoke coverage in GitHub Actions for packaging, completions, and cache commands.
+
+### Changed
+- Kept cache, completion, config-path, and keybinding commands on a config-free CLI path so lightweight commands avoid loading history and TUI state.
+- Documented cache cleanup, arXiv-only PDF/preview support, and provider-aware PDF URL behavior across README and reference docs.
+- Extracted shared browser runtime-state containers to keep the core app initialization surface smaller.
+
+### Fixed
+- Rejected non-PDF download responses before replacing an existing cached PDF.
+- Skipped non-arXiv provider records for arXiv-only PDF download, preview, figure, and full-text fetch paths with clearer warnings.
+
 ## [0.3.3] - 2026-06-27
 
 ### Fixed
@@ -208,7 +224,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ASCII mode for terminals without Unicode support (`--ascii`)
 - Session persistence: scroll position, active filters, sort order
 
-[Unreleased]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.4...HEAD
+[0.3.4]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.0...v0.3.1

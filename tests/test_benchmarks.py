@@ -14,9 +14,9 @@ import pytest
 
 from arxiv_browser.export import format_papers_as_csv
 from arxiv_browser.fuzzy import weighted_fuzzy_score
-from arxiv_browser.models import SORT_OPTIONS, Paper, WatchListEntry
+from arxiv_browser.models import SORT_OPTIONS, Paper, QueryToken, WatchListEntry
 from arxiv_browser.parsing import clean_latex, parse_arxiv_file
-from arxiv_browser.query import paper_matches_watch_entry, sort_papers
+from arxiv_browser.query import execute_query_filter, paper_matches_watch_entry, sort_papers
 from arxiv_browser.similarity import TfidfIndex, find_similar_papers
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
@@ -73,6 +73,11 @@ def papers_200(base_papers: list[Paper]) -> list[Paper]:
 @pytest.fixture(scope="module")
 def papers_500(base_papers: list[Paper]) -> list[Paper]:
     return _generate_papers(500, base_papers)
+
+
+@pytest.fixture(scope="module")
+def papers_2000(base_papers: list[Paper]) -> list[Paper]:
+    return _generate_papers(2000, base_papers)
 
 
 # ---------------------------------------------------------------------------
@@ -166,4 +171,42 @@ class TestBenchmarks:
             lambda: format_papers_as_csv(papers_500),
             0.2,
             "csv_export_500",
+        )
+
+    def test_large_history_sort_and_export(self, papers_2000: list[Paper]) -> None:
+        """Sorting and exporting a larger local history should stay comfortably linear."""
+        _assert_within(
+            lambda: sort_papers(papers_2000[:], "title"),
+            0.3,
+            "sort_title_2000",
+        )
+        _assert_within(
+            lambda: format_papers_as_csv(papers_2000),
+            0.8,
+            "csv_export_2000",
+        )
+
+    def test_large_history_query_filter(self, papers_2000: list[Paper]) -> None:
+        """Filtering 2000 papers through the query dispatch path."""
+
+        def fuzzy_search(query: str, papers: list[Paper]) -> list[Paper]:
+            query_lower = query.lower()
+            return [
+                paper
+                for paper in papers
+                if weighted_fuzzy_score(query_lower, f"{paper.title} {paper.abstract_raw}") > 0.2
+            ]
+
+        def advanced_match(_paper: Paper, _tokens: list[QueryToken]) -> bool:
+            return True
+
+        _assert_within(
+            lambda: execute_query_filter(
+                "neural optimization",
+                papers_2000,
+                fuzzy_search=fuzzy_search,
+                advanced_match=advanced_match,
+            ),
+            1.2,
+            "query_filter_2000",
         )

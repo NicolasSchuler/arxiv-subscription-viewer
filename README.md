@@ -90,6 +90,10 @@ arxiv-viewer digest --category cs.AI --period weekly --tui
 # List local history dates
 arxiv-viewer dates
 
+# Inspect or clear local caches
+arxiv-viewer cache-info
+arxiv-viewer cache-clear --semantic --yes
+
 # Show version
 arxiv-viewer --version
 

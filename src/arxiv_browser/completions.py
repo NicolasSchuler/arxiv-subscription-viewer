@@ -12,7 +12,7 @@ _arxiv_viewer() {
     local cur prev words cword
     _init_completion || return
 
-    local commands="browse search digest dates completions config-path doctor keybindings"
+    local commands="browse search digest dates cache-info cache-clear completions config-path doctor keybindings"
     local global_opts="--debug --color --no-color --ascii --version -V --help -h"
 
     # Find the subcommand (skip global flags)
@@ -58,8 +58,11 @@ _arxiv_viewer() {
             esac
             COMPREPLY=($(compgen -W "--input --query --field --category --period --max-results --output --tui --limit --min-relevance --include-triage --include-hf --no-hf --cached-relevance-only --no-relevance --no-versions --help -h" -- "$cur"))
             ;;
-        dates|config-path|doctor)
+        dates|cache-info|config-path|doctor)
             COMPREPLY=($(compgen -W "--help -h" -- "$cur"))
+            ;;
+        cache-clear)
+            COMPREPLY=($(compgen -W "--all --llm --semantic --enrichment --paper-content --yes --help -h" -- "$cur"))
             ;;
         keybindings)
             case "$prev" in
@@ -92,6 +95,8 @@ _arxiv_viewer() {
         'search:Fetch startup papers from the arXiv API'
         'digest:Generate a Markdown digest and exit'
         'dates:List available local history dates and exit'
+        'cache-info:Show local cache database location and row counts'
+        'cache-clear:Clear selected local cache tables'
         'completions:Generate shell completion scripts'
         'config-path:Print the configuration file path'
         'doctor:Check environment and configuration health'
@@ -155,8 +160,18 @@ _arxiv_viewer() {
                         '--no-versions[Skip version checks]' \
                         '(-h --help)'{-h,--help}'[Show help]'
                     ;;
-                dates|config-path|doctor)
+                dates|cache-info|config-path|doctor)
                     _arguments '(-h --help)'{-h,--help}'[Show help]'
+                    ;;
+                cache-clear)
+                    _arguments \
+                        '--all[Clear all cache sections]' \
+                        '--llm[Clear LLM cache rows]' \
+                        '--semantic[Clear semantic-search embedding cache rows]' \
+                        '--enrichment[Clear enrichment cache rows]' \
+                        '--paper-content[Clear full-paper content cache rows]' \
+                        '--yes[Actually delete rows]' \
+                        '(-h --help)'{-h,--help}'[Show help]'
                     ;;
                 keybindings)
                     _arguments \
@@ -193,6 +208,8 @@ complete -c arxiv-viewer -n '__fish_use_subcommand' -a browse -d 'Open local his
 complete -c arxiv-viewer -n '__fish_use_subcommand' -a search -d 'Fetch startup papers from the arXiv API'
 complete -c arxiv-viewer -n '__fish_use_subcommand' -a digest -d 'Generate a Markdown digest and exit'
 complete -c arxiv-viewer -n '__fish_use_subcommand' -a dates -d 'List available local history dates and exit'
+complete -c arxiv-viewer -n '__fish_use_subcommand' -a cache-info -d 'Show local cache database location and row counts'
+complete -c arxiv-viewer -n '__fish_use_subcommand' -a cache-clear -d 'Clear selected local cache tables'
 complete -c arxiv-viewer -n '__fish_use_subcommand' -a completions -d 'Generate shell completion scripts'
 complete -c arxiv-viewer -n '__fish_use_subcommand' -a config-path -d 'Print the configuration file path'
 complete -c arxiv-viewer -n '__fish_use_subcommand' -a doctor -d 'Check environment and configuration health'
@@ -227,6 +244,14 @@ complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l no-hf -d 'Di
 complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l cached-relevance-only -d 'Use cached relevance only'
 complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l no-relevance -d 'Disable relevance'
 complete -c arxiv-viewer -n '__fish_seen_subcommand_from digest' -l no-versions -d 'Skip version checks'
+
+# cache-clear options
+complete -c arxiv-viewer -n '__fish_seen_subcommand_from cache-clear' -l all -d 'Clear all cache sections'
+complete -c arxiv-viewer -n '__fish_seen_subcommand_from cache-clear' -l llm -d 'Clear LLM cache rows'
+complete -c arxiv-viewer -n '__fish_seen_subcommand_from cache-clear' -l semantic -d 'Clear semantic-search embedding cache rows'
+complete -c arxiv-viewer -n '__fish_seen_subcommand_from cache-clear' -l enrichment -d 'Clear enrichment cache rows'
+complete -c arxiv-viewer -n '__fish_seen_subcommand_from cache-clear' -l paper-content -d 'Clear full-paper content cache rows'
+complete -c arxiv-viewer -n '__fish_seen_subcommand_from cache-clear' -l yes -d 'Actually delete rows'
 
 # completions options
 complete -c arxiv-viewer -n '__fish_seen_subcommand_from completions' -a 'bash zsh fish' -d 'Shell type'

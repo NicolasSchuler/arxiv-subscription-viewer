@@ -17,6 +17,7 @@ import httpx
 from arxiv_browser.export import get_pdf_download_path, get_pdf_url
 from arxiv_browser.models import Paper, UserConfig
 from arxiv_browser.parsing import extract_text_from_html
+from arxiv_browser.sources import is_arxiv_paper
 
 logger = logging.getLogger("arxiv_browser.browser")
 
@@ -130,6 +131,8 @@ async def _get_with_temp_client(
 
 
 async def _fetch_html_content(request: PaperContentFetchRequest) -> str | None:
+    if not is_arxiv_paper(request.paper):
+        return None
     html_url = f"https://arxiv.org/html/{request.paper.arxiv_id}"
     try:
         response = await _get_with_temp_client(
@@ -153,6 +156,8 @@ async def _fetch_html_content(request: PaperContentFetchRequest) -> str | None:
 
 
 def _read_existing_pdf(paper: Paper, config: UserConfig) -> bytes | None:
+    if not is_arxiv_paper(paper):
+        return None
     path = get_pdf_download_path(paper, config)
     try:
         if path.is_file():
@@ -167,6 +172,8 @@ async def _download_pdf_bytes(
     client: httpx.AsyncClient | None,
     timeout: int,
 ) -> bytes | None:
+    if not is_arxiv_paper(paper):
+        return None
     try:
         response = await _get_with_temp_client(
             client,
@@ -205,6 +212,8 @@ def _extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
 
 
 async def _fetch_pdf_content(request: PaperContentFetchRequest) -> str | None:
+    if not is_arxiv_paper(request.paper):
+        return None
     config = request.config or UserConfig()
     try:
         pdf_bytes = await asyncio.to_thread(_read_existing_pdf, request.paper, config)

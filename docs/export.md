@@ -31,6 +31,8 @@ Press `d` to download PDFs for selected papers (or current paper):
 - Already-downloaded files are skipped
 - Progress shown in status bar
 - Supports batch downloads with multi-select
+- Currently supports arXiv papers only; non-arXiv provider records are skipped with a warning
+- Verifies downloaded bytes look like a PDF before replacing an existing file
 
 ```json
 {
@@ -46,6 +48,7 @@ Press `F` to render a terminal preview of the current paper's PDF. If the PDF is
 - Displays with an in-app half-block renderer, with ASCII fallback under `--ascii` / no-color modes
 - Caches preview PNGs next to the configured PDF directory in `.preview-cache/`
 - Limits preview length with `pdf_preview_max_pages` (default `3`)
+- Currently supports arXiv papers only
 
 ```json
 {
@@ -61,6 +64,7 @@ Press `I` to preview the first figure from the current paper's arXiv HTML page.
 - Ignores header/logo images outside paper figures and resolves relative image URLs against arXiv
 - Caches the normalized figure image next to the paper download/cache area in `.figure-cache/`
 - Uses the same terminal-safe renderer as PDF preview, with half-block Unicode output by default and ASCII-safe output under `--ascii` / no-color modes
+- Currently supports arXiv papers only
 - Shows a warning, without changing paper state, when arXiv HTML is unavailable, no figure is present, image bytes are invalid, the image type is unsupported, or the network request fails
 
 ## PDF Viewer (`P`)
@@ -74,6 +78,8 @@ By default, `P` opens PDFs in your browser. Configure a custom viewer:
 ```
 
 `{url}` and `{path}` are interchangeable and both receive the paper's PDF URL — `P` opens the remote PDF in your viewer, not a downloaded file. If neither placeholder is present, the URL is appended as the final argument. On first use, the app asks for trust confirmation. (To open an already-downloaded local file, use `d` to download, then your own tools.)
+
+When `prefer_pdf_url` is enabled, non-arXiv provider records still open their canonical provider URL instead of constructing an arXiv PDF URL.
 
 ## Metadata Export & Import
 

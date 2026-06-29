@@ -14,7 +14,9 @@ arxiv-viewer digest --category cs.AI --period weekly --output digest.md
 arxiv-viewer digest --category cs.AI --tui      # Digest as an interactive inbox
 arxiv-viewer dates                 # List local history dates
 arxiv-viewer doctor                # Diagnose config, history, LLM, environment
-arxiv-viewer config-path           # Print the config/cache directory
+arxiv-viewer cache-info            # Show cache database path and row counts
+arxiv-viewer cache-clear --semantic --yes       # Clear one cache section
+arxiv-viewer config-path           # Print the config file path
 arxiv-viewer keybindings           # Print the key-binding reference
 arxiv-viewer completions bash|zsh|fish          # Shell completions
 ```

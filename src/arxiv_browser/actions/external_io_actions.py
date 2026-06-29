@@ -69,12 +69,39 @@ from arxiv_browser.modals import (
 )
 from arxiv_browser.models import Paper
 from arxiv_browser.pdf_preview import PdfPreviewError, build_pdf_preview_pages
+from arxiv_browser.sources import is_arxiv_paper, provider_display_name
 
 # Compatibility patch surface for tests and callers that monkeypatch browser opening.
 webbrowser = _webbrowser
 
 if TYPE_CHECKING:
     from arxiv_browser.browser.core import ArxivBrowser
+
+
+def _arxiv_only_notice(app: "ArxivBrowser", paper: Paper, title: str, action: str) -> None:
+    provider = provider_display_name(getattr(paper, "provider", "arxiv"))
+    app.notify(
+        f"{action} is currently available only for arXiv papers; skipped {provider} item.",
+        title=title,
+        severity="warning",
+        timeout=8,
+    )
+
+
+def _split_arxiv_supported_papers(papers: list[Paper]) -> tuple[list[Paper], list[Paper]]:
+    supported = [paper for paper in papers if is_arxiv_paper(paper)]
+    skipped = [paper for paper in papers if not is_arxiv_paper(paper)]
+    return supported, skipped
+
+
+def _notify_skipped_provider_papers(app: "ArxivBrowser", skipped: list[Paper], title: str) -> None:
+    if skipped:
+        app.notify(
+            f"Skipped {len(skipped)} non-arXiv item{'s' if len(skipped) != 1 else ''}.",
+            title=title,
+            severity="warning",
+            timeout=8,
+        )
 
 
 def action_copy_bibtex(app: "ArxivBrowser") -> None:
@@ -446,6 +473,10 @@ def action_open_pdf(app: "ArxivBrowser") -> None:
 
 def _do_open_pdfs(app: "ArxivBrowser", papers: list[Paper]) -> None:
     """Open the given papers' PDF URLs in the browser or configured viewer."""
+    papers, skipped = _split_arxiv_supported_papers(papers)
+    _notify_skipped_provider_papers(app, skipped, "PDF")
+    if not papers:
+        return
     viewer = app._config.pdf_viewer.strip()
     if viewer and not app._ensure_pdf_viewer_trusted(
         viewer,
@@ -468,6 +499,9 @@ def action_preview_pdf(app: "ArxivBrowser") -> None:
     if not paper:
         app.notify("No paper selected", title="PDF Preview", severity="warning")
         return
+    if not is_arxiv_paper(paper):
+        _arxiv_only_notice(app, paper, "PDF Preview", "PDF preview")
+        return
     app._track_dataset_task(app._preview_pdf_async(paper))
 
 
@@ -477,11 +511,17 @@ def action_preview_figure(app: "ArxivBrowser") -> None:
     if not paper:
         app.notify("No paper selected", title="Figure Preview", severity="warning")
         return
+    if not is_arxiv_paper(paper):
+        _arxiv_only_notice(app, paper, "Figure Preview", "Figure preview")
+        return
     app._track_dataset_task(app._preview_figure_async(paper))
 
 
 async def _preview_figure_async(app: "ArxivBrowser", paper: Paper) -> None:
     """Fetch arXiv HTML, cache the first figure image, and open the preview modal."""
+    if not is_arxiv_paper(paper):
+        _arxiv_only_notice(app, paper, "Figure Preview", "Figure preview")
+        return
     task_epoch = app._capture_dataset_epoch()
     html_url = f"https://arxiv.org/html/{paper.arxiv_id}"
     if app._http_client is None:
@@ -550,6 +590,9 @@ async def _preview_figure_async(app: "ArxivBrowser", paper: Paper) -> None:
 
 async def _preview_pdf_async(app: "ArxivBrowser", paper: Paper) -> None:
     """Download if needed, render pages, and open the PDF preview modal."""
+    if not is_arxiv_paper(paper):
+        _arxiv_only_notice(app, paper, "PDF Preview", "PDF preview")
+        return
     task_epoch = app._capture_dataset_epoch()
     pdf_path = get_pdf_download_path(paper, app._config)
     if not pdf_path.is_file():
@@ -624,6 +667,10 @@ def action_download_pdf(app: "ArxivBrowser") -> None:
     papers_to_download = app._get_target_papers()
     if not papers_to_download:
         app.notify("No papers to download", title="Download", severity="warning")
+        return
+    papers_to_download, skipped = _split_arxiv_supported_papers(papers_to_download)
+    _notify_skipped_provider_papers(app, skipped, "Download")
+    if not papers_to_download:
         return
 
     to_download, skipped_ids = filter_papers_needing_download(

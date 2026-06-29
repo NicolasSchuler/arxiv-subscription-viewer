@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+from typing import cast
+
+import httpx
 import pytest
 
+from arxiv_browser.browser.content import PaperContentFetchRequest, fetch_paper_content
 from arxiv_browser.enrichment import get_starred_paper_ids_for_version_check
+from arxiv_browser.export import get_paper_url, get_pdf_url
 from arxiv_browser.models import Paper, PaperMetadata
 from arxiv_browser.sources import (
     BIORXIV_PROVIDER,
@@ -108,3 +113,51 @@ def test_provider_labels_do_not_break_existing_api_badge(make_paper) -> None:
     rendered = render_paper_option(bio_paper)
     assert "bioRxiv" in rendered
     assert "API" not in rendered
+
+
+def test_non_arxiv_paper_url_prefers_provider_url_even_when_pdf_preferred() -> None:
+    paper = Paper(
+        arxiv_id="10.1101/2026.01.02.123456",
+        date="Fri, 02 Jan 2026",
+        title="Bio Paper",
+        authors="Alice",
+        categories="cell_biology",
+        comments=None,
+        abstract="Abstract",
+        url="https://www.biorxiv.org/content/10.1101/2026.01.02.123456v1",
+        abstract_raw="Abstract",
+        source="api",
+        provider=BIORXIV_PROVIDER,
+    )
+
+    assert get_paper_url(paper, prefer_pdf=True) == paper.url
+    with pytest.raises(ValueError, match="arXiv papers"):
+        get_pdf_url(paper)
+
+
+@pytest.mark.asyncio
+async def test_non_arxiv_full_content_uses_abstract_without_arxiv_fallbacks() -> None:
+    class NoNetworkClient:
+        async def get(self, *_args, **_kwargs):  # pragma: no cover - should not be called
+            raise AssertionError("non-arXiv providers should not fetch arXiv URLs")
+
+    paper = Paper(
+        arxiv_id="10.1101/2026.01.02.123456",
+        date="Fri, 02 Jan 2026",
+        title="Bio Paper",
+        authors="Alice",
+        categories="cell_biology",
+        comments=None,
+        abstract="Provider abstract",
+        url="https://www.biorxiv.org/content/10.1101/2026.01.02.123456v1",
+        abstract_raw="Provider abstract",
+        source="api",
+        provider=BIORXIV_PROVIDER,
+    )
+
+    result = await fetch_paper_content(
+        PaperContentFetchRequest(paper, client=cast(httpx.AsyncClient, NoNetworkClient()))
+    )
+
+    assert result.source == "abstract"
+    assert result.content == "Abstract:\nProvider abstract"

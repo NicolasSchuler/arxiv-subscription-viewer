@@ -41,6 +41,12 @@ from arxiv_browser.browser.detail_pane import DetailPaneMixin
 from arxiv_browser.browser.discovery import DiscoveryMixin
 from arxiv_browser.browser.options import ArxivBrowserOptions, _coerce_browser_options
 from arxiv_browser.browser.reactive_state import ReactiveStateMixin
+from arxiv_browser.browser.runtime_state import (
+    EnrichmentScoringRuntimeState,
+    LlmApiRuntimeState,
+    attach_enrichment_scoring_runtime,
+    attach_llm_api_runtime,
+)
 from arxiv_browser.browser.worker_runtime import WorkerRuntimeMixin
 from arxiv_browser.config import _coerce_arxiv_api_max_results, get_user_tcss_path
 from arxiv_browser.database import get_cache_db_path, init_cache_db
@@ -49,8 +55,6 @@ from arxiv_browser.llm_providers import resolve_provider
 from arxiv_browser.modals.help import HelpScreen
 from arxiv_browser.models import (
     DETAIL_MODES,
-    ArxivSearchModeState,
-    LocalBrowseSnapshot,
     Paper,
     SessionState,
     UserConfig,
@@ -125,6 +129,11 @@ class ArxivBrowser(
     selected_ids: reactive[set[str]] = reactive(set, init=False, always_update=True)  # type: ignore[bad-override]
     _sort_index: reactive[int] = reactive(0, init=False)  # type: ignore[bad-override]
     _watch_filter_active: reactive[bool] = reactive(False, init=False)  # type: ignore[bad-override]
+    _auto_tag_progress: tuple[int, int] | None
+    _pending_similarity_paper_id: str | None
+    _scoring_progress: tuple[int, int] | None
+    _tfidf_corpus_key: str | None
+    _tfidf_index: TfidfIndex | None
     _show_abstract_preview: reactive[bool] = reactive(False, init=False)  # type: ignore[bad-override]
     _compact_list: reactive[bool] = reactive(False, init=False)  # type: ignore[bad-override]
     _detail_mode: reactive[str] = reactive("scan", init=False)  # type: ignore[bad-override]
@@ -377,55 +386,20 @@ class ArxivBrowser(
 
     def _init_llm_and_api_state(self) -> None:
         """Initialize LLM summary state, API browsing state, and shared clients."""
-        self._paper_summaries: dict[str, str] = {}
-        self._summary_loading: set[str] = set()
-        self._cache_db_path = get_cache_db_path()
-        init_cache_db(self._cache_db_path)
-        self._summary_db_path = self._cache_db_path
-        self._summary_mode_label: dict[str, str] = {}
-        self._summary_command_hash: dict[str, str] = {}
-        self._in_arxiv_api_mode = False
-        self._arxiv_search_state: ArxivSearchModeState | None = None
-        self._local_browse_snapshot: LocalBrowseSnapshot | None = None
-        self._arxiv_api_fetch_inflight = False
-        self._arxiv_api_loading = False
-        self._last_arxiv_api_request_at = 0.0
-        self._arxiv_api_request_token = 0
-        self._http_client: httpx.AsyncClient | None = None
-        self._llm_provider = resolve_provider(self._config)
+        state = LlmApiRuntimeState(
+            cache_db_path=get_cache_db_path(),
+            llm_provider=resolve_provider(self._config),
+        )
+        self._llm_api_state = state
+        init_cache_db(state.cache_db_path)
+        attach_llm_api_runtime(self, state)
 
     def _init_enrichment_and_scoring_state(self) -> None:
         """Initialize enrichment caches, scoring state, and similarity state."""
-        self._s2_active = False
-        self._s2_cache: dict[str, SemanticScholarPaper] = {}
-        self._s2_loading = set()
-        self._s2_db_path = self._cache_db_path
-        self._s2_api_error = False
-        self._hf_active = False
-        self._hf_cache: dict[str, HuggingFacePaper] = {}
-        self._hf_loading = False
-        self._hf_db_path = self._cache_db_path
-        self._hf_api_error = False
+        state = EnrichmentScoringRuntimeState(cache_db_path=self._cache_db_path)
+        self._enrichment_scoring_state = state
+        attach_enrichment_scoring_runtime(self, state)
         _deadline_ui.init_conference_deadline_state(self)
-        self._version_updates: dict[str, tuple[int, int]] = {}
-        self._version_checking = False
-        self._version_progress = None
-        self._relevance_scores: dict[str, tuple[int, str]] = {}
-        self._relevance_scoring_active = False
-        self._scoring_progress: tuple[int, int] | None = None
-        self._relevance_db_path = self._cache_db_path
-        self._auto_tag_active = False
-        self._auto_tag_progress: tuple[int, int] | None = None
-        self._paper_remix_active = False
-        self._cancel_batch_requested = False
-        self._detail_focus_active = False
-        self._read_event_timestamps: deque[float] = deque(maxlen=240)
-        self._tfidf_index: TfidfIndex | None = None
-        self._tfidf_corpus_key: str | None = None
-        self._tfidf_build_task: Any = None
-        self._pending_similarity_paper_id: str | None = None
-        self._semantic_search_worker: Any = None
-        self._semantic_search_token = 0
 
     def _configure_ascii_mode(self, ascii_icons: bool) -> None:
         """Apply ASCII/Unicode rendering mode across the UI."""

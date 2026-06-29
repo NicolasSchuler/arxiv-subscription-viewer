@@ -21,6 +21,7 @@ Determined by [platformdirs](https://pypi.org/project/platformdirs/):
 | Windows | `%APPDATA%/arxiv-browser/config.json` |
 
 Run `arxiv-viewer config-path` to print the exact path for the current machine.
+Run `arxiv-viewer cache-info` to print the cache database path and grouped row counts; use `arxiv-viewer cache-clear --help` for section-specific cleanup commands.
 
 ## Loading And Recovery Behavior
 

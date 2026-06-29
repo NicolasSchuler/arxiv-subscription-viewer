@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.metadata
+import importlib.util
 import os
 import re
 import shlex
@@ -195,6 +196,150 @@ def _doctor_http_llm_issue_count(
     return issues
 
 
+def _doctor_semantic_search_issue_count(
+    config: UserConfig,
+    *,
+    ok_marker: str,
+    warn_marker: str,
+    info_marker: str,
+) -> int:
+    """Report semantic-search backend readiness and return issue count."""
+    backend = config.semantic_search_backend.strip().lower()
+    model = config.semantic_search_model.strip() or "BAAI/bge-small-en-v1.5"
+    if backend == "off":
+        print(f"{info_marker} Semantic search: disabled")
+        return 0
+    if backend == "http":
+        return _doctor_semantic_http_issue_count(
+            config,
+            ok_marker=ok_marker,
+            warn_marker=warn_marker,
+        )
+    if backend == "fastembed":
+        return _doctor_python_module_issue_count(
+            "Semantic search FastEmbed",
+            "fastembed",
+            ok_marker=ok_marker,
+            warn_marker=warn_marker,
+            install_hint="install with `pip install arxiv-subscription-viewer[semantic-fastembed]`",
+        )
+    if backend == "sentence-transformers":
+        return _doctor_python_module_issue_count(
+            "Semantic search sentence-transformers",
+            "sentence_transformers",
+            ok_marker=ok_marker,
+            warn_marker=warn_marker,
+            install_hint="install sentence-transformers and confirm the configured model is available",
+        )
+    if config.semantic_search_api_base_url.strip():
+        return _doctor_semantic_http_issue_count(
+            config,
+            ok_marker=ok_marker,
+            warn_marker=warn_marker,
+        )
+    if _module_available("fastembed"):
+        print(f"{ok_marker} Semantic search: auto -> fastembed ({model})")
+    elif _module_available("sentence_transformers"):
+        print(f"{ok_marker} Semantic search: auto -> sentence-transformers ({model})")
+    else:
+        print(
+            f"{info_marker} Semantic search: optional backend not installed; fuzzy search remains active"
+        )
+    return 0
+
+
+def _doctor_semantic_http_issue_count(
+    config: UserConfig,
+    *,
+    ok_marker: str,
+    warn_marker: str,
+) -> int:
+    """Report OpenAI-compatible embedding backend diagnostics."""
+    issues = 0
+    base_url = config.semantic_search_api_base_url.strip()
+    model = config.semantic_search_model.strip()
+    if not base_url:
+        print(
+            f"{warn_marker} Semantic search HTTP backend: semantic_search_api_base_url is required"
+        )
+        issues += 1
+    else:
+        parsed = urlparse(base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            print(f"{warn_marker} Semantic search HTTP backend: invalid base URL '{base_url}'")
+            issues += 1
+        elif base_url.rstrip("/").endswith("/v1/embeddings"):
+            print(
+                f"{warn_marker} Semantic search HTTP backend: use the API root, not /v1/embeddings"
+            )
+            issues += 1
+        else:
+            print(f"{ok_marker} Semantic search HTTP backend: {base_url.rstrip('/')}")
+    if not model:
+        print(f"{warn_marker} Semantic search model: semantic_search_model is required")
+        issues += 1
+    else:
+        print(f"{ok_marker} Semantic search model: {model}")
+    return issues
+
+
+def _doctor_python_module_issue_count(
+    label: str,
+    module_name: str,
+    *,
+    ok_marker: str,
+    warn_marker: str,
+    install_hint: str,
+) -> int:
+    """Report whether an optional Python module is importable."""
+    if _module_available(module_name):
+        print(f"{ok_marker} {label}: available")
+        return 0
+    print(f"{warn_marker} {label}: missing; {install_hint}")
+    return 1
+
+
+def _doctor_triage_issue_count(*, ok_marker: str, warn_marker: str, info_marker: str) -> int:
+    """Report local supervised triage artifact/dependency readiness."""
+    from arxiv_browser.triage_model import (
+        TRIAGE_INSTALL_HINT,
+        MissingTriageModelDependencyError,
+        load_triage_model,
+        triage_model_paths,
+    )
+
+    model_path, info_path = triage_model_paths()
+    if not model_path.exists() and not info_path.exists():
+        print(f"{info_marker} Local triage model: no trained model artifact yet")
+        return 0
+    if not model_path.exists() or not info_path.exists():
+        print(f"{warn_marker} Local triage model: incomplete artifacts in {model_path.parent}")
+        return 1
+    missing_modules = [name for name in ("joblib", "sklearn") if not _module_available(name)]
+    if missing_modules:
+        missing = ", ".join(missing_modules)
+        print(f"{warn_marker} Local triage model: missing {missing}. {TRIAGE_INSTALL_HINT}")
+        return 1
+    try:
+        loaded = load_triage_model()
+    except MissingTriageModelDependencyError as exc:
+        print(f"{warn_marker} Local triage model: {exc}")
+        return 1
+    except (AttributeError, EOFError, ImportError, OSError, TypeError, ValueError) as exc:
+        print(f"{warn_marker} Local triage model: failed to load artifacts ({exc})")
+        return 1
+    if loaded is None:
+        print(f"{info_marker} Local triage model: no trained model artifact yet")
+        return 0
+    _model, info = loaded
+    print(f"{ok_marker} Local triage model: trained on {info.total_count} examples")
+    return 0
+
+
+def _module_available(module_name: str) -> bool:
+    return importlib.util.find_spec(module_name) is not None
+
+
 def _resolve_llm_diagnostic_target(
     config: UserConfig,
     resolved_llm_command: str,
@@ -343,6 +488,17 @@ def _run_doctor(config: UserConfig, history_files: list[tuple[date, Path]]) -> i
         warn_marker=warn_marker,
         info_marker=info_marker,
     )
+    issues += _doctor_semantic_search_issue_count(
+        config,
+        ok_marker=ok_marker,
+        warn_marker=warn_marker,
+        info_marker=info_marker,
+    )
+    issues += _doctor_triage_issue_count(
+        ok_marker=ok_marker,
+        warn_marker=warn_marker,
+        info_marker=info_marker,
+    )
 
     _doctor_feature_summary(config, ok_marker=ok_marker, info_marker=info_marker)
     _doctor_export_dirs(config, ok_marker=ok_marker, info_marker=info_marker)
@@ -363,7 +519,10 @@ __all__ = [
     "_doctor_history_issue_count",
     "_doctor_http_llm_issue_count",
     "_doctor_llm_issue_count",
+    "_doctor_semantic_http_issue_count",
+    "_doctor_semantic_search_issue_count",
     "_doctor_terminal_summary",
+    "_doctor_triage_issue_count",
     "_extract_command_binary",
     "_get_version",
     "_run_doctor",

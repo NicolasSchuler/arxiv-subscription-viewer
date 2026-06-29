@@ -18,6 +18,8 @@ from typing import Any, cast
 from platformdirs import user_config_dir
 
 from arxiv_browser.action_messages import build_actionable_error
+from arxiv_browser.cache_cli import add_cache_cli_subparsers
+from arxiv_browser.cli_config_free import handle_config_free_command
 from arxiv_browser.cli_doctor import (
     _doctor_config_issue_count,
     _doctor_export_dirs,
@@ -25,7 +27,10 @@ from arxiv_browser.cli_doctor import (
     _doctor_history_issue_count,
     _doctor_http_llm_issue_count,
     _doctor_llm_issue_count,
+    _doctor_semantic_http_issue_count,
+    _doctor_semantic_search_issue_count,
     _doctor_terminal_summary,
+    _doctor_triage_issue_count,
     _extract_command_binary,
     _get_version,
     _run_doctor,
@@ -69,6 +74,8 @@ CLI_COMMANDS = (
     "search",
     "digest",
     "dates",
+    "cache-info",
+    "cache-clear",
     "completions",
     "config-path",
     "doctor",
@@ -83,6 +90,8 @@ CLI_ROOT_EPILOG = """Examples:
   arxiv-viewer search --query "diffusion transformer" --field title
   arxiv-viewer digest --category cs.AI --period weekly --output digest.md
   arxiv-viewer dates
+  arxiv-viewer cache-info
+  arxiv-viewer cache-clear --semantic --yes
   arxiv-viewer config-path
   arxiv-viewer doctor
   arxiv-viewer keybindings
@@ -412,6 +421,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         help="List available local history dates and exit",
         description="Print the available YYYY-MM-DD history files and exit.",
     )
+    add_cache_cli_subparsers(subparsers)
 
     completions_parser = subparsers.add_parser(
         "completions",
@@ -532,21 +542,6 @@ def _app_factory_accepts_options(app_factory: Callable[..., Any]) -> bool:
         return "options" in inspect.signature(app_factory).parameters
     except (TypeError, ValueError):
         return False
-
-
-def _handle_config_free_command(args: argparse.Namespace) -> int | None:
-    """Run subcommands that do not need config, history, or TTY state."""
-    command = getattr(args, "command", None)
-    if command == "completions":
-        from arxiv_browser.completions import get_completion_script
-
-        print(get_completion_script(args.shell))
-        return 0
-    if command == "config-path":
-        return _print_config_path()
-    if command == "keybindings":
-        return _run_keybindings(args)
-    return None
 
 
 def _resolve_color_mode(args: argparse.Namespace, normalized_argv: list[str]) -> str:
@@ -806,7 +801,11 @@ def main(
     normalized_argv = _normalize_cli_argv(argv)
     args = parser.parse_args(normalized_argv)
 
-    early_exit = _handle_config_free_command(args)
+    early_exit = handle_config_free_command(
+        args,
+        print_config_path=_print_config_path,
+        run_keybindings=_run_keybindings,
+    )
     if early_exit is not None:
         return early_exit
 
@@ -877,7 +876,10 @@ __all__ = [
     "_doctor_history_issue_count",
     "_doctor_http_llm_issue_count",
     "_doctor_llm_issue_count",
+    "_doctor_semantic_http_issue_count",
+    "_doctor_semantic_search_issue_count",
     "_doctor_terminal_summary",
+    "_doctor_triage_issue_count",
     "_extract_command_binary",
     "_fetch_arxiv_api_papers",
     "_fetch_latest_arxiv_digest",

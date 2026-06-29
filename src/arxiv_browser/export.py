@@ -15,6 +15,7 @@ from arxiv_browser.models import (
     PaperMetadata,
     UserConfig,
 )
+from arxiv_browser.sources import is_arxiv_paper
 
 # BibTeX export settings
 DEFAULT_BIBTEX_EXPORT_DIR = "arxiv-exports"  # Default subdirectory in home folder
@@ -250,6 +251,10 @@ def format_papers_as_markdown_table(papers: list[Paper]) -> str:
 
 def get_pdf_url(paper: Paper) -> str:
     """Get the PDF URL for a paper."""
+    if not is_arxiv_paper(paper):
+        raise ValueError(
+            f"PDF URLs are currently supported only for arXiv papers: {paper.arxiv_id}"
+        )
     if "arxiv.org/pdf/" in paper.url:
         return paper.url if paper.url.endswith(".pdf") else f"{paper.url}.pdf"
     return f"https://arxiv.org/pdf/{paper.arxiv_id}.pdf"
@@ -257,7 +262,7 @@ def get_pdf_url(paper: Paper) -> str:
 
 def get_paper_url(paper: Paper, prefer_pdf: bool = False) -> str:
     """Get the preferred URL for a paper (abs or PDF)."""
-    if prefer_pdf:
+    if prefer_pdf and is_arxiv_paper(paper):
         return get_pdf_url(paper)
     return paper.url
 

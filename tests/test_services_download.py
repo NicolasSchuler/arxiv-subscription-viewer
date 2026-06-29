@@ -9,13 +9,24 @@ import httpx
 import pytest
 
 from arxiv_browser.models import UserConfig
-from arxiv_browser.services.download_service import DownloadFailure, DownloadResult, download_pdf
+from arxiv_browser.services.download_service import (
+    DownloadFailure,
+    DownloadResult,
+    _classify_failure,
+    download_pdf,
+)
 
 
 class _FakeResponse:
-    def __init__(self, chunks: list[bytes], error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        chunks: list[bytes],
+        error: Exception | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self._chunks = chunks
         self._error = error
+        self.headers = headers or {"content-type": "application/pdf"}
 
     def raise_for_status(self) -> None:
         if self._error is not None:
@@ -180,6 +191,71 @@ async def test_download_pdf_returns_false_when_temp_file_is_never_created(
     assert ok.success is False
     assert ok.failure == DownloadFailure.DISK
     assert "PDF download failed for 2401.50004" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_download_pdf_rejects_non_pdf_content_and_preserves_existing_file(
+    make_paper,
+    tmp_path,
+) -> None:
+    paper = make_paper(arxiv_id="2401.50005")
+    target = tmp_path / "pdfs" / "2401.50005.pdf"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"%PDF-1.4 old")
+    response = _FakeResponse(
+        [b"<html>not found</html>"],
+        headers={"content-type": "text/html; charset=utf-8"},
+    )
+    client = SimpleNamespace(stream=MagicMock(return_value=_StreamContext(response)))
+
+    with (
+        patch(
+            "arxiv_browser.services.download_service.get_pdf_url",
+            return_value="https://example.test/pdf",
+        ),
+        patch("arxiv_browser.services.download_service.get_pdf_download_path", return_value=target),
+    ):
+        result = await download_pdf(
+            paper=paper,
+            config=UserConfig(),
+            client=client,
+            timeout_seconds=30,
+        )
+
+    assert result.success is False
+    assert result.failure == DownloadFailure.INVALID_CONTENT
+    assert "not a PDF" in result.detail
+    assert target.read_bytes() == b"%PDF-1.4 old"
+    assert list(target.parent.glob(".*.tmp")) == []
+
+
+@pytest.mark.asyncio
+async def test_download_pdf_accepts_pdf_signature_split_across_chunks(make_paper, tmp_path) -> None:
+    paper = make_paper(arxiv_id="2401.50006")
+    target = tmp_path / "pdfs" / "2401.50006.pdf"
+    response = _FakeResponse([b"%", b"PDF-1.4", b" body"])
+    client = SimpleNamespace(stream=MagicMock(return_value=_StreamContext(response)))
+
+    with (
+        patch(
+            "arxiv_browser.services.download_service.get_pdf_url",
+            return_value="https://example.test/pdf",
+        ),
+        patch("arxiv_browser.services.download_service.get_pdf_download_path", return_value=target),
+    ):
+        result = await download_pdf(
+            paper=paper,
+            config=UserConfig(),
+            client=client,
+            timeout_seconds=30,
+        )
+
+    assert result == DownloadResult(success=True)
+    assert target.read_bytes() == b"%PDF-1.4 body"
+
+
+def test_download_failure_classifier_default_network_bucket() -> None:
+    assert _classify_failure(RuntimeError("boom")) == DownloadFailure.NETWORK
 
 
 @pytest.mark.asyncio

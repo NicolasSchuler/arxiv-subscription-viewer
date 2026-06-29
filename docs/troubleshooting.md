@@ -23,6 +23,8 @@ It reports:
 - config file path/status
 - whether `./history/` contains `YYYY-MM-DD.txt` files
 - resolved LLM command or preset, including `{prompt}` placeholder checks, shell-fallback policy, and whether the binary is on `PATH`
+- semantic-search backend readiness, including missing optional packages or HTTP embedding URL mistakes
+- local triage model readiness when persisted model artifacts exist
 - whether Semantic Scholar / HuggingFace are enabled
 - export/PDF directories and whether they'll be created on first use
 - whether the current terminal is an interactive TTY
@@ -130,7 +132,7 @@ If `--output` points at a directory, unwritable path, or invalid parent location
 
 **No preset configured:**
 
-LLM features require either `llm_preset` or `llm_command` in your config. Without one, LLM actions are silently skipped.
+LLM features require either `llm_preset`, `llm_command`, or the HTTP provider fields in your config. Without one, LLM actions show a warning and `arxiv-viewer doctor` reports that no LLM provider is configured.
 
 ```json
 { "llm_preset": "copilot" }
@@ -233,7 +235,7 @@ Request a key at [Semantic Scholar API](https://www.semanticscholar.org/product/
 
 **Stale cache:**
 
-S2 data is cached for 7 days (configurable via `s2_cache_ttl_days`). All enrichment lives in the unified `cache.db`, so to force a refresh either lower `s2_cache_ttl_days` or clear every cache by deleting `cache.db` (see [Clearing all caches](#clearing-all-caches)).
+S2 data is cached for 7 days (configurable via `s2_cache_ttl_days`). All enrichment lives in the unified `cache.db`, so to force a refresh either lower `s2_cache_ttl_days` or clear the enrichment cache (see [Clearing caches](#clearing-caches)).
 
 ---
 
@@ -261,13 +263,25 @@ The HF API has a 15-second timeout and the same 3-attempt retry budget (1s → 2
 
 **Stale cache:**
 
-HF data is cached for 6 hours (configurable via `hf_cache_ttl_hours`). Like all enrichment it lives in the unified `cache.db`, so to force a refresh either lower `hf_cache_ttl_hours` or clear every cache by deleting `cache.db` (see [Clearing all caches](#clearing-all-caches)).
+HF data is cached for 6 hours (configurable via `hf_cache_ttl_hours`). Like all enrichment it lives in the unified `cache.db`, so to force a refresh either lower `hf_cache_ttl_hours` or clear the enrichment cache (see [Clearing caches](#clearing-caches)).
 
 ---
 
-## Clearing all caches
+## Clearing caches
 
-All cached data — LLM summaries, relevance scores, Semantic Scholar enrichment, HuggingFace trending, extracted paper content, and semantic embeddings — lives in a single `cache.db` in the config directory. There is no per-source cache file on a normal install; to clear everything, delete `cache.db` (it is rebuilt on the next run):
+All cached data — LLM summaries, relevance scores, Semantic Scholar enrichment, HuggingFace trending, extracted paper content, and semantic embeddings — lives in a single `cache.db` in the config directory. Prefer the built-in commands when you want to inspect or clear one section:
+
+```bash
+arxiv-viewer cache-info
+arxiv-viewer cache-clear --llm --yes
+arxiv-viewer cache-clear --semantic --yes
+arxiv-viewer cache-clear --enrichment --yes
+arxiv-viewer cache-clear --paper-content --yes
+```
+
+Omit `--yes` for a dry run that reports how many rows would be deleted.
+
+To clear everything manually, delete `cache.db` (it is rebuilt on the next run):
 
 ```bash
 # macOS
