@@ -5,8 +5,23 @@ from __future__ import annotations
 from typing import TypeVar
 
 from textual.screen import ModalScreen
+from textual.widgets import Label, ListItem
 
 T = TypeVar("T")
+
+
+def build_empty_placeholder(message: str) -> ListItem:
+    """Build a disabled ``ListItem`` that renders an empty-state hint in-list.
+
+    The placeholder is disabled so keyboard navigation skips it and selection
+    handlers bail out on their bounds checks; the surrounding CSS dims it
+    further via the ``-empty`` class. Rendering the hint *inside* the list
+    region (rather than as a separate floating widget) keeps the two list
+    managers visually consistent.
+    """
+    item = ListItem(Label(f"[dim italic]{message}[/]"), classes="-empty")
+    item.disabled = True
+    return item
 
 
 class ModalBase(ModalScreen[T]):

@@ -2,8 +2,15 @@
 
 from __future__ import annotations
 
+from arxiv_browser.themes import THEME_NAMES
+
 # Static completion scripts generated from the known CLI structure.
-# No runtime dependency on the application — scripts are self-contained.
+# The ``__ARXIV_THEME_NAMES__`` placeholder is substituted with the real built-in
+# theme names at render time so ``--theme`` completions stay in sync with themes.py.
+# Scripts remain plain raw strings (not f-strings) so the docs-sync extractor and
+# shell brace syntax are both preserved.
+
+_THEME_PLACEHOLDER = "__ARXIV_THEME_NAMES__"
 
 _BASH_SCRIPT = r"""# bash completion for arxiv-viewer
 # Add to ~/.bashrc:  eval "$(arxiv-viewer completions bash)"
@@ -13,19 +20,24 @@ _arxiv_viewer() {
     _init_completion || return
 
     local commands="browse search digest dates cache-info cache-clear completions config-path doctor keybindings"
-    local global_opts="--debug --color --no-color --ascii --version -V --help -h"
+    local global_opts="--debug --color --no-color --ascii --theme --version -V --help -h"
 
-    # Find the subcommand (skip global flags)
+    # Find the subcommand (skip global flags and their values)
     local cmd=""
     local i
     for ((i=1; i < cword; i++)); do
         case "${words[i]}" in
-            --color) ((i++)) ;;  # skip --color's argument
+            --color|--theme) ((i++)) ;;  # skip flags that consume a value
             --debug|--no-color|--ascii|--version|-V) ;;
             -*) ;;
             *) cmd="${words[i]}"; break ;;
         esac
     done
+
+    if [[ "$prev" == "--theme" ]]; then
+        COMPREPLY=($(compgen -W "__ARXIV_THEME_NAMES__" -- "$cur"))
+        return
+    fi
 
     if [[ -z "$cmd" ]]; then
         COMPREPLY=($(compgen -W "$commands $global_opts" -- "$cur"))
@@ -92,7 +104,7 @@ _arxiv_viewer() {
     local -a commands
     commands=(
         'browse:Open local history or a local paper file'
-        'search:Fetch startup papers from the arXiv API'
+        'search:Search arXiv online and open results in the TUI'
         'digest:Generate a Markdown digest and exit'
         'dates:List available local history dates and exit'
         'cache-info:Show local cache database location and row counts'
@@ -109,6 +121,7 @@ _arxiv_viewer() {
         '--color[Color output mode]:mode:(auto always never)'
         '--no-color[Disable terminal colors]'
         '--ascii[Use ASCII-only status icons]'
+        '--theme[Override the UI color theme]:theme:(__ARXIV_THEME_NAMES__)'
         '(-V --version)'{-V,--version}'[Show version]'
         '(-h --help)'{-h,--help}'[Show help]'
     )
@@ -201,11 +214,12 @@ complete -c arxiv-viewer -n '__fish_use_subcommand' -l debug -d 'Enable debug lo
 complete -c arxiv-viewer -n '__fish_use_subcommand' -l color -x -a 'auto always never' -d 'Color output mode'
 complete -c arxiv-viewer -n '__fish_use_subcommand' -l no-color -d 'Disable terminal colors'
 complete -c arxiv-viewer -n '__fish_use_subcommand' -l ascii -d 'Use ASCII-only status icons'
+complete -c arxiv-viewer -l theme -x -a '__ARXIV_THEME_NAMES__' -d 'Override the UI color theme'
 complete -c arxiv-viewer -n '__fish_use_subcommand' -s V -l version -d 'Show version'
 
 # Subcommands
 complete -c arxiv-viewer -n '__fish_use_subcommand' -a browse -d 'Open local history or a local paper file'
-complete -c arxiv-viewer -n '__fish_use_subcommand' -a search -d 'Fetch startup papers from the arXiv API'
+complete -c arxiv-viewer -n '__fish_use_subcommand' -a search -d 'Search arXiv online and open results in the TUI'
 complete -c arxiv-viewer -n '__fish_use_subcommand' -a digest -d 'Generate a Markdown digest and exit'
 complete -c arxiv-viewer -n '__fish_use_subcommand' -a dates -d 'List available local history dates and exit'
 complete -c arxiv-viewer -n '__fish_use_subcommand' -a cache-info -d 'Show local cache database location and row counts'
@@ -280,7 +294,8 @@ def get_completion_script(shell: str) -> str:
     if script is None:
         supported = ", ".join(SUPPORTED_SHELLS)
         raise ValueError(f"Unsupported shell: {shell!r}. Supported shells: {supported}")
-    return script.lstrip("\n")
+    theme_names = " ".join(sorted(THEME_NAMES))
+    return script.lstrip("\n").replace(_THEME_PLACEHOLDER, theme_names)
 
 
 __all__ = [

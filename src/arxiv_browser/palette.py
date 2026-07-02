@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-PALETTE_NAME_MAX_LEN = 28
-PALETTE_DESC_MAX_LEN = 40
-PALETTE_KEY_MAX_LEN = 24
+# Fixed column widths for the one-line-per-command palette rows. Chosen so a full
+# row (key + marker + name + description) fits inside the Medium-width (70-col)
+# palette overlay without wrapping. See widgets/omni_input.py for the layout.
+PALETTE_KEY_MAX_LEN = 7
+PALETTE_NAME_MAX_LEN = 24
+PALETTE_DESC_MAX_LEN = 28
 
 
 def truncate_palette_text(text: str, max_len: int) -> str:

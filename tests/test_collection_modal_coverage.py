@@ -164,6 +164,9 @@ class TestCollectionsCoverage:
         modal.on_pick_list_selected(SimpleNamespace())
         modal.dismiss.assert_called_once_with("Reading")
         modal.dismiss.reset_mock()
+        # Ctrl+S is a no-op in pick mode (nothing to persist).
+        modal.action_save()
+        modal.dismiss.assert_not_called()
         modal.action_cancel_or_back()
         assert modal.dismiss.call_args_list[-1].args[0] is None
 
@@ -188,6 +191,11 @@ class TestCollectionsCoverage:
 
         # Save
         modal.on_save_pressed()
+        modal.dismiss.assert_called_with("save")
+
+        # Ctrl+S save action (manage mode) also persists
+        modal.dismiss.reset_mock()
+        modal.action_save()
         modal.dismiss.assert_called_with("save")
 
         # Close

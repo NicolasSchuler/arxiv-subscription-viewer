@@ -12,8 +12,20 @@ from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
 from textual.widgets import Button, Checkbox, Input, Label, ListItem, ListView, Select, Static
 
-from arxiv_browser.modals.base import ModalBase
+from arxiv_browser._ascii import is_ascii_mode
+from arxiv_browser.modals.base import ModalBase, build_empty_placeholder
 from arxiv_browser.models import WATCH_MATCH_TYPES, WatchListEntry
+
+# Match-type placeholder / prompt shown before a type is chosen. Lists the
+# actual options so the Select is a guessable affordance instead of a blank bar.
+WATCH_MATCH_PROMPT = " / ".join(WATCH_MATCH_TYPES)
+
+# Manage-view empty state rendered inside the list region (mirrors the
+# Collections manager). Keeps the §7 Try:/Next: template intact.
+WATCH_LIST_EMPTY = (
+    "No watch entries yet. Try: add a pattern on the right, then press Add. "
+    "Next: press Save to persist."
+)
 
 
 class WatchListItem(ListItem):
@@ -60,15 +72,15 @@ class WatchListModal(ModalBase[list[WatchListEntry] | None]):
         margin-right: 2;
     }
 
-    #watch-empty {
-        color: $th-muted;
-        padding: 0 1;
-        margin-top: 1;
-        display: none;
+    /* Full-width, wrapping empty-state placeholder rendered inside the list
+       region (avoids single-line truncation of the Try:/Next: hint). */
+    #watch-list > ListItem.-empty {
+        height: auto;
     }
 
-    #watch-empty.visible {
-        display: block;
+    #watch-list > ListItem.-empty > Label {
+        width: 1fr;
+        height: auto;
     }
 
     #watch-form {
@@ -81,7 +93,15 @@ class WatchListModal(ModalBase[list[WatchListEntry] | None]):
         margin-top: 1;
     }
 
-    #watch-pattern,
+    /* Single-line height matches the Collections form inputs so both list
+       managers share one field rhythm. */
+    #watch-pattern {
+        width: 100%;
+        height: 1;
+        background: $th-panel;
+        border: none;
+    }
+
     #watch-type {
         width: 100%;
         background: $th-panel;
@@ -103,8 +123,26 @@ class WatchListModal(ModalBase[list[WatchListEntry] | None]):
         align: left middle;
     }
 
+    /* min-width:0 keeps all three action buttons inside the dialog interior
+       (default min-width:16 overflows the ~62-col row). */
     #watch-actions Button {
         margin-right: 1;
+        min-width: 0;
+    }
+
+    /* Destructive Delete stays dim/outlined at rest so Save keeps the only
+       primary weight; the error color is reserved for hover/focus. */
+    #watch-delete {
+        color: $th-muted;
+        background: transparent;
+        text-style: none;
+    }
+
+    #watch-delete:hover,
+    #watch-delete:focus {
+        color: $error;
+        background: $error-muted;
+        text-style: bold;
     }
 
     #watch-buttons {
@@ -136,42 +174,67 @@ class WatchListModal(ModalBase[list[WatchListEntry] | None]):
             with Horizontal(id="watch-body"):
                 with Vertical(id="watch-list-column"):
                     yield ListView(id="watch-list")
-                    yield Static(
-                        "No watch entries yet.\nTry: add a pattern on the right, then press Add.",
-                        id="watch-empty",
-                    )
                 with Vertical(id="watch-form"):
                     yield Label("Pattern")
                     yield Input(placeholder="e.g., diffusion", id="watch-pattern")
                     yield Label("Match Type")
                     yield Select(
                         [(value, value) for value in WATCH_MATCH_TYPES],
+                        prompt=WATCH_MATCH_PROMPT,
                         id="watch-type",
                     )
                     yield Checkbox("Case sensitive", id="watch-case")
-                    with Horizontal(id="watch-actions"):
-                        yield Button("Add", variant="primary", id="watch-add")
-                        yield Button("Update", variant="default", id="watch-update")
-                        yield Button("Delete", variant="error", id="watch-delete")
+            # Action row lives at the dialog level (not nested in the narrow
+            # 1fr form column) so all three buttons stay on-dialog.
+            with Horizontal(id="watch-actions"):
+                yield Button("Add", variant="default", id="watch-add")
+                yield Button("Update", variant="default", id="watch-update")
+                yield Button("Delete", variant="default", id="watch-delete")
             with Horizontal(id="watch-buttons", classes="modal-buttons"):
                 yield Button("Cancel", variant="default", id="watch-cancel")
                 yield Button("Save (Ctrl+S)", variant="primary", id="watch-save")
             yield Static(
-                "No unsaved changes | Ctrl+S save | Esc discards edits",
+                "No unsaved changes | Esc discards edits",
                 id="watch-help",
                 classes="modal-footer",
             )
 
     def on_mount(self) -> None:
-        """Populate the list view and focus the pattern input on mount."""
+        """Populate the list view, ASCII-fix the Select arrow, and focus the pattern."""
         self._refresh_list()
         self._focus_widget("#watch-pattern")
+        # Deferred so the Select's arrow children (mounted by the framework
+        # during compose) exist before we rewrite their glyphs.
+        self.call_after_refresh(self._apply_ascii_select_arrow)
+
+    def _apply_ascii_select_arrow(self) -> None:
+        """Swap the Select's Unicode chevron for an ASCII fallback in ASCII mode.
+
+        The ``▼``/``▲`` glyphs are framework-emitted (see the style guide's
+        "Framework Chrome Glyphs" note); we override them here so the dropdown
+        affordance survives ``--ascii``.
+        """
+        if not is_ascii_mode():
+            return
+        for arrow in self.query("#watch-type .down-arrow"):
+            if isinstance(arrow, Static):
+                arrow.update("v")
+        for arrow in self.query("#watch-type .up-arrow"):
+            if isinstance(arrow, Static):
+                arrow.update("^")
 
     def _refresh_list(self) -> None:
-        """Rebuild the list view from the current entries and update the empty hint."""
+        """Rebuild the list view from the current entries.
+
+        When there are no entries an in-list empty-state placeholder is mounted
+        so the guidance sits inside the list region rather than floating below
+        an empty box.
+        """
         list_view = self.query_one("#watch-list", ListView)
-        empty_hint = self.query_one("#watch-empty", Static)
         list_view.clear()
+        if not self._entries:
+            list_view.mount(build_empty_placeholder(WATCH_LIST_EMPTY))
+            return
         for entry in self._entries:
             label = f"{entry.match_type}: {entry.pattern}"
             if entry.case_sensitive:
@@ -180,9 +243,6 @@ class WatchListModal(ModalBase[list[WatchListEntry] | None]):
         if list_view.children:
             list_view.index = 0
             self._populate_form(list_view.highlighted_child)
-            empty_hint.remove_class("visible")
-        else:
-            empty_hint.add_class("visible")
 
     def _populate_form(self, item: ListItem | None) -> None:
         """Fill the pattern, match-type, and case-sensitivity fields from a list item."""
@@ -223,7 +283,7 @@ class WatchListModal(ModalBase[list[WatchListEntry] | None]):
         self._dirty = True
         try:
             self.query_one("#watch-help", Static).update(
-                "[bold]Unsaved changes[/bold] | Ctrl+S save | Esc discards edits"
+                "[bold]Unsaved changes[/bold] | Esc discards edits"
             )
         except NoMatches:
             return

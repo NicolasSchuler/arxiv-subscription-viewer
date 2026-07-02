@@ -15,7 +15,6 @@ from arxiv_browser.browser.core import ArxivBrowser
 from arxiv_browser.empty_state import build_list_empty_message
 from arxiv_browser.modals.collections import CollectionsModal
 from arxiv_browser.modals.editing import PaperEditResult
-from arxiv_browser.modals.search import CommandPaletteModal
 from arxiv_browser.models import PaperCollection, PaperMetadata, WatchListEntry
 from arxiv_browser.palette import truncate_palette_text
 from arxiv_browser.semantic_scholar import S2RecommendationsCacheSnapshot, SemanticScholarPaper
@@ -103,7 +102,7 @@ class TestLibraryActionBehavior:
         assert app._config.watch_list == [old_entry]
         app._compute_watched_papers.assert_not_called()
         app._apply_filter.assert_not_called()
-        assert "Failed to save watch list" in app.notify.call_args.args[0]
+        assert "Could not save the watch list" in app.notify.call_args.args[0]
 
     def test_manage_watch_list_success_clears_empty_watch_filter(self) -> None:
         app = _new_app_stub()
@@ -250,49 +249,11 @@ class TestLibraryActionBehavior:
         app._apply_filter.assert_not_called()
 
 
-class _FakeOptionList:
-    def __init__(self, options: list[SimpleNamespace], highlighted: int | None = 0) -> None:
-        self._options = options
-        self.option_count = len(options)
-        self.highlighted = highlighted
-
-    def get_option_at_index(self, index: int) -> SimpleNamespace:
-        return self._options[index]
-
-
 class TestSearchModalBehavior:
     def test_truncate_palette_text_honors_short_max_len(self) -> None:
         assert truncate_palette_text("abcdef", 3) == "abc"
         assert truncate_palette_text("abcdef", 2) == "ab"
         assert truncate_palette_text("abcdef", 1) == "a"
-
-    def test_highlight_first_enabled_handles_all_disabled(self) -> None:
-        option_list = _FakeOptionList(
-            [SimpleNamespace(disabled=True), SimpleNamespace(disabled=True)],
-            highlighted=0,
-        )
-        CommandPaletteModal._highlight_first_enabled(option_list)  # type: ignore[arg-type]
-        assert option_list.highlighted is None
-
-    def test_option_selection_and_enter_guards(self) -> None:
-        modal = CommandPaletteModal(commands=[])
-        modal.dismiss = MagicMock()
-        modal._on_option_selected(SimpleNamespace(option_id=None))
-        modal.dismiss.assert_not_called()
-
-        modal._on_option_selected(SimpleNamespace(option_id="run"))
-        modal.dismiss.assert_called_once_with("run")
-
-        modal.dismiss.reset_mock()
-        option_list = _FakeOptionList([SimpleNamespace(disabled=True, id="x")], highlighted=0)
-        modal.query_one = MagicMock(return_value=option_list)
-        modal.key_enter()
-        modal.dismiss.assert_not_called()
-
-        option_list = _FakeOptionList([SimpleNamespace(disabled=False, id="x")], highlighted=0)
-        modal.query_one = MagicMock(return_value=option_list)
-        modal.key_enter()
-        modal.dismiss.assert_called_once_with("x")
 
 
 class TestCollectionsModalBehavior:
@@ -473,7 +434,7 @@ class TestLlmActionBehavior:
             call.args == ("partial auto-tag results",)
             for call in app._save_config_or_warn.call_args_list
         )
-        assert "1 tagged before error" in app.notify.call_args.args[0]
+        assert "1 paper(s) were tagged before" in app.notify.call_args.args[0]
         assert app.notify.call_args.kwargs["severity"] == "error"
         assert app._auto_tag_active is False
         assert app._auto_tag_progress is None

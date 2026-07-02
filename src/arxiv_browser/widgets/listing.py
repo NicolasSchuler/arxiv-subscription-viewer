@@ -8,6 +8,7 @@ from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any
 
+from rich.cells import cell_len
 from textual.app import ComposeResult
 from textual.css.query import NoMatches
 from textual.widgets import ListItem, Static
@@ -43,9 +44,16 @@ PREVIEW_ABSTRACT_MAX_LEN = 150  # Max abstract preview length in list items
 # pre-measurement fallback (≈ the list pane at the narrow breakpoint); once the
 # pane has a real width the budget is derived via ``meta_line_budget_for``.
 META_LINE_BUDGET = 78
-META_LINE_BUDGET_MIN = 36
+META_LINE_BUDGET_MIN = 20
 META_LINE_BUDGET_MAX = 120
-META_LINE_BORDER_PAD = 4  # list-pane border + scrollbar gutter subtracted from width
+# Columns the ``#paper-list`` OptionList steals from its *own* measured width
+# before row text is drawn: the stable scrollbar gutter (2) + the highlighted
+# row's ``border-left`` (1). ``meta_line_budget_for`` is fed the OptionList's
+# real ``size.width`` (see ``_build_paper_row_state``), so only these per-row
+# chrome cells remain. Budgeting on the tighter, highlighted-row width keeps the
+# ``+N`` overflow marker inline instead of wrapping onto its own line on the
+# focused row (style guide §8).
+META_LINE_BORDER_PAD = 3
 _RICH_TAG_RE = re.compile(r"\[[^\]]*]")
 
 
@@ -223,46 +231,92 @@ def _join_meta_parts(parts: list[str]) -> str:
     return "  ".join(parts)
 
 
-def _compress_meta_parts(parts: list[str], budget: int = META_LINE_BUDGET) -> str:
-    """Compress metadata by dropping lowest-priority tail parts and showing +N."""
+def _compress_meta_parts(
+    parts: list[str],
+    budget: int = META_LINE_BUDGET,
+    *,
+    flex_index: int | None = None,
+) -> str:
+    """Compress metadata by dropping lowest-priority tail parts and showing +N.
+
+    ``flex_index`` marks a single space-joined "shrinkable" part (the category
+    group). When dropping whole trailing parts is not enough to fit the ``+N``
+    marker on one line, its trailing tokens are shed one at a time so the marker
+    stays inline (style guide §8: truncate, don't wrap) instead of wrapping.
+    """
     if not parts:
         return ""
     rendered = _join_meta_parts(parts)
     if _visible_text_length(rendered) <= budget:
         return rendered
 
+    def _protect_flex(kept: list[str]) -> bool:
+        # Stop dropping whole parts once the flex (category) part is the tail so
+        # it can be token-shrunk instead of removed outright, preserving the
+        # arXiv category under width pressure.
+        return flex_index is not None and len(kept) - 1 <= flex_index
+
     kept = parts.copy()
     removed = 0
     while len(kept) > 1 and _visible_text_length(_join_meta_parts(kept)) > budget:
+        if _protect_flex(kept):
+            break
         kept.pop()
         removed += 1
 
-    if removed > 0:
+    if removed > 0 or _protect_flex(kept):
         summary = f"[dim]+{removed}[/]"
         while len(kept) > 1 and _visible_text_length(_join_meta_parts([*kept, summary])) > budget:
+            if _protect_flex(kept):
+                break
             kept.pop()
             removed += 1
             summary = f"[dim]+{removed}[/]"
-        candidate = _join_meta_parts([*kept, summary])
-        if _visible_text_length(candidate) <= budget:
-            return candidate
+
+        if (
+            flex_index is not None
+            and len(kept) - 1 == flex_index
+            and _visible_text_length(_join_meta_parts([*kept, summary])) > budget
+        ):
+            tokens = kept[-1].split(" ")
+            while len(tokens) > 1:
+                tokens.pop()
+                removed += 1
+                summary = f"[dim]+{removed}[/]"
+                shrunk = [*kept[:-1], " ".join(tokens), summary]
+                if _visible_text_length(_join_meta_parts(shrunk)) <= budget:
+                    return _join_meta_parts(shrunk)
+            kept[-1] = " ".join(tokens)
+
+        if removed > 0:
+            candidate = _join_meta_parts([*kept, summary])
+            if _visible_text_length(candidate) <= budget:
+                return candidate
 
     return _truncate_visible_text(_join_meta_parts(kept), budget)
 
 
-def _build_meta_parts(state: PaperRowRenderState) -> list[str]:
-    """Build ordered metadata parts with deterministic priority."""
+def _build_meta_parts(state: PaperRowRenderState) -> tuple[list[str], int]:
+    """Build ordered metadata parts with deterministic priority.
+
+    Returns the parts plus the index of the category group — a single
+    space-joined part the compressor may token-shrink under width pressure so
+    the ``+N`` overflow marker stays inline (style guide §8).
+    """
     parts: list[str] = []
     provider = getattr(state.paper, "provider", ARXIV_PROVIDER)
     if provider != ARXIV_PROVIDER:
         parts.append(f"[{state.theme_colors['orange']}]{provider_display_name(provider)}[/]")
     elif state.paper.source == "api":
         parts.append(f"[{state.theme_colors['orange']}]API[/]")
-    parts.extend(
-        [
-            f"[dim]{state.paper.arxiv_id}[/]",
-            format_categories(state.paper.categories, state.category_colors),
-        ]
+    parts.append(f"[dim]{state.paper.arxiv_id}[/]")
+    category_index = len(parts)
+    parts.append(
+        format_categories(
+            state.paper.categories,
+            state.category_colors,
+            default_color=state.theme_colors.get("muted"),
+        )
     )
     review_label = review_status_label(state.metadata, date.today())
     if review_label:
@@ -303,21 +357,41 @@ def _build_meta_parts(state: PaperRowRenderState) -> list[str]:
             for tag in tags
         )
         parts.append(tag_str)
-    return parts
+    return parts, category_index
+
+
+def _leading_badge_markup(glyph: str, color: str) -> str:
+    """Return a colored leading title badge followed by exactly one visible gap.
+
+    Double-width emoji (e.g. the star ``⭐``) get an extra trailing space so the
+    glyph does not visually collide with the next token; the visible gap then
+    matches the single-width badges (e.g. the read check ``✓``) instead of
+    reading as glued to the title.
+    """
+    gap = "  " if cell_len(glyph) > 1 else " "
+    return f"[{color}]{glyph}[/]{gap}"
 
 
 def _render_title_line(state: PaperRowRenderState) -> str:
     """Build the title line with selection/watch/star/read indicators."""
     prefix_parts: list[str] = []
     if state.selected:
-        prefix_parts.append(f"[{state.theme_colors['green']}]{_ACTIVE_ICON_SET['selected']}[/]")
+        prefix_parts.append(
+            _leading_badge_markup(_ACTIVE_ICON_SET["selected"], state.theme_colors["green"])
+        )
     if state.watched:
-        prefix_parts.append(f"[{state.theme_colors['orange']}]{_ACTIVE_ICON_SET['watched']}[/]")
+        prefix_parts.append(
+            _leading_badge_markup(_ACTIVE_ICON_SET["watched"], state.theme_colors["orange"])
+        )
     if state.metadata and state.metadata.starred:
-        prefix_parts.append(f"[{state.theme_colors['yellow']}]{_ACTIVE_ICON_SET['starred']}[/]")
+        prefix_parts.append(
+            _leading_badge_markup(_ACTIVE_ICON_SET["starred"], state.theme_colors["yellow"])
+        )
     if state.metadata and state.metadata.is_read:
-        prefix_parts.append(f"[{state.theme_colors['muted']}]{_ACTIVE_ICON_SET['read']}[/]")
-    prefix = " ".join(prefix_parts)
+        prefix_parts.append(
+            _leading_badge_markup(_ACTIVE_ICON_SET["read"], state.theme_colors["muted"])
+        )
+    prefix = "".join(prefix_parts)
 
     title_text = highlight_text(
         state.paper.title,
@@ -326,7 +400,8 @@ def _render_title_line(state: PaperRowRenderState) -> str:
     )
     if state.metadata and state.metadata.is_read:
         title_text = f"[dim]{title_text}[/]"
-    return f"{prefix} {title_text}" if prefix else title_text
+    # ``prefix`` already ends with its own trailing gap (see _leading_badge_markup).
+    return f"{prefix}{title_text}" if prefix else title_text
 
 
 def _relevance_badge_parts(
@@ -360,7 +435,12 @@ def _triage_badge_color(
 
 def _render_meta_badges(state: PaperRowRenderState) -> str:
     """Build the meta line with arxiv_id, categories, and badges."""
-    return _compress_meta_parts(_build_meta_parts(state), budget=state.meta_line_budget)
+    parts, category_index = _build_meta_parts(state)
+    return _compress_meta_parts(
+        parts,
+        budget=state.meta_line_budget,
+        flex_index=category_index,
+    )
 
 
 def _render_abstract_preview(state: PaperRowRenderState) -> str:

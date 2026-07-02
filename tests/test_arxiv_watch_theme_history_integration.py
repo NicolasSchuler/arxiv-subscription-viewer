@@ -134,7 +134,7 @@ class TestWatchListActions:
         assert app._config.watch_list == old_entries
         app._compute_watched_papers.assert_not_called()
         app._apply_filter.assert_not_called()
-        assert "Failed to save watch list" in app.notify.call_args[0][0]
+        assert "Could not save the watch list" in app.notify.call_args[0][0]
 
     def test_manage_watch_list_disables_active_filter_when_new_watch_list_matches_nothing(self):
         app = self._make_mock_app()

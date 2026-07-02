@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any
 
@@ -142,6 +142,7 @@ class DetailRenderState:
     review_stage: int | None = None
     line_annotations: tuple[LineAnnotation, ...] = ()
     detail_line_cursor: int | None = None
+    detail_focus: bool = True
     collapsed_sections: tuple[str, ...] = ()
     detail_mode: str = "full"
     theme_colors: Mapping[str, str] = field(default_factory=lambda: dict(DEFAULT_THEME))
@@ -177,6 +178,7 @@ def _normalize_detail_state(state: DetailRenderState) -> DetailRenderState:
         review_stage=state.review_stage,
         line_annotations=tuple(state.line_annotations or ()),
         detail_line_cursor=state.detail_line_cursor,
+        detail_focus=state.detail_focus,
         collapsed_sections=tuple(state.collapsed_sections or ()),
         detail_mode=state.detail_mode,
         theme_colors=dict(state.theme_colors or DEFAULT_THEME),
@@ -290,6 +292,7 @@ def _detail_cache_key_for_state(state: DetailRenderState) -> tuple:
         state.review_stage,
         tuple((annotation.line, annotation.text) for annotation in state.line_annotations),
         state.detail_line_cursor,
+        state.detail_focus,
         state.collapsed_sections,
         state.detail_mode,
         tuple(sorted(state.theme_colors.items())),
@@ -399,35 +402,14 @@ class PaperDetails(Static):
             self.update("[dim italic]Select a paper to view details[/]")
             return
 
-        state = DetailRenderState(
-            paper=paper,
-            abstract_text=resolved_state.abstract_text,
-            abstract_loading=resolved_state.abstract_loading,
-            summary=resolved_state.summary,
-            summary_loading=resolved_state.summary_loading,
-            highlight_terms=resolved_state.highlight_terms,
-            s2_data=resolved_state.s2_data,
-            s2_loading=resolved_state.s2_loading,
-            hf_data=resolved_state.hf_data,
-            version_update=resolved_state.version_update,
-            summary_mode=resolved_state.summary_mode,
-            tags=resolved_state.tags,
-            relevance=resolved_state.relevance,
-            submission_targets=resolved_state.submission_targets,
-            deadline_countdown_key=resolved_state.deadline_countdown_key,
-            is_read=resolved_state.is_read,
-            starred=resolved_state.starred,
-            next_review_date=resolved_state.next_review_date,
-            review_stage=resolved_state.review_stage,
-            line_annotations=resolved_state.line_annotations,
-            detail_line_cursor=resolved_state.detail_line_cursor,
-            collapsed_sections=resolved_state.collapsed_sections,
-            detail_mode=resolved_state.detail_mode,
+        # Only the three colour maps are resolved against the widget's live theme;
+        # every other field passes through unchanged (including detail_focus).
+        state = replace(
+            resolved_state,
             theme_colors=theme_colors_for(self, resolved_state.theme_colors),
             category_colors=category_colors_for(self, resolved_state.category_colors),
             tag_namespace_colors=tag_namespace_colors_for(
-                self,
-                resolved_state.tag_namespace_colors,
+                self, resolved_state.tag_namespace_colors
             ),
         )
 
@@ -485,7 +467,7 @@ class PaperDetails(Static):
         markup = _render_line_annotations(
             markup,
             state.line_annotations,
-            state.detail_line_cursor,
+            state.detail_line_cursor if state.detail_focus else None,
             state.theme_colors,
         )
 
@@ -544,7 +526,11 @@ class PaperDetails(Static):
             _detail_kv_line("Date", safe_date, colors),
             _detail_kv_line(
                 "Categories",
-                format_categories(paper.categories, resolved_category_colors),
+                format_categories(
+                    paper.categories,
+                    resolved_category_colors,
+                    default_color=colors.get("muted"),
+                ),
                 colors,
             ),
         ]
@@ -558,6 +544,11 @@ class PaperDetails(Static):
         Only *active* signals are shown. An untouched paper produces an empty
         strip (filtered out by the section join) so the title and abstract lead
         the pane instead of a muted ``Read:no Star:no Tags:none`` wall.
+
+        Every token uses the single ``label: value`` idiom (via
+        ``_decision_part``) with the semantic role color on the label, so the
+        strip reads as one consistent set of chips rather than a mix of spaced
+        (``Star: yes``) and glued (``S2:42``) tokens.
         """
         colors = theme_colors_for(self, self._theme_colors)
         parts: list[str] = []
@@ -582,16 +573,18 @@ class PaperDetails(Static):
                 _decision_part("Rel", f"[{score_color}]{score_sym}{score}/10[/]", score_color)
             )
         if state.s2_loading:
-            parts.append(f"[{colors['green']}]S2:loading[/]")
+            parts.append(_decision_part("S2", "loading", colors["green"]))
         elif state.s2_data is not None:
-            parts.append(f"[{colors['green']}]S2:{state.s2_data.citation_count}[/]")
+            parts.append(_decision_part("S2", str(state.s2_data.citation_count), colors["green"]))
         if state.hf_data is not None:
             hf_upvotes = _ACTIVE_DETAIL_GLYPHS["hf_upvotes"]
-            parts.append(f"[{colors['orange']}]HF:{hf_upvotes}{state.hf_data.upvotes}[/]")
+            parts.append(
+                _decision_part("HF", f"{hf_upvotes}{state.hf_data.upvotes}", colors["orange"])
+            )
         if state.version_update is not None:
             old_v, new_v = state.version_update
             version_arrow = _ACTIVE_DETAIL_GLYPHS["version_arrow"]
-            parts.append(f"[{colors['pink']}]v{old_v}{version_arrow}v{new_v}[/]")
+            parts.append(_decision_part("Ver", f"v{old_v}{version_arrow}v{new_v}", colors["pink"]))
         return "  ".join(parts)
 
     def _render_abstract(
@@ -972,11 +965,17 @@ class PaperDetails(Static):
         paper: Paper,
         theme_colors: Mapping[str, str] | None = None,
     ) -> str:
-        """Return Rich markup for the paper URL footer."""
+        """Return Rich markup for the paper URL footer.
+
+        URL is always visible (not in ``DETAIL_SECTION_KEYS``, so uncollapsible) but
+        uses the same bold + expanded-arrow + ``accent`` section-header treatment as
+        the collapsible sections. Avoids the ``pink`` category/tag role per §6.
+        """
         resolved_theme_colors = theme_colors or theme_colors_for(self, self._theme_colors)
+        expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
         safe_url = escape_rich_text(paper.url)
         return (
-            f"[bold {resolved_theme_colors['pink']}]URL[/]\n"
+            f"[bold {resolved_theme_colors['accent']}]{expanded_glyph} URL[/]\n"
             f"  [{resolved_theme_colors['accent']}]{safe_url}[/]"
         )
 

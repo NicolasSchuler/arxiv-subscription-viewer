@@ -237,12 +237,11 @@ async def test_read_abstract_async_notifies_on_subprocess_failure(monkeypatch) -
 
     await run_current_task()
 
-    app.notify.assert_called_once_with(
-        "TTS playback failed: voice failed",
-        title="Audio",
-        severity="error",
-        timeout=8,
-    )
+    app.notify.assert_called_once()
+    message, kwargs = app.notify.call_args.args[0], app.notify.call_args.kwargs
+    assert "Could not read the abstract aloud" in message
+    assert "voice failed" in message
+    assert kwargs == {"title": "Audio", "severity": "error", "timeout": 8}
     assert app._tts_task is None
 
 

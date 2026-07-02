@@ -438,12 +438,13 @@ def to_rpn(tokens: list[QueryToken]) -> list[QueryToken]:
 def _format_categories_cached(
     categories: str,
     color_items: tuple[tuple[str, str], ...],
+    default_color: str = DEFAULT_CATEGORY_COLOR,
 ) -> str:
     """Format categories with colors for a specific resolved palette."""
     category_colors = dict(color_items)
     parts = []
     for cat in categories.split():
-        color = category_colors.get(cat, DEFAULT_CATEGORY_COLOR)
+        color = category_colors.get(cat, default_color)
         parts.append(f"[{color}]{cat}[/]")
     return " ".join(parts)
 
@@ -451,10 +452,20 @@ def _format_categories_cached(
 def format_categories(
     categories: str,
     category_colors: Mapping[str, str] | None = None,
+    default_color: str | None = None,
 ) -> str:
-    """Format categories with colors using the provided or default palette."""
+    """Format categories with colors using the provided or default palette.
+
+    ``default_color`` styles categories missing from the palette; pass the active
+    theme's muted colour so unknown categories stay legible (the static
+    ``DEFAULT_CATEGORY_COLOR`` grey fails WCAG AA on light themes).
+    """
     palette = category_colors or DEFAULT_CATEGORY_COLORS
-    return _format_categories_cached(categories, tuple(sorted(palette.items())))
+    return _format_categories_cached(
+        categories,
+        tuple(sorted(palette.items())),
+        default_color or DEFAULT_CATEGORY_COLOR,
+    )
 
 
 format_categories.cache_clear = _format_categories_cached.cache_clear  # type: ignore[attr-defined]

@@ -39,10 +39,10 @@ HeaderTitle {
     background: $th-panel;
 }
 
+/* Focused pane gets a heavier border (not just an accent colour) so the active
+   pane is distinguishable without relying on colour, in ASCII and no-colour. */
 #left-pane:focus-within {
-    border: solid $th-highlight;
-    border-left: solid $th-accent;
-    border-top: solid $th-accent;
+    border: heavy $th-accent;
 }
 
 #right-pane {
@@ -54,9 +54,7 @@ HeaderTitle {
 }
 
 #right-pane:focus-within {
-    border: solid $th-highlight;
-    border-left: solid $th-accent;
-    border-top: solid $th-accent;
+    border: heavy $th-accent;
 }
 
 Screen.pane-split-1 #left-pane {
@@ -143,6 +141,22 @@ Screen.-narrow.pane-split-4 #left-pane {
 
 Screen.-narrow.pane-split-4 #right-pane {
     height: 1fr;
+}
+
+/* Reclaim vertical space when stacked: single-row pane headers and a floor on
+   the list pane so the paper list keeps usable rows even at 80x24. */
+Screen.-narrow #list-header,
+Screen.-narrow #details-header {
+    padding: 0 1;
+}
+
+/* Guarantee the stacked list shows >= 3 paper rows (each option is ~3 lines)
+   even when the detail pane wants more room. The absolute floor overrides the
+   pane_split fr shares below it, so the guarantee holds at every preset; the
+   detail pane below shrinks to its remaining space (and scrolls) instead of
+   reserving blank rows that starve the list. */
+Screen.-narrow #left-pane {
+    min-height: 16;
 }
 
 #list-header {
@@ -275,13 +289,13 @@ APP_HORIZONTAL_BREAKPOINTS: list[tuple[int, str]] = [
 #   c  copy            d  download         P  PDF         F  preview PDF
 #   I  preview figure  z  compact list
 #   v  detail mode     w  watch filter     W  watch list  A  API search
-#   y  read aloud      1-9  bookmarks      Ctrl+b  add bookmark
+#   1-9  bookmarks     Ctrl+b  add bookmark
 #
 # Power (remaining) - discoverable via command palette (Ctrl+p).
 #   m/'  marks          R  similar          G  citation graph
 #   V    versions       e  S2 fetch         Ctrl+s  AI summary
-#   C    chat           Ctrl+v compare      Ctrl+p  debate/remix
-#   L    relevance
+#   C    chat           Ctrl+v compare      debate/remix (palette-only)
+#   L    relevance      y  read aloud
 #   Ctrl+g  auto-tag
 #   Ctrl+t  theme       Ctrl+d  sections    Ctrl+k  collections
 #   Ctrl+h  HF toggle   Ctrl+e  S2 toggle   Ctrl+l  interests
@@ -348,7 +362,7 @@ APP_BINDINGS: list[BindingType] = [
     Binding("E", "export_menu", "Export...", show=False),
     Binding("d", "download_pdf", "Download", show=False),
     # Paper similarity
-    Binding("R", "show_similar", "Similar", show=False),
+    Binding("R", "show_similar", "Similar papers", show=False),
     # LLM summary & chat
     Binding("ctrl+s", "generate_summary", "AI Summary", show=False),
     Binding("C", "chat_with_paper", "Chat", show=False),

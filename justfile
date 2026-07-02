@@ -62,6 +62,22 @@ snapshots:
 # Regenerate Textual SVG screenshot baselines after visual inspection
 snapshots-update:
     uv run python scripts/render_tui_snapshots.py --update
+    just hero-png
+
+# Regenerate the raster hero image (docs/screenshot_preview.png) from the hero SVG
+# so the README / docs/index.html hero can never drift from the current UI.
+hero-png:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v rsvg-convert >/dev/null 2>&1; then
+        rsvg-convert -w 1200 -h 680 docs/screenshot.svg -o docs/screenshot_preview.png
+    elif command -v magick >/dev/null 2>&1; then
+        magick -background none -density 144 docs/screenshot.svg -resize 1200x680\! docs/screenshot_preview.png
+    else
+        echo "error: install rsvg-convert (librsvg) or ImageMagick to regenerate docs/screenshot_preview.png" >&2
+        exit 1
+    fi
+    echo "Regenerated docs/screenshot_preview.png from docs/screenshot.svg (1200x680)"
 
 # Run performance benchmarks
 bench:

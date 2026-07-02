@@ -28,6 +28,17 @@ class TestGetCompletionScript:
         for flag in ("query", "field", "category"):
             assert flag in script
 
+    @pytest.mark.parametrize("shell", ["bash", "zsh", "fish"])
+    def test_script_advertises_theme_option(self, shell: str) -> None:
+        from arxiv_browser.themes import THEME_NAMES
+
+        script = get_completion_script(shell)
+        assert "theme" in script
+        # Real theme names are interpolated, not left as a placeholder.
+        assert "__ARXIV_THEME_NAMES__" not in script
+        for name in THEME_NAMES:
+            assert name in script
+
     def test_unsupported_shell_raises(self) -> None:
         with pytest.raises(ValueError, match=r"Unsupported shell.*powershell"):
             get_completion_script("powershell")

@@ -210,9 +210,17 @@ class HelpScreen(ModalBase[None]):
         return [(n, e) for n, e in self._sections if _classify_section(n) == tab_id]
 
     def _render_section_lines(self, entries: list[tuple[str, str]]) -> str:
-        """Render key-description pairs as theme-coloured markup lines."""
+        """Render key-description pairs as theme-coloured markup lines.
+
+        Keys are padded to a fixed column width (outside the colour markup) so
+        the description column stays aligned instead of running ragged.
+        """
         green = theme_colors_for(self)["green"]
-        lines = [f"  [{green}]{key}[/]  {description}" for key, description in entries]
+        key_width = min(max((len(key) for key, _ in entries), default=0), 12)
+        lines = [
+            f"  [{green}]{key}[/]{' ' * max(0, key_width - len(key))}  {description}"
+            for key, description in entries
+        ]
         return "\n".join(lines)
 
     def _filter_sections(self, query: str) -> list[tuple[str, list[tuple[str, str]]]]:

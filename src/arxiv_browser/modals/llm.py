@@ -187,7 +187,7 @@ class ResearchInterestsModal(ModalBase[str]):
                 yield Button("Cancel", variant="default", id="cancel-btn")
                 yield Button("Save (Ctrl+S)", variant="primary", id="save-btn")
             yield Static(
-                "Ctrl+S save | Esc cancel", id="interests-keys-help", classes="modal-footer"
+                "Ctrl+S save | Cancel: Esc", id="interests-keys-help", classes="modal-footer"
             )
 
     def on_mount(self) -> None:
@@ -269,7 +269,7 @@ class PaperRemixResultModal(ModalBase[None]):
             yield Static(self._format_sources(), id="paper-remix-sources", markup=False)
             with VerticalScroll(id="paper-remix-body"):
                 yield Static(self._result_text, markup=False)
-            yield Static("Esc/q close", id="paper-remix-help", classes="modal-footer")
+            yield Static("Close: Esc/q", id="paper-remix-help", classes="modal-footer")
 
     def _format_sources(self) -> str:
         """Return a compact plain-text source list."""
@@ -336,7 +336,7 @@ class PaperDebateResultModal(ModalBase[None]):
             yield Static(self._format_source(), id="paper-debate-source", markup=False)
             with VerticalScroll(id="paper-debate-body"):
                 yield Static(self._format_debate_body(), id="paper-debate-thread")
-            yield Static("Esc/q close", id="paper-debate-help", classes="modal-footer")
+            yield Static("Close: Esc/q", id="paper-debate-help", classes="modal-footer")
 
     def _format_source(self) -> str:
         """Return a compact plain-text source label."""
@@ -454,7 +454,7 @@ class PaperComparisonScreen(ModalBase[None]):
             with VerticalScroll(id="paper-comparison-ai-output"):
                 yield Static("", id="paper-comparison-ai-text")
             yield Static(
-                "g AI compare | Esc/q close", id="paper-comparison-help", classes="modal-footer"
+                "g AI compare | Close: Esc/q", id="paper-comparison-help", classes="modal-footer"
             )
 
     def _format_paper_column(self, index: int, paper: Paper) -> str:
@@ -742,8 +742,8 @@ class PaperChatScreen(ModalBase[None]):
                 return
             if chunk.delta:
                 if not streaming_status_shown:
-                    # Replace the contradictory "Thinking…" with a live status.
-                    self._update_chat_status("Streaming…")
+                    # Replace the contradictory "Thinking..." with a live status.
+                    self._update_chat_status("Streaming..." if is_ascii_mode() else "Streaming…")
                     streaming_status_shown = True
                 parts.append(chunk.delta)
                 # Trailing cursor distinguishes active streaming from a stall.

@@ -111,7 +111,7 @@ SOLARIZED_DARK_THEME: dict[str, str] = {
 SOLARIZED_LIGHT_THEME: dict[str, str] = {
     "background": "#fdf6e3",
     "panel": "#eee8d5",
-    "panel_alt": "#e3dcc8",
+    "panel_alt": "#d6cdb0",
     "border": "#93a1a1",
     "text": "#073642",
     "muted": "#405a60",
@@ -122,10 +122,13 @@ SOLARIZED_LIGHT_THEME: dict[str, str] = {
     "orange": "#9a4b00",
     "pink": "#b0005b",
     "purple": "#5f4b9a",
-    "highlight": "#eee8d5",
-    "highlight_focus": "#d7e7ec",
-    "selection": "#dce8cf",
-    "selection_highlight": "#c9ddb8",
+    # Selection/highlight backgrounds darkened to a clear step below the cream
+    # surface so the cursor/selected row is unmistakable on this light theme
+    # (text stays WCAG AA; see test_theme_contrast).
+    "highlight": "#a8cbd3",
+    "highlight_focus": "#93b9c2",
+    "selection": "#c0d5ac",
+    "selection_highlight": "#aec69a",
     "scrollbar_background": "#eee8d5",
     "scrollbar_background_hover": "#e3dcc8",
     "scrollbar_background_active": "#d6ceb8",
@@ -300,7 +303,7 @@ EVERFOREST_DARK_THEME: dict[str, str] = {
 GITHUB_LIGHT_THEME: dict[str, str] = {
     "background": "#ffffff",
     "panel": "#f6f8fa",
-    "panel_alt": "#eaeef2",
+    "panel_alt": "#d3dde7",
     "border": "#8c959f",
     "text": "#24292f",
     "muted": "#57606a",
@@ -311,10 +314,13 @@ GITHUB_LIGHT_THEME: dict[str, str] = {
     "orange": "#bc4c00",
     "pink": "#bf3989",
     "purple": "#8250df",
-    "highlight": "#eaeef2",
-    "highlight_focus": "#d0d7de",
-    "selection": "#ddf4ff",
-    "selection_highlight": "#b6e3ff",
+    # Selection/highlight backgrounds darkened to a clear step below the near-white
+    # surface so the cursor/selected row is unmistakable on this light theme
+    # (text stays WCAG AA; see test_theme_contrast).
+    "highlight": "#a0d0ff",
+    "highlight_focus": "#7fbdf5",
+    "selection": "#c2e2fb",
+    "selection_highlight": "#9fd0f5",
     "scrollbar_background": "#eaeef2",
     "scrollbar_background_hover": "#d0d7de",
     "scrollbar_background_active": "#afb8c1",

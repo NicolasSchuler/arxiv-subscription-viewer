@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import VerticalScroll
+from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Label, Static
 
+from arxiv_browser._ascii import is_ascii_mode
 from arxiv_browser.modals.base import ModalBase
 from arxiv_browser.themes import theme_colors_for
 
@@ -24,7 +25,10 @@ class WelcomeScreen(ModalBase[None]):
     CSS = """
     #welcome-dialog {
         width: 60;
+        height: auto;
         max-height: 80%;
+        /* The dialog itself does not scroll — title, subtitle, and footer stay
+           pinned; only the content between them scrolls when space is tight. */
     }
 
     #welcome-title {
@@ -36,6 +40,10 @@ class WelcomeScreen(ModalBase[None]):
         text-align: center;
         color: $th-muted;
         margin-bottom: 1;
+    }
+
+    #welcome-scroll {
+        height: 1fr;
     }
 
     .welcome-keys {
@@ -52,18 +60,25 @@ class WelcomeScreen(ModalBase[None]):
 
     def compose(self) -> ComposeResult:
         """Yield a focused welcome dialog with essential keybindings."""
-        with VerticalScroll(id="welcome-dialog", classes="modal-dialog"):
+        with Vertical(id="welcome-dialog", classes="modal-dialog"):
             yield Label("Welcome to arXiv Viewer", id="welcome-title", classes="modal-title")
             yield Label(
                 "Here are the essential shortcuts to get started:",
                 id="welcome-subtitle",
             )
-            yield Static(id="welcome-content")
+            with VerticalScroll(id="welcome-scroll"):
+                yield Static(id="welcome-content")
             yield Label(
-                "Press Enter / Space / Esc to start, or ? for full help",
+                self._footer_text(),
                 id="welcome-footer",
                 classes="modal-footer",
             )
+
+    @staticmethod
+    def _footer_text() -> str:
+        """Return a compact, width-safe dismiss hint (ASCII-aware separator)."""
+        sep = "-" if is_ascii_mode() else "·"
+        return f"Enter / Esc: start {sep} ?: full help"
 
     def on_mount(self) -> None:
         """Populate the welcome content with themed keybinding hints."""
@@ -76,13 +91,13 @@ class WelcomeScreen(ModalBase[None]):
                 "Navigate",
                 [
                     ("j / k", "Move up and down"),
-                    ("[ / ]", "Change dates (history mode)"),
                 ],
             ),
             (
                 "Search",
                 [
                     ("/", "Search and filter papers"),
+                    ("A", "Search all arXiv"),
                     ("Ctrl+p", "Open command palette"),
                 ],
             ),
@@ -91,7 +106,7 @@ class WelcomeScreen(ModalBase[None]):
                 [
                     ("Space", "Select paper"),
                     ("o", "Open in browser"),
-                    ("r / x", "Mark read / star"),
+                    ("r / x", "Toggle read / star"),
                     ("E", "Export selected papers"),
                 ],
             ),
@@ -104,8 +119,10 @@ class WelcomeScreen(ModalBase[None]):
         ]
 
         lines: list[str] = []
-        for section_name, entries in sections:
-            lines.append(f"\n[{accent}]{section_name}[/]")
+        for index, (section_name, entries) in enumerate(sections):
+            if index:
+                lines.append("")
+            lines.append(f"[{accent}]{section_name}[/]")
             for key, desc in entries:
                 lines.append(f"  [{green}]{key:<12}[/]  {desc}")
 

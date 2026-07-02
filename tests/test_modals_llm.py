@@ -416,6 +416,45 @@ async def test_chat_screen_streaming_updates_single_assistant_message(make_paper
 
 
 @pytest.mark.asyncio
+async def test_chat_streaming_status_is_ascii_in_ascii_mode(make_paper):
+    from arxiv_browser import _ascii
+
+    app = ArxivBrowser([make_paper()], restore_session=False)
+
+    class _AsciiStreamingProvider:
+        def __init__(self) -> None:
+            self.execute = AsyncMock()
+
+        async def execute_stream(self, prompt: str, timeout: int):
+            yield LLMChunk(delta="Hi")
+            yield LLMChunk(done=True)
+
+    screen = PaperChatScreen(
+        make_paper(title="ascii stream"),
+        _AsciiStreamingProvider(),
+        "content",
+        streaming_enabled=True,
+    )
+
+    statuses: list[str] = []
+    _ascii.set_ascii_mode(True)
+    try:
+        async with app.run_test() as pilot:
+            app.push_screen(screen)
+            await pilot.pause(0.05)
+            screen._update_chat_status = statuses.append  # type: ignore[method-assign]
+            screen._add_message("user", "Explain")
+            screen._waiting = True
+            await screen._ask_llm("Explain")
+            await pilot.pause(0)
+    finally:
+        _ascii.set_ascii_mode(False)
+
+    assert any("Streaming" in text for text in statuses)
+    assert all(all(ord(char) < 128 for char in text) for text in statuses)
+
+
+@pytest.mark.asyncio
 async def test_chat_screen_long_conversation_history(make_paper):
     """A conversation with 20+ exchanges doesn't crash and history is maintained."""
     app = ArxivBrowser([make_paper()], restore_session=False)

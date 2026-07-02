@@ -10,22 +10,19 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 from textual.events import Click
-from textual.widgets import Checkbox, Input, Label, ListView, Select, Static
+from textual.widgets import Button, Checkbox, Input, Label, ListView, Select, Static
 
 from arxiv_browser.browser.core import ArxivBrowser
 from arxiv_browser.citation_genealogy import GenealogyNode, GenealogyPaper, GenealogyRoot
 from arxiv_browser.modals import (
-    ArxivSearchModal,
     CitationGraphScreen,
     CollectionsModal,
-    CommandPaletteModal,
     RecommendationsScreen,
     WatchListModal,
 )
 from arxiv_browser.modals.citations import _format_genealogy_label
 from arxiv_browser.models import (
     MAX_COLLECTIONS,
-    ArxivSearchRequest,
     PaperCollection,
     WatchListEntry,
 )
@@ -665,136 +662,6 @@ async def test_citation_graph_genealogy_tree_controls_and_labels(make_paper):
             assert len(captured) == 2
 
 
-@pytest.mark.asyncio
-async def test_arxiv_search_modal_validation_and_submit(make_paper):
-    app = ArxivBrowser([make_paper()], restore_session=False)
-    modal = ArxivSearchModal(initial_query="seed", initial_field="bad-field", initial_category="")
-
-    with patch_save_config(return_value=True):
-        async with app.run_test() as pilot:
-            await _open_modal(app, pilot, modal)
-            field_select = modal.query_one("#arxiv-search-field", Select)
-            assert field_select.value == "all"
-
-            modal.dismiss = MagicMock()
-            modal.query_one("#arxiv-search-query", Input).value = "transformers"
-            modal.query_one("#arxiv-search-category", Input).value = "cs.AI"
-            field_select.value = "title"
-            modal.action_search()
-
-            request = modal.dismiss.call_args[0][0]
-            assert isinstance(request, ArxivSearchRequest)
-            assert request.query == "transformers"
-            assert request.field == "title"
-            assert request.category == "cs.AI"
-
-            modal.dismiss.reset_mock()
-            modal.notify = MagicMock()
-            modal.query_one("#arxiv-search-query", Input).value = ""
-            modal.query_one("#arxiv-search-category", Input).value = ""
-            modal.action_search()
-            modal.notify.assert_called_once()
-            modal.dismiss.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_command_palette_modal_filters_and_executes(make_paper):
-    from arxiv_browser.palette import PaletteCommand
-
-    commands = [
-        PaletteCommand("Open Paper", "Open selected paper", "o", "open", "Core"),
-        PaletteCommand("Toggle Watch", "Toggle watch filter", "w", "watch", "Organize"),
-        PaletteCommand("Export CSV", "Export list as CSV", "E", "csv", "Core"),
-    ]
-    app = ArxivBrowser([make_paper()], restore_session=False)
-    modal = CommandPaletteModal(commands)
-
-    with patch_save_config(return_value=True):
-        async with app.run_test() as pilot:
-            await _open_modal(app, pilot, modal)
-            results = modal.query_one("#palette-results")
-            assert "Command palette" in str(modal.query_one(Label).content)
-            assert results.option_count == 4
-            assert "All commands" in str(results.get_option_at_index(0).prompt)
-            assert "Esc close" in str(modal.query_one("#palette-footer", Static).content)
-
-            modal._populate_results("watch")
-            assert results.option_count >= 1
-
-            modal.dismiss = MagicMock()
-            modal.key_enter()
-            assert modal.dismiss.called
-
-            modal.dismiss.reset_mock()
-            modal._populate_results("zzzzqzzzz")
-            assert results.option_count == 1
-            assert "No commands match" in str(results.get_option_at_index(0).prompt)
-            modal.key_enter()
-            modal.dismiss.assert_not_called()
-
-            modal.dismiss.reset_mock()
-            modal._on_option_selected(SimpleNamespace(option_id="csv"))
-            modal.dismiss.assert_called_once_with("csv")
-
-            modal.dismiss.reset_mock()
-            modal.action_cancel()
-            modal.dismiss.assert_called_once_with("")
-
-
-@pytest.mark.asyncio
-async def test_command_palette_groups_suggested_and_disabled_commands(make_paper):
-    from arxiv_browser.palette import PaletteCommand
-
-    commands = [
-        PaletteCommand(
-            "Suggested Action",
-            "Best next move",
-            "s",
-            "suggested",
-            "Core",
-            suggested=True,
-        ),
-        PaletteCommand("Regular Action", "Normal command", "r", "regular", "Core"),
-        PaletteCommand(
-            "Blocked Action",
-            "Unavailable command",
-            "b",
-            "blocked",
-            "Core",
-            enabled=False,
-            blocked_reason="No papers loaded",
-        ),
-    ]
-    app = ArxivBrowser([make_paper()], restore_session=False)
-    modal = CommandPaletteModal(commands)
-
-    with patch_save_config(return_value=True):
-        async with app.run_test() as pilot:
-            await _open_modal(app, pilot, modal)
-            results = modal.query_one("#palette-results")
-
-            prompts = [str(results.get_option_at_index(index).prompt) for index in range(5)]
-            assert "Suggested now" in prompts[0]
-            assert "Suggested Action" in prompts[1]
-            assert "All commands" in prompts[2]
-            assert "Regular Action" in prompts[3]
-            assert "Requires: No papers loaded" in prompts[4]
-            assert results.highlighted == 1
-
-            modal.dismiss = MagicMock()
-            results.highlighted = 4
-            modal.key_enter()
-            modal.dismiss.assert_not_called()
-
-            results.highlighted = 2
-            modal.key_enter()
-            modal.dismiss.assert_not_called()
-
-            results.highlighted = 3
-            modal.key_enter()
-            modal.dismiss.assert_called_once_with("regular")
-
-
 def test_read_only_modals_support_q_close_binding():
     from arxiv_browser.modals import (
         CitationGraphScreen,
@@ -976,8 +843,8 @@ async def test_watch_list_modal_add_update_delete_and_save(make_paper):
             match_type = modal.query_one("#watch-type", Select)
             case = modal.query_one("#watch-case", Checkbox)
             list_view = modal.query_one("#watch-list", ListView)
-            empty_hint = modal.query_one("#watch-empty", Static)
-            assert empty_hint.has_class("visible") is False
+            # With entries present there is no in-list empty placeholder.
+            assert not list_view.query("ListItem.-empty")
 
             modal.notify = MagicMock()
             pattern.value = ""
@@ -1017,10 +884,12 @@ async def test_watch_list_modal_update_delete_require_selection(make_paper):
     with patch_save_config(return_value=True):
         async with app.run_test() as pilot:
             await _open_modal(app, pilot, modal)
-            empty_hint = modal.query_one("#watch-empty", Static)
-            assert "No watch entries yet." in str(empty_hint.content)
-            assert "Try:" in str(empty_hint.content)
-            assert empty_hint.has_class("visible")
+            list_view = modal.query_one("#watch-list", ListView)
+            placeholder = list_view.query_one("ListItem.-empty Label", Label)
+            placeholder_text = str(placeholder.render())
+            assert "No watch entries yet." in placeholder_text
+            assert "Try:" in placeholder_text
+            assert "Next:" in placeholder_text
             modal.notify = MagicMock()
             modal.on_update_pressed()
             assert "Select a watch entry to update" in modal.notify.call_args[0][0]
@@ -1028,6 +897,65 @@ async def test_watch_list_modal_update_delete_require_selection(make_paper):
             modal.notify.reset_mock()
             modal.on_delete_pressed()
             assert "Select a watch entry to delete" in modal.notify.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_list_manager_modals_unified_chrome(make_paper):
+    """Collections and Watch-list managers share one button/hint template."""
+    from arxiv_browser.modals import CollectionsModal, WatchListModal
+    from arxiv_browser.models import PaperCollection, WatchListEntry
+
+    app = ArxivBrowser([make_paper()], restore_session=False)
+    with patch_save_config(return_value=True):
+        async with app.run_test() as pilot:
+            col = CollectionsModal([], papers_by_id={})
+            await _open_modal(app, pilot, col)
+            # Unified button cluster: Cancel + primary Save (Ctrl+S).
+            assert str(col.query_one("#col-close", Button).label) == "Cancel"
+            assert str(col.query_one("#col-save", Button).label) == "Save (Ctrl+S)"
+            assert col.query_one("#col-save", Button).variant == "primary"
+            # Delete restyled off the error variant so Save keeps sole primary weight.
+            assert col.query_one("#col-delete", Button).variant == "default"
+            # Empty-state copy points to the form on the right (not "above").
+            col_placeholder = col.query_one("#col-list ListItem.-empty Label", Label)
+            col_text = str(col_placeholder.render())
+            assert "on the right" in col_text
+            assert "Try:" in col_text and "Next:" in col_text
+            col.dismiss(None)
+            await pilot.pause(0.02)
+
+            watch = WatchListModal(
+                [WatchListEntry(pattern="x", match_type="author", case_sensitive=False)]
+            )
+            await _open_modal(app, pilot, watch)
+            assert str(watch.query_one("#watch-cancel", Button).label) == "Cancel"
+            assert str(watch.query_one("#watch-save", Button).label) == "Save (Ctrl+S)"
+            assert watch.query_one("#watch-save", Button).variant == "primary"
+            assert watch.query_one("#watch-delete", Button).variant == "default"
+            # Match Type select advertises the options as its prompt.
+            assert watch.query_one("#watch-type", Select).prompt == "author / title / keyword"
+
+
+@pytest.mark.asyncio
+async def test_watch_list_select_arrow_ascii_fallback(make_paper):
+    """The Select chevron falls back to an ASCII glyph under --ascii."""
+    from arxiv_browser._ascii import set_ascii_mode
+    from arxiv_browser.modals import WatchListModal
+
+    app = ArxivBrowser([make_paper()], restore_session=False)
+    try:
+        with patch_save_config(return_value=True):
+            async with app.run_test() as pilot:
+                # App init resolves ASCII mode from config; force it on here so
+                # the modal's on_mount takes the ASCII branch.
+                set_ascii_mode(True)
+                modal = WatchListModal([])
+                await _open_modal(app, pilot, modal)
+                arrows = list(modal.query("#watch-type .down-arrow"))
+                assert arrows
+                assert all(str(arrow.render()) == "v" for arrow in arrows)
+    finally:
+        set_ascii_mode(False)
 
 
 @pytest.mark.asyncio
@@ -1211,25 +1139,7 @@ async def test_modal_tail_branches_cover_common_search_and_citation_edges(make_p
         SectionToggleModal,
     )
     from arxiv_browser.modals.help import HelpScreen
-    from arxiv_browser.modals.search import ArxivSearchModal, CommandPaletteModal
     from arxiv_browser.modals.watchlist import WatchListModal
-
-    class _PaletteListStub:
-        def __init__(self) -> None:
-            self.options: list[object] = []
-            self.option_count = 0
-            self.highlighted = None
-
-        def clear_options(self) -> None:
-            self.options.clear()
-            self.option_count = 0
-
-        def add_option(self, option: object) -> None:
-            self.options.append(option)
-            self.option_count = len(self.options)
-
-        def get_option_at_index(self, index: int) -> object:
-            return self.options[index]
 
     class _PanelStub:
         def __init__(self) -> None:
@@ -1293,42 +1203,6 @@ async def test_modal_tail_branches_cover_common_search_and_citation_edges(make_p
     section_modal.action_toggle_a()
     section_modal._toggle("z")
     assert section_modal._collapsed == {"abstract", "authors"}
-
-    search_modal = ArxivSearchModal(initial_query="seed", initial_field="bad-field")
-    search_modal.dismiss = MagicMock()
-    search_modal.notify = MagicMock()
-    search_modal.query_one = MagicMock(
-        side_effect=lambda selector, _type=None: {
-            "#arxiv-search-query": SimpleNamespace(value="graph"),
-            "#arxiv-search-field": SimpleNamespace(value="title"),
-            "#arxiv-search-category": SimpleNamespace(value="cs.AI"),
-        }[selector]
-    )
-    search_modal.on_query_submitted()
-    search_modal.on_category_submitted()
-    search_modal.on_search_pressed()
-    search_modal.on_cancel_pressed()
-    assert search_modal.dismiss.call_args_list[-1].args == (None,)
-
-    palette_modal = CommandPaletteModal([])
-    palette_list = _PaletteListStub()
-    palette_modal.query_one = MagicMock(return_value=palette_list)
-    palette_modal._populate_results("")
-    assert "No commands available" in str(palette_list.get_option_at_index(0).prompt)
-    palette_modal._populate_results("watch")
-    assert "No commands match" in str(palette_list.get_option_at_index(0).prompt)
-    palette_modal.dismiss = MagicMock()
-    palette_modal.key_enter()
-    palette_modal.dismiss.assert_not_called()
-    palette_modal.action_cancel()
-    palette_modal.dismiss.assert_called_once_with("")
-    palette_modal._highlight_first_enabled(
-        SimpleNamespace(
-            option_count=2,
-            highlighted=None,
-            get_option_at_index=lambda idx: SimpleNamespace(disabled=idx == 0),
-        )
-    )
 
     root = make_paper(arxiv_id="2401.00001", title="Root")
     refs = [

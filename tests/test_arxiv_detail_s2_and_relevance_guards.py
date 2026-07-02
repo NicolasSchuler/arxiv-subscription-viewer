@@ -431,8 +431,8 @@ class TestBatchConfirmationThreshold:
 
         source = inspect.getsource(ConfirmModal.compose)
         assert "Confirm (y)" in source
-        assert "Cancel (Esc)" in source
-        assert "y confirm | Esc/n cancel" in source
+        assert "Cancel (n / Esc)" in source
+        assert "Confirm: y   Cancel: n / Esc" in source
 
 
 @pytest.mark.integration

@@ -104,6 +104,20 @@ def _notify_skipped_provider_papers(app: "ArxivBrowser", skipped: list[Paper], t
         )
 
 
+def _notify_clipboard_failure(app: "ArxivBrowser", title: str, action: str) -> None:
+    """Report an actionable clipboard-copy failure (finding #8)."""
+    app.notify(
+        build_actionable_error(
+            action,
+            why="the system clipboard is unavailable",
+            next_step="use export-to-file instead, or check your clipboard tool (xclip/pbcopy)",
+        ),
+        title=title,
+        severity="error",
+        timeout=8,
+    )
+
+
 def action_copy_bibtex(app: "ArxivBrowser") -> None:
     """Copy selected papers as BibTeX entries to clipboard."""
     papers = app._get_target_papers()
@@ -121,7 +135,7 @@ def action_copy_bibtex(app: "ArxivBrowser") -> None:
             title="BibTeX",
         )
     else:
-        app.notify("Failed to copy to clipboard", title="BibTeX", severity="error")
+        _notify_clipboard_failure(app, "BibTeX", "copy the BibTeX entries to the clipboard")
 
 
 def action_export_bibtex_file(app: "ArxivBrowser") -> None:
@@ -154,7 +168,7 @@ def action_export_markdown(app: "ArxivBrowser") -> None:
             title="Markdown",
         )
     else:
-        app.notify("Failed to copy to clipboard", title="Markdown", severity="error")
+        _notify_clipboard_failure(app, "Markdown", "copy the Markdown export to the clipboard")
 
 
 def action_export_menu(app: "ArxivBrowser") -> None:
@@ -230,7 +244,7 @@ def _export_clipboard_ris(app: "ArxivBrowser", papers: list[Paper]) -> None:
             title="RIS",
         )
     else:
-        app.notify("Failed to copy to clipboard", title="RIS", severity="error")
+        _notify_clipboard_failure(app, "RIS", "copy the RIS entries to the clipboard")
 
 
 def _export_clipboard_csv(app: "ArxivBrowser", papers: list[Paper]) -> None:
@@ -243,7 +257,7 @@ def _export_clipboard_csv(app: "ArxivBrowser", papers: list[Paper]) -> None:
             title="CSV",
         )
     else:
-        app.notify("Failed to copy to clipboard", title="CSV", severity="error")
+        _notify_clipboard_failure(app, "CSV", "copy the CSV export to the clipboard")
 
 
 def _export_clipboard_mdtable(app: "ArxivBrowser", papers: list[Paper]) -> None:
@@ -256,11 +270,7 @@ def _export_clipboard_mdtable(app: "ArxivBrowser", papers: list[Paper]) -> None:
             title="Markdown Table",
         )
     else:
-        app.notify(
-            "Failed to copy to clipboard",
-            title="Markdown Table",
-            severity="error",
-        )
+        _notify_clipboard_failure(app, "Markdown Table", "copy the Markdown table to the clipboard")
 
 
 def _export_file_ris(app: "ArxivBrowser", papers: list[Paper]) -> None:
@@ -608,7 +618,16 @@ async def _preview_pdf_async(app: "ArxivBrowser", paper: Paper) -> None:
         if not app._is_current_dataset_epoch(task_epoch):
             return
         if not success:
-            app.notify("PDF download failed", title="PDF Preview", severity="error")
+            app.notify(
+                build_actionable_error(
+                    "download the PDF for preview",
+                    why="the download did not complete",
+                    next_step="check your network connection and free disk space, then retry",
+                ),
+                title="PDF Preview",
+                severity="error",
+                timeout=8,
+            )
             return
 
     try:
@@ -621,7 +640,16 @@ async def _preview_pdf_async(app: "ArxivBrowser", paper: Paper) -> None:
         )
     except PdfPreviewError as exc:
         if app._is_current_dataset_epoch(task_epoch):
-            app.notify(str(exc)[:200], title="PDF Preview", severity="error", timeout=8)
+            app.notify(
+                build_actionable_error(
+                    "render the PDF preview",
+                    why=str(exc)[:200],
+                    next_step="open the PDF with P, or check that the file is a valid PDF",
+                ),
+                title="PDF Preview",
+                severity="error",
+                timeout=8,
+            )
         return
     if not app._is_current_dataset_epoch(task_epoch):
         return
@@ -773,8 +801,4 @@ def action_copy_selected(app: "ArxivBrowser") -> None:
             title="Copy",
         )
     else:
-        app.notify(
-            "Failed to copy to clipboard",
-            title="Copy",
-            severity="error",
-        )
+        _notify_clipboard_failure(app, "Copy", "copy the selected papers to the clipboard")

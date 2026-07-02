@@ -25,6 +25,21 @@ This style guide defines copy, layout, and interaction conventions for arXiv Sub
 - Use `Help overlay` for `?`.
 - Use `Semantic Scholar` in help text and `S2` in compact status/footer hints.
 - Use `History` for date navigation context.
+- Use `Similar papers` for the `R` action (canonical); do not drift to
+  "Recommendations".
+- Reaffirm `Toggle` for actions that flip local state (read, watch filter,
+  preview, detail mode).
+- Use `density` for the detail-pane reading-density mode (toggled by `v density`
+  in the detail-focus footer). Its two values are `scan` (truncated, at-a-glance
+  metadata and abstract) and `full` (untruncated content). Label it explicitly
+  in chrome, e.g. the detail header reads `density: scan`; never show a bare mode
+  word (`… · scan`) with no label.
+- Never expose internal jargon in user-facing help; e.g. say "papers shown at
+  startup" / "today's papers", not "startup papers".
+- Palette-group ↔ tier mapping: the command-palette groups (Core, Organize,
+  Research, Advanced) map onto the keybinding tiers (Core, Standard, Power) of
+  §10. Treat them as the same conceptual ordering; full reconciliation of the
+  two vocabularies is a follow-up.
 - Compact-vs-long naming policy:
   - Footer stays compact (`o open`, `Ctrl+p commands`) for 80-col scan speed.
   - Help/modals/binding descriptions use long-form labels (`Open in Browser`, `Command palette`).
@@ -44,12 +59,37 @@ Most modals use one of three standard widths. Pick the smallest size that fits t
 
 Small/Medium modals also cap at `max-width: 90%` for narrow-terminal safety. Large modals keep `min-width: 60; min-height: 20;` for small-terminal safety.
 
+The only sanctioned widths are `52`, `70`, and the named bespoke full-screen
+surfaces below. Do **not** introduce new one-off widths — in particular do not
+add `64`; the former width-64 pickers are being moved onto this grid.
+
 Full-screen reading and diagnostic surfaces (e.g. Trend Radar, Author Profile, Quick Triage, Settings, Paper Comparison) intentionally use bespoke widths outside this set.
+
+### Canonical Close/Cancel Strings
+
+Pin these exact strings; do not paraphrase:
+
+- Read-only modals: `Close: Esc/q`.
+- Edit modals: `Cancel: Esc`.
+- Dirty-tracking (save/discard) modals: `Esc discards edits`.
+
+### Button Clusters
+
+- At most **one** `primary` button per modal view.
+- Action rows must fit fully inside the dialog at every supported terminal size;
+  never let buttons overflow or clip.
+
+### First-Run And Announcement Overlays
+
+- First-run / announcement overlays (Welcome, What's New) must pin their dismiss
+  hint **outside** the scrolling body so it is always visible.
+- Their core content must fit within an 80×24 terminal without requiring scroll
+  to reach the essential message.
 
 **Example assignments** (not exhaustive — see each modal's `CSS`):
 
 - **Small**: ConfirmModal, ExportMenuModal, SummaryModeModal, SectionToggleModal, MetadataSnapshotPickerModal
-- **Medium**: PaperEditModal, ArxivSearchModal, CommandPaletteModal, WatchListModal, CollectionsModal, ResearchInterestsModal
+- **Medium**: PaperEditModal, WatchListModal, CollectionsModal, ResearchInterestsModal
 - **Large**: HelpScreen, RecommendationsScreen, CitationGraphScreen, PaperChatScreen
 
 - Preserve the three-zone structure:
@@ -66,10 +106,17 @@ Full-screen reading and diagnostic surfaces (e.g. Trend Radar, Author Profile, Q
 - Narrow-width behavior:
   - Prefer compact status tokens and shorter labels before removing high-value hints.
   - Keep `? help` visible in all contexts.
+  - In stacked layout the paper list must stay usable: guarantee a readable
+    minimum of ≥2–3 visible rows by giving the left/list pane a `min-height`,
+    even when the detail pane wants more room.
 
 ## 5. Footer Hierarchy Rules
 
 - Default browse footer is capped at 9 hints.
+- Narrow-width degradation (matches the width-aware `render_bindings`): below
+  ~90 columns, shorten labels first; if still too wide, drop hints in this
+  priority order — context slot → `E export` → `s sort` → `Space select`.
+  `? help` and `Ctrl+p commands` are **never** dropped.
 - Footer hints are mouse-clickable: each hint with a bound action uses Textual `@click` action-link markup (single `Static`, no per-hint child widgets) so a click invokes the same app action as the key. Hints without a bound action (e.g. `[/] dates`) render as plain text.
 - Always include these core hints in order:
   - `/ search`, `Space select`, `o open`, `s sort`, `r read`, context slot, `E export`, `Ctrl+p commands`, `? help`.
@@ -96,9 +143,32 @@ Full-screen reading and diagnostic surfaces (e.g. Trend Radar, Author Profile, Q
 - Never rely on color alone for meaning; pair with text or symbol.
 - Ensure all key states remain readable with `--color never`.
 - Ensure status/list indicators remain readable with `--ascii`.
-- Keep color use semantic:
-  - Accent for interactive controls and key hints.
-  - Green/yellow/orange/pink for status meaning, not decoration.
+- Keep color use semantic (see role map below), not decorative.
+
+### Semantic Color-Role Map
+
+Roles carry meaning; themes vary the hue but never the meaning. Assign colors by
+role, not by picking a pleasing shade per widget.
+
+| Role | Meaning | Notes |
+|------|---------|-------|
+| **accent** | Interactive controls and key hints | The "key hint" role must be the **same** across footer, help overlay, and menus. |
+| **status ramp** | One ramp for read/star/version state | Single progression (e.g. read→starred→version-update); do not split into unrelated hues. |
+| **muted** | Secondary metadata | Low-emphasis IDs, counts, timestamps. |
+| **category/tag** | Category and tag chips | Per-theme palette; distinct hues, same role in every theme. |
+
+- **Theme-aware fallback**: any fallback color (e.g. unknown-category) must
+  resolve per-theme via the theme's `muted` role — never a hard-coded literal.
+  A fixed `#888888` fails WCAG AA on light themes; resolve the muted color from
+  the active theme instead.
+
+### Framework Chrome Glyphs
+
+- ASCII parity is **mandatory** for app-authored content (see ASCII Glyph
+  Pattern below).
+- Framework-emitted chrome glyphs (e.g. Textual `Tabs` underline `╸╺`, `Select`
+  `▼`) are **best-effort**: override them where practical; where the framework
+  gives no clean hook, document the exception rather than blocking on it.
 
 ### ASCII Glyph Pattern
 
@@ -156,7 +226,9 @@ When adding any non-ASCII character to the UI, follow the established glyph-set 
   - `No <entity> found.`
   - `Try: <next command or filter adjustment>.`
   - `Next: <follow-up command for discovery or recovery>.`
-  - Edit/manage modals must include a `Try:` next step when empty.
+  - This is universal: every empty state — browse, API, and edit/manage/modal
+    surfaces alike — includes both a `Try:` and a `Next:`. Modal empty states may
+    keep both lines short, but neither is optional.
 
 ## 8. Tables, Lists, Truncation, Wrapping
 
@@ -175,6 +247,9 @@ When adding any non-ASCII character to the UI, follow the established glyph-set 
   - Render enrichment progress, reading velocity, and category histogram only when the status bar has enough width.
   - Drop visual tokens before dropping core paper count, query/watch context, selection count, API page/loading, and sort context.
 - Do not duplicate active progress text; when a visual token shows `Versions`, suppress the separate `Checking versions...` text.
+- Do not triplicate the primary paper count across the Header subtitle, the
+  list-header, and the status bar. The count lives in the status bar; the other
+  zones should not repeat it.
 - Use Unicode sparklines/histograms by default and ASCII-safe ramps (`#`, `-`, punctuation) when ASCII mode is active.
 
 ## 9. TUI Clarity Checklist
@@ -184,10 +259,19 @@ Use this before changing visible TUI behavior:
 - **Primary task**: the current screen should make the next useful action obvious without showing the whole command surface.
 - **Footer**: keep browse mode to the fixed core hints plus one contextual slot; do not add a second row of shortcuts.
 - **Help overlay**: explain features with long-form names and keep the top `Getting Started` list aligned with README and the footer.
+- **Welcome modal**: its key list must stay aligned with README, the footer, and
+  the help overlay, and must include `A` (search all of arXiv) so no-history
+  users have a next action.
 - **Rows**: preserve title, authors, and highest-value badges before adding optional enrichment signals.
 - **State**: empty, loading, disabled, error, selected, detail-focus, and ASCII/no-color modes need explicit copy or non-color indicators.
 - **Verification**: cover changed footer/help/status/empty-state strings with tests and run constrained-width layout checks when the change affects scanning.
-- **Snapshots**: keep browse, 96-col breakpoint, narrow browse, detail focus, command palette, light theme, and ASCII high-contrast baselines visually inspected before accepting snapshot updates.
+  - Captured snapshot SVGs must contain the footer hint text — assert `? help`
+    is present so a footer regression cannot slip through.
+  - README/docs hero images must be regenerated by the same snapshot flow (a
+    single `just` target) so they cannot drift from the live UI.
+  - Each snapshot baseline pins an explicit color mode set by the harness;
+    document which baselines are colored vs no-color.
+- **Snapshots**: keep browse, 96-col breakpoint, narrow browse, detail focus, command palette, light theme, and ASCII high-contrast baselines visually inspected before accepting snapshot updates. Snapshot coverage also includes the key modal states: settings, collections-manage, watch-list, and export menu.
 
 ## 10. Help And Discoverability
 
@@ -212,8 +296,8 @@ Rules:
 - Help overlay must include a top `Getting Started` section with the core flow:
   - Scan, move, select, open/enrich, organize/export, command palette, full help.
 - Footer should prioritize immediate next actions for the current mode.
-- Modals should use consistent close/cancel hints:
-  - `Close: Esc/q` for read-only views and `Cancel: Esc` for edit/confirm flows.
+- Modals should use the canonical close/cancel hints pinned in §4:
+  - `Close: Esc/q` (read-only), `Cancel: Esc` (edit/confirm), `Esc discards edits` (dirty-tracking save/discard).
 - Use consistent labels across footer/help/notifications:
   - `commands`, `dates`, `help`, `search`, `open`, `export`.
 - Keep label density intentional:
@@ -287,6 +371,7 @@ When adding a new keybinding:
 - [ ] Every empty state includes a concrete `Try:` next step.
 - [ ] Empty states also include a concise `Next:` follow-up hint.
 - [ ] Confirm modals keep impact text in body and key hints in modal chrome.
+- [ ] Destructive actions gate behind a `ConfirmModal` — including non-batch ones (e.g. Clear Triage Model), not only bulk deletes.
 - [ ] Error text includes actionable recovery guidance.
 - [ ] Non-color/ASCII compatibility remains intact.
 - [ ] Tests cover changed help/footer/status/empty/error strings.
@@ -335,3 +420,17 @@ PaperDetails {
 
 Invalid CSS is reported at startup but will not crash the app. Keep overrides
 minimal; relying on internal widget IDs is fragile across releases.
+
+## 15. CLI Conventions
+
+- `--color auto` must disable color when stdout is not a TTY (only emit color to
+  interactive terminals).
+- Every new global flag must be added to `completions.py` for all three shells
+  (bash, zsh, fish).
+- Numeric flags that advertise a valid range must validate that range at parse
+  time via bounded-int argparse types — reject out-of-range values with a clear
+  error rather than accepting and clamping silently.
+- CLI errors follow the §7 error template: `Could not …` / optional `Why: …` /
+  `Next step: …`.
+- Use documented exit codes: `0` success, `1` runtime error, `2` usage error;
+  keep them consistent with what `--help` states.

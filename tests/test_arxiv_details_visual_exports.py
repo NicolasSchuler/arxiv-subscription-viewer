@@ -275,6 +275,65 @@ class TestPaperDetailsCacheIntegration:
         assert "Rel:" in content
         assert "v1" in content
 
+    def test_decision_strip_uses_consistent_label_value_idiom(self, make_paper):
+        from rich.text import Text
+
+        from arxiv_browser.huggingface import HuggingFacePaper
+        from arxiv_browser.semantic_scholar import SemanticScholarPaper
+        from arxiv_browser.widgets.details import DetailRenderState, PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(arxiv_id="2401.00001")
+        state = DetailRenderState(
+            paper=paper,
+            is_read=True,
+            starred=True,
+            tags=("topic:ml",),
+            s2_data=SemanticScholarPaper(
+                arxiv_id="2401.00001",
+                s2_paper_id="p",
+                citation_count=42,
+                influential_citation_count=0,
+                tldr="",
+                fields_of_study=(),
+                year=None,
+                url="",
+            ),
+            hf_data=HuggingFacePaper(
+                arxiv_id="2401.00001",
+                title="T",
+                upvotes=12,
+                num_comments=0,
+                ai_summary="",
+                ai_keywords=(),
+                github_repo="",
+                github_stars=0,
+            ),
+            version_update=(1, 2),
+        )
+
+        plain = Text.from_markup(details._render_decision_strip(state)).plain
+        # Every strip token uses the same spaced "label: value" idiom -- the
+        # enrichment tokens are no longer glued (e.g. no bare "S2:42").
+        assert "Read: yes" in plain
+        assert "Star: yes" in plain
+        assert "S2: 42" in plain
+        assert "HF: " in plain
+        assert "Ver: v1" in plain
+        assert "S2:42" not in plain
+
+    def test_decision_strip_shows_s2_loading(self, make_paper):
+        from rich.text import Text
+
+        from arxiv_browser.widgets.details import DetailRenderState, PaperDetails
+
+        details = PaperDetails()
+        paper = make_paper(arxiv_id="2401.00001")
+        state = DetailRenderState(paper=paper, s2_loading=True)
+
+        plain = Text.from_markup(details._render_decision_strip(state)).plain
+        assert "S2: loading" in plain
+
     def test_decision_strip_hidden_for_unactioned_paper(self, make_paper):
         from arxiv_browser.widgets.details import PaperDetails
 

@@ -353,7 +353,7 @@ class TestLlmActionCoverage:
 
         app.notify.reset_mock()
         llm_actions._on_summary_mode_selected(app, "bogus", paper, "cmd {prompt}")
-        assert "Unknown summary mode" in app.notify.call_args[0][0]
+        assert "unrecognized summary mode" in app.notify.call_args[0][0]
 
         app.notify.reset_mock()
         app._llm_provider = None
@@ -403,7 +403,7 @@ class TestLlmActionCoverage:
             mode_label="Q",
             use_full_paper_content=False,
         )
-        assert "Summary failed" in app.notify.call_args[0][0]
+        assert "Could not generate the AI summary" in app.notify.call_args[0][0]
 
         app.notify.reset_mock()
         app._services.llm.generate_summary = AsyncMock(side_effect=Exception("boom"))
@@ -644,11 +644,8 @@ class TestLlmActionCoverage:
         assert llm_actions._maybe_cancel_auto_tag_batch(app, index=2, total=3, tagged=1) is True
         assert app._save_config_or_warn.called
 
-        assert llm_actions._auto_tag_failure_message(0) == "Auto-tagging failed"
-        assert (
-            llm_actions._auto_tag_failure_message(2)
-            == "Auto-tagging failed (2 tagged before error)"
-        )
+        assert "Could not auto-tag" in llm_actions._auto_tag_failure_message(0)
+        assert "2 paper(s) were tagged before" in llm_actions._auto_tag_failure_message(2)
 
         app._auto_tag_active = True
         llm_actions._start_auto_tag_flow(app)
@@ -1016,7 +1013,7 @@ class TestLlmActionCoverage:
             call.args != ("auto-tag results",)
             for call in partial_batch_app._save_config_or_warn.call_args_list
         )
-        assert "1 tagged before error" in partial_batch_app.notify.call_args[0][0]
+        assert "1 paper(s) were tagged before" in partial_batch_app.notify.call_args[0][0]
         assert partial_batch_app._auto_tag_active is False
         assert partial_batch_app._auto_tag_progress is None
 

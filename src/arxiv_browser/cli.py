@@ -42,15 +42,23 @@ from arxiv_browser.cli_resolver import (
     ARXIV_API_URL,
     ARXIV_API_USER_AGENT,
     ResolvePapersResult,
+    _add_shared_global_flags,
     _api_mode_requested,
     _fetch_arxiv_api_papers,
     _fetch_latest_arxiv_digest,
     _find_history_index,
+    _max_results_arg,
+    _positive_int,
+    _relevance_score_int,
     _resolve_arxiv_api_mode,
     _resolve_history_date,
     _resolve_input_file,
     _resolve_legacy_fallback,
     _resolve_papers,
+    _write_digest_output,
+    digest_source_conflict_error,
+    digest_tui_output_conflict_error,
+    validate_theme_override,
 )
 from arxiv_browser.config import CONFIG_APP_NAME, _coerce_arxiv_api_max_results, load_config
 from arxiv_browser.models import (
@@ -110,23 +118,6 @@ _LOG_BACKUP_COUNT = 3
 
 _ROOT_FLAG_OPTIONS = frozenset({"--debug", "--ascii", "--no-color", "-V", "--version"})
 _ROOT_VALUE_OPTIONS = frozenset({"--color", "--theme"})
-
-
-def _positive_int(value: str) -> int:
-    try:
-        parsed = int(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError("expected an integer") from exc
-    if parsed < 1:
-        raise argparse.ArgumentTypeError("expected a positive integer")
-    return parsed
-
-
-def _relevance_score_int(value: str) -> int:
-    parsed = _positive_int(value)
-    if parsed > 10:
-        raise argparse.ArgumentTypeError("expected an integer from 1 to 10")
-    return parsed
 
 
 def _configure_logging(debug: bool) -> None:
@@ -265,7 +256,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
 
     search_parser = subparsers.add_parser(
         "search",
-        help="Fetch startup papers from the arXiv API",
+        help="Search arXiv online and open results in the TUI",
         description="Search arXiv online and open the results directly in the TUI.",
         epilog=(
             "Examples:\n"
@@ -302,7 +293,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     )
     search_parser.add_argument(
         "--max-results",
-        type=int,
+        type=_max_results_arg,
         default=None,
         help=(f"API request page size (1-{ARXIV_API_MAX_RESULTS_LIMIT}; default: config value)"),
     )
@@ -351,7 +342,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     )
     digest_parser.add_argument(
         "--max-results",
-        type=int,
+        type=_max_results_arg,
         default=None,
         help=(f"API request page size (1-{ARXIV_API_MAX_RESULTS_LIMIT}; default: config value)"),
     )
@@ -443,10 +434,15 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         description="Print the platform-specific config.json path to stdout.",
     )
 
-    subparsers.add_parser(
+    doctor_cmd = subparsers.add_parser(
         "doctor",
         help="Check environment and configuration health",
         description="Run diagnostic checks and report potential issues.",
+    )
+    doctor_cmd.add_argument(
+        "--offline",
+        action="store_true",
+        help="Skip the arXiv API network reachability probe",
     )
 
     keybindings_parser = subparsers.add_parser(
@@ -467,6 +463,10 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         default="all",
         help="Filter shortcuts by tier (default: all)",
     )
+
+    # Accept the global options after the subcommand too (e.g. "dates --ascii").
+    for _subcommand_parser in subparsers.choices.values():
+        _add_shared_global_flags(_subcommand_parser)
 
     return parser
 
@@ -493,6 +493,10 @@ def _normalize_cli_argv(argv: list[str] | None) -> list[str]:
                 return args
             index += 2
             continue
+        if not token.startswith("-"):
+            # A bare word that isn't a known subcommand is a typo; return it
+            # unchanged so argparse emits "invalid choice: ... (choose from ...)".
+            return args
         break
 
     return [*args[:index], "browse", *args[index:]]
@@ -596,10 +600,10 @@ def _run_digest_command_with_deps(
     set_ascii_mode(bool(getattr(args, "ascii", False)))
     conflict = _digest_input_source_conflict(args)
     if conflict:
-        print(f"Error: {conflict}", file=sys.stderr)
+        print(digest_source_conflict_error(conflict), file=sys.stderr)
         return 2
     if bool(getattr(args, "tui", False)) and getattr(args, "output", None) is not None:
-        print("Error: --tui cannot be combined with --output", file=sys.stderr)
+        print(digest_tui_output_conflict_error(), file=sys.stderr)
         return 2
     if bool(getattr(args, "tui", False)) and not dependencies.validate_interactive_tty_fn():
         _print_non_interactive_error()
@@ -700,20 +704,6 @@ def _digest_relevance_mode(args: argparse.Namespace) -> str:
     if bool(getattr(args, "cached_relevance_only", False)):
         return "cached"
     return "score"
-
-
-def _write_digest_output(markdown: str, output_path: Path | None) -> int:
-    if output_path is None:
-        print(markdown, end="")
-        return 0
-    resolved = output_path.expanduser()
-    try:
-        resolved.parent.mkdir(parents=True, exist_ok=True)
-        resolved.write_text(markdown, encoding="utf-8")
-    except OSError as exc:
-        print(f"Error: Failed to write digest to {resolved}: {exc}", file=sys.stderr)
-        return 1
-    return 0
 
 
 def _print_empty_papers_error() -> None:
@@ -818,10 +808,15 @@ def main(
     # Load user config early (needed for session restore)
     config = dependencies.load_config_fn()
 
+    theme_error = validate_theme_override(getattr(args, "theme", None), config)
+    if theme_error:
+        print(theme_error, file=sys.stderr)
+        return 2
+
     history_files = dependencies.discover_history_files_fn(base_dir)
 
     if getattr(args, "command", None) == "doctor":
-        return _run_doctor(config, history_files)
+        return _run_doctor(config, history_files, probe_network=not getattr(args, "offline", False))
 
     if getattr(args, "command", None) == "dates":
         return _run_dates_command(history_files)

@@ -11,10 +11,12 @@ from pathlib import Path
 
 import httpx
 
+from arxiv_browser.action_messages import build_actionable_error
 from arxiv_browser.config import _coerce_arxiv_api_max_results
-from arxiv_browser.models import ArxivSearchRequest, Paper, UserConfig
+from arxiv_browser.models import ARXIV_API_MAX_RESULTS_LIMIT, ArxivSearchRequest, Paper, UserConfig
 from arxiv_browser.parsing import HISTORY_DATE_FORMAT, parse_arxiv_file
 from arxiv_browser.services import arxiv_api_service as _arxiv_api_service
+from arxiv_browser.themes import THEME_NAMES
 
 ResolvePapersResult = tuple[list[Paper], list[tuple[date, Path]], int] | int
 
@@ -22,6 +24,118 @@ ARXIV_API_URL = _arxiv_api_service.ARXIV_API_URL
 ARXIV_API_TIMEOUT = _arxiv_api_service.ARXIV_API_TIMEOUT
 ARXIV_API_USER_AGENT = _arxiv_api_service.ARXIV_API_USER_AGENT
 ARXIV_API_MIN_INTERVAL_SECONDS = _arxiv_api_service.ARXIV_API_MIN_INTERVAL_SECONDS
+
+_SHARED_GLOBAL_FLAG_HELP = argparse.SUPPRESS
+
+
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("expected an integer") from exc
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("expected a positive integer")
+    return parsed
+
+
+def _relevance_score_int(value: str) -> int:
+    parsed = _positive_int(value)
+    if parsed > 10:
+        raise argparse.ArgumentTypeError("expected an integer from 1 to 10")
+    return parsed
+
+
+def _max_results_arg(value: str) -> int:
+    """Parse a ``--max-results`` value, enforcing the advertised 1..limit range."""
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("expected an integer") from exc
+    if not 1 <= parsed <= ARXIV_API_MAX_RESULTS_LIMIT:
+        raise argparse.ArgumentTypeError(
+            f"expected an integer from 1 to {ARXIV_API_MAX_RESULTS_LIMIT}"
+        )
+    return parsed
+
+
+def _add_shared_global_flags(parser: argparse.ArgumentParser) -> None:
+    """Attach the global options to a subparser so they also work after the command.
+
+    ``argparse.SUPPRESS`` defaults ensure that omitting a flag in the subcommand
+    position does not clobber a value already parsed before the command.
+    """
+    parser.add_argument(
+        "--debug", action="store_true", default=argparse.SUPPRESS, help=_SHARED_GLOBAL_FLAG_HELP
+    )
+    parser.add_argument(
+        "--color",
+        choices=["auto", "always", "never"],
+        default=argparse.SUPPRESS,
+        help=_SHARED_GLOBAL_FLAG_HELP,
+    )
+    parser.add_argument(
+        "--no-color", action="store_true", default=argparse.SUPPRESS, help=_SHARED_GLOBAL_FLAG_HELP
+    )
+    parser.add_argument(
+        "--ascii", action="store_true", default=argparse.SUPPRESS, help=_SHARED_GLOBAL_FLAG_HELP
+    )
+    parser.add_argument(
+        "--theme", default=argparse.SUPPRESS, metavar="NAME", help=_SHARED_GLOBAL_FLAG_HELP
+    )
+
+
+def validate_theme_override(theme: str | None, config: UserConfig) -> str | None:
+    """Return an actionable error when ``--theme`` names an unknown theme, else ``None``."""
+    if not theme:
+        return None
+    valid = set(THEME_NAMES) | set(config.custom_themes)
+    if theme in valid:
+        return None
+    return build_actionable_error(
+        "apply the requested theme",
+        why=f"'{theme}' is not a known theme",
+        next_step=f"choose a built-in or custom_themes name: {', '.join(sorted(valid))}",
+    )
+
+
+def digest_source_conflict_error(conflict: str) -> str:
+    """Actionable message for combining ``--input`` with live digest source flags."""
+    return build_actionable_error(
+        "generate the digest",
+        why=conflict,
+        next_step="drop --input to fetch live results, or remove the live source flags",
+    )
+
+
+def digest_tui_output_conflict_error() -> str:
+    """Actionable message for combining ``--tui`` with ``--output``."""
+    return build_actionable_error(
+        "open the digest in the TUI",
+        why="--tui cannot be combined with --output",
+        next_step="drop --output to view interactively, or drop --tui to write a file",
+    )
+
+
+def _write_digest_output(markdown: str, output_path: Path | None) -> int:
+    """Write digest Markdown to stdout or a file. Returns an exit code."""
+    if output_path is None:
+        print(markdown, end="")
+        return 0
+    resolved = output_path.expanduser()
+    try:
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        resolved.write_text(markdown, encoding="utf-8")
+    except OSError as exc:
+        print(
+            build_actionable_error(
+                "write the digest",
+                why=f"Failed to write digest to {resolved}: {exc}",
+                next_step="check the output path is writable and the parent directory exists",
+            ),
+            file=sys.stderr,
+        )
+        return 1
+    return 0
 
 
 def _fetch_arxiv_api_papers(
@@ -165,18 +279,46 @@ def _resolve_input_file(input_path: Path) -> list[Paper] | int:
     """Validate and parse an explicit input file. Returns papers or exit code."""
     arxiv_file = input_path.resolve()
     if not arxiv_file.exists():
-        print(f"Error: {arxiv_file} not found", file=sys.stderr)
+        print(
+            build_actionable_error(
+                "open the input file",
+                why=f"{arxiv_file} not found",
+                next_step="check the path, or run without -i to use local history",
+            ),
+            file=sys.stderr,
+        )
         return 1
     if arxiv_file.is_dir():
-        print(f"Error: {arxiv_file} is a directory, not a file", file=sys.stderr)
+        print(
+            build_actionable_error(
+                "open the input file",
+                why=f"{arxiv_file} is a directory, not a file",
+                next_step="pass a file path to -i, not a directory",
+            ),
+            file=sys.stderr,
+        )
         return 1
     if not os.access(arxiv_file, os.R_OK):
-        print(f"Error: {arxiv_file} is not readable (permission denied)", file=sys.stderr)
+        print(
+            build_actionable_error(
+                "open the input file",
+                why=f"{arxiv_file} is not readable (permission denied)",
+                next_step="fix the file permissions and retry",
+            ),
+            file=sys.stderr,
+        )
         return 1
     try:
         return parse_arxiv_file(arxiv_file)
     except OSError as e:
-        print(f"Error: Failed to read {arxiv_file}: {e}", file=sys.stderr)
+        print(
+            build_actionable_error(
+                "read the input file",
+                why=f"Failed to read {arxiv_file}: {e}",
+                next_step="check the file is readable and not corrupt",
+            ),
+            file=sys.stderr,
+        )
         return 1
 
 
@@ -197,14 +339,25 @@ def _resolve_history_date(history_files: list[tuple[date, Path]], date_str: str)
         target_date = datetime.strptime(date_str, HISTORY_DATE_FORMAT).date()
     except ValueError:
         print(
-            f"Error: Invalid date format '{date_str}', expected YYYY-MM-DD",
+            build_actionable_error(
+                "open the requested date",
+                why=f"Invalid date format '{date_str}', expected YYYY-MM-DD",
+                next_step='run "arxiv-viewer dates" to list available dates',
+            ),
             file=sys.stderr,
         )
         return None
     idx = _find_history_index(history_files, target_date)
     if idx is not None:
         return idx
-    print(f"Error: No file found for date {date_str}", file=sys.stderr)
+    print(
+        build_actionable_error(
+            "open the requested date",
+            why=f"No file found for date {date_str}",
+            next_step='run "arxiv-viewer dates" to list available dates',
+        ),
+        file=sys.stderr,
+    )
     return None
 
 

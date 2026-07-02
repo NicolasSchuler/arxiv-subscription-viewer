@@ -5,7 +5,12 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from arxiv_browser.actions.constants import RECOVERABLE_ACTION_ERRORS, log_action_failure
+from arxiv_browser.action_messages import build_actionable_error
+from arxiv_browser.actions.constants import (
+    LLM_ERROR_NEXT_STEP,
+    RECOVERABLE_ACTION_ERRORS,
+    log_action_failure,
+)
 from arxiv_browser.io_actions import resolve_target_papers
 from arxiv_browser.llm import PAPER_COMPARISON_CONTENT_MAX_CHARS
 from arxiv_browser.modals import PaperComparisonScreen
@@ -19,6 +24,11 @@ if TYPE_CHECKING:
 _NOTIFY_TIMEOUT_DEFAULT = 8
 _NOTIFY_MAX_LENGTH = 200
 _RECOVERABLE_ACTION_ERRORS = RECOVERABLE_ACTION_ERRORS
+_COMPARISON_FAILED_MESSAGE = build_actionable_error(
+    "compare papers",
+    why="the LLM command failed or timed out",
+    next_step=LLM_ERROR_NEXT_STEP,
+)
 
 
 def action_compare_papers(app: ArxivBrowser) -> None:
@@ -90,7 +100,16 @@ def _start_paper_comparison_ai(
     provider = app._llm_provider
     if provider is None:
         screen.set_ai_error("LLM provider unavailable")
-        app.notify("LLM provider unavailable", title="Paper Comparison", severity="error")
+        app.notify(
+            build_actionable_error(
+                "compare papers",
+                why="the LLM provider could not be initialized",
+                next_step=LLM_ERROR_NEXT_STEP,
+            ),
+            title="Paper Comparison",
+            severity="error",
+            timeout=_NOTIFY_TIMEOUT_DEFAULT,
+        )
         return
     screen.set_ai_loading()
     app._track_dataset_task(_generate_paper_comparison_async(app, screen, papers, provider))
@@ -136,12 +155,22 @@ async def _generate_paper_comparison_async(
         if app._is_current_dataset_epoch(task_epoch) and _comparison_screen_is_live(screen):
             log_action_failure("paper comparison generation", exc)
             screen.set_ai_error("Paper comparison failed")
-            app.notify("Paper comparison failed", title="Paper Comparison", severity="error")
+            app.notify(
+                _COMPARISON_FAILED_MESSAGE,
+                title="Paper Comparison",
+                severity="error",
+                timeout=_NOTIFY_TIMEOUT_DEFAULT,
+            )
     except Exception as exc:
         if app._is_current_dataset_epoch(task_epoch) and _comparison_screen_is_live(screen):
             log_action_failure("paper comparison generation", exc, unexpected=True)
             screen.set_ai_error("Paper comparison failed")
-            app.notify("Paper comparison failed", title="Paper Comparison", severity="error")
+            app.notify(
+                _COMPARISON_FAILED_MESSAGE,
+                title="Paper Comparison",
+                severity="error",
+                timeout=_NOTIFY_TIMEOUT_DEFAULT,
+            )
 
 
 __all__ = [

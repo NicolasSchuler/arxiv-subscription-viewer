@@ -15,13 +15,17 @@ from datetime import date
 from pathlib import Path
 from urllib.parse import urlparse
 
+import httpx
+
 from arxiv_browser.models import UserConfig
+from arxiv_browser.services.arxiv_api_service import ARXIV_API_URL
 
 _PACKAGE_NAME = "arxiv-subscription-viewer"
 _POSIX_ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
 _DOCTOR_OK_MARKER = "  ok   "
 _DOCTOR_WARN_MARKER = "  WARN "
 _DOCTOR_INFO_MARKER = "  info "
+_DOCTOR_NETWORK_TIMEOUT = 3.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -460,7 +464,33 @@ def _doctor_terminal_summary(*, ok_marker: str, info_marker: str) -> None:
         print(f"{info_marker} Terminal: not an interactive TTY (TUI will not start)")
 
 
-def _run_doctor(config: UserConfig, history_files: list[tuple[date, Path]]) -> int:
+def _doctor_network_reachable(url: str, *, timeout: float) -> bool:
+    """Return True when ``url`` answers a HEAD request within ``timeout`` seconds."""
+    try:
+        httpx.head(url, timeout=timeout, follow_redirects=True)
+    except (httpx.HTTPError, OSError):
+        return False
+    return True
+
+
+def _doctor_network_issue_count(*, ok_marker: str, warn_marker: str) -> int:
+    """Probe arXiv API reachability. Never counts as an issue so doctor stays usable offline."""
+    if _doctor_network_reachable(ARXIV_API_URL, timeout=_DOCTOR_NETWORK_TIMEOUT):
+        print(f"{ok_marker} Network: arXiv API reachable ({ARXIV_API_URL})")
+    else:
+        print(
+            f"{warn_marker} Network: arXiv API unreachable at {ARXIV_API_URL}; "
+            "check your network/proxy (offline features still work)"
+        )
+    return 0
+
+
+def _run_doctor(
+    config: UserConfig,
+    history_files: list[tuple[date, Path]],
+    *,
+    probe_network: bool = False,
+) -> int:
     """Run diagnostic checks and print a summary report."""
     from arxiv_browser.config import get_config_path
 
@@ -503,6 +533,8 @@ def _run_doctor(config: UserConfig, history_files: list[tuple[date, Path]]) -> i
     _doctor_feature_summary(config, ok_marker=ok_marker, info_marker=info_marker)
     _doctor_export_dirs(config, ok_marker=ok_marker, info_marker=info_marker)
     _doctor_terminal_summary(ok_marker=ok_marker, info_marker=info_marker)
+    if probe_network:
+        _doctor_network_issue_count(ok_marker=ok_marker, warn_marker=warn_marker)
 
     print()
     if issues:
@@ -519,6 +551,8 @@ __all__ = [
     "_doctor_history_issue_count",
     "_doctor_http_llm_issue_count",
     "_doctor_llm_issue_count",
+    "_doctor_network_issue_count",
+    "_doctor_network_reachable",
     "_doctor_semantic_http_issue_count",
     "_doctor_semantic_search_issue_count",
     "_doctor_terminal_summary",

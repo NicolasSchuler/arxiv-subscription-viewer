@@ -24,4 +24,4 @@ def format_header_text(app: Any, query: str = "") -> str:
         return f" [bold]Papers[/]{sep}Watched {filtered}/{total}"
     if query:
         return f" [bold]Papers[/]{sep}Filtered ({filtered}/{total})"
-    return f" [bold]Papers[/]{sep}Browse {total}"
+    return f" [bold]Papers[/]{sep}Browse"

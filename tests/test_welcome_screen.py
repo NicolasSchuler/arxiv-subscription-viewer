@@ -68,7 +68,7 @@ class TestWelcomeScreen:
                 assert "Search" in rendered
                 assert "Actions" in rendered
                 footer = str(modal.query_one("#welcome-footer", Static).content)
-                assert "Enter / Space / Esc" in footer
+                assert "Enter / Esc: start" in footer
                 assert "full help" in footer
                 await pilot.press("enter")
                 await pilot.pause()

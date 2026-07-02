@@ -12,6 +12,7 @@ from collections.abc import Callable
 from datetime import date
 from typing import TYPE_CHECKING
 
+from arxiv_browser.action_messages import build_actionable_error
 from arxiv_browser.config import save_config
 from arxiv_browser.modals import PaperEditModal, WatchListModal
 from arxiv_browser.modals.editing import PaperEditResult
@@ -227,9 +228,14 @@ def action_manage_watch_list(app: "ArxivBrowser") -> None:
         if not save_config(app._config):
             app._config.watch_list = old_entries
             app.notify(
-                "Failed to save watch list",
+                build_actionable_error(
+                    "save the watch list",
+                    why="the config file could not be written",
+                    next_step="check permissions on the config directory, then retry",
+                ),
                 title="Watch",
                 severity="error",
+                timeout=8,
             )
             return
         app._compute_watched_papers()

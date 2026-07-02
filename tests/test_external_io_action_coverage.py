@@ -65,7 +65,7 @@ class TestExternalIoCoverage:
         app._copy_to_clipboard = MagicMock(return_value=False)
         app._format_paper_as_markdown = MagicMock(return_value="## title")
         io_actions.action_export_markdown(app)
-        assert "Failed to copy to clipboard" in app.notify.call_args[0][0]
+        assert "Could not copy" in app.notify.call_args[0][0]
 
         app._copy_to_clipboard = MagicMock(return_value=True)
         app._format_paper_for_clipboard = MagicMock(side_effect=["A", "B"])
@@ -237,13 +237,13 @@ class TestExternalIoCoverage:
 
         app.notify.reset_mock()
         io_actions._export_clipboard_ris(app, [paper])
-        assert "Failed to copy to clipboard" in app.notify.call_args[0][0]
+        assert "Could not copy" in app.notify.call_args[0][0]
         app.notify.reset_mock()
         io_actions._export_clipboard_csv(app, [paper])
-        assert "Failed to copy to clipboard" in app.notify.call_args[0][0]
+        assert "Could not copy" in app.notify.call_args[0][0]
         app.notify.reset_mock()
         io_actions._export_clipboard_mdtable(app, [paper])
-        assert "Failed to copy to clipboard" in app.notify.call_args[0][0]
+        assert "Could not copy" in app.notify.call_args[0][0]
 
         export_dir = tmp_path / "exports"
         export_dir.mkdir()
@@ -409,7 +409,7 @@ class TestExternalIoCoverage:
         app._get_target_papers = MagicMock(return_value=[paper])
         app._copy_to_clipboard = MagicMock(return_value=False)
         io_actions.action_copy_bibtex(app)
-        assert "Failed to copy to clipboard" in app.notify.call_args[0][0]
+        assert "Could not copy" in app.notify.call_args[0][0]
 
         # Lines 51-52: action_export_markdown no paper selected
         app._get_target_papers = MagicMock(return_value=[])
@@ -567,7 +567,7 @@ class TestExternalIoCoverage:
         app._download_pdf_async = AsyncMock(return_value=False)
         app.notify.reset_mock()
         await io_actions._preview_pdf_async(app, missing_paper)
-        assert "PDF download failed" in app.notify.call_args[0][0]
+        assert "Could not download the PDF" in app.notify.call_args[0][0]
 
         pdf_path = get_pdf_download_path(paper, app._config)
         pdf_path.parent.mkdir(parents=True, exist_ok=True)

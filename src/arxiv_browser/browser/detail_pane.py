@@ -38,6 +38,7 @@ from arxiv_browser.palette import PaletteCommand
 from arxiv_browser.parsing import HISTORY_DATE_FORMAT, clean_latex
 from arxiv_browser.query import format_categories, render_progress_bar, truncate_text
 from arxiv_browser.themes import _build_textual_theme, build_theme_runtime
+from arxiv_browser.ui_constants import NARROW_BREAKPOINT
 from arxiv_browser.widgets import chrome as _widget_chrome
 from arxiv_browser.widgets.chrome import StatusBarState
 from arxiv_browser.widgets.details import DetailRenderState
@@ -229,6 +230,7 @@ class DetailPaneMixin(DetailAnnotationMixin):
             review_stage=metadata.review_stage if metadata else None,
             line_annotations=tuple(metadata.line_annotations if metadata else ()),
             detail_line_cursor=getattr(self, "_detail_line_cursor", 1),
+            detail_focus=self._is_detail_footer_active(),
             collapsed_sections=tuple(self._config.collapsed_sections),
             detail_mode=getattr(self, "_detail_mode", "scan"),
             theme_colors=theme_runtime.colors,
@@ -249,9 +251,14 @@ class DetailPaneMixin(DetailAnnotationMixin):
         except (AttributeError, NoMatches):
             list_width = 0
         if not list_width:
+            # Pre-layout fallback (no measured width yet; the list is re-rendered
+            # after layout). Stacked mode spans full width; side-by-side takes 2fr.
             screen_width = getattr(getattr(self, "size", None), "width", 0) or 0
             if screen_width:
-                list_width = int(screen_width * _LIST_PANE_WIDTH_FRACTION)
+                if screen_width < NARROW_BREAKPOINT:
+                    list_width = screen_width
+                else:
+                    list_width = int(screen_width * _LIST_PANE_WIDTH_FRACTION)
         meta_line_budget = meta_line_budget_for(list_width)
         return PaperRowRenderState(
             paper=paper,
@@ -325,7 +332,7 @@ class DetailPaneMixin(DetailAnnotationMixin):
         sep = " - " if is_ascii_mode() else " \u00b7 "
         index = self._get_current_index()
         position = f"{sep}{index + 1}/{len(self.filtered_papers)}" if index is not None else ""
-        return f" Paper Details{position}{sep}{self._detail_mode}"
+        return f" Paper Details{position}{sep}density: {getattr(self, '_detail_mode', 'scan')}"
 
     def _update_details_header(self) -> None:
         """Refresh the detail pane header text."""
@@ -353,8 +360,8 @@ class DetailPaneMixin(DetailAnnotationMixin):
             return f"Filtered{sep}{len(self.filtered_papers)}/{len(self.all_papers)} papers"
         current_date = self._get_current_date()
         if current_date is not None:
-            return f"Browse{sep}{len(self.all_papers)} papers{sep}{current_date.strftime(HISTORY_DATE_FORMAT)}"
-        return f"Browse{sep}{len(self.all_papers)} papers"
+            return f"Browse{sep}{current_date.strftime(HISTORY_DATE_FORMAT)}"
+        return "Browse"
 
     def _update_subtitle(self) -> None:
         """Refresh the app subtitle from current state."""
@@ -376,18 +383,14 @@ class DetailPaneMixin(DetailAnnotationMixin):
             self._update_option_for_paper(arxiv_id)
 
     def _save_config_or_warn(self, context: str) -> bool:
-        """Save config and notify the user on failure.
-        Returns True on success, False on failure.
-        """
+        """Save config and notify the user on failure; return success."""
         if not save_config(self._config):
             self.notify(f"Failed to save {context}.", severity="warning")
             return False
         return True
 
     def _save_session_state(self) -> None:
-        """Save current session state to config.
-        Handles the case where DOM widgets may already be destroyed during unmount.
-        """
+        """Save session state to config (DOM widgets may be gone during unmount)."""
         if getattr(self, "_digest_inbox_context", None) is not None:
             return
         # API mode is intentionally session-ephemeral; persist the underlying local state.
@@ -578,11 +581,7 @@ class DetailPaneMixin(DetailAnnotationMixin):
             or (sort_key == "queue" and badge_kind in {"s2", "hf", "relevance"})
         )
 
-    def _schedule_sort_sensitive_refresh(
-        self,
-        *badge_types: str,
-        immediate: bool = False,
-    ) -> None:
+    def _schedule_sort_sensitive_refresh(self, *badge_types: str, immediate: bool = False) -> None:
         """Debounce re-sorts triggered by async cache updates."""
         if not any(self._sort_sensitive_badge_kind(kind) for kind in badge_types):
             return
@@ -957,7 +956,7 @@ class DetailPaneMixin(DetailAnnotationMixin):
             return bool(
                 getattr(details, "has_focus", False) or getattr(details, "has_focus_within", False)
             )
-        except (AttributeError, NoMatches):
+        except (AttributeError, NoMatches, ScreenStackError):
             return False
 
     def _browse_footer_bindings(self) -> list[tuple[str, str]]:

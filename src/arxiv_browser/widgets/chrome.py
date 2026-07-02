@@ -7,11 +7,13 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Horizontal
 from textual.message import Message
 from textual.widgets import Label, Static
 
+from arxiv_browser._ascii import is_ascii_mode
 from arxiv_browser.models import QueryToken, SearchBookmark
 from arxiv_browser.parsing import count_papers_in_file
 from arxiv_browser.query import escape_rich_text, pill_label_for_token
@@ -116,14 +118,30 @@ class ContextFooter(Static):
         background: $th-panel;
         color: $th-muted;
         padding: 0 1;
-        border-top: solid $th-panel-alt;
     }
     """
 
     def render_bindings(self, bindings: list[tuple[str, str]], mode_badge: str = "") -> None:
         """Update the footer with a list of (key, label) binding hints."""
+        self._footer_bindings = list(bindings[:MAX_FOOTER_HINTS])
+        self._footer_mode_badge = mode_badge
+        self._render_footer()
+
+    def on_resize(self, event: object) -> None:
+        """Re-fit stored hints when the footer's available width changes."""
+        if getattr(self, "_footer_bindings", None) is not None:
+            self._render_footer()
+
+    def _render_footer(self) -> None:
+        """Render stored hints, dropping the lowest-priority ones to fit the width."""
         colors = theme_colors_for(self)
-        parts = _build_footer_parts(bindings[:MAX_FOOTER_HINTS], mode_badge, colors)
+        badge = getattr(self, "_footer_mode_badge", "")
+        hints = _fit_footer_hints(
+            getattr(self, "_footer_bindings", []),
+            badge,
+            self.content_size.width,
+        )
+        parts = _build_footer_parts(hints, badge, colors)
         self.update("  ".join(parts))
 
 
@@ -165,6 +183,69 @@ def _format_footer_hint(key: str, label: str, accent: str, muted: str) -> str:
 
 def _footer_action(key: str) -> str | None:
     return _FOOTER_ACTION_BY_KEY.get(key)
+
+
+# Help and the command palette are the two escape hatches; never drop them.
+_FOOTER_PROTECTED_KEYS = frozenset({"?", "Ctrl+p"})
+# Lower rank drops first when the footer is too narrow; unlisted keys use the default (last).
+_FOOTER_DROP_RANKS: dict[str, int] = {
+    "[/]": 0,
+    "e": 0,
+    "L": 0,
+    "V": 0,
+    "x": 0,
+    "E": 1,
+    "s": 2,
+    "Space": 3,
+}
+_FOOTER_DEFAULT_DROP_RANK = 4
+_FOOTER_HINT_GAP = 2  # cells inserted between rendered parts by "  ".join()
+
+
+def _footer_hint_width(key: str, label: str) -> int:
+    """Return the painted cell width of one footer hint (no markup)."""
+    if key and label:
+        return len(key) + 1 + len(label)
+    return len(label or key)
+
+
+def _footer_total_width(hints: list[tuple[str, str]], badge: str) -> int:
+    """Return the total painted width of a badge plus hint list."""
+    widths = [Text.from_markup(badge).cell_len] if badge else []
+    widths.extend(_footer_hint_width(key, label) for key, label in hints)
+    if not widths:
+        return 0
+    return sum(widths) + _FOOTER_HINT_GAP * (len(widths) - 1)
+
+
+def _lowest_priority_hint_index(hints: list[tuple[str, str]]) -> int | None:
+    """Return the index of the next hint to drop, or None if all are protected."""
+    best: tuple[int, int] | None = None
+    for index, (key, _label) in enumerate(hints):
+        if key in _FOOTER_PROTECTED_KEYS:
+            continue
+        rank = _FOOTER_DROP_RANKS.get(key, _FOOTER_DEFAULT_DROP_RANK)
+        if best is None or rank < best[0] or (rank == best[0] and index > best[1]):
+            best = (rank, index)
+    return None if best is None else best[1]
+
+
+def _fit_footer_hints(
+    bindings: list[tuple[str, str]],
+    badge: str,
+    width: int,
+) -> list[tuple[str, str]]:
+    """Drop lowest-priority hints until the footer fits ``width`` (help and
+    command palette are never dropped; ``width`` <= 0 keeps every hint)."""
+    hints = list(bindings)
+    if width <= 0:
+        return hints
+    while _footer_total_width(hints, badge) > width:
+        index = _lowest_priority_hint_index(hints)
+        if index is None:
+            break
+        hints.pop(index)
+    return hints
 
 
 def _compute_window_bounds(total: int, current_index: int, window_size: int) -> tuple[int, int]:
@@ -477,6 +558,87 @@ class DateNavigator(Horizontal):
                 pass
 
 
+BOOKMARK_MAX_TABS = 9
+_BOOKMARK_PREFIX_LABEL = "Saved searches"
+_BOOKMARK_SAVE_LABEL = "Ctrl+b save"
+_BOOKMARK_SAVE_CURRENT_LABEL = "Ctrl+b save current search"
+# Cell budget from each part's CSS padding/margin (see BookmarkTabBar DEFAULT_CSS).
+_BOOKMARK_CHIP_CHROME = 5
+_BOOKMARK_PREFIX_CHROME = 1
+_BOOKMARK_SIDE_CHROME = 2
+
+
+def _bookmark_chip_text(index: int, name: str) -> str:
+    """Return the visible label for a numbered bookmark chip."""
+    return f"{index + 1}: {name}"
+
+
+def _elide_bookmark_name(index: int, name: str, budget: int, ellipsis: str) -> str:
+    """Elide a single bookmark name so its chip fits ``budget`` cells."""
+    prefix = f"{index + 1}: "
+    avail = budget - _BOOKMARK_CHIP_CHROME - len(prefix) - len(ellipsis)
+    if avail < 1:
+        avail = 1
+    return name[:avail] + ellipsis
+
+
+def _fit_bookmark_chips(
+    names: list[str],
+    width: int,
+) -> tuple[list[tuple[int, str]], int]:
+    """Fit numbered bookmark chips into ``width`` content cells.
+
+    Returns ``(visible, hidden)`` — ``visible`` is ``(index, display_name)`` per
+    rendered chip (name may be ellipsis-elided), ``hidden`` is the count folded
+    into a trailing ``+N`` chip. Whole chips are dropped from the right before any
+    chip is elided (no mid-word fragment); ``width`` <= 0 keeps every chip.
+    """
+    indexed = list(enumerate(names))
+    if width <= 0 or not indexed:
+        return indexed, 0
+
+    ellipsis = "..." if is_ascii_mode() else "…"
+    reserved = (
+        len(_BOOKMARK_PREFIX_LABEL)
+        + _BOOKMARK_PREFIX_CHROME
+        + len(_BOOKMARK_SAVE_LABEL)
+        + _BOOKMARK_SIDE_CHROME
+    )
+    budget = width - reserved
+
+    def chip_width(index: int, name: str) -> int:
+        return len(_bookmark_chip_text(index, name)) + _BOOKMARK_CHIP_CHROME
+
+    visible: list[tuple[int, str]] = []
+    used = 0
+    for index, name in indexed:
+        width_needed = chip_width(index, name)
+        if not visible and width_needed > budget:
+            # The first chip alone overflows: elide it rather than clip a word.
+            elided = _elide_bookmark_name(index, name, budget, ellipsis)
+            visible.append((index, elided))
+            used += chip_width(index, elided)
+            break
+        if used + width_needed > budget:
+            break
+        visible.append((index, name))
+        used += width_needed
+
+    hidden = len(indexed) - len(visible)
+    if hidden == 0:
+        return visible, 0
+
+    # Reserve room for the "+N" marker, dropping whole chips (never the last) to fit.
+    def marker_width(count: int) -> int:
+        return len(f"+{count}") + _BOOKMARK_CHIP_CHROME
+
+    while len(visible) > 1 and used + marker_width(hidden) > budget:
+        drop_index, drop_name = visible.pop()
+        used -= chip_width(drop_index, drop_name)
+        hidden = len(indexed) - len(visible)
+    return visible, hidden
+
+
 class BookmarkTabBar(Horizontal):
     """Horizontal bar displaying search bookmarks as numbered tabs."""
 
@@ -545,24 +707,61 @@ class BookmarkTabBar(Horizontal):
 
     def compose(self) -> ComposeResult:
         """Compose the bookmark label, numbered tabs, and save hint."""
-        yield Label("Saved searches", classes="chrome-label", id="bookmark-label")
+        yield from self._build_children(self._content_width())
+
+    def _content_width(self) -> int:
+        """Return the current content width, or 0 before the first layout pass."""
+        return getattr(getattr(self, "content_size", None), "width", 0)
+
+    def _build_children(self, width: int) -> list[Label]:
+        """Build the prefix, width-fitted numbered chips, and trailing hint."""
+        children: list[Label] = [
+            Label(_BOOKMARK_PREFIX_LABEL, classes="chrome-label", id="bookmark-label")
+        ]
         if self._bookmarks:
-            for i, bookmark in enumerate(self._bookmarks[:9]):  # Max 9 bookmarks
-                classes = "bookmark-tab active" if i == self._active_index else "bookmark-tab"
-                yield _chrome_label(
-                    f"{i + 1}: {bookmark.name}",
-                    classes,
-                    f"bookmark-{i}",
-                    f"Saved search {i + 1} - press {i + 1} to load",
+            names = [bookmark.name for bookmark in self._bookmarks[:BOOKMARK_MAX_TABS]]
+            visible, hidden = _fit_bookmark_chips(names, width)
+            for index, display_name in visible:
+                classes = "bookmark-tab active" if index == self._active_index else "bookmark-tab"
+                children.append(
+                    _chrome_label(
+                        _bookmark_chip_text(index, display_name),
+                        classes,
+                        f"bookmark-{index}",
+                        f"Saved search {index + 1} - press {index + 1} to load",
+                    )
                 )
-            yield _chrome_label("Ctrl+b save", "bookmark-add", "bookmark-add", "Save search")
-        elif self._active_search:
-            yield _chrome_label(
-                "Ctrl+b save current search",
-                "bookmark-hint",
-                "bookmark-hint",
-                "Save current search",
+            if hidden:
+                plural = "es" if hidden != 1 else ""
+                children.append(
+                    _chrome_label(
+                        f"+{hidden}",
+                        "bookmark-add",
+                        "bookmark-overflow",
+                        f"{hidden} more saved search{plural} - press 1-9 to load",
+                    )
+                )
+            children.append(
+                _chrome_label(_BOOKMARK_SAVE_LABEL, "bookmark-add", "bookmark-add", "Save search")
             )
+        elif self._active_search:
+            children.append(
+                _chrome_label(
+                    _BOOKMARK_SAVE_CURRENT_LABEL,
+                    "bookmark-hint",
+                    "bookmark-hint",
+                    "Save current search",
+                )
+            )
+        return children
+
+    def _fit_signature(self, width: int) -> tuple[tuple[tuple[int, str], ...], int] | None:
+        """Return a signature of the width-derived chip layout, or None."""
+        if not self._bookmarks:
+            return None
+        names = [bookmark.name for bookmark in self._bookmarks[:BOOKMARK_MAX_TABS]]
+        visible, hidden = _fit_bookmark_chips(names, width)
+        return (tuple(visible), hidden)
 
     async def update_bookmarks(
         self,
@@ -574,34 +773,46 @@ class BookmarkTabBar(Horizontal):
         self._bookmarks = bookmarks
         self._active_index = active_index
         self._active_search = active_search
+        # Invalidate any pending resize-driven rebuild so it cannot race this one.
+        token = self._next_bookmark_rebuild_token()
         await self.remove_children()
-        if bookmarks or active_search:
-            self.add_class("visible")
-        else:
+        if token != self._bookmark_rebuild_token:
+            return
+        if not (bookmarks or active_search):
             self.remove_class("visible")
             return
-        self.mount(Label("Saved searches", classes="chrome-label", id="bookmark-label"))
-        if bookmarks:
-            for i, bookmark in enumerate(bookmarks[:9]):
-                classes = "bookmark-tab active" if i == self._active_index else "bookmark-tab"
-                self.mount(
-                    _chrome_label(
-                        f"{i + 1}: {bookmark.name}",
-                        classes,
-                        f"bookmark-{i}",
-                        f"Saved search {i + 1} - press {i + 1} to load",
-                    )
-                )
-            self.mount(_chrome_label("Ctrl+b save", "bookmark-add", "bookmark-add", "Save search"))
-        else:
-            self.mount(
-                _chrome_label(
-                    "Ctrl+b save current search",
-                    "bookmark-hint",
-                    "bookmark-hint",
-                    "Save current search",
-                )
-            )
+        self.add_class("visible")
+        width = self._content_width()
+        self._bookmark_fit_signature = self._fit_signature(width)
+        for child in self._build_children(width):
+            self.mount(child)
+
+    def _next_bookmark_rebuild_token(self) -> int:
+        """Bump and return the rebuild token; the newest request always wins."""
+        token = getattr(self, "_bookmark_rebuild_token", 0) + 1
+        self._bookmark_rebuild_token = token
+        return token
+
+    def on_resize(self, event: object) -> None:
+        """Re-fit numbered chips when the bar's available width changes."""
+        if not self._bookmarks:
+            return
+        signature = self._fit_signature(self._content_width())
+        if signature == getattr(self, "_bookmark_fit_signature", None):
+            return
+        self._bookmark_fit_signature = signature
+        token = self._next_bookmark_rebuild_token()
+        self.call_later(self._rerender_bookmarks, token)
+
+    async def _rerender_bookmarks(self, token: int) -> None:
+        """Rebuild chips against the current width (used after a resize)."""
+        if token != self._bookmark_rebuild_token:
+            return
+        await self.remove_children()
+        if token != self._bookmark_rebuild_token:
+            return
+        for child in self._build_children(self._content_width()):
+            self.mount(child)
 
 
 class FilterPillBar(Horizontal):

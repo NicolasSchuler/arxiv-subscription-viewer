@@ -11,6 +11,7 @@ from arxiv_browser.palette import PaletteCommand
 from arxiv_browser.themes import THEME_COLORS, _build_textual_theme
 from arxiv_browser.widgets.omni_input import (
     FUZZY_THRESHOLD,
+    GROUP_ORDER,
     OMNI_HINT_API,
     OMNI_HINT_COMMAND,
     OMNI_HINT_LOCAL,
@@ -18,6 +19,7 @@ from arxiv_browser.widgets.omni_input import (
     OMNI_PLACEHOLDER,
     OmniInput,
     OmniMode,
+    _group_order_index,
     parse_omni_mode,
 )
 
@@ -180,6 +182,50 @@ class TestOmniInputWidget:
         assert widget._command_match("ctrl+k", command) is not None
         assert widget._command_match("collections", command) is not None
 
+    def _multi_group_commands(self) -> list[PaletteCommand]:
+        """Commands whose authored order interleaves groups (as in the real registry)."""
+
+        def cmd(name: str, group: str) -> PaletteCommand:
+            return PaletteCommand(
+                name=name, description=name, key_hint="", action=name, group=group
+            )
+
+        return [
+            cmd("a-research", "Research"),
+            cmd("b-core", "Core"),
+            cmd("c-organize", "Organize"),
+            cmd("d-core", "Core"),
+            cmd("e-advanced", "Advanced"),
+            cmd("f-research", "Research"),
+            cmd("g-unknown", "Mystery"),
+        ]
+
+    def test_group_order_index_ranks_known_groups(self):
+        assert _group_order_index("Core") < _group_order_index("Organize")
+        assert _group_order_index("Organize") < _group_order_index("Research")
+        assert _group_order_index("Research") < _group_order_index("Advanced")
+        # Unknown groups sort after every canonical group.
+        assert _group_order_index("Mystery") == len(GROUP_ORDER)
+
+    def test_filter_commands_no_query_sorts_by_group_stably(self):
+        widget = OmniInput()
+        widget.set_commands(self._multi_group_commands())
+        ordered = widget._filter_commands("")
+        groups = [c.group for c in ordered]
+        # Groups appear contiguously in canonical order, unknown group last.
+        assert groups == [
+            "Core",
+            "Core",
+            "Organize",
+            "Research",
+            "Research",
+            "Advanced",
+            "Mystery",
+        ]
+        # Authored within-group order preserved (stable sort).
+        core_names = [c.name for c in ordered if c.group == "Core"]
+        assert core_names == ["b-core", "d-core"]
+
 
 @pytest.mark.asyncio
 class TestOmniInputTUI:
@@ -287,12 +333,78 @@ class TestOmniInputTUI:
 
             results = omni.query_one("#omni-results", OptionList)
             assert results.has_class("visible")
-            assert results.option_count == 1
+            # §7 empty state: the "No matching" line plus Try: and Next: guidance.
+            assert results.option_count == 3
             empty_prompt = str(results.get_option_at_index(0).prompt)
-            # Compact single-row message (Esc affordance lives in the hint line).
             assert "No matching commands" in empty_prompt
             assert "zzzzzz" in empty_prompt
+            try_prompt = str(results.get_option_at_index(1).prompt)
+            assert "Try:" in try_prompt
+            next_prompt = str(results.get_option_at_index(2).prompt)
+            assert "Next:" in next_prompt
             assert omni._filtered_commands == []
+
+    @staticmethod
+    def _grouped_commands() -> list[PaletteCommand]:
+        def cmd(name: str, group: str) -> PaletteCommand:
+            return PaletteCommand(
+                name=name, description=name, key_hint="", action=name, group=group
+            )
+
+        return [
+            cmd("alpha", "Research"),
+            cmd("bravo", "Core"),
+            cmd("charlie", "Organize"),
+            cmd("delta", "Core"),
+            cmd("echo", "Research"),
+        ]
+
+    async def test_no_query_group_headers_appear_at_most_once(self):
+        from textual.widgets import Input, OptionList
+
+        class TestApp(_ThemedApp):
+            def compose(self):
+                yield OmniInput()
+
+        async with TestApp().run_test() as pilot:
+            omni = pilot.app.query_one(OmniInput)
+            omni.set_commands(self._grouped_commands())
+            omni.open(">")
+            inp = omni.query_one("#omni-input", Input)
+            inp.value = ">"
+            await pilot.pause()
+
+            results = omni.query_one("#omni-results", OptionList)
+            # Header rows are the options not mapped to a command (no empty state here).
+            header_indexes = [
+                i for i in range(results.option_count) if i not in omni._command_option_indexes
+            ]
+            distinct_groups = {c.group for c in omni._filtered_commands}
+            # Exactly one header per distinct group — no repeats.
+            assert len(header_indexes) == len(distinct_groups)
+
+    async def test_query_suppresses_group_headers(self):
+        from textual.widgets import Input, OptionList
+
+        class TestApp(_ThemedApp):
+            def compose(self):
+                yield OmniInput()
+
+        async with TestApp().run_test() as pilot:
+            omni = pilot.app.query_one(OmniInput)
+            omni.set_commands(self._grouped_commands())
+            omni.open(">a")
+            inp = omni.query_one("#omni-input", Input)
+            inp.value = ">a"
+            await pilot.pause()
+
+            results = omni.query_one("#omni-results", OptionList)
+            assert omni._filtered_commands  # query matched something
+            # With a query every option maps to a command — zero header rows.
+            header_indexes = [
+                i for i in range(results.option_count) if i not in omni._command_option_indexes
+            ]
+            assert header_indexes == []
 
     async def test_disabled_command_explains_blocker(self):
         from textual.widgets import Input, OptionList
@@ -325,7 +437,7 @@ class TestOmniInputTUI:
             prompt = str(results.get_option_at_index(0).prompt)
             assert "Requires: No papers loaded" in prompt
 
-    async def test_suggested_command_label_includes_group_and_marker(self):
+    async def test_suggested_command_label_uses_compact_marker(self):
         from textual.widgets import Input, OptionList
 
         class TestApp(_ThemedApp):
@@ -353,8 +465,81 @@ class TestOmniInputTUI:
 
             results = omni.query_one("#omni-results", OptionList)
             prompt = str(results.get_option_at_index(0).prompt)
-            assert "Core" in prompt
-            assert "suggested" in prompt
+            # Row layout: key hint, then compact "*" suggested marker, then name.
+            assert "*" in prompt
+            assert "Open" in prompt
+            assert "o" in prompt
+            # The old trailing "suggested" prose is gone.
+            assert "suggested" not in prompt
+
+    async def test_command_row_is_single_line_key_name_desc(self):
+        from textual.widgets import Input, OptionList
+
+        class TestApp(_ThemedApp):
+            def compose(self):
+                yield OmniInput()
+
+        async with TestApp().run_test() as pilot:
+            omni = pilot.app.query_one(OmniInput)
+            omni.set_commands(
+                [
+                    PaletteCommand(
+                        name="Search Papers",
+                        description="Filter papers by text, category, or tag",
+                        key_hint="/",
+                        action="toggle_search",
+                        group="Core",
+                    ),
+                ]
+            )
+            omni.open(">search")
+            inp = omni.query_one("#omni-input", Input)
+            inp.value = ">search"
+            await pilot.pause()
+
+            results = omni.query_one("#omni-results", OptionList)
+            prompt = str(results.get_option_at_index(0).prompt)
+            # One command per line: no newlines, key hint + name + (truncated) desc.
+            assert "\n" not in prompt
+            assert "/" in prompt
+            assert "Search Papers" in prompt
+            # Long description is ellipsis-truncated (ASCII "..."), never wrapped.
+            assert "Filter papers by text" in prompt
+            assert "..." in prompt
+            assert "category, or tag" not in prompt
+
+    async def test_command_row_ascii_only(self):
+        import re
+
+        from textual.widgets import Input, OptionList
+
+        class TestApp(_ThemedApp):
+            def compose(self):
+                yield OmniInput()
+
+        async with TestApp().run_test() as pilot:
+            omni = pilot.app.query_one(OmniInput)
+            omni.set_commands(
+                [
+                    PaletteCommand(
+                        name="Open in Browser",
+                        description="Open selected paper(s) in web browser",
+                        key_hint="o",
+                        action="open_url",
+                        group="Core",
+                        suggested=True,
+                    ),
+                ]
+            )
+            omni.open(">")
+            inp = omni.query_one("#omni-input", Input)
+            inp.value = ">"
+            await pilot.pause()
+
+            results = omni.query_one("#omni-results", OptionList)
+            for index in range(results.option_count):
+                prompt = str(results.get_option_at_index(index).prompt)
+                assert not re.search(r"[^\x00-\x7f]", prompt)
 
     async def test_command_mode_arrow_keys_move_highlight(self):
         from textual.widgets import Input, OptionList

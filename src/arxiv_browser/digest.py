@@ -13,6 +13,7 @@ from typing import Any, Literal
 
 import httpx
 
+from arxiv_browser.action_messages import build_actionable_error
 from arxiv_browser.config import save_config
 from arxiv_browser.enrichment import apply_version_updates, get_starred_paper_ids_for_version_check
 from arxiv_browser.huggingface import (
@@ -230,22 +231,52 @@ def _load_digest_source(
             max_results=options.max_results,
         )
     except ValueError as exc:
-        raise DigestError(str(exc)) from exc
+        raise DigestError(
+            build_actionable_error(
+                "generate the digest",
+                why=str(exc),
+                next_step="check --query/--category and retry",
+            )
+        ) from exc
     except (httpx.HTTPError, OSError) as exc:
-        raise DigestError("Failed to fetch papers from arXiv API") from exc
+        raise DigestError(
+            build_actionable_error(
+                "generate the digest",
+                why="Failed to fetch papers from arXiv API",
+                next_step="check your network connection and retry",
+            )
+        ) from exc
     return papers, _live_source_label(options)
 
 
 def _load_input_source(path: Path, deps: DigestDependencies) -> tuple[list[Paper], str]:
     resolved = path.expanduser().resolve()
     if not resolved.exists():
-        raise DigestError(f"{resolved} not found")
+        raise DigestError(
+            build_actionable_error(
+                "read the digest input file",
+                why=f"{resolved} not found",
+                next_step="check the path, or omit --input to fetch live results",
+            )
+        )
     if resolved.is_dir():
-        raise DigestError(f"{resolved} is a directory, not a file")
+        raise DigestError(
+            build_actionable_error(
+                "read the digest input file",
+                why=f"{resolved} is a directory, not a file",
+                next_step="pass a file path to --input, not a directory",
+            )
+        )
     try:
         papers = deps.parse_input_file(resolved)
     except OSError as exc:
-        raise DigestError(f"Failed to read {resolved}: {exc}") from exc
+        raise DigestError(
+            build_actionable_error(
+                "read the digest input file",
+                why=f"Failed to read {resolved}: {exc}",
+                next_step="check the file is readable and not corrupt",
+            )
+        ) from exc
     return papers, f"input {resolved.name}"
 
 

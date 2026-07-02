@@ -16,25 +16,20 @@ from textual.widgets import Button, Input, Label, ListItem, ListView, Static
 from arxiv_browser.action_messages import build_actionable_warning
 from arxiv_browser.empty_state import (
     COLLECTION_DETAIL_EMPTY,
-    COLLECTIONS_MANAGE_EMPTY,
     COLLECTIONS_PICK_EMPTY,
 )
-from arxiv_browser.modals.base import ModalBase
+from arxiv_browser.modals.base import ModalBase, build_empty_placeholder
 from arxiv_browser.models import MAX_COLLECTIONS, Paper, PaperCollection
 
 logger = logging.getLogger(__name__)
 
-
-def _build_empty_placeholder(message: str) -> ListItem:
-    """Build a disabled ListItem that communicates an empty-state hint.
-
-    The placeholder is disabled so that keyboard navigation skips it and
-    selection handlers bail out on the bounds check; the surrounding CSS
-    dims it further via the ``-empty`` class.
-    """
-    item = ListItem(Label(f"[dim italic]{message}[/]"), classes="-empty")
-    item.disabled = True
-    return item
+# Manage-view empty state. Defined locally (rather than reusing the shared
+# ``empty_state`` copy) so the "on the right" wording matches the actual form
+# placement — the Name field sits to the right of the list, not above it.
+COLLECTIONS_MANAGE_EMPTY = (
+    "No collections yet. Try: type a name on the right and press Create. "
+    "Next: press Save to persist."
+)
 
 
 class CollectionsModal(ModalBase[str | None]):
@@ -49,6 +44,7 @@ class CollectionsModal(ModalBase[str | None]):
     """
 
     BINDINGS = [
+        Binding("ctrl+s", "save", "Save"),
         Binding("escape", "cancel_or_back", "Cancel"),
         Binding("q", "cancel_or_back", "Cancel", show=False),
     ]
@@ -77,6 +73,21 @@ class CollectionsModal(ModalBase[str | None]):
         margin-right: 2;
     }
 
+    /* Full-width, wrapping empty-state placeholder (avoids single-line
+       truncation of the Try:/Next: hint in the narrow list column). */
+    #col-list > ListItem.-empty,
+    #detail-list > ListItem.-empty,
+    #pick-list > ListItem.-empty {
+        height: auto;
+    }
+
+    #col-list > ListItem.-empty > Label,
+    #detail-list > ListItem.-empty > Label,
+    #pick-list > ListItem.-empty > Label {
+        width: 1fr;
+        height: auto;
+    }
+
     #col-form {
         width: 1fr;
         height: 1fr;
@@ -87,9 +98,13 @@ class CollectionsModal(ModalBase[str | None]):
         margin-top: 1;
     }
 
+    /* Both inputs share one single-line height so the form reads as a
+       consistent stack (previously the focused Name input rendered ~3 rows
+       tall while Description sat at 1 row). */
     #col-name,
     #col-desc {
         width: 100%;
+        height: 1;
         background: $th-panel;
         border: none;
     }
@@ -105,7 +120,27 @@ class CollectionsModal(ModalBase[str | None]):
         align: left middle;
     }
 
-    #col-actions Button { margin-right: 1; }
+    /* min-width:0 keeps all four action buttons inside the dialog interior
+       (default min-width:16 overflows the ~62-col row). */
+    #col-actions Button { margin-right: 1; min-width: 0; }
+
+    /* Destructive actions stay dim/outlined at rest so Save remains the only
+       primary-weight button; the error color is reserved for hover/focus. */
+    #col-delete,
+    #detail-remove {
+        color: $th-muted;
+        background: transparent;
+        text-style: none;
+    }
+
+    #col-delete:hover,
+    #col-delete:focus,
+    #detail-remove:hover,
+    #detail-remove:focus {
+        color: $error;
+        background: $error-muted;
+        text-style: bold;
+    }
 
     #col-buttons {
         margin-top: 1;
@@ -183,16 +218,18 @@ class CollectionsModal(ModalBase[str | None]):
                         yield Input(placeholder="e.g., ML Reading List", id="col-name")
                         yield Label("Description")
                         yield Input(placeholder="Optional description", id="col-desc")
-                        with Horizontal(id="col-actions"):
-                            yield Button("Create", variant="primary", id="col-create")
-                            yield Button("Rename", variant="default", id="col-rename")
-                            yield Button("Delete", variant="error", id="col-delete")
-                            yield Button("View", variant="default", id="col-view")
+                # Action row lives at the manage-view level (not nested in the
+                # narrow 1fr form column) so all four buttons stay on-dialog.
+                with Horizontal(id="col-actions"):
+                    yield Button("Create", variant="default", id="col-create")
+                    yield Button("Rename", variant="default", id="col-rename")
+                    yield Button("Delete", variant="default", id="col-delete")
+                    yield Button("View", variant="default", id="col-view")
                 with Horizontal(id="col-buttons", classes="modal-buttons"):
-                    yield Button("Close", variant="default", id="col-close")
-                    yield Button("Save", variant="primary", id="col-save")
+                    yield Button("Cancel", variant="default", id="col-close")
+                    yield Button("Save (Ctrl+S)", variant="primary", id="col-save")
                 yield Static(
-                    "No unsaved changes | Save persists | Esc discards edits",
+                    "No unsaved changes | Esc discards edits",
                     id="col-help",
                     classes="modal-footer",
                 )
@@ -202,10 +239,10 @@ class CollectionsModal(ModalBase[str | None]):
                 yield Label("", id="detail-title", classes="modal-title")
                 yield ListView(id="detail-list")
                 with Horizontal(id="detail-buttons", classes="modal-buttons"):
-                    yield Button("Remove Selected", variant="error", id="detail-remove")
+                    yield Button("Remove Selected", variant="default", id="detail-remove")
                     yield Button("Back", variant="primary", id="detail-back")
                 yield Static(
-                    "No unsaved changes | Remove Selected edits list | Esc discards edits",
+                    "No unsaved changes | Esc discards edits",
                     id="detail-help",
                     classes="modal-footer",
                 )
@@ -216,7 +253,7 @@ class CollectionsModal(ModalBase[str | None]):
                 yield ListView(id="pick-list")
                 with Horizontal(id="pick-buttons", classes="modal-buttons"):
                     yield Button("Cancel (Esc/q)", variant="default", id="pick-cancel")
-                yield Static("Enter choose | Esc cancel", id="pick-help", classes="modal-footer")
+                yield Static("Enter choose | Cancel: Esc", id="pick-help", classes="modal-footer")
 
     # ── lifecycle ────────────────────────────────────────────────────
 
@@ -251,7 +288,7 @@ class CollectionsModal(ModalBase[str | None]):
         list_view = self.query_one("#col-list", ListView)
         list_view.clear()
         if not self._collections:
-            list_view.mount(_build_empty_placeholder(COLLECTIONS_MANAGE_EMPTY))
+            list_view.mount(build_empty_placeholder(COLLECTIONS_MANAGE_EMPTY))
             return
         for col in self._collections:
             count = len(col.paper_ids)
@@ -291,7 +328,7 @@ class CollectionsModal(ModalBase[str | None]):
     def _mark_dirty(self) -> None:
         """Mark the modal as having unsaved collection edits."""
         self._dirty = True
-        message = "[bold]Unsaved changes[/bold] | Save persists | Esc discards edits"
+        message = "[bold]Unsaved changes[/bold] | Esc discards edits"
         for selector in ("#col-help", "#detail-help"):
             try:
                 self.query_one(selector, Static).update(message)
@@ -397,6 +434,12 @@ class CollectionsModal(ModalBase[str | None]):
         )
         self._show_detail_view()
 
+    def action_save(self) -> None:
+        """Persist collection edits via Ctrl+S (manage/detail views only)."""
+        if self._mode == "pick":
+            return
+        self.dismiss("save")
+
     @on(Button.Pressed, "#col-save")
     def on_save_pressed(self) -> None:
         """Dismiss the modal with a save signal to persist collection changes."""
@@ -425,7 +468,7 @@ class CollectionsModal(ModalBase[str | None]):
         list_view = self.query_one("#detail-list", ListView)
         list_view.clear()
         if not self._viewing_collection.paper_ids:
-            list_view.mount(_build_empty_placeholder(COLLECTION_DETAIL_EMPTY))
+            list_view.mount(build_empty_placeholder(COLLECTION_DETAIL_EMPTY))
             return
         for pid in self._viewing_collection.paper_ids:
             paper = self._papers_by_id.get(pid)
@@ -473,7 +516,7 @@ class CollectionsModal(ModalBase[str | None]):
         list_view = self.query_one("#pick-list", ListView)
         list_view.clear()
         if not self._collections:
-            list_view.mount(_build_empty_placeholder(COLLECTIONS_PICK_EMPTY))
+            list_view.mount(build_empty_placeholder(COLLECTIONS_PICK_EMPTY))
             return
         for col in self._collections:
             count = len(col.paper_ids)

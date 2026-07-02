@@ -82,9 +82,9 @@ class BrowseMixin:
 
     def _capture_local_browse_snapshot(self) -> LocalBrowseSnapshot | None:
         """Capture the local-library view before switching into API search mode.
-        The snapshot intentionally preserves everything needed to restore the
-        user-visible browsing state later: current dataset, sort/filter state,
-        selection, highlight terms, visible-list position, and subtitle text.
+
+        Preserves everything needed to restore the browsing state: dataset,
+        sort/filter, selection, highlight terms, list position, and subtitle.
         """
         try:
             list_view = self._get_paper_list_widget()
@@ -111,11 +111,10 @@ class BrowseMixin:
 
     def _restore_local_browse_snapshot(self) -> None:
         """Restore the local-library view saved before API search mode.
-        Restoring advances the dataset epoch first so stale background work from
-        the temporary API dataset will not publish into the restored local
-        dataset. After the core state is restored, this method recomputes watch
-        matches, reapplies the saved query, and rebuilds the visible list focus
-        so the UI returns to the same logical place the user left.
+
+        Advances the dataset epoch first (so stale API background work cannot
+        publish into the restored dataset), then recomputes watch matches,
+        reapplies the saved query, and rebuilds the visible list focus.
         """
         snapshot = self._local_browse_snapshot
         if snapshot is None:
@@ -194,9 +193,7 @@ class BrowseMixin:
         return match_query_term(paper, token, metadata, abstract_text)
 
     def _fuzzy_search(self, query: str, papers: list[Paper] | None = None) -> list[Paper]:
-        """Perform fuzzy search on title and authors.
-        Populates self._match_scores with relevance scores.
-        """
+        """Fuzzy-search title and authors, populating self._match_scores."""
         query_lower = query.lower()
         scored_papers = []
         search_space = papers if papers is not None else self.all_papers
@@ -390,12 +387,10 @@ class BrowseMixin:
 
     def _apply_filter(self, query: str) -> None:
         """Apply the current query and refresh all dependent dataset UI state.
-        Query execution runs through the shared query engine, then intersects
-        with the optional watch filter, reapplies the active sort order, and
-        refreshes list/detail/bookmark UI surfaces. Keeping the whole sequence
-        here ensures the visible dataset, highlight terms, status text, and
-        bookmark state stay in sync after both local typing and API-mode
-        restoration.
+
+        Runs the shared query engine, intersects with the optional watch filter,
+        reapplies the sort order, and refreshes list/detail/bookmark surfaces so
+        dataset, highlight terms, status text, and bookmarks stay in sync.
         """
         perf_start = time.perf_counter() if logger.isEnabledFor(logging.DEBUG) else None
         query = query.strip()
@@ -547,6 +542,23 @@ class BrowseMixin:
                 details.update_state(None)
             except NoMatches:
                 pass
+
+    def _rerender_list_for_measured_width(self) -> None:
+        """Re-render list rows with the measured pane width (first paint uses an
+        estimate) so the focused row's ``+N`` marker stays inline (style guide §8).
+
+        No-op until the width is known; skips redundant work once applied.
+        """
+        try:
+            option_list = self._get_paper_list_widget()
+        except NoMatches:
+            return
+        width = option_list.size.width
+        if width <= 0 or width == getattr(self, "_last_list_render_width", None):
+            return
+        self._last_list_render_width = width
+        if self.filtered_papers and option_list.option_count:
+            self._refresh_list_view()
 
     def _render_option(self, paper: Paper) -> str:
         """Render a single paper as Rich markup for OptionList."""

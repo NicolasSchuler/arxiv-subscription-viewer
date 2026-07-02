@@ -631,6 +631,11 @@ class TestCLIVersionAndSubcommands:
 
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr("sys.argv", ["arxiv_browser", "doctor"])
+        # Keep CI network-free: doctor's default HEAD probe to the arXiv API is
+        # stubbed so this test never reaches out over the network.
+        monkeypatch.setattr(
+            "arxiv_browser.cli_doctor._doctor_network_reachable", lambda *_a, **_k: True
+        )
         result = cli_main(
             deps=CliDependencies(
                 load_config_fn=lambda: UserConfig(),

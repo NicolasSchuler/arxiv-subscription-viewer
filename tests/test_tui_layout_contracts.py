@@ -401,7 +401,63 @@ async def test_major_modal_footer_contracts(make_paper):
             )
             app.push_screen(watch_modal)
             await pilot.pause(0.05)
-            assert "Ctrl+S save" in str(watch_modal.query_one("#watch-help", Static).content)
+            # Resting state uses the unified dirty-tracking hint (the Ctrl+S
+            # shortcut lives on the Save button label, not this hint line).
+            watch_help = str(watch_modal.query_one("#watch-help", Static).content)
+            assert "No unsaved changes" in watch_help
+            assert "Esc discards edits" in watch_help
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("size", [(100, 30), (120, 40)])
+async def test_manager_action_buttons_stay_inside_dialog(make_paper, size):
+    """Collections/Watch-list action buttons must render fully within the dialog.
+
+    Regression for action rows that overflowed off-dialog (and off-screen) when
+    nested inside the narrow 1fr form column: the buttons were unreachable by
+    mouse and Tab focus was hijacked app-wide.
+    """
+    from arxiv_browser.modals import CollectionsModal, WatchListModal
+    from arxiv_browser.models import PaperCollection, WatchListEntry
+
+    paper = make_paper(arxiv_id="2401.00001")
+    app = ArxivBrowser([paper], restore_session=False)
+
+    def _inside(dialog, region):
+        return (
+            region.x >= dialog.x
+            and region.y >= dialog.y
+            and region.right <= dialog.right
+            and region.bottom <= dialog.bottom
+        )
+
+    with patch_save_config(return_value=True):
+        async with app.run_test(size=size) as pilot:
+            await pilot.pause(0.1)
+
+            collections_modal = CollectionsModal(
+                [PaperCollection(name="Reading", paper_ids=[])], papers_by_id={}
+            )
+            app.push_screen(collections_modal)
+            await pilot.pause(0.05)
+            dialog = collections_modal.query_one("#col-dialog").region
+            for button_id in ("col-create", "col-rename", "col-delete", "col-view"):
+                region = collections_modal.query_one(f"#{button_id}").region
+                assert region.width > 0, button_id
+                assert _inside(dialog, region), (button_id, region, dialog)
+            collections_modal.dismiss(None)
+            await pilot.pause(0.05)
+
+            watch_modal = WatchListModal(
+                [WatchListEntry(pattern="graph", match_type="title", case_sensitive=False)]
+            )
+            app.push_screen(watch_modal)
+            await pilot.pause(0.05)
+            dialog = watch_modal.query_one("#watch-dialog").region
+            for button_id in ("watch-add", "watch-update", "watch-delete"):
+                region = watch_modal.query_one(f"#{button_id}").region
+                assert region.width > 0, button_id
+                assert _inside(dialog, region), (button_id, region, dialog)
 
 
 @pytest.mark.asyncio

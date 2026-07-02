@@ -86,8 +86,10 @@ class ConfirmModal(ModalBase[bool]):
                 yield Label(self._message, id="confirm-message", classes="modal-title")
             with Horizontal(id="confirm-buttons", classes="modal-buttons"):
                 yield Button("Confirm (y)", variant="warning", id="confirm-yes")
-                yield Button("Cancel (Esc)", variant="default", id="confirm-no")
-            yield Static("y confirm | Esc/n cancel", id="confirm-footer", classes="modal-footer")
+                yield Button("Cancel (n / Esc)", variant="default", id="confirm-no")
+            yield Static(
+                "Confirm: y   Cancel: n / Esc", id="confirm-footer", classes="modal-footer"
+            )
 
     def action_confirm(self) -> None:
         """Dismiss the modal with a positive (True) result."""
@@ -179,7 +181,7 @@ class ExportMenuModal(ModalBase[str]):
                 f"  [{g}]B[/]  BibTeX (.bib)  [{g}]R[/]  RIS (.ris)\n  [{g}]C[/]  CSV (.csv)",
                 classes="export-keys",
             )
-            yield Static("Cancel: Esc/q", id="export-footer", classes="modal-footer")
+            yield Static("Close: Esc/q", id="export-footer", classes="modal-footer")
 
     def action_cancel(self) -> None:
         """Close the export menu without selecting a format."""
@@ -290,14 +292,17 @@ class MetadataSnapshotPickerModal(ModalBase[Path | None]):
                 classes="modal-title",
             )
             subtitle = (
-                "Choose the JSON snapshot to import. Newest snapshots appear first."
+                "Choose the JSON snapshot to import. Newest snapshots appear first. "
+                "Try: press Enter on a row. Next: press Esc to cancel."
                 if self._snapshots
-                else "No metadata snapshots found. They are created when you export metadata."
+                else "No metadata snapshots found. "
+                "Try: export metadata first (they are created on export). "
+                "Next: press Esc to close."
             )
             yield Static(subtitle, id="metadata-snapshot-subtitle")
             yield ListView(id="metadata-snapshot-list")
             yield Static(
-                "Select: Enter | Cancel: Esc/q",
+                "Select: Enter | Cancel: Esc",
                 id="metadata-snapshot-footer",
                 classes="modal-footer",
             )

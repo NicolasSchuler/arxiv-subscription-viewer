@@ -44,9 +44,13 @@ OMNI_HINT_API = "Enter to search arXiv · Esc cancel"
 OMNI_HINT_SEMANTIC = "Semantic search over titles + abstracts · Esc cancel"
 
 FUZZY_THRESHOLD = 40
-COMMAND_NAME_WIDTH = 20
-COMMAND_GROUP_WIDTH = 8
-COMMAND_DESC_WIDTH = 26
+# Width used to truncate the single-line group-header scan aids. Group names are
+# short words, so this only needs to be comfortably larger than the longest name.
+GROUP_HEADER_MAX_LEN = 24
+
+# Canonical order for command-group headers in the no-query listing. Groups not
+# listed here sort last (stable), preserving authored within-group order.
+GROUP_ORDER: tuple[str, ...] = ("Core", "Organize", "Research", "Advanced")
 
 CommandMatch = tuple[float, int, int, PaletteCommand]
 
@@ -99,6 +103,14 @@ class OmniInput(Vertical):
     OmniInput #omni-results {
         max-height: 12;
         display: none;
+        /* Float the palette results as a Medium-width (70-col) overlay so rows are
+           not crushed into the ~40-col left pane and so nothing beneath (the paper
+           list / detail pane) bleeds through. `constrain: inside` keeps the panel
+           on screen on narrow terminals; no percentage max-width — that would clamp
+           the overlay back to the narrow parent pane. */
+        overlay: screen;
+        constrain: inside;
+        width: 70;
     }
 
     OmniInput #omni-results.visible {
@@ -232,14 +244,17 @@ class OmniInput(Vertical):
         self._filtered_commands = self._filter_commands(query)
         self._command_option_indexes = {}
 
-        show_group_headers = len({cmd.group for cmd in self._filtered_commands}) > 1
+        # Headers only in the no-query listing, where commands are group-sorted so
+        # each header appears exactly once. With a query the results are score-sorted
+        # and interleaved, so we suppress headers and rely on the per-row group chip.
+        show_group_headers = not query and len({cmd.group for cmd in self._filtered_commands}) > 1
         last_group: str | None = None
         for command_index, cmd in enumerate(self._filtered_commands):
             if show_group_headers and cmd.group != last_group:
                 results.add_option(_command_group_header(cmd.group))
                 last_group = cmd.group
             option_index = results.option_count
-            results.add_option(self._command_option(cmd, show_group=not show_group_headers))
+            results.add_option(self._command_option(cmd))
             self._command_option_indexes[option_index] = command_index
         self._add_empty_command_result(results, query)
 
@@ -247,7 +262,7 @@ class OmniInput(Vertical):
 
     def _filter_commands(self, query: str) -> list[PaletteCommand]:
         if not query:
-            return list(self._commands)
+            return sorted(self._commands, key=lambda cmd: _group_order_index(cmd.group))
 
         q = query.lower()
         scored = [match for cmd in self._commands if (match := self._command_match(q, cmd))]
@@ -271,48 +286,48 @@ class OmniInput(Vertical):
             return
 
         safe = escape_rich_text(query)
-        # Kept short so it fits one row of the narrow results dropdown (the Esc
-        # affordance already lives in the persistent hint line below the input).
-        results.add_option(Option(f'[dim]No matching commands for "{safe}"[/]', disabled=True))
+        # §7 empty-state template: state the miss, then a Try: and a Next: step. Each
+        # line is one row of the results overlay (Esc lives in the hint line below).
+        results.add_option(Option(f'[dim]No matching commands for "{safe}".[/]', disabled=True))
+        results.add_option(Option("[dim]Try: a shorter or different term.[/]", disabled=True))
+        results.add_option(
+            Option("[dim]Next: clear the query to browse all commands.[/]", disabled=True)
+        )
 
-    def _command_option(self, command: PaletteCommand, *, show_group: bool = True) -> Option:
+    def _command_option(self, command: PaletteCommand) -> Option:
         return Option(
-            self._command_option_label(command, show_group=show_group),
+            self._command_option_label(command),
             disabled=not command.enabled,
         )
 
-    def _command_option_label(self, command: PaletteCommand, *, show_group: bool = True) -> str:
-        safe_name, safe_desc, safe_hint, safe_group, safe_blocked = self._safe_command_parts(
-            command
-        )
+    def _command_option_label(self, command: PaletteCommand) -> str:
+        """Render one command as a single fixed-column row: key · name · description.
+
+        Columns never wrap: the key hint and name are width-padded and the
+        description is ellipsis-truncated. A suggested command is flagged with a
+        compact ``*`` marker before its name rather than trailing prose.
+        """
+        safe_name, safe_desc, safe_hint, safe_blocked = self._safe_command_parts(command)
+        marker = "*" if command.suggested else " "
+
         if not command.enabled:
-            blocked = f"  Requires: {safe_blocked}" if safe_blocked else ""
             muted = theme_colors_for(self)["muted"]
-            disabled_parts = [safe_name, safe_desc]
-            if show_group:
-                disabled_parts.insert(1, safe_group)
-            return f"[dim]{'  '.join(disabled_parts)}[/][{muted}]{blocked}[/]"
+            blocked = f"  Requires: {safe_blocked}" if safe_blocked else ""
+            return f"[dim]{safe_hint} {marker} {safe_name} {safe_desc}[/][{muted}]{blocked}[/]"
 
         colors = theme_colors_for(self)
-        parts = [f"[bold {colors['accent']}]{safe_name}[/]"]
-        if show_group:
-            parts.append(f"[dim {colors['purple']}]{safe_group}[/]")
-        parts.append(f"[{colors['muted']}]{safe_desc}[/]")
-        if command.suggested:
-            parts.append(f"[{colors['green']}]* suggested[/]")
-        if safe_hint:
-            parts.append(f"[{colors['green']}]{safe_hint}[/]")
-        return "  ".join(parts)
-
-    def _safe_command_parts(self, command: PaletteCommand) -> tuple[str, str, str, str, str]:
-        name = _palette_cell(command.name, PALETTE_NAME_MAX_LEN, COMMAND_NAME_WIDTH)
-        desc = _palette_cell(command.description, PALETTE_DESC_MAX_LEN, COMMAND_DESC_WIDTH)
-        hint = (
-            _palette_cell(command.key_hint, PALETTE_KEY_MAX_LEN, PALETTE_KEY_MAX_LEN)
-            if command.key_hint
-            else ""
+        marker_markup = f"[{colors['green']}]{marker}[/]" if command.suggested else marker
+        return (
+            f"[{colors['accent']}]{safe_hint}[/] "
+            f"{marker_markup} "
+            f"[bold]{safe_name}[/] "
+            f"[{colors['muted']}]{safe_desc}[/]"
         )
-        group = _palette_cell(command.group, PALETTE_KEY_MAX_LEN, COMMAND_GROUP_WIDTH)
+
+    def _safe_command_parts(self, command: PaletteCommand) -> tuple[str, str, str, str]:
+        name = _palette_cell(command.name, PALETTE_NAME_MAX_LEN, PALETTE_NAME_MAX_LEN)
+        desc = truncate_palette_text(command.description, PALETTE_DESC_MAX_LEN)
+        hint = _palette_cell(command.key_hint, PALETTE_KEY_MAX_LEN, PALETTE_KEY_MAX_LEN)
         blocked = (
             truncate_palette_text(command.blocked_reason, PALETTE_DESC_MAX_LEN)
             if command.blocked_reason
@@ -322,7 +337,6 @@ class OmniInput(Vertical):
             escape_rich_text(name),
             escape_rich_text(desc),
             escape_rich_text(hint),
-            escape_rich_text(group),
             escape_rich_text(blocked),
         )
 
@@ -433,9 +447,17 @@ def _palette_cell(text: str, max_len: int, width: int) -> str:
     return truncate_palette_text(text, max_len).ljust(width)
 
 
+def _group_order_index(group: str) -> int:
+    """Rank a command group per GROUP_ORDER; unknown groups sort last."""
+    try:
+        return GROUP_ORDER.index(group)
+    except ValueError:
+        return len(GROUP_ORDER)
+
+
 def _command_group_header(group: str) -> Option:
     """Return a non-selectable command group header row."""
-    safe_group = escape_rich_text(truncate_palette_text(group, PALETTE_KEY_MAX_LEN))
+    safe_group = escape_rich_text(truncate_palette_text(group, GROUP_HEADER_MAX_LEN))
     return Option(f"[dim]{safe_group}[/]", disabled=True)
 
 

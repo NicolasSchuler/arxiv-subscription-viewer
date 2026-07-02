@@ -453,7 +453,10 @@ class ArxivBrowser(
 
     def compose(self) -> ComposeResult:
         """Build the main UI layout: header, split panes for list/detail, and footer."""
-        yield Header()
+        from arxiv_browser._ascii import is_ascii_mode
+
+        # Textual's default icon (U+2B58) renders as tofu in many monospace fonts.
+        yield Header(icon="*" if is_ascii_mode() else "≡")
         with Horizontal(id="main-container"):
             with Vertical(id="left-pane"):
                 yield Label(f" Papers ({len(self.all_papers)} total)", id="list-header")
@@ -473,12 +476,33 @@ class ArxivBrowser(
                     yield PaperDetails()
         yield ContextFooter()
 
+    def format_title(self, title: str, sub_title: str) -> Any:
+        """Join the header title and sub-title with the app's middot separator.
+
+        Replaces Textual's default em-dash (U+2014, glued in narrow header fonts)
+        with the canonical ``·`` (ASCII ``-``), single-spaced on each side.
+        """
+        from textual.content import Content
+
+        from arxiv_browser._ascii import is_ascii_mode
+
+        if not sub_title:
+            return Content(title)
+        sep = " - " if is_ascii_mode() else " · "
+        return Content.assemble(
+            Content(title),
+            (sep, "dim"),
+            Content(sub_title).stylize("dim"),
+        )
+
     def on_mount(self) -> None:
         """Called when app is mounted. Restores session state if enabled."""
         self._initialize_mount_runtime()
         self._restore_initial_list_state()
         self._finish_mount_ui()
         self._show_startup_screen()
+        # Re-render rows once layout settles so budgets use the real pane width.
+        self.call_after_refresh(self._rerender_list_for_measured_width)
 
     def _initialize_mount_runtime(self) -> None:
         self._http_client = httpx.AsyncClient()
@@ -576,6 +600,9 @@ class ArxivBrowser(
     def _on_welcome_dismissed(self, result: None) -> None:
         """Mark onboarding as seen after the welcome screen is dismissed."""
         self._config.onboarding_seen = True
+        # The welcome screen already surfaces "? for shortcuts", so suppress the
+        # redundant same-session shortcuts toast (maybe_hint_shortcuts).
+        self._config.shortcuts_hint_seen = True
         from arxiv_browser.whats_new import WHATS_NEW_VERSION
 
         self._config.last_seen_whats_new = WHATS_NEW_VERSION

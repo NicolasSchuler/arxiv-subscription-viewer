@@ -132,7 +132,7 @@ class TriageDiagnosticsModal(ModalBase[None]):
                 ),
                 id="triage-diagnostics-body",
             )
-            yield Static("Esc/q close", id="triage-diagnostics-footer", classes="modal-footer")
+            yield Static("Close: Esc/q", id="triage-diagnostics-footer", classes="modal-footer")
 
     def action_close(self) -> None:
         """Close the overlay."""

@@ -52,6 +52,82 @@ def _result(app, **overrides) -> SettingsResult:
     return SettingsResult(**base)
 
 
+class TestSettingsAsciiSafety:
+    """The settings modal must not leak Unicode glyphs in --ascii mode."""
+
+    @pytest.fixture
+    def ascii_mode(self):
+        from arxiv_browser import _ascii
+
+        _ascii.set_ascii_mode(True)
+        try:
+            yield
+        finally:
+            _ascii.set_ascii_mode(False)
+
+    def test_edit_button_label_is_ascii(self, ascii_mode):
+        label = SettingsModal._edit_label()
+        assert "…" not in label
+        assert label == "Edit..."
+
+    def test_interests_summary_ellipsis_is_ascii(self, ascii_mode):
+        modal = SettingsModal(
+            SettingsResult(
+                llm_preset="",
+                theme_name="monokai",
+                s2_enabled=False,
+                hf_enabled=False,
+                research_interests="x" * 80,
+            ),
+            theme_names=["monokai"],
+        )
+        summary = modal._interests_summary()
+        assert "…" not in summary
+        assert summary.endswith("...")
+
+    def test_interests_summary_uses_unicode_ellipsis_by_default(self):
+        modal = SettingsModal(
+            SettingsResult(
+                llm_preset="",
+                theme_name="monokai",
+                s2_enabled=False,
+                hf_enabled=False,
+                research_interests="x" * 80,
+            ),
+            theme_names=["monokai"],
+        )
+        assert modal._interests_summary().endswith("…")
+
+
+class TestSettingsInterestsSummaryLayout:
+    """The interests preview stays short enough for the inline Edit button."""
+
+    def _modal(self, interests: str) -> SettingsModal:
+        return SettingsModal(
+            SettingsResult(
+                llm_preset="",
+                theme_name="monokai",
+                s2_enabled=False,
+                hf_enabled=False,
+                research_interests=interests,
+            ),
+            theme_names=["monokai"],
+        )
+
+    def test_long_interest_is_truncated_to_fit_row(self):
+        # Value column (auto) + inline Edit button must fit the 72-wide dialog;
+        # cap the preview so a long interest never overflows the row.
+        summary = self._modal("word " * 40)._interests_summary()
+        assert len(summary) <= 30
+
+    def test_short_interest_is_shown_verbatim(self):
+        summary = self._modal("ML safety")._interests_summary()
+        assert summary == "ML safety"
+
+    def test_empty_interest_shows_placeholder(self):
+        assert self._modal("")._interests_summary() == "(not set)"
+
+
 class TestApplySettings:
     def test_sets_preset_and_interests(self):
         app = _make_app()
@@ -157,6 +233,61 @@ class TestSettingsModalTUI:
                 await pilot.press("ctrl+s")
                 await pilot.pause()
         assert captured and isinstance(captured[0], SettingsResult)
+
+    async def test_footer_shows_only_cancel_hint(self, make_paper):
+        from textual.widgets import Static
+
+        from arxiv_browser.browser.core import ArxivBrowser, ArxivBrowserOptions
+        from tests.support.patch_helpers import patch_save_config
+
+        config = UserConfig(onboarding_seen=True)
+        app = ArxivBrowser(
+            [make_paper()], options=ArxivBrowserOptions(config=config, restore_session=False)
+        )
+        with patch_save_config(return_value=True):
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                current = SettingsResult(
+                    llm_preset="",
+                    theme_name="monokai",
+                    s2_enabled=False,
+                    hf_enabled=False,
+                    research_interests="",
+                )
+                app.push_screen(SettingsModal(current, ["monokai"]))
+                await pilot.pause()
+                footer = app.screen.query_one("#settings-footer", Static)
+                assert str(footer.content) == "Cancel: Esc"
+
+    async def test_edit_button_shares_interests_row(self, make_paper):
+        from textual.widgets import Button, Static
+
+        from arxiv_browser.browser.core import ArxivBrowser, ArxivBrowserOptions
+        from tests.support.patch_helpers import patch_save_config
+
+        config = UserConfig(onboarding_seen=True)
+        app = ArxivBrowser(
+            [make_paper()], options=ArxivBrowserOptions(config=config, restore_session=False)
+        )
+        with patch_save_config(return_value=True):
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                current = SettingsResult(
+                    llm_preset="",
+                    theme_name="monokai",
+                    s2_enabled=False,
+                    hf_enabled=False,
+                    research_interests="",
+                )
+                app.push_screen(SettingsModal(current, ["monokai"]))
+                await pilot.pause()
+                value = app.screen.query_one("#settings-interests-value", Static)
+                edit = app.screen.query_one("#settings-interests-edit", Button)
+                # Inline association: Edit lives in the same row as its value,
+                # not down in the Cancel/Save button row.
+                assert edit.parent is value.parent
+                buttons_row = app.screen.query_one("#settings-buttons")
+                assert edit.parent is not buttons_row
 
     async def test_llm_preset_picker_lists_and_returns_preset(self, make_paper):
         from arxiv_browser.browser.core import ArxivBrowser, ArxivBrowserOptions

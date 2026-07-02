@@ -399,6 +399,17 @@ class CitationGraphScreen(ModalBase[str | None]):
         background: $th-highlight-focus;
     }
 
+    /* Full-width, wrapping empty-state placeholder (avoids single-line
+       truncation of the Try:/Next: hint in the narrow citation panels). */
+    .citation-list > ListItem.-empty {
+        height: auto;
+    }
+
+    .citation-list > ListItem.-empty > Label {
+        width: 1fr;
+        height: auto;
+    }
+
     .cite-title {
         color: $th-text;
     }

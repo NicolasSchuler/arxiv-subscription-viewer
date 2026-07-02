@@ -1,6 +1,20 @@
-"""Render deterministic Textual SVG snapshots for documentation and review."""
+"""Render deterministic Textual SVG snapshots for documentation and review.
+
+Color determinism: baselines pin **colored** output. We remove ``NO_COLOR`` and
+set ``FORCE_COLOR`` *before* importing Textual so that the SVG export always
+renders the vivid, fully themed UI users actually see — never the color-stripped
+variant a ``NO_COLOR`` terminal would otherwise produce. This makes the snapshot
+gate environment-independent (identical bytes whether run on a color terminal,
+a ``NO_COLOR`` terminal, or CI).
+"""
 
 from __future__ import annotations
+
+import os
+
+# Pin colored rendering before any Textual/Rich import reads the environment.
+os.environ.pop("NO_COLOR", None)
+os.environ["FORCE_COLOR"] = "1"
 
 import argparse
 import asyncio
@@ -47,6 +61,18 @@ async def _open_command_palette(pilot: object) -> None:
     await pilot.pause(0.1)  # type: ignore[attr-defined]
 
 
+def _press_modal(*keys: str) -> Callable[[object], Awaitable[None]]:
+    """Build a setup that presses ``keys`` to open a modal, then lets it settle."""
+
+    async def _setup(pilot: object) -> None:
+        for key in keys:
+            await pilot.press(key)  # type: ignore[attr-defined]
+            await pilot.pause(0.1)  # type: ignore[attr-defined]
+        await pilot.pause(0.2)  # type: ignore[attr-defined]
+
+    return _setup
+
+
 SNAPSHOT_CASES = (
     SnapshotCase("default-browse", (100, 30), _idle),
     SnapshotCase("breakpoint-browse", (96, 30), _idle),
@@ -61,6 +87,12 @@ SNAPSHOT_CASES = (
         theme_name="high-contrast",
         ascii_icons=True,
     ),
+    # Modal coverage (#24): high-surface dialogs that snapshots previously never
+    # guarded — a modal case here would have caught the off-dialog buttons (#5).
+    SnapshotCase("modal-settings", (100, 30), _press_modal("comma")),
+    SnapshotCase("modal-collections", (100, 30), _press_modal("ctrl+k")),
+    SnapshotCase("modal-watchlist", (100, 30), _press_modal("W")),
+    SnapshotCase("modal-export", (100, 30), _press_modal("E")),
 )
 
 
@@ -171,6 +203,28 @@ async def _render_all() -> dict[str, str]:
     return rendered
 
 
+# Browse cases whose footer must always paint the "? help" hint (regression
+# guard for #1 — the footer CSS bug that rendered zero content rows).
+_FOOTER_HINT_CASES = ("default-browse", "breakpoint-browse", "narrow-browse")
+
+
+def _validate_footer_hints(rendered: dict[str, str]) -> list[str]:
+    """Return errors if any browse snapshot lost its footer ``? help`` hint.
+
+    Textual's SVG export splits styled runs into separate ``<text>`` elements,
+    so the literal ``"? help"`` never appears as one substring — the accent-
+    colored ``?`` and the ``help`` label are distinct elements. We therefore
+    assert the footer's ``>help<`` text element is present, which is the ``help``
+    label of the ``? help`` hint.
+    """
+    errors: list[str] = []
+    for name in _FOOTER_HINT_CASES:
+        svg = rendered.get(name, "")
+        if ">help<" not in svg:
+            errors.append(f"{name}: footer '? help' hint missing (footer regressed to zero rows?)")
+    return errors
+
+
 def _snapshot_path(name: str) -> Path:
     """Return the committed SVG path for a snapshot case name."""
     return SNAPSHOT_DIR / f"{name}.svg"
@@ -238,6 +292,12 @@ async def _main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     rendered = await _render_all()
+
+    footer_errors = _validate_footer_hints(rendered)
+    if footer_errors:
+        print("\n".join(footer_errors), file=sys.stderr)
+        return 1
+
     if args.update:
         _write_snapshots(rendered)
         print(f"Updated {len(rendered)} TUI snapshots in {SNAPSHOT_DIR}")

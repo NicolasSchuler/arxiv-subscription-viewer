@@ -133,6 +133,29 @@ class TestKeybindingsCommand:
         assert "Getting Started" in output
         assert "Core Actions" in output
 
+    def test_keybindings_ascii_flag_produces_pure_ascii(self, capsys: object) -> None:
+        """--ascii replaces U+00B7 section separators across every format."""
+        from arxiv_browser.cli import main
+
+        for fmt in ("table", "markdown", "json"):
+            exit_code = main(["--ascii", "keybindings", "--format", fmt])
+            assert exit_code == 0
+            out = capsys.readouterr().out  # type: ignore[union-attr]
+            assert all(ord(ch) <= 0x7F for ch in out), f"non-ASCII leaked in {fmt}"
+        # Global option accepted after the subcommand too.
+        assert main(["keybindings", "--ascii"]) == 0
+        out = capsys.readouterr().out  # type: ignore[union-attr]
+        assert "Standard - Organize" in out
+        assert "·" not in out
+
+    def test_keybindings_table_no_color_when_piped(self, capsys: object) -> None:
+        """Auto color mode must not emit ANSI when stdout is not a TTY (captured)."""
+        from arxiv_browser.cli import main
+
+        exit_code = main(["keybindings"])
+        assert exit_code == 0
+        assert "\033[" not in capsys.readouterr().out  # type: ignore[union-attr]
+
     def test_keybindings_normalize_argv(self) -> None:
         """keybindings command is not rewritten by _normalize_cli_argv."""
         from arxiv_browser.cli import _normalize_cli_argv

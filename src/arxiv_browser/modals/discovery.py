@@ -53,7 +53,7 @@ class TrendRadarModal(ModalBase[None]):
                 _render_trend_report(self._report, theme_colors_for(self)["accent"]),
                 id="trend-radar-body",
             )
-            yield Static("Esc/q close", id="trend-radar-footer", classes="modal-footer")
+            yield Static("Close: Esc/q", id="trend-radar-footer", classes="modal-footer")
 
     def action_close(self) -> None:
         """Close the overlay."""
@@ -79,8 +79,9 @@ class AuthorPickerModal(ModalBase[str | None]):
 
     CSS = """
     #author-picker-dialog {
-        width: 64;
-        max-width: 95%;
+        /* Small guide width (author names are short). */
+        width: 52;
+        max-width: 90%;
         height: 70%;
         padding: 0 2;
     }
@@ -173,7 +174,7 @@ class AuthorProfileModal(ModalBase[None]):
                 _render_author_profile(self._profile, theme_colors_for(self)["accent"]),
                 id="author-profile-body",
             )
-            yield Static("Esc/q close", id="author-profile-footer", classes="modal-footer")
+            yield Static("Close: Esc/q", id="author-profile-footer", classes="modal-footer")
 
     def action_close(self) -> None:
         """Close the profile."""

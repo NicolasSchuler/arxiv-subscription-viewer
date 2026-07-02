@@ -97,6 +97,16 @@ class TestShortcutsHint:
         assert data["shortcuts_hint_seen"] is True
         assert _dict_to_config(data).shortcuts_hint_seen is True
 
+    def test_welcome_dismissal_suppresses_same_session_shortcuts_hint(self) -> None:
+        stub = self._stub(shortcuts_hint_seen=False)
+        ArxivBrowser._on_welcome_dismissed(stub, None)
+        assert stub._config.shortcuts_hint_seen is True
+        assert stub._config.onboarding_seen is True
+
+        # The welcome screen already surfaced "? for shortcuts", so the nudge no-ops.
+        self._hint(stub)
+        stub.notify.assert_not_called()
+
 
 class TestBadgeLegendHint:
     """Tests for the one-time 'badges → ? legend' nudge."""

@@ -182,12 +182,13 @@ If something looks off, run `arxiv-viewer doctor` to check config, history disco
 | `Ctrl+p` | Command palette | | `V` | Check versions |
 | `Ctrl+g` | Auto-tag (LLM) | | `Ctrl+b` | Save bookmark |
 | `G` | Citation graph | | `m` / `'` | Set / jump to mark |
-| `R` | Recommendations | | `Ctrl+l` | Edit interests |
+| `R` | Similar papers | | `Ctrl+l` | Edit interests |
 | `1-9` | Jump to bookmark | | `Ctrl+d` | Detail pane sections |
 | `w` / `W` | Watch list | | `Ctrl+t` | Cycle theme |
 | `Ctrl+e` | Toggle S2 / Exit API mode | | `Ctrl+r` | Mark visible as read |
 | `Ctrl+h` | HuggingFace trending | | `Ctrl+Shift+b` | Remove bookmark |
 | `,` | Settings | | `?` | Help / shortcuts |
+| `F1` | What's New (release notes) | | | |
 
 ### Marks
 

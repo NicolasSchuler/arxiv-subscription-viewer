@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from arxiv_browser.actions import constants as _c
 from arxiv_browser.actions.constants import RECOVERABLE_ACTION_ERRORS, log_action_failure, logger
 from arxiv_browser.actions.llm_preset_prompt import prompt_llm_preset
 from arxiv_browser.actions.llm_streaming import request_summary_streaming, should_stream_summary
@@ -130,6 +131,11 @@ def _log_action_failure(action: str, exc: Exception, *, unexpected: bool = False
     return log_action_failure(action, exc, unexpected=unexpected)
 
 
+def _notify_err(app, message: str, title: str, timeout: int = _NOTIFY_TIMEOUT_DEFAULT) -> None:
+    """Show an error notification with the standard severity and timeout."""
+    app.notify(message, title=title, severity="error", timeout=timeout)
+
+
 def _collect_all_tags(app: ArxivBrowser) -> list[str]:
     """Collect all unique tags across all paper metadata."""
     return list(
@@ -205,7 +211,7 @@ def _on_summary_mode_selected(app, mode: str | None, paper: Paper, command_templ
     if not mode:
         return
     if mode not in SUMMARY_MODES:
-        app.notify(f"Unknown summary mode: {mode}", title="AI Summary", severity="error")
+        _notify_err(app, _c.UNKNOWN_SUMMARY_MODE_MESSAGE, "AI Summary")
         return
 
     arxiv_id = paper.arxiv_id
@@ -359,7 +365,7 @@ def _handle_summary_value_error(
     if not app._is_current_dataset_epoch(task_epoch):
         return
     logger.warning("Summary config error for %s: %s", arxiv_id, exc)
-    app.notify(str(exc), title="AI Summary", severity="error", timeout=_NOTIFY_TIMEOUT_LONG)
+    _notify_err(app, _c.build_summary_config_error(str(exc)), "AI Summary", _NOTIFY_TIMEOUT_LONG)
 
 
 def _handle_summary_recoverable_error(
@@ -371,7 +377,7 @@ def _handle_summary_recoverable_error(
     if not app._is_current_dataset_epoch(task_epoch):
         return
     _log_action_failure(f"summary generation for {arxiv_id}", exc)
-    app.notify("Summary failed", title="AI Summary", severity="error")
+    _notify_err(app, _c.SUMMARY_FAILED_MESSAGE, "AI Summary")
 
 
 def _finish_summary_generation(
@@ -739,7 +745,7 @@ def _handle_relevance_batch_error(
     if not app._is_current_dataset_epoch(task_epoch):
         return
     _log_action_failure("relevance batch scoring", exc)
-    app.notify("Relevance scoring failed", title="Relevance", severity="error")
+    _notify_err(app, _c.RELEVANCE_FAILED_MESSAGE, "Relevance")
 
 
 def _finish_relevance_batch(app: ArxivBrowser, task_epoch: int) -> None:
@@ -837,9 +843,7 @@ def _apply_auto_tag_batch_result(
 
 def _auto_tag_failure_message(tagged: int) -> str:
     """Return the standard batch auto-tag failure message."""
-    if tagged:
-        return f"Auto-tagging failed ({tagged} tagged before error)"
-    return "Auto-tagging failed"
+    return _c.build_auto_tag_failure(tagged)
 
 
 async def _auto_tag_single_async(
@@ -887,7 +891,7 @@ async def _auto_tag_single_async(
         if not app._is_current_dataset_epoch(task_epoch):
             return
         _log_action_failure(f"auto-tag single for {paper.arxiv_id}", exc)
-        app.notify("Auto-tagging failed", title="Auto-Tag", severity="error")
+        _notify_err(app, _c.AUTO_TAG_FAILED_MESSAGE, "Auto-Tag")
     finally:
         if app._is_current_dataset_epoch(task_epoch):
             app._auto_tag_active = False
@@ -983,7 +987,7 @@ def _handle_auto_tag_batch_error(
     _log_action_failure("auto-tag batch", exc)
     if tagged > 0:
         app._save_config_or_warn("partial auto-tag results")
-    app.notify(_auto_tag_failure_message(tagged), title="Auto-Tag", severity="error")
+    _notify_err(app, _auto_tag_failure_message(tagged), "Auto-Tag")
 
 
 def _finish_auto_tag_batch(app: ArxivBrowser, task_epoch: int) -> None:

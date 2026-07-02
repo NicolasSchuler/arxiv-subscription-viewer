@@ -618,7 +618,16 @@ def action_track_author(app: "ArxivBrowser") -> None:
         app._config.tracked_authors = dedupe_author_names([*old_authors, author])
         if not save_config(app._config):
             app._config.tracked_authors = old_authors
-            app.notify("Failed to save tracked author", title="Authors", severity="error")
+            app.notify(
+                build_actionable_error(
+                    "save the tracked author",
+                    why="the config file could not be written",
+                    next_step="check permissions on the config directory, then retry",
+                ),
+                title="Authors",
+                severity="error",
+                timeout=8,
+            )
             return
         app._compute_watched_papers()
         app._apply_filter(app._get_active_query())

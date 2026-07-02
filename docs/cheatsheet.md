@@ -45,7 +45,7 @@ arxiv-viewer completions bash|zsh|fish          # Shell completions
 |-----|--------|-|-----|--------|
 | `Ctrl+s` | AI summary | | `e` / `Ctrl+e` | Fetch S2 / toggle S2 |
 | `C` | Chat with paper | | `G` | Citation graph |
-| `Ctrl+v` | Compare papers | | `R` | Recommendations |
+| `Ctrl+v` | Compare papers | | `R` | Similar papers |
 | `L` | Relevance score | | `Ctrl+h` | HuggingFace trending |
 | `Ctrl+g` | Auto-tag (LLM) | | `V` | Check versions |
 
@@ -60,6 +60,7 @@ arxiv-viewer completions bash|zsh|fish          # Shell completions
 | `I` | Preview first figure | | `z` | Compact list |
 | `Alt+Left` / `Alt+Right` | Resize list/details | | `Alt+0` | Reset pane sizes |
 | `y` | Read abstract aloud | | `Ctrl+t` | Cycle theme |
+| `F1` | What's New (release notes) | | | |
 
 ## Search syntax
 

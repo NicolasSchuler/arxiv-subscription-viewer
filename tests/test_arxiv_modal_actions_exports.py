@@ -234,12 +234,25 @@ class TestExportMenuModal:
 
         assert len(set(values)) == 9
 
-    def test_compose_footer_uses_cancel_esc_copy(self):
+    def test_compose_footer_uses_close_esc_copy(self):
         import inspect
 
         from arxiv_browser.modals import ExportMenuModal
 
-        assert "Cancel: Esc/q" in inspect.getsource(ExportMenuModal.compose)
+        source = inspect.getsource(ExportMenuModal.compose)
+        assert "Close: Esc/q" in source
+        assert "Cancel: Esc/q" not in source
+
+    def test_compose_separates_keys_from_labels(self):
+        """Accelerator letters use a two-space gutter, not color-only separation."""
+        import inspect
+
+        from arxiv_browser.modals import ExportMenuModal
+
+        source = inspect.getsource(ExportMenuModal.compose)
+        # Key hint markup closes, then two spaces before the label text.
+        for label in ("Plain text", "BibTeX", "Markdown", "RIS", "CSV", "BibTeX (.bib)"):
+            assert f"[/]  {label}" in source
 
     def test_compose_uses_markdown_table_copy(self):
         import inspect

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import VerticalScroll
+from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Label, Static
 
 from arxiv_browser._ascii import is_ascii_mode
@@ -37,7 +37,10 @@ class WhatsNewScreen(ModalBase[None]):
     #whats-new-dialog {
         width: 70;
         max-width: 90%;
+        height: auto;
         max-height: 80%;
+        /* The dialog itself does not scroll — title, version, and footer stay
+           pinned; only the release-notes body between them scrolls. */
     }
 
     #whats-new-title {
@@ -51,6 +54,10 @@ class WhatsNewScreen(ModalBase[None]):
         margin-bottom: 1;
     }
 
+    #whats-new-scroll {
+        height: 1fr;
+    }
+
     #whats-new-footer {
         text-align: center;
         margin-top: 1;
@@ -59,13 +66,14 @@ class WhatsNewScreen(ModalBase[None]):
     """
 
     def compose(self) -> ComposeResult:
-        """Yield a scrolling dialog rendering the release highlights."""
-        with VerticalScroll(id="whats-new-dialog", classes="modal-dialog"):
+        """Yield a dialog rendering the release highlights with a pinned footer."""
+        with Vertical(id="whats-new-dialog", classes="modal-dialog"):
             yield Label(WHATS_NEW_HEADLINE, id="whats-new-title", classes="modal-title")
             yield Label(f"Version {WHATS_NEW_VERSION}", id="whats-new-version")
-            yield Static(id="whats-new-content")
+            with VerticalScroll(id="whats-new-scroll"):
+                yield Static(id="whats-new-content")
             yield Label(
-                "Press Esc / Enter / Space to close",
+                "Close: Enter / Esc / q",
                 id="whats-new-footer",
                 classes="modal-footer",
             )

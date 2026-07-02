@@ -18,6 +18,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Label, ListItem, ListView, Select, Static, Switch
 
+from arxiv_browser._ascii import is_ascii_mode
 from arxiv_browser.llm import LLM_PRESETS
 from arxiv_browser.modals.base import ModalBase
 
@@ -56,7 +57,8 @@ class LLMPresetPickerModal(ModalBase[str | None]):
 
     CSS = """
     #llm-preset-dialog {
-        width: 64;
+        /* Medium guide width (preset commands are long). */
+        width: 70;
         max-width: 90%;
         height: auto;
     }
@@ -88,7 +90,7 @@ class LLMPresetPickerModal(ModalBase[str | None]):
             )
             yield ListView(id="llm-preset-list")
             yield Static(
-                "Select: Enter | Cancel: Esc/q", id="llm-preset-footer", classes="modal-footer"
+                "Select: Enter | Cancel: Esc", id="llm-preset-footer", classes="modal-footer"
             )
 
     def on_mount(self) -> None:
@@ -159,15 +161,36 @@ class SettingsModal(ModalBase[SettingsResult | None]):
         width: 1fr;
     }
 
+    /* Raise the off-state slider contrast so the toggle is legible in
+       high-contrast themes (on-state stays theme-accent). */
+    .settings-row Switch > .switch--slider {
+        color: $th-muted;
+    }
+
+    /* Hug the value text (auto width) so the inline Edit button sits directly
+       after "(not set)" and reads as this row's control, matching the
+       label/control rhythm of the Select rows above. The summary is truncated
+       (see _interests_summary) so the row never overflows the dialog. */
     #settings-interests-value {
-        width: 1fr;
+        width: auto;
         color: $th-muted;
         content-align: left middle;
         height: 3;
     }
 
-    #settings-buttons Button {
+    #settings-interests-edit {
+        height: 3;
         margin-left: 1;
+    }
+
+    /* Separate the bottom action row from the grid above and space Cancel/Save
+       apart so they read as a distinct cluster, not an L with the Edit button. */
+    #settings-buttons {
+        margin-top: 1;
+    }
+
+    #settings-buttons Button {
+        margin-left: 2;
     }
 
     #settings-footer {
@@ -213,21 +236,35 @@ class SettingsModal(ModalBase[SettingsResult | None]):
                 with Horizontal(classes="settings-row"):
                     yield Label("HuggingFace trending", classes="settings-label")
                     yield Switch(value=self._current.hf_enabled, id="settings-hf")
+                # NOTE: the theme/preset Select dropdown arrows (▼/▲) are drawn
+                # by Textual's SelectCurrent.compose and are not ASCII-gated by
+                # the framework; overriding them cleanly is out of scope, so they
+                # remain Unicode even in --ascii mode (known limitation).
                 with Horizontal(classes="settings-row"):
                     yield Label("Research interests", classes="settings-label")
                     yield Static(self._interests_summary(), id="settings-interests-value")
-                    yield Button("Edit…", id="settings-interests-edit")
+                    yield Button(self._edit_label(), id="settings-interests-edit")
             with Horizontal(id="settings-buttons", classes="modal-buttons"):
                 yield Button("Cancel", variant="default", id="settings-cancel")
                 yield Button("Save (Ctrl+S)", variant="primary", id="settings-save")
-            yield Static("Ctrl+S save | Esc cancel", id="settings-footer", classes="modal-footer")
+            yield Static("Cancel: Esc", id="settings-footer", classes="modal-footer")
+
+    @staticmethod
+    def _edit_label() -> str:
+        """Return the Edit button label with an ASCII-safe ellipsis."""
+        return "Edit..." if is_ascii_mode() else "Edit…"
 
     def _interests_summary(self) -> str:
-        """Return a short one-line preview of the research interests text."""
+        """Return a short one-line preview of the research interests text.
+
+        Capped so the auto-width value plus the inline Edit button always fit
+        within the dialog at supported terminal widths (label 24 + value + Edit).
+        """
+        ellipsis = "..." if is_ascii_mode() else "…"
         text = " ".join(self._interests.split())
         if not text:
             return "(not set)"
-        return text if len(text) <= 40 else f"{text[:39]}…"
+        return text if len(text) <= 30 else f"{text[:29]}{ellipsis}"
 
     @on(Button.Pressed, "#settings-interests-edit")
     def on_edit_interests(self) -> None:

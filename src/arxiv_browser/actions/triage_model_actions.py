@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 from textual.css.query import NoMatches
 
+from arxiv_browser.action_messages import build_actionable_error
+from arxiv_browser.modals import ConfirmModal
 from arxiv_browser.parsing import parse_arxiv_file
 from arxiv_browser.triage_model import (
     TRIAGE_INSTALL_HINT,
@@ -49,11 +51,30 @@ def action_train_triage_model(app: ArxivBrowser) -> None:
 
 
 def action_clear_triage_model(app: ArxivBrowser) -> None:
-    """Clear the persisted local triage model and current predictions."""
+    """Confirm, then clear the persisted local triage model and predictions."""
+    app.push_screen(
+        ConfirmModal(
+            "Delete the trained triage model?\nYou'll need to retrain it from your saved decisions."
+        ),
+        lambda confirmed: _do_clear_triage_model(app) if confirmed else None,
+    )
+
+
+def _do_clear_triage_model(app: ArxivBrowser) -> None:
+    """Delete the persisted triage model and predictions after confirmation."""
     try:
         changed = clear_triage_model()
     except OSError as exc:
-        app.notify(f"Could not clear triage model: {exc}", title="Triage Model", severity="error")
+        app.notify(
+            build_actionable_error(
+                "clear the triage model",
+                why=str(exc),
+                next_step="check permissions on the config directory, then retry",
+            ),
+            title="Triage Model",
+            severity="error",
+            timeout=8,
+        )
         return
     _apply_triage_predictions(app, {}, None, refresh=True)
     message = "Cleared triage model" if changed else "No triage model to clear"
@@ -159,7 +180,16 @@ async def _train_triage_model_async(app: ArxivBrowser) -> None:
         app.notify(str(exc), title="Triage Model", severity="warning", timeout=10)
     except (OSError, ValueError, RuntimeError) as exc:
         logger.warning("Triage model training failed", exc_info=True)
-        app.notify(f"Triage model training failed: {exc}", title="Triage Model", severity="error")
+        app.notify(
+            build_actionable_error(
+                "train the triage model",
+                why=str(exc),
+                next_step="star/exclude a few more papers to build training data, then retry",
+            ),
+            title="Triage Model",
+            severity="error",
+            timeout=8,
+        )
     finally:
         app._triage_training_active = False
         try:

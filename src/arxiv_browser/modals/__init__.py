@@ -58,13 +58,6 @@ from arxiv_browser.modals.llm import (
 # pdf.py — terminal PDF/figure preview
 from arxiv_browser.modals.pdf import FigurePreviewScreen, PdfPreviewScreen
 
-# search.py — arXiv search form, command palette
-from arxiv_browser.modals.search import (
-    ArxivSearchModal,
-    CommandPaletteModal,
-    PaletteCommand,
-)
-
 # settings.py — in-app settings editor and inline LLM preset picker
 from arxiv_browser.modals.settings import (
     LLMPresetPickerModal,
@@ -85,14 +78,12 @@ from arxiv_browser.modals.welcome import WelcomeScreen
 from arxiv_browser.modals.whats_new import WhatsNewScreen
 
 __all__ = [
-    "ArxivSearchModal",
     "AuthorListItem",
     "AuthorPickerModal",
     "AuthorProfileModal",
     "CitationGraphListItem",
     "CitationGraphScreen",
     "CollectionsModal",
-    "CommandPaletteModal",
     "ConfirmModal",
     "ExportMenuModal",
     "FigurePreviewScreen",
@@ -102,7 +93,6 @@ __all__ = [
     "LineAnnotationResult",
     "MetadataSnapshotPickerModal",
     "ModalBase",
-    "PaletteCommand",
     "PaperChatScreen",
     "PaperComparisonScreen",
     "PaperDebateResultModal",

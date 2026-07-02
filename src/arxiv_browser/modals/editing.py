@@ -425,7 +425,7 @@ class LineAnnotationModal(ModalBase["LineAnnotationResult | None"]):
             )
             yield Input(placeholder="Margin note...", id="line-annotation-input")
             yield Static(
-                "Enter save | Esc cancel", id="line-annotation-help", classes="modal-footer"
+                "Enter save | Cancel: Esc", id="line-annotation-help", classes="modal-footer"
             )
 
     def on_mount(self) -> None:

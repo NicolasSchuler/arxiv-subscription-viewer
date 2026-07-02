@@ -257,7 +257,7 @@ class TestBookmarkRelevanceAndCopyCoverage:
         app2._copy_to_clipboard = MagicMock(return_value=False)
         app2._format_paper_for_clipboard = MagicMock(return_value="X")
         app2.action_copy_selected()
-        assert "Failed to copy to clipboard" in app2.notify.call_args[0][0]
+        assert "Could not copy" in app2.notify.call_args[0][0]
 
     @pytest.mark.asyncio
     async def test_run_arxiv_search_returns_early_when_fetch_inflight(self):

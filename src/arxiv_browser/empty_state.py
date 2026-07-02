@@ -51,19 +51,25 @@ def build_list_empty_message(
 # disabled ``ListItem`` placeholder.
 
 
-COLLECTIONS_MANAGE_EMPTY = "No collections yet. Try: type a name above and press Create."
+COLLECTIONS_MANAGE_EMPTY = (
+    "No collections yet. Try: type a name above and press Create. Next: press Save to persist."
+)
 COLLECTIONS_PICK_EMPTY = (
-    "No collections yet. Try: press Ctrl+k in the main view to create one first."
+    "No collections yet. Try: press Ctrl+k in the main view to create one first. "
+    "Next: press Esc to close."
 )
 COLLECTION_DETAIL_EMPTY = (
     "No papers in this collection yet. "
-    "Try: select a paper in the main view and press Ctrl+k to add it."
+    "Try: select a paper in the main view and press Ctrl+k to add it. "
+    "Next: press Back to return to the list."
 )
 CITATIONS_REFS_EMPTY = (
-    "No references recorded for this paper. Try: press e to refresh Semantic Scholar data."
+    "No references recorded for this paper. Try: press e to refresh Semantic Scholar data. "
+    "Next: press Tab to view citing papers."
 )
 CITATIONS_CITES_EMPTY = (
-    "No citing papers recorded yet. Try: press e to refresh Semantic Scholar data."
+    "No citing papers recorded yet. Try: press e to refresh Semantic Scholar data. "
+    "Next: press Tab to view references."
 )
 
 

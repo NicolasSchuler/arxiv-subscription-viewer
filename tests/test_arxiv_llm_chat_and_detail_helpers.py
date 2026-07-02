@@ -564,6 +564,10 @@ class TestPaperDetailsRenderHelpers:
         result = details._render_url(paper)
         assert "URL" in result
         assert "arxiv.org" in result
+        # URL gets the same expanded-arrow section-header treatment as siblings
+        # and uses the accent role, not the decorative pink (style-guide §6).
+        assert "▾ URL" in result
+        assert "pink" not in result
 
     def test_ascii_mode_uses_ascii_safe_detail_glyphs(self, make_paper):
         from arxiv_browser.huggingface import HuggingFacePaper

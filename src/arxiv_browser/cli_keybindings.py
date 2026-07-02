@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from collections.abc import Sequence
 
 from arxiv_browser.help_ui import build_help_sections
@@ -46,7 +47,7 @@ def _table_uses_color(args: argparse.Namespace) -> bool:
         return False
     if color_mode == "always":
         return True
-    return "NO_COLOR" not in os.environ
+    return sys.stdout.isatty() and "NO_COLOR" not in os.environ
 
 
 def _render_json(sections: KeybindingSections) -> None:
@@ -83,6 +84,11 @@ def _render_table(sections: KeybindingSections, *, use_color: bool) -> None:
 
 def _run_keybindings(args: argparse.Namespace) -> int:
     """Print keyboard shortcuts to stdout in the requested format."""
+    from arxiv_browser._ascii import set_ascii_mode
+
+    # Apply --ascii before building sections so the ASCII section-header variants
+    # (and any other icons) are emitted; without this the U+00B7 separators leak.
+    set_ascii_mode(bool(getattr(args, "ascii", False)))
     sections = _filter_sections_for_tier(
         build_help_sections(APP_BINDINGS), getattr(args, "tier", "all")
     )

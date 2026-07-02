@@ -10,6 +10,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from arxiv_browser.action_messages import build_actionable_error
 from arxiv_browser.actions.constants import logger
 from arxiv_browser.models import Paper
 
@@ -161,7 +162,7 @@ async def _read_abstract_aloud_async(
         _notify_if_current(app, paper_id, _tts_missing_message(), severity="warning")
     except OSError as exc:
         logger.warning("TTS playback failed for %s: %s", paper_id, exc, exc_info=True)
-        _notify_if_current(app, paper_id, "TTS playback failed", severity="error")
+        _notify_if_current(app, paper_id, _tts_failure_message(), severity="error")
     except asyncio.CancelledError:
         _terminate_process(process)
         if process is not None:
@@ -175,11 +176,24 @@ async def _read_abstract_aloud_async(
             app._tts_paper_id = None
 
 
+def _tts_failure_message(why: str | None = None) -> str:
+    """Build an actionable TTS-failure notification message (finding #8)."""
+    return build_actionable_error(
+        "read the abstract aloud",
+        why=why or "the system TTS command failed to run",
+        next_step="check the configured TTS command (macOS 'say' or Linux espeak-ng/espeak)",
+    )
+
+
 def _notify_tts_failure(app: ArxivBrowser, paper_id: str, stderr: bytes) -> None:
     stderr_text = stderr.decode("utf-8", errors="replace").strip()
-    suffix = f": {stderr_text[:160]}" if stderr_text else ""
-    logger.warning("TTS playback failed for %s%s", paper_id, suffix)
-    _notify_if_current(app, paper_id, f"TTS playback failed{suffix}", severity="error")
+    logger.warning(
+        "TTS playback failed for %s%s",
+        paper_id,
+        f": {stderr_text[:160]}" if stderr_text else "",
+    )
+    why = f"the TTS command exited with an error: {stderr_text[:160]}" if stderr_text else None
+    _notify_if_current(app, paper_id, _tts_failure_message(why), severity="error")
 
 
 def _notify_if_current(

@@ -270,6 +270,80 @@ def test_narrow_meta_budget_keeps_identifiers_before_bulk_tags(make_paper):
     assert "+2" in visible_meta
 
 
+def test_leading_badges_keep_visible_space_before_title(make_paper):
+    paper = make_paper(title="Retrieval-Augmented Generation")
+    star = _visible_text(
+        render_paper_option(
+            PaperRowRenderState(
+                paper=paper,
+                metadata=PaperMetadata(arxiv_id=paper.arxiv_id, starred=True),
+                compact=True,
+            )
+        )
+    )
+    read = _visible_text(
+        render_paper_option(
+            PaperRowRenderState(
+                paper=paper,
+                metadata=PaperMetadata(arxiv_id=paper.arxiv_id, is_read=True),
+                compact=True,
+            )
+        )
+    )
+    # Double-width star gets an extra space so it does not visually glue to the
+    # title; the single-width read check keeps exactly one space.
+    assert star.startswith("⭐  Retrieval")
+    assert read.startswith("✓ Retrieval")
+
+
+def test_leading_star_badge_has_space_in_ascii_mode(make_paper):
+    paper = make_paper(title="Retrieval-Augmented Generation")
+    set_ascii_icons(True)
+    try:
+        text = _visible_text(
+            render_paper_option(
+                PaperRowRenderState(
+                    paper=paper,
+                    metadata=PaperMetadata(arxiv_id=paper.arxiv_id, starred=True),
+                    compact=True,
+                )
+            )
+        )
+    finally:
+        set_ascii_icons(False)
+    assert text.startswith("* Retrieval")
+
+
+def test_category_group_shrinks_to_keep_overflow_marker_inline(make_paper):
+    paper = make_paper(arxiv_id="2401.01001", categories="cs.AI cs.CL cs.IR")
+    text = render_paper_option(
+        PaperRowRenderState(
+            paper=paper,
+            metadata=PaperMetadata(arxiv_id=paper.arxiv_id, tags=["topic:ml"]),
+            meta_line_budget=30,
+        )
+    )
+    meta_line = _visible_text(text.splitlines()[2])
+    # arXiv ID and at least the leading category survive; the trailing category
+    # is folded into the inline +N marker rather than wrapping onto a new line.
+    assert len(meta_line) <= 30
+    assert meta_line == "2401.01001  cs.AI cs.CL  +2"
+
+
+def test_compress_meta_parts_shrinks_flex_category_token():
+    parts = ["[dim]2401.01001[/]", "cs.AI cs.CL cs.IR cs.LG", "[g]X[/]"]
+    compressed = _compress_meta_parts(parts, budget=24, flex_index=1)
+    assert len(_visible_text(compressed)) <= 24
+    assert "cs.AI" in compressed
+    assert "+" in compressed
+
+
+def test_compress_meta_parts_flex_single_category_truncates():
+    parts = ["[dim]2401.01001[/]", "cs.SUPERLONGCATEGORYNAME"]
+    compressed = _compress_meta_parts(parts, budget=12, flex_index=1)
+    assert len(_visible_text(compressed)) <= 12
+
+
 def test_review_badges_render_due_and_future_states(make_paper):
     paper = make_paper()
     due = render_paper_option(
@@ -997,6 +1071,22 @@ class TestAsciiModeNoUnicodeLeaks:
             self._assert_ascii_only(text, "render_paper_option")
         finally:
             set_ascii_icons(False)
+
+    def test_header_format_title_ascii(self):
+        """The Header title/sub-title join uses a spaced ``-`` (not U+2014) in ASCII mode."""
+        from arxiv_browser._ascii import set_ascii_mode
+        from arxiv_browser.browser.core import ArxivBrowser
+
+        app = ArxivBrowser.__new__(ArxivBrowser)
+        set_ascii_mode(True)
+        try:
+            content = app.format_title("arXiv Paper Browser", "Browse")
+            self._assert_ascii_only(content.plain, "format_title")
+            # Clean, spaced separator with no glued em-dash or double-dash.
+            assert content.plain == "arXiv Paper Browser - Browse"
+            assert "--" not in content.plain
+        finally:
+            set_ascii_mode(False)
 
     def test_chrome_status_bar_ascii(self):
         """Status bar uses ASCII separator in ASCII mode."""

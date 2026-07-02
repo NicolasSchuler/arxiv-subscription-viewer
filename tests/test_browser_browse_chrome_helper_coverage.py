@@ -316,7 +316,7 @@ class TestBrowserHelperCoverage:
         wide_state = app._build_paper_row_state(paper)
         wide_markup = render_paper_option(wide_state)
 
-        assert narrow_state.meta_line_budget == 36
+        assert narrow_state.meta_line_budget == 37
         assert wide_state.meta_line_budget == 120
         assert "+6" in narrow_markup or "+7" in narrow_markup or "+8" in narrow_markup
         assert "S2:10" in wide_markup
@@ -863,11 +863,11 @@ class TestBrowserHelperCoverage:
         app, paper1, _paper2, _theme_runtime = self._build_chrome_state_app(make_paper)
         app._get_current_index = MagicMock(return_value=0)
         with patch("arxiv_browser._ascii.is_ascii_mode", return_value=True):
-            assert app._format_details_header_text() == " Paper Details - 1/1 - scan"
+            assert app._format_details_header_text() == " Paper Details - 1/1 - density: scan"
             assert "Search - graph search - page 3" in app._build_subtitle_text()
         app._get_current_index = MagicMock(return_value=None)
         with patch("arxiv_browser._ascii.is_ascii_mode", return_value=True):
-            assert app._format_details_header_text() == " Paper Details - scan"
+            assert app._format_details_header_text() == " Paper Details - density: scan"
         app._in_arxiv_api_mode = False
         app._digest_inbox_context = DigestInboxContext("digest source")
         with patch("arxiv_browser._ascii.is_ascii_mode", return_value=True):
@@ -879,7 +879,7 @@ class TestBrowserHelperCoverage:
             assert app._build_subtitle_text() == "Filtered - 1/2 papers"
         app._get_active_query = MagicMock(return_value="")
         with patch("arxiv_browser._ascii.is_ascii_mode", return_value=True):
-            assert app._build_subtitle_text() == "Browse - 2 papers - 2026-03-22"
+            assert app._build_subtitle_text() == "Browse - 2026-03-22"
         app._update_details_header()
         app._get_details_header_widget = MagicMock(side_effect=NoMatches())
         app._update_details_header()

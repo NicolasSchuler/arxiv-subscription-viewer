@@ -46,12 +46,38 @@ def test_action_train_triage_model_starts_background_task():
     assert app._track_task.called
 
 
+def _confirm_clear(app) -> None:
+    """Invoke the ConfirmModal callback registered by action_clear_triage_model."""
+    app.push_screen = MagicMock()
+    triage_model_actions.action_clear_triage_model(app)
+    confirm_callback = app.push_screen.call_args.args[1]
+    confirm_callback(True)
+
+
+def test_action_clear_triage_model_prompts_before_deleting(monkeypatch):
+    app = _new_app_stub()
+    app.push_screen = MagicMock()
+    called = MagicMock()
+    monkeypatch.setattr(triage_model_actions, "clear_triage_model", called)
+
+    triage_model_actions.action_clear_triage_model(app)
+
+    # Deletion must not happen until the user confirms.
+    assert not called.called
+    prompt = app.push_screen.call_args.args[0]
+    confirm_callback = app.push_screen.call_args.args[1]
+    assert "Delete the trained triage model" in prompt._message
+    # Cancelling leaves the model untouched.
+    confirm_callback(False)
+    assert not called.called
+
+
 def test_action_clear_triage_model_updates_state(monkeypatch):
     app = _new_app_stub()
     app._triage_predictions = {"paper": TriagePrediction("paper", 0.9, "likely_star")}
     monkeypatch.setattr(triage_model_actions, "clear_triage_model", lambda: True)
 
-    triage_model_actions.action_clear_triage_model(app)
+    _confirm_clear(app)
 
     assert app._triage_predictions == {}
     assert app._triage_model_info is None
@@ -65,7 +91,7 @@ def test_action_clear_triage_model_no_artifact_clears_stale_predictions(monkeypa
     app._triage_model_info = _info()
     monkeypatch.setattr(triage_model_actions, "clear_triage_model", lambda: False)
 
-    triage_model_actions.action_clear_triage_model(app)
+    _confirm_clear(app)
 
     assert app._triage_predictions == {}
     assert app._triage_model_info is None
@@ -81,7 +107,7 @@ def test_action_clear_triage_model_reports_io_error(monkeypatch):
 
     monkeypatch.setattr(triage_model_actions, "clear_triage_model", raise_os_error)
 
-    triage_model_actions.action_clear_triage_model(app)
+    _confirm_clear(app)
 
     assert "Could not clear" in app.notify.call_args.args[0]
 
@@ -399,7 +425,8 @@ async def test_train_triage_model_async_reports_runtime_error(monkeypatch, make_
     await triage_model_actions._train_triage_model_async(app)
 
     assert app._triage_training_active is False
-    assert "training failed: boom" in app.notify.call_args.args[0]
+    assert "Could not train the triage model" in app.notify.call_args.args[0]
+    assert "boom" in app.notify.call_args.args[0]
 
 
 @pytest.mark.asyncio
@@ -428,7 +455,8 @@ async def test_train_triage_model_async_reports_predict_failure_after_successful
     assert app._triage_training_active is False
     assert app._triage_predictions == {}
     app._mark_badges_dirty.assert_not_called()
-    assert "training failed: post-fit scoring failed" in app.notify.call_args.args[0]
+    assert "Could not train the triage model" in app.notify.call_args.args[0]
+    assert "post-fit scoring failed" in app.notify.call_args.args[0]
     app._update_footer.assert_called_once_with()
 
 
@@ -455,7 +483,8 @@ async def test_train_triage_model_async_training_failure_preserves_existing_pred
     assert app._triage_training_active is False
     assert app._triage_predictions == {"paper": prediction}
     assert app._triage_model_info == _info()
-    assert "training failed: fit failed" in app.notify.call_args.args[0]
+    assert "Could not train the triage model" in app.notify.call_args.args[0]
+    assert "fit failed" in app.notify.call_args.args[0]
 
 
 def test_apply_triage_predictions_ignores_refresh_errors():
