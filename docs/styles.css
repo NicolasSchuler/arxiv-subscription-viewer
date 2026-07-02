@@ -415,3 +415,19 @@ button:focus-visible{
     width:100%;
   }
 }
+
+html,body{
+  overflow-x:clip;
+}
+
+@media (prefers-reduced-motion: reduce){
+  html{
+    scroll-behavior:auto;
+  }
+  .hero-cta-primary{
+    transition-duration:0s;
+  }
+  .hero-cta-primary:hover{
+    transform:none;
+  }
+}

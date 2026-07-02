@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-07-02
+
+### Changed
+- Polished the TUI from a snapshot-based design review: cleaner command palette, header, and list-row rendering, with the paper count shown only in the status bar.
+- Unified the Collections, Watchlist, Settings, and Export modals around consistent Cancel/Save clusters, save-state hints, and close affordances.
+- Improved the narrow-terminal layout so the paper list is never starved at small sizes, and tightened saved-search chip truncation and detail-pane labels.
+- Documented previously-missing CLI flags (`doctor --offline`, `keybindings --format/--tier`, `cache-clear --all`) across the README and reference docs.
+- Added missing README key-binding rows (`Tab`, `e`, `a`, `u`, `[`/`]`), documented the `keybindings` command, and linked the digest guide from the README.
+- Optimized the landing-page logo from 1.44 MB to 87 KB and added Open Graph, Twitter, canonical, and theme-color meta tags plus `prefers-reduced-motion` support.
+
+### Fixed
+- Fixed the documentation-sync gate's CLI-flag check, which silently passed due to a regex bug; it now scans every argparse parser, including subparsers and `cache_cli.py`.
+- Fixed a duplicated landing-page logo fetch and a 1px horizontal overflow on mobile.
+- Raised landing-page small-text contrast to meet WCAG AA.
+
 ## [0.3.4] - 2026-06-29
 
 ### Added
@@ -224,7 +239,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ASCII mode for terminals without Unicode support (`--ascii`)
 - Session persistence: scroll position, active filters, sort order
 
-[Unreleased]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.4...HEAD
+[Unreleased]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.5...HEAD
+[0.3.5]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.1...v0.3.2

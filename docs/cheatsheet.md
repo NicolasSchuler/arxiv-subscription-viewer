@@ -17,7 +17,7 @@ arxiv-viewer doctor                # Diagnose config, history, LLM, environment
 arxiv-viewer cache-info            # Show cache database path and row counts
 arxiv-viewer cache-clear --semantic --yes       # Clear one cache section
 arxiv-viewer config-path           # Print the config file path
-arxiv-viewer keybindings           # Print the key-binding reference
+arxiv-viewer keybindings           # Print the key-binding reference (--format table|json|markdown, --tier core|standard|power|all)
 arxiv-viewer completions bash|zsh|fish          # Shell completions
 ```
 

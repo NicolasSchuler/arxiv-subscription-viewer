@@ -5,8 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>arXiv Subscription Viewer - Triage arXiv papers from your terminal</title>
   <meta name="description" content="A keyboard-first terminal UI for triaging arXiv papers with history mode, live API search, metadata portability, and optional Semantic Scholar plus LLM enrichment.">
-  <link rel="stylesheet" href="styles.css?v=20260530">
-  <link rel="icon" href="logo.png?v=20260530" type="image/png">
+  <link rel="canonical" href="https://nicolasschuler.github.io/arxiv-subscription-viewer/">
+  <meta name="theme-color" content="#101216">
+  <meta property="og:title" content="arXiv Subscription Viewer - Triage arXiv papers from your terminal">
+  <meta property="og:description" content="A keyboard-first terminal UI for triaging arXiv papers with history mode, live API search, metadata portability, and optional Semantic Scholar plus LLM enrichment.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://nicolasschuler.github.io/arxiv-subscription-viewer/">
+  <meta property="og:image" content="https://nicolasschuler.github.io/arxiv-subscription-viewer/screenshot_preview.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="680">
+  <meta property="og:image:alt" content="arXiv Subscription Viewer terminal interface showing a paper list, filters, and detail pane">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="arXiv Subscription Viewer - Triage arXiv papers from your terminal">
+  <meta name="twitter:description" content="A keyboard-first terminal UI for triaging arXiv papers with history mode, live API search, metadata portability, and optional Semantic Scholar plus LLM enrichment.">
+  <meta name="twitter:image" content="https://nicolasschuler.github.io/arxiv-subscription-viewer/screenshot_preview.png">
+  <link rel="stylesheet" href="styles.css?v=20260702">
+  <link rel="icon" href="logo.png?v=20260702" type="image/png">
   <style>
     body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     code, pre, .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
@@ -26,7 +40,7 @@
     <div class="hero-grid max-w-6xl mx-auto px-6 py-16 md:py-24">
       <div class="hero-copy">
         <div class="hero-badge">
-          <img src="logo.png" width="34" height="34" alt="" class="hero-badge-logo">
+          <img src="logo.png?v=20260702" width="34" height="34" alt="" class="hero-badge-logo">
           <span class="hero-badge-text mono">arXiv Subscription Viewer</span>
         </div>
         <h1 class="hero-title">
@@ -170,7 +184,7 @@
             <span class="text-gray-500"># Save digest as history/2026-02-13.txt</span><br>
             <span class="text-gray-500">$</span> <span class="text-monokai-green">arxiv-viewer</span>
           </div>
-          <p class="text-gray-500 text-sm mt-3">
+          <p class="text-gray-400 text-sm mt-3">
             Tip: automate this by writing each digest to <code class="mono text-gray-400">history/YYYY-MM-DD.txt</code>.
           </p>
         </div>
@@ -185,7 +199,7 @@
             <span class="text-gray-500">$</span> <span class="text-monokai-green">arxiv-viewer search --category cs.AI</span><br>
             <span class="text-gray-500"># or:</span> <span class="text-gray-400">arxiv-viewer search --query "diffusion transformer" --field title</span>
           </div>
-          <p class="text-gray-500 text-sm mt-3">
+          <p class="text-gray-400 text-sm mt-3">
             Use this path when you want the latest matching papers without maintaining a local archive first.
           </p>
         </div>
@@ -194,15 +208,15 @@
       <div class="mt-8 grid md:grid-cols-2 gap-4 text-sm">
         <div class="bg-black/30 border border-gray-800 rounded-xl p-4">
           <p class="text-gray-300 font-semibold mb-2">Useful launch commands</p>
-          <p class="text-gray-500 mono">arxiv-viewer --color never --ascii</p>
-          <p class="text-gray-500 mono mt-2">arxiv-viewer dates</p>
-          <p class="text-gray-500 mono mt-2">arxiv-viewer doctor</p>
+          <p class="text-gray-400 mono">arxiv-viewer --color never --ascii</p>
+          <p class="text-gray-400 mono mt-2">arxiv-viewer dates</p>
+          <p class="text-gray-400 mono mt-2">arxiv-viewer doctor</p>
         </div>
         <div class="bg-black/30 border border-gray-800 rounded-xl p-4">
           <p class="text-gray-300 font-semibold mb-2">Default destinations</p>
-          <p class="text-gray-500">General exports: <code class="mono text-gray-400">~/arxiv-exports/</code></p>
-          <p class="text-gray-500">PDF downloads: <code class="mono text-gray-400">~/arxiv-pdfs/</code></p>
-          <p class="text-gray-500">Metadata portability: explicit timestamped JSON snapshots</p>
+          <p class="text-gray-400">General exports: <code class="mono text-gray-400">~/arxiv-exports/</code></p>
+          <p class="text-gray-400">PDF downloads: <code class="mono text-gray-400">~/arxiv-pdfs/</code></p>
+          <p class="text-gray-400">Metadata portability: explicit timestamped JSON snapshots</p>
         </div>
       </div>
     </div>
@@ -215,7 +229,7 @@
       <p class="text-gray-400 text-center mb-12 max-w-3xl mx-auto">
         Use this page as the published entrypoint, the GitHub README for installation and shortcuts, and the docs index for markdown-first browsing inside the repository.
       </p>
-      <p class="text-gray-500 text-center text-sm mb-10 max-w-3xl mx-auto">
+      <p class="text-gray-400 text-center text-sm mb-10 max-w-3xl mx-auto">
         Markdown guide links below open on GitHub so they stay readable from the published site without adding a separate docs platform.
       </p>
 
@@ -336,19 +350,19 @@
         <div class="bg-black/40 border border-gray-800 rounded-xl p-6">
           <h3 class="text-lg font-semibold mb-3">Semantic Scholar</h3>
           <p class="text-gray-400 text-sm mb-3">Prerequisites: optional <code class="mono text-gray-300">s2_api_key</code> for higher rate limits, plus <code class="mono text-gray-300">Ctrl+e</code> at runtime or <code class="mono text-gray-300">"s2_enabled": true</code> in config.</p>
-          <p class="text-gray-500 text-sm">First use: press <code class="mono text-gray-300">Ctrl+e</code> to enable enrichment, then <code class="mono text-gray-300">e</code> on a paper to fetch citations, TLDR, and fields of study. Use <code class="mono text-gray-300">R</code> and <code class="mono text-gray-300">G</code> after that.</p>
+          <p class="text-gray-400 text-sm">First use: press <code class="mono text-gray-300">Ctrl+e</code> to enable enrichment, then <code class="mono text-gray-300">e</code> on a paper to fetch citations, TLDR, and fields of study. Use <code class="mono text-gray-300">R</code> and <code class="mono text-gray-300">G</code> after that.</p>
         </div>
 
         <div class="bg-black/40 border border-gray-800 rounded-xl p-6">
           <h3 class="text-lg font-semibold mb-3">HuggingFace Trending</h3>
           <p class="text-gray-400 text-sm mb-3">Prerequisites: toggle with <code class="mono text-gray-300">Ctrl+h</code> or enable on startup with <code class="mono text-gray-300">"hf_enabled": true</code>.</p>
-          <p class="text-gray-500 text-sm">First use: press <code class="mono text-gray-300">Ctrl+h</code>, let the app cross-match the loaded papers, then inspect the HuggingFace section in the detail pane for upvotes, GitHub links, keywords, and summaries.</p>
+          <p class="text-gray-400 text-sm">First use: press <code class="mono text-gray-300">Ctrl+h</code>, let the app cross-match the loaded papers, then inspect the HuggingFace section in the detail pane for upvotes, GitHub links, keywords, and summaries.</p>
         </div>
 
         <div class="bg-black/40 border border-gray-800 rounded-xl p-6">
           <h3 class="text-lg font-semibold mb-3">AI Summary / Chat / Compare / Relevance / Auto-Tag</h3>
           <p class="text-gray-400 text-sm mb-3">Prerequisites: configure <code class="mono text-gray-300">llm_preset</code> or <code class="mono text-gray-300">llm_command</code>; relevance scoring also uses <code class="mono text-gray-300">research_interests</code>.</p>
-          <p class="text-gray-500 text-sm">First use: try <code class="mono text-gray-300">Ctrl+s</code> for summaries, <code class="mono text-gray-300">C</code> for chat, <code class="mono text-gray-300">Ctrl+v</code> for comparison, <code class="mono text-gray-300">L</code> for relevance scoring, and <code class="mono text-gray-300">Ctrl+g</code> for auto-tagging. Custom LLM commands prompt for trust on first execution.</p>
+          <p class="text-gray-400 text-sm">First use: try <code class="mono text-gray-300">Ctrl+s</code> for summaries, <code class="mono text-gray-300">C</code> for chat, <code class="mono text-gray-300">Ctrl+v</code> for comparison, <code class="mono text-gray-300">L</code> for relevance scoring, and <code class="mono text-gray-300">Ctrl+g</code> for auto-tagging. Custom LLM commands prompt for trust on first execution.</p>
         </div>
       </div>
     </div>
@@ -361,7 +375,7 @@
     <div class="max-w-6xl mx-auto px-6">
       <div class="flex flex-col md:flex-row justify-between items-center gap-6">
         <div class="flex items-center gap-3">
-          <img src="logo.png" width="40" height="40" alt="" class="w-10 h-10 rounded-lg bg-white">
+          <img src="logo.png?v=20260702" width="40" height="40" alt="" class="w-10 h-10 rounded-lg bg-white">
           <span class="font-semibold">arXiv Subscription Viewer</span>
         </div>
         <div class="flex items-center gap-6 text-gray-400">
@@ -372,7 +386,7 @@
           <a href="mailto:nicolas.schuler@kit.edu" class="hover:text-white transition-colors">Contact</a>
         </div>
       </div>
-      <p class="text-center text-gray-500 text-sm mt-8">
+      <p class="text-center text-gray-400 text-sm mt-8">
         Built by <a href="mailto:nicolas.schuler@kit.edu" class="text-gray-400 hover:text-white">Nicolas Sebastian Schuler</a>
       </p>
     </div>

@@ -10,6 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CLI_PATH = ROOT / "src/arxiv_browser/cli.py"
+CACHE_CLI_PATH = ROOT / "src/arxiv_browser/cache_cli.py"
 APP_PATH = ROOT / "src/arxiv_browser/app.py"
 MODELS_PATH = ROOT / "src/arxiv_browser/models.py"
 CONFIG_PATH = ROOT / "src/arxiv_browser/config.py"
@@ -101,7 +102,7 @@ def _parse_python_module(source: str) -> ast.Module | None:
 
 def _extract_cli_flag_groups(cli_text: str) -> list[tuple[str, ...]]:
     groups: list[tuple[str, ...]] = []
-    pattern = re.compile(r"parser\\.add_argument\\((.*?)\\)\\n", re.DOTALL)
+    pattern = re.compile(r"\w+\.add_argument\((.*?)\)\n", re.DOTALL)
     for block in pattern.findall(cli_text):
         flags = tuple(re.findall(r'"(--?[a-zA-Z0-9-]+)"', block))
         if flags:
@@ -712,6 +713,7 @@ def main() -> int:
     models_text = _read(MODELS_PATH)
     config_text = _read(CONFIG_PATH)
     cli_text = _read(CLI_PATH)
+    cache_cli_text = _read(CACHE_CLI_PATH)
     llm_text = _read(LLM_PATH)
     completions_text = _read(COMPLETIONS_PATH)
     _ = _read(APP_PATH)  # Keep app.py as an explicit source-of-truth dependency.
@@ -725,7 +727,7 @@ def main() -> int:
     export_doc_text = _read(EXPORT_DOC_PATH)
 
     errors: list[str] = []
-    errors.extend(_check_cli_flags(readme_text, cli_text))
+    errors.extend(_check_cli_flags(readme_text, cli_text + "\n" + cache_cli_text))
     errors.extend(_check_llm_presets(readme_text, claude_text, llm_text))
     errors.extend(_check_keybindings(readme_text, claude_text))
     errors.extend(_check_config_reference(models_text, config_text, config_reference_text))

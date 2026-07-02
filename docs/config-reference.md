@@ -298,3 +298,4 @@ All other keys use their defaults and are populated by the app as needed.
 - [search-filters.md](search-filters.md) — Query syntax and search bookmarks
 - [history-mode.md](history-mode.md) — History directory setup and date navigation
 - [digest.md](digest.md) — Cron-friendly Markdown digests and the TUI inbox
+- [All Docs](README.md) — Documentation index

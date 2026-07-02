@@ -18,7 +18,7 @@ Enable at runtime with `Ctrl+e`, or add to `config.json`:
 |-----|-------------|---------|
 | `s2_enabled` | Enable S2 enrichment on startup | `false` |
 | `s2_api_key` | Optional API key for higher rate limits | `""` |
-| `s2_cache_ttl_days` | Days to cache S2 paper metadata in SQLite | `7` |
+| `s2_cache_ttl_days` | Days to cache S2 paper metadata in the unified `cache.db` | `7` |
 
 ## Usage
 
@@ -40,7 +40,7 @@ Use the `Graph`, `Ancestors`, and `Descendants` buttons, or press `1`, `a`, and 
 
 In genealogy mode, `Enter` or a click activates the selected node: local arXiv papers jump inside the TUI, while remote papers open their arXiv or Semantic Scholar URL. Labels include year, citation count, and badges such as `target`, `local`, `starred`, `repeat`, and `more`.
 
-All S2 data is cached in SQLite. Paper metadata uses a configurable TTL (`s2_cache_ttl_days`, default 7 days). Recommendations and citation graph data use a fixed 3-day TTL.
+All S2 data is cached in the unified `cache.db` (with a legacy per-module `semantic_scholar.db` fallback when one already exists). Paper metadata uses a configurable TTL (`s2_cache_ttl_days`, default 7 days). Recommendations and citation graph data use a fixed 3-day TTL.
 
 ---
 

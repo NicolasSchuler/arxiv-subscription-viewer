@@ -100,6 +100,9 @@ arxiv-viewer --version
 # Print config file path
 arxiv-viewer config-path
 
+# Print key bindings (supports --format table|json|markdown, --tier core|standard|power|all)
+arxiv-viewer keybindings
+
 # Module entrypoint, equivalent to arxiv-viewer
 python -m arxiv_browser --version
 ```
@@ -188,7 +191,9 @@ If something looks off, run `arxiv-viewer doctor` to check config, history disco
 | `Ctrl+e` | Toggle S2 / Exit API mode | | `Ctrl+r` | Mark visible as read |
 | `Ctrl+h` | HuggingFace trending | | `Ctrl+Shift+b` | Remove bookmark |
 | `,` | Settings | | `?` | Help / shortcuts |
-| `F1` | What's New (release notes) | | | |
+| `Tab` | Focus detail pane | | `e` | Semantic Scholar enrich |
+| `a` | Select all | | `u` | Clear selection |
+| `[` / `]` | Previous / next date | | `F1` | What's New (release notes) |
 
 ### Marks
 
@@ -218,6 +223,7 @@ See the **[full documentation](docs/)** for:
 - 📊 [Semantic Scholar integration](docs/semantic-scholar.md)
 - 🔥 [HuggingFace trending](docs/huggingface.md)
 - 📅 [History mode & email ingestion](docs/history-mode.md)
+- 📨 [Markdown digests & automation](docs/digest.md)
 - 🔍 [Search filters & advanced queries](docs/search-filters.md)
 - 📥 [Export & PDF configuration](docs/export.md)
 - 🛠️ [Troubleshooting](docs/troubleshooting.md)

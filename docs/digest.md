@@ -150,3 +150,7 @@ arxiv-viewer digest --category cs.AI --no-versions
 | `0` | Digest generated, even if optional enrichment warned or no papers matched. |
 | `1` | Source, parse, network, or output-write failure prevented digest generation. |
 | `2` | Usage error, such as conflicting `--input` and live source flags. |
+
+---
+
+**See also:** [Search & Filters](search-filters.md) · [History Mode](history-mode.md) · [LLM Setup](llm-setup.md) · [All Docs](README.md)

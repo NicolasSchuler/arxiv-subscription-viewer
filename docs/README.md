@@ -33,10 +33,11 @@ Review organization is local-first: use read state, stars, tags, notes, marks, b
 1. [Main README](../README.md) for install, quick commands, and core shortcuts
 2. [search-filters.md](search-filters.md) for live arXiv scans and complex local filtering
 3. [history-mode.md](history-mode.md) if you keep local digest files
-4. [llm-setup.md](llm-setup.md), [semantic-scholar.md](semantic-scholar.md), and [huggingface.md](huggingface.md) when you are ready to enrich papers
-5. [export.md](export.md) when you want to move selected papers into BibTeX, RIS, CSV, Markdown, or PDF folders
-6. [config-reference.md](config-reference.md) once you start customizing paths, themes, API keys, or enrichment defaults
-7. [troubleshooting.md](troubleshooting.md) when `doctor` or first-run behavior surfaces problems
+4. [digest.md](digest.md) when you want cron-friendly daily/weekly briefs piped to email or Slack
+5. [llm-setup.md](llm-setup.md), [semantic-scholar.md](semantic-scholar.md), and [huggingface.md](huggingface.md) when you are ready to enrich papers
+6. [export.md](export.md) when you want to move selected papers into BibTeX, RIS, CSV, Markdown, or PDF folders
+7. [config-reference.md](config-reference.md) once you start customizing paths, themes, API keys, or enrichment defaults
+8. [troubleshooting.md](troubleshooting.md) when `doctor` or first-run behavior surfaces problems
 
 ## Feature Guides
 

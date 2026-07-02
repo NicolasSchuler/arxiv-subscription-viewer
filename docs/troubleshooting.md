@@ -29,6 +29,8 @@ It reports:
 - export/PDF directories and whether they'll be created on first use
 - whether the current terminal is an interactive TTY
 
+Pass `--offline` to skip the arXiv API network reachability probe (useful on air-gapped machines or flaky connections).
+
 Exit code is `0` when no warnings are found, `1` when `doctor` reports issues.
 
 ## No Papers Loaded
@@ -277,9 +279,10 @@ arxiv-viewer cache-clear --llm --yes
 arxiv-viewer cache-clear --semantic --yes
 arxiv-viewer cache-clear --enrichment --yes
 arxiv-viewer cache-clear --paper-content --yes
+arxiv-viewer cache-clear --all --yes
 ```
 
-Omit `--yes` for a dry run that reports how many rows would be deleted.
+Omit `--yes` for a dry run that reports how many rows would be deleted. Use `--all` to clear every cache section at once.
 
 To clear everything manually, delete `cache.db` (it is rebuilt on the next run):
 

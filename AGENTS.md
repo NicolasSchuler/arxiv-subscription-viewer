@@ -1,6 +1,6 @@
 # Agent Instructions
 
-Quick-reference for AI agents. See `docs/architecture.md` for the human-facing architecture guide and `CLAUDE.md` for the fuller AI-oriented dependency notes.
+Quick-reference for AI agents. See `docs/architecture.md` for the human-facing architecture guide; `CLAUDE.md` is deliberately slim and covers only AI-specific test-mock, fixture, and Textual conventions, deferring to this file and `docs/architecture.md` for everything else.
 
 ## Task Runner
 

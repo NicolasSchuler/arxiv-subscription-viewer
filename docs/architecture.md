@@ -60,7 +60,7 @@ Do not import `arxiv_browser.app` from `src/` code. Tests import canonical modul
 The main package is organized by responsibility:
 
 - `cli.py`: argument parsing, non-interactive commands, startup/bootstrap
-- `browser/`: the Textual app, split into `core.py`, `browse.py`, `detail_pane.py`, and `discovery.py`
+- `browser/`: the Textual app, split by responsibility — core orchestration (`core.py`, `browse.py`, plus `options.py`, `bootstrap.py`, `contracts.py`, `constants.py`), reactive/worker runtime (`reactive_state.py`, `worker_runtime.py`, `runtime_state.py`), detail-pane rendering (`detail_pane.py`, `detail_annotations.py`, `content.py`), and discovery/onboarding (`discovery.py`, `onboarding_hints.py`, `browse_header.py`)
 - `actions/`: action handlers mixed into `ArxivBrowser`
 - `models.py`: data objects and shared constants
 - `config.py`: persisted user configuration and metadata import/export
@@ -100,7 +100,7 @@ Imports flow one way: higher layers import lower ones, never upward. This is the
 ```
 cli.py            entry point / bootstrap
   ↓
-browser/          the Textual app (core, browse, detail_pane, discovery)
+browser/          the Textual app (core/browse orchestration, reactive/worker runtime, detail-pane rendering, discovery)
   ↓
 actions/          user-triggered action handlers mixed into ArxivBrowser
   ↓
