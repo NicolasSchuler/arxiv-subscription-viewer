@@ -53,14 +53,14 @@ async def test_narrow_layout_keeps_usable_list_rows_at_80x24(make_paper):
         await pilot.pause(0.2)
         assert app.screen.has_class("-narrow")
         paper_list = app.query_one("#paper-list", OptionList)
-        # Each paper option renders ~3 lines; the list floor must show >= 3 rows.
-        assert paper_list.content_size.height >= 9
+        # List focus reserves room for at least two compact (~3-line) rows.
+        assert paper_list.region.height >= 6
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("split", ["pane-split-1", "pane-split-2", "pane-split-4"])
 async def test_narrow_list_floor_holds_at_every_pane_split(make_paper, split):
-    """The >=3-row list floor holds even at detail-favoring presets (H2)."""
+    """The two-row list-focus floor holds even at detail-favoring presets (H2)."""
     app = _app(make_paper)
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause(0.2)
@@ -68,7 +68,47 @@ async def test_narrow_list_floor_holds_at_every_pane_split(make_paper, split):
         app.screen.add_class(split)
         await pilot.pause(0.2)
         paper_list = app.query_one("#paper-list", OptionList)
-        assert paper_list.content_size.height >= 9
+        assert paper_list.region.height >= 6
+
+
+@pytest.mark.asyncio
+async def test_narrow_detail_focus_reallocates_height_to_reading_pane(make_paper):
+    """Detail focus expands the reading surface instead of preserving list previews."""
+    app = _app(make_paper)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause(0.2)
+        left_pane = app.query_one("#left-pane")
+        right_pane = app.query_one("#right-pane")
+        assert left_pane.region.height > right_pane.region.height
+
+        await pilot.press("tab")
+        await pilot.pause(0.2)
+
+        assert right_pane.region.height > left_pane.region.height
+        assert right_pane.region.height >= 12
+
+
+@pytest.mark.asyncio
+async def test_short_narrow_detail_focus_keeps_both_panes_on_screen(make_paper):
+    """Short terminals use proportional focus shares instead of overflowing floors."""
+    app = _app(make_paper)
+    async with app.run_test(size=(80, 20)) as pilot:
+        await pilot.pause(0.2)
+        assert app.screen.has_class("-narrow")
+        assert app.screen.has_class("-short")
+
+        left_pane = app.query_one("#left-pane")
+        right_pane = app.query_one("#right-pane")
+        footer = app.query_one(ContextFooter)
+        assert left_pane.region.height > right_pane.region.height > 0
+        assert right_pane.region.bottom <= footer.region.y
+
+        await pilot.press("tab")
+        await pilot.pause(0.2)
+
+        assert left_pane.region.height > 0
+        assert right_pane.region.height > left_pane.region.height
+        assert right_pane.region.bottom <= footer.region.y
 
 
 @pytest.mark.asyncio

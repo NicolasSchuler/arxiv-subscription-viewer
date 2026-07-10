@@ -77,6 +77,7 @@ SNAPSHOT_CASES = (
     SnapshotCase("default-browse", (100, 30), _idle),
     SnapshotCase("breakpoint-browse", (96, 30), _idle),
     SnapshotCase("narrow-browse", (80, 24), _idle),
+    SnapshotCase("narrow-detail-focus", (80, 24), _focus_details),
     SnapshotCase("detail-focus", (100, 30), _focus_details),
     SnapshotCase("command-palette", (100, 30), _open_command_palette),
     SnapshotCase("light-theme-browse", (100, 30), _idle, theme_name="github-light"),

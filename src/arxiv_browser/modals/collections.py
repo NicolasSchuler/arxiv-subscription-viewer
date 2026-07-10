@@ -66,7 +66,7 @@ class CollectionsModal(ModalBase[str | None]):
     #col-body { height: 1fr; }
 
     #col-list {
-        width: 2fr;
+        width: 3fr;
         height: 1fr;
         background: $th-panel;
         border: none;
@@ -89,7 +89,8 @@ class CollectionsModal(ModalBase[str | None]):
     }
 
     #col-form {
-        width: 1fr;
+        width: 2fr;
+        min-width: 34;
         height: 1fr;
     }
 

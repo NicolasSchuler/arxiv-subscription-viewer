@@ -7,7 +7,11 @@ from unittest.mock import patch
 import pytest
 from textual.app import App
 
-from arxiv_browser.palette import PaletteCommand
+from arxiv_browser.palette import (
+    PaletteCommand,
+    palette_description_max_len,
+    truncate_palette_text,
+)
 from arxiv_browser.themes import THEME_COLORS, _build_textual_theme
 from arxiv_browser.widgets.omni_input import (
     FUZZY_THRESHOLD,
@@ -125,6 +129,13 @@ class TestConstants:
 
     def test_fuzzy_threshold_is_positive(self):
         assert FUZZY_THRESHOLD > 0
+
+    @pytest.mark.parametrize(
+        ("viewport_width", "expected"),
+        [(60, 12), (80, 24), (100, 40), (160, 40)],
+    )
+    def test_palette_description_budget_tracks_viewport(self, viewport_width, expected):
+        assert palette_description_max_len(viewport_width) == expected
 
 
 class TestOmniInputWidget:
@@ -305,6 +316,87 @@ class TestOmniInputTUI:
             results = omni.query_one("#omni-results", OptionList)
             assert results.has_class("visible")
             assert results.option_count > 0
+
+    async def test_command_mode_aligns_input_and_results_and_uses_wide_description(self):
+        from textual.widgets import Input, OptionList
+
+        class TestApp(_ThemedApp):
+            def compose(self):
+                yield OmniInput()
+
+        description = "Open the Watch List Manager to create and edit watch entries"
+        async with TestApp().run_test(size=(100, 30)) as pilot:
+            omni = pilot.app.query_one(OmniInput)
+            omni.set_commands(
+                [
+                    PaletteCommand(
+                        name="Manage Watch List",
+                        description=description,
+                        key_hint="W",
+                        action="manage_watch_list",
+                        group="Organize",
+                    )
+                ]
+            )
+            omni.open(">watch")
+            await pilot.pause()
+
+            input_widget = omni.query_one("#omni-input", Input)
+            results = omni.query_one("#omni-results", OptionList)
+            prompt = str(results.get_option_at_index(0).prompt)
+
+            assert omni.has_class("command-mode")
+            assert omni.region.width == 100
+            assert input_widget.region.x == results.region.x
+            assert input_widget.region.width == results.region.width
+            assert description[:37] in prompt
+
+            omni.close()
+            assert not omni.has_class("command-mode")
+
+    async def test_command_mode_rebudgets_descriptions_on_resize(self):
+        from textual.widgets import OptionList
+
+        class TestApp(_ThemedApp):
+            def compose(self):
+                yield OmniInput()
+
+        description = "Open the Watch List Manager to create and edit watch entries"
+        async with TestApp().run_test(size=(100, 30)) as pilot:
+            omni = pilot.app.query_one(OmniInput)
+            omni.set_commands(
+                [
+                    PaletteCommand(
+                        name="Manage Watch List",
+                        description=description,
+                        key_hint="W",
+                        action="manage_watch_list",
+                        group="Organize",
+                    )
+                ]
+            )
+            omni.open(">watch")
+            await pilot.pause()
+
+            results = omni.query_one("#omni-results", OptionList)
+            results.highlighted = 0
+            wide_prompt = str(results.get_option_at_index(0).prompt)
+            assert truncate_palette_text(description, 40) in wide_prompt
+
+            await pilot.resize_terminal(60, 20)
+            await pilot.pause()
+
+            narrow_prompt = str(results.get_option_at_index(0).prompt)
+            assert truncate_palette_text(description, 12) in narrow_prompt
+            assert truncate_palette_text(description, 40) not in narrow_prompt
+            assert results.highlighted == 0
+
+            await pilot.resize_terminal(100, 30)
+            await pilot.pause()
+
+            widened_prompt = str(results.get_option_at_index(0).prompt)
+            assert truncate_palette_text(description, 40) in widened_prompt
+            assert results.highlighted == 0
 
     async def test_command_mode_no_matches_shows_disabled_empty_result(self):
         from textual.widgets import Input, OptionList

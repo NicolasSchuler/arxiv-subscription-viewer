@@ -150,13 +150,32 @@ Screen.-narrow #details-header {
     padding: 0 1;
 }
 
-/* Guarantee the stacked list shows >= 3 paper rows (each option is ~3 lines)
-   even when the detail pane wants more room. The absolute floor overrides the
-   pane_split fr shares below it, so the guarantee holds at every preset; the
-   detail pane below shrinks to its remaining space (and scrolls) instead of
-   reserving blank rows that starve the list. */
-Screen.-narrow #left-pane {
-    min-height: 16;
+/* In a tall-enough stacked layout, allocate height by task. List/search focus
+   keeps room for two compact paper rows; detail focus releases that space so
+   metadata and abstract text become readable at 80x24. */
+Screen.-narrow.-tall #left-pane {
+    min-height: 9;
+}
+
+Screen.-narrow.-tall #left-pane:focus-within {
+    min-height: 14;
+}
+
+Screen.-narrow.-tall #right-pane:focus-within {
+    min-height: 12;
+}
+
+/* Below 23 terminal rows, the absolute floors cannot fit together. Keep both
+   panes inside the viewport and promote the focused pane proportionally. The
+   other pane retains its persisted 1fr-4fr share, so it always remains visible. */
+Screen.-narrow.-short #left-pane,
+Screen.-narrow.-short #right-pane {
+    min-height: 0;
+}
+
+Screen.-narrow.-short #left-pane:focus-within,
+Screen.-narrow.-short #right-pane:focus-within {
+    height: 4fr;
 }
 
 #list-header {
@@ -269,6 +288,14 @@ NARROW_BREAKPOINT = 96
 APP_HORIZONTAL_BREAKPOINTS: list[tuple[int, str]] = [
     (0, "-narrow"),
     (NARROW_BREAKPOINT, "-wide"),
+]
+
+# Absolute pane floors require 21 main-content rows plus the one-row header and
+# footer. Shorter terminals use proportional focus weighting instead.
+MIN_PANE_FLOOR_TERMINAL_HEIGHT = 23
+APP_VERTICAL_BREAKPOINTS: list[tuple[int, str]] = [
+    (0, "-short"),
+    (MIN_PANE_FLOOR_TERMINAL_HEIGHT, "-tall"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -403,5 +430,7 @@ __all__ = [
     "APP_BINDINGS",
     "APP_CSS",
     "APP_HORIZONTAL_BREAKPOINTS",
+    "APP_VERTICAL_BREAKPOINTS",
+    "MIN_PANE_FLOOR_TERMINAL_HEIGHT",
     "NARROW_BREAKPOINT",
 ]

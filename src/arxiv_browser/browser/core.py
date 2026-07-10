@@ -23,6 +23,7 @@ from textual.widgets import Header, Input, Label, OptionList
 
 from arxiv_browser import conference_deadline_ui as _deadline_ui
 from arxiv_browser import empty_state as _empty_state
+from arxiv_browser import ui_constants as _ui_constants
 from arxiv_browser.actions import comparison_actions as _comparison_actions
 from arxiv_browser.actions import constants as _action_constants
 from arxiv_browser.actions import external_io_actions as _external_io_actions
@@ -65,7 +66,6 @@ from arxiv_browser.semantic_scholar import SemanticScholarPaper
 from arxiv_browser.services.interfaces import AppServices, build_default_app_services
 from arxiv_browser.similarity import TfidfIndex
 from arxiv_browser.themes import TEXTUAL_THEMES, ThemeRuntime, build_theme_runtime
-from arxiv_browser.ui_constants import APP_BINDINGS, APP_CSS, APP_HORIZONTAL_BREAKPOINTS
 from arxiv_browser.ui_runtime import UiRefreshCoordinator, UiRefs, restore_omni_chrome
 from arxiv_browser.widgets import (
     BookmarkTabBar,
@@ -86,7 +86,6 @@ FUZZY_SCORE_CUTOFF = _browser_constants.FUZZY_SCORE_CUTOFF
 MAX_ABSTRACT_LOADS = _browser_constants.MAX_ABSTRACT_LOADS
 build_list_empty_message = _empty_state.build_list_empty_message
 _fetch_paper_content_async = _browser_content._fetch_paper_content_async
-
 MIN_LIST_WIDTH, MAX_LIST_WIDTH = 50, 100
 CLIPBOARD_SEPARATOR = _action_constants.CLIPBOARD_SEPARATOR
 MAX_HISTORY_FILES, SUBPROCESS_TIMEOUT = 365, _action_constants.SUBPROCESS_TIMEOUT
@@ -122,8 +121,9 @@ class ArxivBrowser(
     DiscoveryMixin,
     App,
 ):
-    TITLE, CSS, BINDINGS = "arXiv Paper Browser", APP_CSS, APP_BINDINGS
-    HORIZONTAL_BREAKPOINTS = APP_HORIZONTAL_BREAKPOINTS
+    TITLE, CSS, BINDINGS = "arXiv Paper Browser", _ui_constants.APP_CSS, _ui_constants.APP_BINDINGS
+    HORIZONTAL_BREAKPOINTS = _ui_constants.APP_HORIZONTAL_BREAKPOINTS
+    VERTICAL_BREAKPOINTS = _ui_constants.APP_VERTICAL_BREAKPOINTS
     VERSION_CHECK_BATCH_SIZE = 40
 
     selected_ids: reactive[set[str]] = reactive(set, init=False, always_update=True)  # type: ignore[bad-override]

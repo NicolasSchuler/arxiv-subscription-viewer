@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Final
 
-WHATS_NEW_VERSION: Final[str] = "0.3.4"
+WHATS_NEW_VERSION: Final[str] = "0.3.6"
 """Tag of the release whose notes are currently presented.
 
 When a user's ``UserConfig.last_seen_whats_new`` differs from this
@@ -32,24 +32,24 @@ WHATS_NEW_HEADLINE: Final[str] = "What's New in arXiv Viewer"
 
 WHATS_NEW_ENTRIES: Final[tuple[tuple[str, str], ...]] = (
     (
-        "Cache controls",
-        "Use [bold]arxiv-viewer cache-info[/] to inspect the local cache and "
-        "[bold]cache-clear[/] to dry-run or clear selected cache sections.",
+        "Adaptive command palette",
+        "[bold]Ctrl+p[/] now uses the terminal width up to 100 columns and "
+        "reflows descriptions as the window is resized.",
     ),
     (
-        "Richer doctor checks",
-        "[bold]arxiv-viewer doctor[/] now reports semantic-search backend readiness "
-        "and local triage-model artifact issues.",
+        "Focus-aware narrow layout",
+        "List/search focus keeps useful paper rows, while [bold]Tab[/] expands the "
+        "detail pane for metadata and abstract reading.",
     ),
     (
-        "Safer PDF handling",
-        "Downloads now verify that response bytes look like a PDF before replacing "
-        "an existing local file.",
+        "Short-terminal safety",
+        "Below 23 rows, proportional pane sizing keeps both list and detail surfaces "
+        "inside the viewport.",
     ),
     (
-        "Provider-aware previews",
-        "PDF downloads, previews, figures, and full-text fetches now skip non-arXiv "
-        "records with clearer warnings.",
+        "Clearer list managers",
+        "Collections and Watch List forms have more readable widths, with [bold]Try:[/] "
+        "and [bold]Next:[/] actions emphasized in empty states.",
     ),
 )
 

@@ -106,9 +106,11 @@ Pin these exact strings; do not paraphrase:
 - Narrow-width behavior:
   - Prefer compact status tokens and shorter labels before removing high-value hints.
   - Keep `? help` visible in all contexts.
-  - In stacked layout the paper list must stay usable: guarantee a readable
-    minimum of ≥2–3 visible rows by giving the left/list pane a `min-height`,
-    even when the detail pane wants more room.
+  - In stacked layout, allocate height by focus: list/search focus keeps room
+    for at least two compact rows, while detail focus expands the detail pane
+    enough to expose metadata and abstract text at 80×24.
+  - Below 23 terminal rows, replace those absolute floors with proportional
+    focus weighting so both panes remain inside the viewport.
 
 ## 5. Footer Hierarchy Rules
 
@@ -304,6 +306,11 @@ Rules:
   - Footer uses compact tokens while help/modal copy uses expanded phrasing.
 - Keep close instructions concise in modals (for example `Close: ? / Esc / q`).
 - Command palette must provide a clear empty-state message with next-step guidance.
+- Command palette input and results share one viewport-level surface. It uses
+  the terminal width up to 100 columns, with description text budgeted
+  from the actual viewport width rather than a fixed truncation limit.
+- Empty-state recovery guidance stays muted but not dim/italic; `Try:` and
+  `Next:` are emphasized because they are the primary actions in an empty view.
 - Command palette group headers are scan aids only; arrow/Enter selection must skip headers and disabled commands.
 
 ## 11. Keybinding Conventions

@@ -67,7 +67,7 @@ class WatchListModal(ModalBase[list[WatchListEntry] | None]):
     }
 
     #watch-list-column {
-        width: 2fr;
+        width: 3fr;
         height: 1fr;
         margin-right: 2;
     }
@@ -84,7 +84,8 @@ class WatchListModal(ModalBase[list[WatchListEntry] | None]):
     }
 
     #watch-form {
-        width: 1fr;
+        width: 2fr;
+        min-width: 34;
         height: 1fr;
     }
 

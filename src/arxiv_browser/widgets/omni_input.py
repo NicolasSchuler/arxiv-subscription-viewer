@@ -22,10 +22,10 @@ from textual.widgets.option_list import Option
 
 from arxiv_browser.fuzzy import partial_fuzzy_score
 from arxiv_browser.palette import (
-    PALETTE_DESC_MAX_LEN,
     PALETTE_KEY_MAX_LEN,
     PALETTE_NAME_MAX_LEN,
     PaletteCommand,
+    palette_description_max_len,
     truncate_palette_text,
 )
 from arxiv_browser.query import escape_rich_text
@@ -90,6 +90,16 @@ class OmniInput(Vertical):
         display: block;
     }
 
+    /* Command mode is a viewport-level surface: align its input and results,
+       use available width without exposing distracting content behind result
+       rows. Other search modes stay embedded in the list pane. */
+    OmniInput.command-mode {
+        overlay: screen;
+        constrain: inside;
+        width: 100vw;
+        max-width: 100;
+    }
+
     OmniInput #omni-input {
         margin: 0;
     }
@@ -103,14 +113,7 @@ class OmniInput(Vertical):
     OmniInput #omni-results {
         max-height: 12;
         display: none;
-        /* Float the palette results as a Medium-width (70-col) overlay so rows are
-           not crushed into the ~40-col left pane and so nothing beneath (the paper
-           list / detail pane) bleeds through. `constrain: inside` keeps the panel
-           on screen on narrow terminals; no percentage max-width — that would clamp
-           the overlay back to the narrow parent pane. */
-        overlay: screen;
-        constrain: inside;
-        width: 70;
+        width: 100%;
     }
 
     OmniInput #omni-results.visible {
@@ -158,6 +161,7 @@ class OmniInput(Vertical):
         self._commands: list[PaletteCommand] = []
         self._filtered_commands: list[PaletteCommand] = []
         self._command_option_indexes: dict[int, int] = {}
+        self._command_description_max_len: int | None = None
         self._current_mode: str = "local"
 
     def compose(self) -> ComposeResult:
@@ -178,6 +182,7 @@ class OmniInput(Vertical):
     def open(self, initial_text: str = "") -> None:
         """Show the OmniInput and focus it."""
         self.add_class("visible")
+        self._set_mode_class(parse_omni_mode(initial_text).mode)
         inp = self.query_one("#omni-input", Input)
         inp.disabled = False
         inp.value = initial_text
@@ -192,6 +197,7 @@ class OmniInput(Vertical):
         inp.disabled = True
         self._hide_results()
         self._current_mode = "local"
+        self.remove_class("command-mode")
 
     @property
     def is_open(self) -> bool:
@@ -211,6 +217,7 @@ class OmniInput(Vertical):
     def hide(self) -> None:
         """Hide the OmniInput without clearing the input value."""
         self.remove_class("visible")
+        self.remove_class("command-mode")
         self.query_one("#omni-input", Input).disabled = True
         self._hide_results()
 
@@ -232,15 +239,41 @@ class OmniInput(Vertical):
         results.clear_options()
         self._filtered_commands = []
         self._command_option_indexes = {}
+        self._command_description_max_len = None
 
     def _update_hint(self, mode: str) -> None:
         hint = self.query_one("#omni-hint", Static)
         hint.update(_hint_for_mode(mode))
 
+    def _set_mode_class(self, mode: str) -> None:
+        """Expand command mode to a viewport-level surface only."""
+        if mode == "command":
+            self.add_class("command-mode")
+        else:
+            self.remove_class("command-mode")
+
+    def on_resize(self, _event: object) -> None:
+        """Rebudget mounted command rows when the overlay width changes."""
+        if not self.is_open or self._current_mode != "command":
+            return
+        desc_max_len = palette_description_max_len(self.screen.size.width)
+        if desc_max_len == self._command_description_max_len:
+            return
+
+        self._command_description_max_len = desc_max_len
+        results = self.query_one("#omni-results", OptionList)
+        for option_index, command_index in self._command_option_indexes.items():
+            command = self._filtered_commands[command_index]
+            results.replace_option_prompt_at_index(
+                option_index,
+                self._command_option_label(command),
+            )
+
     def _populate_command_results(self, query: str) -> None:
         """Populate the inline results list with matching commands."""
         results = self.query_one("#omni-results", OptionList)
         results.clear_options()
+        self._command_description_max_len = palette_description_max_len(self.screen.size.width)
         self._filtered_commands = self._filter_commands(query)
         self._command_option_indexes = {}
 
@@ -325,11 +358,14 @@ class OmniInput(Vertical):
         )
 
     def _safe_command_parts(self, command: PaletteCommand) -> tuple[str, str, str, str]:
+        desc_max_len = self._command_description_max_len
+        if desc_max_len is None:
+            desc_max_len = palette_description_max_len(self.screen.size.width)
         name = _palette_cell(command.name, PALETTE_NAME_MAX_LEN, PALETTE_NAME_MAX_LEN)
-        desc = truncate_palette_text(command.description, PALETTE_DESC_MAX_LEN)
+        desc = truncate_palette_text(command.description, desc_max_len)
         hint = _palette_cell(command.key_hint, PALETTE_KEY_MAX_LEN, PALETTE_KEY_MAX_LEN)
         blocked = (
-            truncate_palette_text(command.blocked_reason, PALETTE_DESC_MAX_LEN)
+            truncate_palette_text(command.blocked_reason, desc_max_len)
             if command.blocked_reason
             else ""
         )
@@ -383,6 +419,7 @@ class OmniInput(Vertical):
         parsed = parse_omni_mode(event.value)
         old_mode = self._current_mode
         self._current_mode = parsed.mode
+        self._set_mode_class(parsed.mode)
 
         if parsed.mode != old_mode:
             self._update_hint(parsed.mode)

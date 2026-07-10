@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-07-10
+
+### Changed
+- Expanded the command palette into a viewport-level surface up to 100 columns, with descriptions budgeted from the available terminal width.
+- Made narrow stacked layouts allocate height by focus so list/search work keeps useful rows while detail focus exposes more metadata and abstract text.
+- Rebalanced the Collections and Watch List managers with wider forms and clearer, emphasized empty-state recovery actions.
+
+### Fixed
+- Kept the focused detail pane on-screen in terminals shorter than 23 rows by falling back to proportional pane sizing.
+- Recomputed command-palette row truncation during live terminal resizes while preserving the highlighted command.
+
 ## [0.3.5] - 2026-07-02
 
 ### Changed
@@ -239,7 +250,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ASCII mode for terminals without Unicode support (`--ascii`)
 - Session persistence: scroll position, active filters, sort order
 
-[Unreleased]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.5...HEAD
+[Unreleased]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.6...HEAD
+[0.3.6]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.2...v0.3.3

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from textual.widgets import Input, Label, OptionList, Static
+from textual.widgets import Input, Label, ListView, OptionList, Select, Static
 
 from arxiv_browser.browser.core import ArxivBrowser
 from arxiv_browser.browser.options import ArxivBrowserOptions
+from arxiv_browser.modals import CollectionsModal, WatchListModal
 from arxiv_browser.modals.editing import LineAnnotationModal
 from arxiv_browser.models import ArxivSearchModeState, ArxivSearchRequest, UserConfig
 from arxiv_browser.widgets.chrome import ContextFooter, FilterPillBar
@@ -570,3 +571,41 @@ async def test_pane_resize_applies_even_when_preference_save_fails(make_paper):
             assert app._config.pane_split == 3
             assert str(left_pane.styles.width) == "3fr"
             assert str(right_pane.styles.width) == "2fr"
+
+
+@pytest.mark.asyncio
+async def test_list_manager_forms_keep_readable_width_and_guidance(make_paper):
+    """Creation forms stay readable and empty guidance retains visual emphasis."""
+    app = ArxivBrowser([make_paper(arxiv_id="2401.00001")], restore_session=False)
+
+    with patch_save_config(return_value=True):
+        async with app.run_test(size=(100, 30)) as pilot:
+            collections = CollectionsModal([])
+            app.push_screen(collections)
+            await pilot.pause(0.1)
+
+            col_form = collections.query_one("#col-form")
+            col_placeholder = collections.query_one("#col-list ListItem.-empty Label", Label)
+            col_spans = col_placeholder.render().spans
+            assert col_form.region.width >= 34
+            assert all("dim" not in str(span.style) for span in col_spans)
+            assert all("italic" not in str(span.style) for span in col_spans)
+            assert sum("bold" in str(span.style) for span in col_spans) == 2
+
+            collections.dismiss(None)
+            await pilot.pause(0.05)
+
+            watch = WatchListModal([])
+            app.push_screen(watch)
+            await pilot.pause(0.1)
+
+            watch_form = watch.query_one("#watch-form")
+            watch_type = watch.query_one("#watch-type", Select)
+            watch_placeholder = watch.query_one("#watch-list ListItem.-empty Label", Label)
+            assert watch_form.region.width >= 34
+            assert watch_type.region.width >= 34
+            assert watch_type.prompt == "author / title / keyword"
+            assert all(
+                "dim" not in str(span.style) and "italic" not in str(span.style)
+                for span in watch_placeholder.render().spans
+            )

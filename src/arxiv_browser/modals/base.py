@@ -14,12 +14,15 @@ def build_empty_placeholder(message: str) -> ListItem:
     """Build a disabled ``ListItem`` that renders an empty-state hint in-list.
 
     The placeholder is disabled so keyboard navigation skips it and selection
-    handlers bail out on their bounds checks; the surrounding CSS dims it
-    further via the ``-empty`` class. Rendering the hint *inside* the list
-    region (rather than as a separate floating widget) keeps the two list
-    managers visually consistent.
+    handlers bail out on their bounds checks. Its guidance remains readable,
+    with the recovery verbs emphasized rather than dimming the whole message.
+    Rendering the hint *inside* the list region (rather than as a separate
+    floating widget) keeps the two list managers visually consistent.
     """
-    item = ListItem(Label(f"[dim italic]{message}[/]"), classes="-empty")
+    guidance = message.replace("Try: ", "[bold]Try: [/bold]").replace(
+        "Next: ", "[bold]Next: [/bold]"
+    )
+    item = ListItem(Label(guidance, classes="empty-guidance"), classes="-empty")
     item.disabled = True
     return item
 
@@ -64,6 +67,10 @@ class ModalBase(ModalScreen[T]):
     }
 
     .modal-footer {
+        color: $th-muted;
+    }
+
+    .empty-guidance {
         color: $th-muted;
     }
 
