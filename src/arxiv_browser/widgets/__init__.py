@@ -1,17 +1,12 @@
 """Widget classes extracted from app.py for modular UI composition."""
 
-from arxiv_browser.widgets.chrome import (
-    DATE_NAV_WINDOW_SIZE,
-    BookmarkTabBar,
-    ContextFooter,
-    DateNavigator,
-    FilterPillBar,
-    StatusBarState,
-)
+from arxiv_browser.widgets.chrome import ContextFooter, StatusBarState
 from arxiv_browser.widgets.chrome import (
     set_ascii_glyphs as set_ascii_chrome_glyphs,
 )
-from arxiv_browser.widgets.details import DETAIL_CACHE_MAX, DetailRenderState, PaperDetails
+from arxiv_browser.widgets.date_navigation import DATE_NAV_WINDOW_SIZE, DateNavigator
+from arxiv_browser.widgets.detail_state import DetailRenderState
+from arxiv_browser.widgets.details import DETAIL_CACHE_MAX, PaperDetails
 from arxiv_browser.widgets.listing import (
     PREVIEW_ABSTRACT_MAX_LEN,
     PaperHighlightTerms,
@@ -21,6 +16,7 @@ from arxiv_browser.widgets.listing import (
     set_ascii_icons,
 )
 from arxiv_browser.widgets.omni_input import OmniInput, OmniMode, parse_omni_mode
+from arxiv_browser.widgets.search_chrome import BookmarkTabBar, FilterPillBar
 
 __all__ = [
     "DATE_NAV_WINDOW_SIZE",

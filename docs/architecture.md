@@ -71,7 +71,12 @@ The main package is organized by responsibility:
 - `sources.py`: preprint provider identity and prototype non-arXiv parsers
 - `services/`: internal service layer — async I/O and subprocess orchestration for arXiv, downloads, enrichment, and LLMs
 - `modals/` and `widgets/`: reusable UI building blocks; recommendation and citation-graph
-  screens have separate owners under `modals/recommendations.py` and `modals/citations.py`
+  screens have separate owners under `modals/recommendations.py` and `modals/citations.py`,
+  while date navigation and bookmark/filter controls live in
+  `widgets/date_navigation.py` and `widgets/search_chrome.py`; `widgets/chrome.py`
+  preserves established imports and owns context-footer rendering; normalized detail-pane
+  state and render-cache identity live in `widgets/detail_state.py`, separate from the
+  mounted renderer in `widgets/details.py`
 
 ## Where New Features Belong
 

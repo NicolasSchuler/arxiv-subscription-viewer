@@ -41,7 +41,7 @@ from arxiv_browser.themes import _build_textual_theme, build_theme_runtime
 from arxiv_browser.ui_constants import NARROW_BREAKPOINT
 from arxiv_browser.widgets import chrome as _widget_chrome
 from arxiv_browser.widgets.chrome import StatusBarState
-from arxiv_browser.widgets.details import DetailRenderState
+from arxiv_browser.widgets.detail_state import DetailRenderState
 from arxiv_browser.widgets.listing import (
     PaperHighlightTerms,
     PaperRowRenderState,

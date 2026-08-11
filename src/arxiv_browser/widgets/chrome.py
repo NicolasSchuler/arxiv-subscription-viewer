@@ -1,24 +1,75 @@
-"""Widget chrome for date navigation, bookmarks, filters, and footer hints."""
+"""Stable widget-chrome imports plus context-sensitive footer rendering."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
-from datetime import date
-from pathlib import Path
+from collections.abc import Mapping
 
 from rich.text import Text
-from textual.app import ComposeResult
-from textual.containers import Horizontal
-from textual.message import Message
-from textual.widgets import Label, Static
+from textual.widgets import Static
 
-from arxiv_browser._ascii import is_ascii_mode
-from arxiv_browser.models import QueryToken, SearchBookmark
-from arxiv_browser.parsing import count_papers_in_file
-from arxiv_browser.query import escape_rich_text, pill_label_for_token
+import arxiv_browser.widgets.footer_status as _footer_status
+from arxiv_browser.query import escape_rich_text
 from arxiv_browser.themes import theme_colors_for
-from arxiv_browser.widgets import footer_status as _footer_status
+from arxiv_browser.widgets.date_navigation import (
+    DATE_NAV_ARROW_WIDTH as DATE_NAV_ARROW_WIDTH,
+)
+from arxiv_browser.widgets.date_navigation import (
+    DATE_NAV_CONTAINER_PADDING as DATE_NAV_CONTAINER_PADDING,
+)
+from arxiv_browser.widgets.date_navigation import (
+    DATE_NAV_ITEM_PADDING as DATE_NAV_ITEM_PADDING,
+)
+from arxiv_browser.widgets.date_navigation import (
+    DATE_NAV_LABEL_MODES as DATE_NAV_LABEL_MODES,
+)
+from arxiv_browser.widgets.date_navigation import (
+    DATE_NAV_LABEL_MONTH_DAY as DATE_NAV_LABEL_MONTH_DAY,
+)
+from arxiv_browser.widgets.date_navigation import (
+    DATE_NAV_LABEL_NUMERIC as DATE_NAV_LABEL_NUMERIC,
+)
+from arxiv_browser.widgets.date_navigation import (
+    DATE_NAV_LABEL_WIDTH as DATE_NAV_LABEL_WIDTH,
+)
+from arxiv_browser.widgets.date_navigation import (
+    DATE_NAV_LABEL_WITH_COUNTS as DATE_NAV_LABEL_WITH_COUNTS,
+)
+from arxiv_browser.widgets.date_navigation import (
+    DATE_NAV_WINDOW_SIZE as DATE_NAV_WINDOW_SIZE,
+)
+from arxiv_browser.widgets.date_navigation import DateNavigator as DateNavigator
+from arxiv_browser.widgets.date_navigation import (
+    _compute_responsive_date_plan as _compute_responsive_date_plan,
+)
+from arxiv_browser.widgets.date_navigation import (
+    _compute_window_bounds as _compute_window_bounds,
+)
+from arxiv_browser.widgets.date_navigation import (
+    _estimate_date_nav_width as _estimate_date_nav_width,
+)
+from arxiv_browser.widgets.date_navigation import (
+    _format_date_nav_label as _format_date_nav_label,
+)
+from arxiv_browser.widgets.search_chrome import BOOKMARK_MAX_TABS as BOOKMARK_MAX_TABS
+from arxiv_browser.widgets.search_chrome import BookmarkTabBar as BookmarkTabBar
+from arxiv_browser.widgets.search_chrome import FilterPillBar as FilterPillBar
+from arxiv_browser.widgets.search_chrome import FilterPillSpec as FilterPillSpec
+from arxiv_browser.widgets.search_chrome import (
+    _bookmark_chip_text as _bookmark_chip_text,
+)
+from arxiv_browser.widgets.search_chrome import (
+    _elide_bookmark_name as _elide_bookmark_name,
+)
+from arxiv_browser.widgets.search_chrome import (
+    _fit_bookmark_chips as _fit_bookmark_chips,
+)
+from arxiv_browser.widgets.search_chrome import _pill_order as _pill_order
+from arxiv_browser.widgets.search_chrome import (
+    _update_filter_pill as _update_filter_pill,
+)
+from arxiv_browser.widgets.search_chrome import (
+    _watch_filter_pill_spec as _watch_filter_pill_spec,
+)
 
 DEFAULT_THEME = _footer_status.DEFAULT_THEME
 FooterModeBadgeState = _footer_status.FooterModeBadgeState
@@ -42,19 +93,6 @@ build_status_bar_text = _footer_status.build_status_bar_text
 get_filter_pill_remove_glyph = _footer_status.get_filter_pill_remove_glyph
 set_ascii_glyphs = _footer_status.set_ascii_glyphs
 
-DATE_NAV_WINDOW_SIZE = 5
-DATE_NAV_ARROW_WIDTH = 3
-DATE_NAV_ITEM_PADDING = 2
-DATE_NAV_CONTAINER_PADDING = 2
-DATE_NAV_LABEL_WIDTH = 9
-DATE_NAV_LABEL_WITH_COUNTS = "with_counts"
-DATE_NAV_LABEL_MONTH_DAY = "month_day"
-DATE_NAV_LABEL_NUMERIC = "numeric"
-DATE_NAV_LABEL_MODES: tuple[str, ...] = (
-    DATE_NAV_LABEL_WITH_COUNTS,
-    DATE_NAV_LABEL_MONTH_DAY,
-    DATE_NAV_LABEL_NUMERIC,
-)
 MAX_FOOTER_HINTS = 9
 
 _FOOTER_ACTION_BY_KEY: dict[str, str] = {
@@ -87,16 +125,6 @@ _FOOTER_ACTION_BY_KEY: dict[str, str] = {
     "?": "show_help",
     "Ctrl+p": "command_palette",
 }
-
-
-@dataclass(frozen=True, slots=True)
-class FilterPillSpec:
-    """Renderable state for one active filter pill."""
-
-    item_id: str
-    text: str
-    class_name: str
-    tooltip: str
 
 
 class ContextFooter(Static):
@@ -143,12 +171,6 @@ class ContextFooter(Static):
         )
         parts = _build_footer_parts(hints, badge, colors)
         self.update("  ".join(parts))
-
-
-def _chrome_label(content: str, classes: str, item_id: str, tooltip: str) -> Label:
-    label = Label(content, classes=classes, id=item_id)
-    label.tooltip = tooltip
-    return label
 
 
 def _build_footer_parts(
@@ -235,8 +257,10 @@ def _fit_footer_hints(
     badge: str,
     width: int,
 ) -> list[tuple[str, str]]:
-    """Drop lowest-priority hints until the footer fits ``width`` (help and
-    command palette are never dropped; ``width`` <= 0 keeps every hint)."""
+    """Drop lowest-priority hints until the footer fits ``width``.
+
+    Help and command palette are never dropped; ``width`` <= 0 keeps every hint.
+    """
     hints = list(bindings)
     if width <= 0:
         return hints
@@ -246,738 +270,6 @@ def _fit_footer_hints(
             break
         hints.pop(index)
     return hints
-
-
-def _compute_window_bounds(total: int, current_index: int, window_size: int) -> tuple[int, int]:
-    """Compute a centered sliding window clamped to history bounds."""
-    if total <= 0:
-        return (0, 0)
-    window_size = max(1, min(window_size, total))
-    half = window_size // 2
-    start = max(0, current_index - half)
-    end = min(total, start + window_size)
-    if end - start < window_size:
-        start = max(0, end - window_size)
-    return (start, end)
-
-
-def _format_date_nav_label(
-    current_date: date,
-    *,
-    count: int | None,
-    mode: str,
-) -> str:
-    """Format one date label using the requested compaction mode."""
-    if mode == DATE_NAV_LABEL_WITH_COUNTS:
-        safe_count = count or 0
-        return f"{current_date.strftime('%b %d')}({safe_count})"
-    if mode == DATE_NAV_LABEL_MONTH_DAY:
-        return current_date.strftime("%b %d")
-    return current_date.strftime("%m-%d")
-
-
-def _estimate_date_nav_width(labels: list[str]) -> int:
-    """Estimate the rendered width for arrows plus the given labels."""
-    return (
-        DATE_NAV_CONTAINER_PADDING
-        + (DATE_NAV_ARROW_WIDTH * 2)
-        + sum(len(label) + DATE_NAV_ITEM_PADDING for label in labels)
-    )
-
-
-def _compute_responsive_date_plan(
-    history_files: list[tuple[date, Path]],
-    current_index: int,
-    width: int,
-    get_count: Callable[[int], int],
-) -> tuple[int, int, str]:
-    """Choose a centered date window and label mode that fits the available width."""
-    total = len(history_files)
-    if total <= 0:
-        return (0, 0, DATE_NAV_LABEL_WITH_COUNTS)
-
-    if width <= 0:
-        start, end = _compute_window_bounds(total, current_index, min(DATE_NAV_WINDOW_SIZE, total))
-        return (start, end, DATE_NAV_LABEL_WITH_COUNTS)
-
-    max_window = min(DATE_NAV_WINDOW_SIZE, total)
-    for window_size in range(max_window, 0, -1):
-        start, end = _compute_window_bounds(total, current_index, window_size)
-        counts = {i: get_count(i) for i in range(start, end)}
-        for mode in DATE_NAV_LABEL_MODES:
-            labels = [
-                _format_date_nav_label(
-                    history_files[i][0],
-                    count=counts.get(i),
-                    mode=mode,
-                )
-                for i in range(start, end)
-            ]
-            if _estimate_date_nav_width(labels) <= width:
-                return (start, end, mode)
-
-    start, end = _compute_window_bounds(total, current_index, 1)
-    return (start, end, DATE_NAV_LABEL_NUMERIC)
-
-
-class DateNavigator(Horizontal):
-    """Horizontal date strip showing available dates with sliding window."""
-
-    class NavigateDate(Message):
-        """Request to navigate by direction (+1 = older, -1 = newer)."""
-
-        def __init__(self, direction: int) -> None:
-            """Initialize with a navigation direction (+1 older, -1 newer)."""
-            super().__init__()
-            self.direction = direction
-
-    class JumpToDate(Message):
-        """Request to jump to a specific date index."""
-
-        def __init__(self, index: int) -> None:
-            """Initialize with the target date index to jump to."""
-            super().__init__()
-            self.index = index
-
-    DEFAULT_CSS = """
-    DateNavigator {
-        height: auto;
-        padding: 0 1;
-        background: $th-panel;
-        display: none;
-    }
-
-    DateNavigator.visible {
-        display: block;
-    }
-
-    DateNavigator .chrome-label {
-        padding-right: 1;
-        color: $th-muted;
-        text-style: bold;
-    }
-
-    DateNavigator .date-nav-arrow {
-        padding: 0 1;
-        color: $th-muted;
-    }
-
-    DateNavigator .date-nav-arrow:hover {
-        color: $th-text;
-    }
-
-    DateNavigator .date-nav-item {
-        padding: 0 1;
-        color: $th-muted;
-    }
-
-    DateNavigator .date-nav-item:hover {
-        color: $th-text;
-    }
-
-    DateNavigator .date-nav-item.current {
-        color: $th-accent;
-        text-style: bold;
-    }
-    """
-
-    def __init__(
-        self,
-        history_files: list[tuple[date, Path]],
-        current_index: int = 0,
-    ) -> None:
-        """Initialize the date navigator with history files and selected index."""
-        super().__init__()
-        self._history_files = history_files
-        self._current_index = current_index
-        self._paper_counts: dict[Path, int] = {}
-
-    def compose(self) -> ComposeResult:
-        """Compose the static label and navigation arrow widgets."""
-        yield Label("History", classes="chrome-label", id="date-nav-label")
-        yield _chrome_label("<", "date-nav-arrow", "date-nav-prev", "Older (])")
-        yield _chrome_label(">", "date-nav-arrow", "date-nav-next", "Newer ([)")
-
-    def _get_paper_count(self, index: int) -> int:
-        """Return the cached paper count for the history file at index."""
-        _, path = self._history_files[index]
-        if path not in self._paper_counts:
-            self._paper_counts[path] = count_papers_in_file(path)
-        return self._paper_counts[path]
-
-    def _prune_count_cache(self, active_paths: set[Path]) -> None:
-        """Drop cached counts for history files no longer present."""
-        self._paper_counts = {
-            path: count for path, count in self._paper_counts.items() if path in active_paths
-        }
-
-    async def _clear_date_items(self) -> None:
-        """Remove only date labels, leaving navigation arrows intact."""
-        for child in self._get_existing_date_items():
-            await child.remove()
-
-    def _compute_window(self, total: int, current_index: int) -> tuple[int, int]:
-        """Compute a centered sliding window clamped to history bounds."""
-        return _compute_window_bounds(total, current_index, DATE_NAV_WINDOW_SIZE)
-
-    def _build_desired_items(
-        self,
-        history_files: list[tuple[date, Path]],
-        current_index: int,
-        start: int,
-        end: int,
-        label_mode: str,
-    ) -> list[tuple[str, str, bool, str]]:
-        """Build desired date labels for the visible window."""
-        desired: list[tuple[str, str, bool, str]] = []
-        for i in range(start, end):
-            d, _ = history_files[i]
-            count = self._get_paper_count(i) if label_mode == DATE_NAV_LABEL_WITH_COUNTS else None
-            label_text = _format_date_nav_label(d, count=count, mode=label_mode)
-            tooltip = f"Jump to {d.isoformat()}"
-            desired.append((f"date-nav-{i}", label_text, i == current_index, tooltip))
-        return desired
-
-    def _get_existing_date_items(self) -> list[Label]:
-        """Return currently mounted date label widgets."""
-        return [
-            child
-            for child in self.children
-            if isinstance(child, Label) and "date-nav-item" in child.classes
-        ]
-
-    def _can_patch_in_place(
-        self,
-        existing_items: list[Label],
-        desired: list[tuple[str, str, bool, str]],
-    ) -> bool:
-        """Return True when existing and desired IDs match in order."""
-        existing_order = [child.id for child in existing_items if child.id is not None]
-        desired_order = [item_id for item_id, _, _, _ in desired]
-        return existing_order == desired_order
-
-    @staticmethod
-    def _render_label_text(label_text: str, is_current: bool) -> str:
-        """Render one date label, highlighting the currently selected date."""
-        return f"[{label_text}]" if is_current else label_text
-
-    def _patch_items_in_place(
-        self,
-        existing_items: list[Label],
-        desired: list[tuple[str, str, bool, str]],
-    ) -> None:
-        """Patch existing date labels without unmount/remount churn."""
-        existing_by_id = {child.id: child for child in existing_items}
-        for item_id, label_text, is_current, tooltip in desired:
-            child = existing_by_id.get(item_id)
-            if child is None:
-                continue
-            child.update(self._render_label_text(label_text, is_current))
-            child.tooltip = tooltip
-            if is_current:
-                child.add_class("current")
-            else:
-                child.remove_class("current")
-
-    async def _rebuild_items(
-        self,
-        existing_items: list[Label],
-        desired: list[tuple[str, str, bool, str]],
-    ) -> None:
-        """Rebuild date labels when the visible window changed."""
-        for child in existing_items:
-            await child.remove()
-        next_arrow = self.query_one("#date-nav-next")
-        for item_id, label_text, is_current, tooltip in desired:
-            classes = "date-nav-item current" if is_current else "date-nav-item"
-            label = _chrome_label(
-                self._render_label_text(label_text, is_current),
-                classes,
-                item_id,
-                tooltip,
-            )
-            self.mount(label, before=next_arrow)
-
-    async def update_dates(
-        self,
-        history_files: list[tuple[date, Path]],
-        current_index: int,
-    ) -> None:
-        """Update the displayed dates with a sliding window."""
-        self._history_files = history_files
-        self._current_index = current_index
-        self._prune_count_cache({path for _, path in history_files})
-
-        if len(history_files) <= 1:
-            self.remove_class("visible")
-            await self._clear_date_items()
-            return
-
-        self.add_class("visible")
-        width = getattr(getattr(self, "size", None), "width", 0)
-        start, end, label_mode = _compute_responsive_date_plan(
-            history_files,
-            current_index,
-            max(0, width - DATE_NAV_LABEL_WIDTH),
-            self._get_paper_count,
-        )
-        desired = self._build_desired_items(
-            history_files,
-            current_index,
-            start,
-            end,
-            label_mode,
-        )
-        existing_items = self._get_existing_date_items()
-
-        if self._can_patch_in_place(existing_items, desired):
-            self._patch_items_in_place(existing_items, desired)
-            return
-
-        await self._rebuild_items(existing_items, desired)
-
-    def on_click(self, event: object) -> None:
-        """Handle clicks on arrows and date labels."""
-        from textual.events import Click
-
-        if not isinstance(event, Click):
-            return
-        widget = event.widget
-        if widget is None:
-            return
-        widget_id = widget.id or ""
-        if widget_id == "date-nav-prev":
-            self.post_message(self.NavigateDate(1))
-        elif widget_id == "date-nav-next":
-            self.post_message(self.NavigateDate(-1))
-        elif widget_id.startswith("date-nav-"):
-            try:
-                index = int(widget_id.removeprefix("date-nav-"))
-                self.post_message(self.JumpToDate(index))
-            except ValueError:
-                pass
-
-
-BOOKMARK_MAX_TABS = 9
-_BOOKMARK_PREFIX_LABEL = "Saved searches"
-_BOOKMARK_SAVE_LABEL = "Ctrl+b save"
-_BOOKMARK_SAVE_CURRENT_LABEL = "Ctrl+b save current search"
-# Cell budget from each part's CSS padding/margin (see BookmarkTabBar DEFAULT_CSS).
-_BOOKMARK_CHIP_CHROME = 5
-_BOOKMARK_PREFIX_CHROME = 1
-_BOOKMARK_SIDE_CHROME = 2
-
-
-def _bookmark_chip_text(index: int, name: str) -> str:
-    """Return the visible label for a numbered bookmark chip."""
-    return f"{index + 1}: {name}"
-
-
-def _elide_bookmark_name(index: int, name: str, budget: int, ellipsis: str) -> str:
-    """Elide a single bookmark name so its chip fits ``budget`` cells."""
-    prefix = f"{index + 1}: "
-    avail = budget - _BOOKMARK_CHIP_CHROME - len(prefix) - len(ellipsis)
-    if avail < 1:
-        avail = 1
-    return name[:avail] + ellipsis
-
-
-def _fit_bookmark_chips(
-    names: list[str],
-    width: int,
-) -> tuple[list[tuple[int, str]], int]:
-    """Fit numbered bookmark chips into ``width`` content cells.
-
-    Returns ``(visible, hidden)`` — ``visible`` is ``(index, display_name)`` per
-    rendered chip (name may be ellipsis-elided), ``hidden`` is the count folded
-    into a trailing ``+N`` chip. Whole chips are dropped from the right before any
-    chip is elided (no mid-word fragment); ``width`` <= 0 keeps every chip.
-    """
-    indexed = list(enumerate(names))
-    if width <= 0 or not indexed:
-        return indexed, 0
-
-    ellipsis = "..." if is_ascii_mode() else "…"
-    reserved = (
-        len(_BOOKMARK_PREFIX_LABEL)
-        + _BOOKMARK_PREFIX_CHROME
-        + len(_BOOKMARK_SAVE_LABEL)
-        + _BOOKMARK_SIDE_CHROME
-    )
-    budget = width - reserved
-
-    def chip_width(index: int, name: str) -> int:
-        return len(_bookmark_chip_text(index, name)) + _BOOKMARK_CHIP_CHROME
-
-    visible: list[tuple[int, str]] = []
-    used = 0
-    for index, name in indexed:
-        width_needed = chip_width(index, name)
-        if not visible and width_needed > budget:
-            # The first chip alone overflows: elide it rather than clip a word.
-            elided = _elide_bookmark_name(index, name, budget, ellipsis)
-            visible.append((index, elided))
-            used += chip_width(index, elided)
-            break
-        if used + width_needed > budget:
-            break
-        visible.append((index, name))
-        used += width_needed
-
-    hidden = len(indexed) - len(visible)
-    if hidden == 0:
-        return visible, 0
-
-    # Reserve room for the "+N" marker, dropping whole chips (never the last) to fit.
-    def marker_width(count: int) -> int:
-        return len(f"+{count}") + _BOOKMARK_CHIP_CHROME
-
-    while len(visible) > 1 and used + marker_width(hidden) > budget:
-        drop_index, drop_name = visible.pop()
-        used -= chip_width(drop_index, drop_name)
-        hidden = len(indexed) - len(visible)
-    return visible, hidden
-
-
-class BookmarkTabBar(Horizontal):
-    """Horizontal bar displaying search bookmarks as numbered tabs."""
-
-    DEFAULT_CSS = """
-    BookmarkTabBar {
-        height: auto;
-        padding: 0 1;
-        background: $th-panel;
-        border-bottom: solid $th-panel-alt;
-        display: none;
-    }
-
-    BookmarkTabBar.visible {
-        display: block;
-    }
-
-    BookmarkTabBar .chrome-label {
-        padding-right: 1;
-        color: $th-muted;
-        text-style: bold;
-    }
-
-    BookmarkTabBar .bookmark-tab {
-        padding: 0 2;
-        margin-right: 1;
-        color: $th-muted;
-    }
-
-    BookmarkTabBar .bookmark-tab:hover {
-        color: $th-text;
-    }
-
-    BookmarkTabBar .bookmark-tab.active {
-        color: $th-accent-alt;
-        text-style: bold;
-    }
-
-    BookmarkTabBar .bookmark-add {
-        color: $th-muted;
-        padding: 0 1;
-    }
-
-    BookmarkTabBar .bookmark-add:hover {
-        color: $th-text;
-    }
-
-    BookmarkTabBar .bookmark-hint {
-        color: $th-muted;
-        padding: 0 1;
-    }
-    """
-
-    def __init__(
-        self,
-        bookmarks: list[SearchBookmark],
-        active_index: int = -1,
-        active_search: bool = False,
-    ) -> None:
-        """Initialize the bookmark bar with bookmarks and active state."""
-        super().__init__()
-        self._bookmarks = bookmarks
-        self._active_index = active_index
-        self._active_search = active_search
-        if bookmarks or active_search:
-            self.add_class("visible")
-
-    def compose(self) -> ComposeResult:
-        """Compose the bookmark label, numbered tabs, and save hint."""
-        yield from self._build_children(self._content_width())
-
-    def _content_width(self) -> int:
-        """Return the current content width, or 0 before the first layout pass."""
-        return getattr(getattr(self, "content_size", None), "width", 0)
-
-    def _build_children(self, width: int) -> list[Label]:
-        """Build the prefix, width-fitted numbered chips, and trailing hint."""
-        children: list[Label] = [
-            Label(_BOOKMARK_PREFIX_LABEL, classes="chrome-label", id="bookmark-label")
-        ]
-        if self._bookmarks:
-            names = [bookmark.name for bookmark in self._bookmarks[:BOOKMARK_MAX_TABS]]
-            visible, hidden = _fit_bookmark_chips(names, width)
-            for index, display_name in visible:
-                classes = "bookmark-tab active" if index == self._active_index else "bookmark-tab"
-                children.append(
-                    _chrome_label(
-                        _bookmark_chip_text(index, display_name),
-                        classes,
-                        f"bookmark-{index}",
-                        f"Saved search {index + 1} - press {index + 1} to load",
-                    )
-                )
-            if hidden:
-                plural = "es" if hidden != 1 else ""
-                children.append(
-                    _chrome_label(
-                        f"+{hidden}",
-                        "bookmark-add",
-                        "bookmark-overflow",
-                        f"{hidden} more saved search{plural} - press 1-9 to load",
-                    )
-                )
-            children.append(
-                _chrome_label(_BOOKMARK_SAVE_LABEL, "bookmark-add", "bookmark-add", "Save search")
-            )
-        elif self._active_search:
-            children.append(
-                _chrome_label(
-                    _BOOKMARK_SAVE_CURRENT_LABEL,
-                    "bookmark-hint",
-                    "bookmark-hint",
-                    "Save current search",
-                )
-            )
-        return children
-
-    def _fit_signature(self, width: int) -> tuple[tuple[tuple[int, str], ...], int] | None:
-        """Return a signature of the width-derived chip layout, or None."""
-        if not self._bookmarks:
-            return None
-        names = [bookmark.name for bookmark in self._bookmarks[:BOOKMARK_MAX_TABS]]
-        visible, hidden = _fit_bookmark_chips(names, width)
-        return (tuple(visible), hidden)
-
-    async def update_bookmarks(
-        self,
-        bookmarks: list[SearchBookmark],
-        active_index: int = -1,
-        active_search: bool = False,
-    ) -> None:
-        """Update the displayed bookmarks."""
-        self._bookmarks = bookmarks
-        self._active_index = active_index
-        self._active_search = active_search
-        # Invalidate any pending resize-driven rebuild so it cannot race this one.
-        token = self._next_bookmark_rebuild_token()
-        await self.remove_children()
-        if token != self._bookmark_rebuild_token:
-            return
-        if not (bookmarks or active_search):
-            self.remove_class("visible")
-            return
-        self.add_class("visible")
-        width = self._content_width()
-        self._bookmark_fit_signature = self._fit_signature(width)
-        for child in self._build_children(width):
-            self.mount(child)
-
-    def _next_bookmark_rebuild_token(self) -> int:
-        """Bump and return the rebuild token; the newest request always wins."""
-        token = getattr(self, "_bookmark_rebuild_token", 0) + 1
-        self._bookmark_rebuild_token = token
-        return token
-
-    def on_resize(self, event: object) -> None:
-        """Re-fit numbered chips when the bar's available width changes."""
-        if not self._bookmarks:
-            return
-        signature = self._fit_signature(self._content_width())
-        if signature == getattr(self, "_bookmark_fit_signature", None):
-            return
-        self._bookmark_fit_signature = signature
-        token = self._next_bookmark_rebuild_token()
-        self.call_later(self._rerender_bookmarks, token)
-
-    async def _rerender_bookmarks(self, token: int) -> None:
-        """Rebuild chips against the current width (used after a resize)."""
-        if token != self._bookmark_rebuild_token:
-            return
-        await self.remove_children()
-        if token != self._bookmark_rebuild_token:
-            return
-        for child in self._build_children(self._content_width()):
-            self.mount(child)
-
-
-class FilterPillBar(Horizontal):
-    """Horizontal bar displaying active search filters as removable pills."""
-
-    DEFAULT_CSS = """
-    FilterPillBar {
-        height: auto;
-        padding: 0 1;
-        background: $th-panel;
-        display: none;
-    }
-
-    FilterPillBar.visible {
-        display: block;
-    }
-
-    FilterPillBar .chrome-label {
-        padding-right: 1;
-        color: $th-muted;
-        text-style: bold;
-    }
-
-    FilterPillBar .filter-pill {
-        padding: 0 1;
-        margin-right: 1;
-        color: $th-accent;
-    }
-
-    FilterPillBar .filter-pill:hover {
-        color: $th-text;
-        text-style: bold;
-    }
-
-    FilterPillBar .filter-pill-watch {
-        padding: 0 1;
-        margin-right: 1;
-        color: $th-orange;
-    }
-
-    FilterPillBar .filter-pill-watch:hover {
-        color: $th-text;
-        text-style: bold;
-    }
-    """
-
-    class RemoveFilter(Message):
-        """Message sent when a filter pill is clicked to remove it."""
-
-        def __init__(self, token_index: int) -> None:
-            """Initialize with the query token index to remove."""
-            super().__init__()
-            self.token_index = token_index
-
-    class RemoveWatchFilter(Message):
-        """Message sent when the watch filter pill is clicked to remove it."""
-
-    def compose(self) -> ComposeResult:
-        """Compose the filter label prefix widget."""
-        yield Label("Filters", classes="chrome-label", id="filter-pill-prefix")
-
-    async def update_pills(self, tokens: list[QueryToken], watch_active: bool) -> None:
-        """Update the displayed filter pills."""
-        desired = self._desired_filter_pills(tokens, watch_active)
-        existing_items = self._existing_filter_pills()
-
-        if _pill_order(existing_items) == [pill.item_id for pill in desired]:
-            self._update_existing_filter_pills(existing_items, desired)
-        else:
-            await self._rebuild_filter_pills(existing_items, desired)
-
-        if desired:
-            self.add_class("visible")
-        else:
-            self.remove_class("visible")
-
-    def _desired_filter_pills(
-        self,
-        tokens: list[QueryToken],
-        watch_active: bool,
-    ) -> list[FilterPillSpec]:
-        desired = [self._filter_pill_spec(index, token) for index, token in enumerate(tokens)]
-        desired = [pill for pill in desired if pill is not None]
-        if watch_active:
-            desired.append(_watch_filter_pill_spec())
-        return desired
-
-    def _filter_pill_spec(self, index: int, token: QueryToken) -> FilterPillSpec | None:
-        if token.kind == "op":
-            return None
-        label_text = escape_rich_text(pill_label_for_token(token))
-        return FilterPillSpec(
-            item_id=f"pill-{index}",
-            text=f"{label_text} {get_filter_pill_remove_glyph()}",
-            class_name="filter-pill",
-            tooltip="Click to remove filter",
-        )
-
-    def _existing_filter_pills(self) -> list[Label]:
-        return [
-            child
-            for child in self.children
-            if isinstance(child, Label) and child.id is not None and child.id.startswith("pill-")
-        ]
-
-    def _update_existing_filter_pills(
-        self,
-        existing_items: list[Label],
-        desired: list[FilterPillSpec],
-    ) -> None:
-        existing_by_id = {child.id: child for child in existing_items}
-        for pill in desired:
-            child = existing_by_id.get(pill.item_id)
-            if child is not None:
-                _update_filter_pill(child, pill)
-
-    async def _rebuild_filter_pills(
-        self,
-        existing_items: list[Label],
-        desired: list[FilterPillSpec],
-    ) -> None:
-        for child in existing_items:
-            await child.remove()
-        for pill in desired:
-            self.mount(_chrome_label(pill.text, pill.class_name, pill.item_id, pill.tooltip))
-
-    def on_click(self, event: object) -> None:
-        """Handle click on a filter pill to remove it."""
-        from textual.events import Click
-
-        if not isinstance(event, Click):
-            return
-        widget = event.widget
-        if not isinstance(widget, Label):
-            return
-        widget_id = widget.id or ""
-        if widget_id == "pill-watch":
-            self.post_message(self.RemoveWatchFilter())
-        elif widget_id.startswith("pill-"):
-            try:
-                index = int(widget_id.split("-", 1)[1])
-                self.post_message(self.RemoveFilter(index))
-            except (ValueError, IndexError):
-                pass
-
-
-def _pill_order(pills: list[Label]) -> list[str | None]:
-    return [pill.id for pill in pills]
-
-
-def _update_filter_pill(label: Label, pill: FilterPillSpec) -> None:
-    label.update(pill.text)
-    label.remove_class("filter-pill-watch")
-    label.remove_class("filter-pill")
-    label.add_class(pill.class_name)
-    label.tooltip = pill.tooltip
-
-
-def _watch_filter_pill_spec() -> FilterPillSpec:
-    return FilterPillSpec(
-        item_id="pill-watch",
-        text=f"watched {get_filter_pill_remove_glyph()}",
-        class_name="filter-pill-watch",
-        tooltip="Click to remove watch filter",
-    )
 
 
 __all__ = [
