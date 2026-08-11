@@ -13,7 +13,8 @@ from arxiv_browser.actions import ui_actions as _ui_actions
 from arxiv_browser.browser.constants import logger
 from arxiv_browser.citation_genealogy import GenealogyRoot
 from arxiv_browser.enrichment import apply_version_updates
-from arxiv_browser.modals.citations import CitationGraphScreen, RecommendationsScreen
+from arxiv_browser.modals.citations import CitationGraphScreen
+from arxiv_browser.modals.recommendations import RecommendationsScreen
 from arxiv_browser.models import Paper
 from arxiv_browser.parsing import clean_latex, parse_arxiv_version_map
 from arxiv_browser.semantic_scholar import SemanticScholarPaper

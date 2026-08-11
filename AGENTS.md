@@ -5,7 +5,7 @@ Quick-reference for AI agents. See `docs/architecture.md` for the human-facing a
 ## Task Runner
 
 - **Pre-commit**: `just check` (docs + version drift, snapshots, lint, Pyright/Pyrefly types, tests, quality budgets)
-- **Full suite**: `just quality`
+- **Full local suite**: `just quality` (pre-commit checks + CI-enforced quality/security gates)
 - **Auto-fix**: `just format`
 - **Docs + version drift**: `just docs-check` (CLI/preset/keybinding/config sync + CHANGELOG/version consistency)
 - **Dashboard**: `just report`
@@ -22,13 +22,14 @@ Quick-reference for AI agents. See `docs/architecture.md` for the human-facing a
 
 - `just lint` — zero ruff errors, formatting matches
 - `just typecheck` — zero Pyright errors (basic mode)
-- `just typecheck-pyrefly` — zero Pyrefly errors
+- `just typecheck-pyrefly` — zero new Pyrefly errors beyond the checked-in baseline
 - `just test` — all tests pass; statement coverage >= 95% and branch coverage >= 85% (`check_coverage_thresholds.py`), combined coverage for `actions/`, `browser/`, and `cli.py` >= 85%, and the signature-count structural guard passes
 - `just quality-budget` (also run by `just check`) — the binding, stricter coverage gates: statement coverage >= 96%, branch coverage >= 90%, interactive-module (`actions/` + `browser/` + `cli.py`) coverage >= 94%, plus per-file line budgets (`browser/core.py` <= 938, `config.py` <= 921, `cli.py` <= 900)
-- `uv run xenon src/arxiv_browser/ --max-absolute C --max-modules C --max-average B`
+- `just complexity-gate` — Xenon thresholds: maximum absolute/module complexity C and average complexity B
 - `just dead-code` / `just security` / `just deps` — zero findings each
-- Repo-tracked Python file-size guard (`report_python_file_sizes.py --strict`): **hard failure at > 1000 lines**; near-cap reporting (warning only) at > 900 lines
-- `src/arxiv_browser/app.py` line-count guardrail: <= 5000 lines
+- `just deps-audit` — zero known dependency vulnerabilities
+- `just file-size` (`report_python_file_sizes.py --path-prefix src/arxiv_browser --soft-cap 1000 --near-cap 900 --strict`) — repo-tracked production Python files: **hard failure at > 1000 lines**; near-cap reporting (warning only) at > 900 lines
+- `just app-size` — `src/arxiv_browser/app.py` line-count guardrail: <= 5000 lines
 
 ## Key Rules
 

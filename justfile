@@ -93,6 +93,10 @@ complexity:
     @echo "=== Maintainability Index ==="
     @uv run radon mi {{ src }} -s
 
+# Enforce the CI cyclomatic-complexity thresholds
+complexity-gate:
+    uv run xenon {{ src }}/ --max-absolute C --max-modules C --max-average B
+
 # Run bandit security scanner
 security:
     uv run bandit -c pyproject.toml -r {{ src }}
@@ -110,13 +114,29 @@ deps-audit:
     uv export --format requirements.txt --all-groups --no-emit-project --no-emit-package pip --frozen \
         | uv run pip-audit -r /dev/stdin --strict --require-hashes --disable-pip
 
+# Enforce the CI line cap for tracked production Python files
+file-size:
+    uv run python scripts/report_python_file_sizes.py \
+        --path-prefix {{ src }} \
+        --soft-cap 1000 \
+        --near-cap 900 \
+        --strict
+
+# Enforce the dedicated compatibility-shim line-count guardrail
+app-size:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    lines=$(wc -l < "{{ src }}/app.py")
+    echo "{{ src }}/app.py lines: ${lines}"
+    test "${lines}" -le 5000
+
 # ── Composite targets ────────────────────────────────────────────────
 
 # Run all fast checks (docs drift + snapshots + lint + types + tests)
 check: docs-check snapshots lint typecheck-all test quality-budget
 
-# Run all checks including quality tools
-quality: check complexity security dead-code deps
+# Run all local checks, reports, and CI-enforced quality gates
+quality: check complexity complexity-gate security dead-code deps deps-audit file-size app-size
 
 # ── CI (matches GitHub Actions + adds quality gates) ─────────────────
 

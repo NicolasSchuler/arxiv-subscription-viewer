@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-08-11
+
+### Changed
+- Split query-token grammar, recommendation screens, and dataset-task lifecycle into focused owners while preserving established public imports and monkeypatch seams.
+- Moved the historical paper-content fetch behavior out of `arxiv_browser.app`, leaving the app module as a compact compatibility shim backed by the canonical browser content owner.
+- Removed the search-action dependency on the CLI layer by resolving the arXiv API rate-limit constant from its service owner.
+- Expanded `just quality` to enforce complexity, security, dependency-vulnerability, production file-size, and app-size gates, and documented the resulting architecture and contributor workflow.
+- Refreshed the locked Click and Pillow releases.
+
+### Fixed
+- Updated `pypdf` to 6.15.0 to clear `PYSEC-2026-3655` and `PYSEC-2026-3656` from the release dependency audit.
+
 ## [0.3.6] - 2026-07-10
 
 ### Changed
@@ -250,7 +262,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ASCII mode for terminals without Unicode support (`--ascii`)
 - Session persistence: scroll position, active filters, sort order
 
-[Unreleased]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.6...HEAD
+[Unreleased]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.7...HEAD
+[0.3.7]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/NicolasSchuler/arxiv-subscription-viewer/compare/v0.3.3...v0.3.4

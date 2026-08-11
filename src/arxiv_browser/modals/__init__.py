@@ -7,12 +7,10 @@ Import modals from this package: ``from arxiv_browser.modals import HelpScreen``
 # base.py — shared base class for all modals
 from arxiv_browser.modals.base import ModalBase
 
-# citations.py — recommendation and citation graph modals
+# citations.py — citation graph modal
 from arxiv_browser.modals.citations import (
     CitationGraphListItem,
     CitationGraphScreen,
-    RecommendationListItem,
-    RecommendationsScreen,
 )
 
 # collections.py — paper collections (reading lists) modal
@@ -57,6 +55,9 @@ from arxiv_browser.modals.llm import (
 
 # pdf.py — terminal PDF/figure preview
 from arxiv_browser.modals.pdf import FigurePreviewScreen, PdfPreviewScreen
+
+# recommendations.py — local and Semantic Scholar recommendations modal
+from arxiv_browser.modals.recommendations import RecommendationListItem, RecommendationsScreen
 
 # settings.py — in-app settings editor and inline LLM preset picker
 from arxiv_browser.modals.settings import (

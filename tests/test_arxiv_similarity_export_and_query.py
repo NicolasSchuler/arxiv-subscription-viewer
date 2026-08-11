@@ -550,6 +550,32 @@ class TestBibTeXExport:
 class TestQueryParser:
     """Tests for query tokenizer and parser functions."""
 
+    def test_query_surface_preserves_collaborator_patch_points(self, monkeypatch):
+        """Query entry points should resolve collaborators through the stable module."""
+        import arxiv_browser.query as query_module
+
+        sentinel = QueryToken(kind="term", value="patched")
+        parser_calls: list[str] = []
+
+        def parse_plain_term(query: str, start: int, i: int, query_len: int):
+            parser_calls.append(query)
+            return sentinel, query_len
+
+        monkeypatch.setattr(query_module, "_parse_plain_term", parse_plain_term)
+        assert query_module.tokenize_query("foo") == [sentinel]
+        assert parser_calls == ["foo"]
+
+        monkeypatch.setattr(query_module, "tokenize_query", lambda query: [sentinel])
+        assert query_module.get_query_tokens(" foo ") == [sentinel]
+
+        monkeypatch.setattr(query_module, "get_query_tokens", lambda query: [sentinel])
+        monkeypatch.setattr(
+            query_module,
+            "reconstruct_query",
+            lambda tokens, token_index: f"patched:{tokens[0].value}:{token_index}",
+        )
+        assert query_module.remove_query_token("foo", 0) == "patched:patched:0"
+
     def test_tokenize_simple_term(self):
         """Single word should produce one term token."""
         tokens = tokenize_query("attention")

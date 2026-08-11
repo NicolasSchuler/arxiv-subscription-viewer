@@ -45,7 +45,8 @@ Use these paths for new code and for test imports:
 - App options: `arxiv_browser.browser.core.ArxivBrowserOptions`
 - Models and constants: `arxiv_browser.models`
 - Parsing and history helpers: `arxiv_browser.parsing`
-- Query/search helpers: `arxiv_browser.query`
+- Query/search helpers: `arxiv_browser.query` (stable surface; token grammar lives in
+  `arxiv_browser.query_syntax`)
 - Export helpers: `arxiv_browser.export`
 - Config load/save/import/export: `arxiv_browser.config`
 - LLM workflows and storage: `arxiv_browser.llm`
@@ -60,14 +61,17 @@ Do not import `arxiv_browser.app` from `src/` code. Tests import canonical modul
 The main package is organized by responsibility:
 
 - `cli.py`: argument parsing, non-interactive commands, startup/bootstrap
-- `browser/`: the Textual app, split by responsibility — core orchestration (`core.py`, `browse.py`, plus `options.py`, `bootstrap.py`, `contracts.py`, `constants.py`), reactive/worker runtime (`reactive_state.py`, `worker_runtime.py`, `runtime_state.py`), detail-pane rendering (`detail_pane.py`, `detail_annotations.py`, `content.py`), and discovery/onboarding (`discovery.py`, `onboarding_hints.py`, `browse_header.py`)
+- `browser/`: the Textual app, split by responsibility — core orchestration (`core.py`, `browse.py`, plus `options.py`, `bootstrap.py`, `contracts.py`, `constants.py`), reactive/worker runtime and dataset-task lifecycle (`reactive_state.py`, `worker_runtime.py`, `runtime_state.py`), detail-pane rendering (`detail_pane.py`, `detail_annotations.py`, `content.py`), and discovery/onboarding (`discovery.py`, `onboarding_hints.py`, `browse_header.py`)
 - `actions/`: action handlers mixed into `ArxivBrowser`
 - `models.py`: data objects and shared constants
 - `config.py`: persisted user configuration and metadata import/export
-- `parsing.py`, `query.py`, `export.py`: pure-ish domain helpers
+- `parsing.py`, `query.py`, `query_syntax.py`, `export.py`: pure-ish domain helpers;
+  `query.py` preserves and coordinates the established query-helper import and
+  patch surface while `query_syntax.py` owns lexical parsing and query-token primitives
 - `sources.py`: preprint provider identity and prototype non-arXiv parsers
 - `services/`: internal service layer — async I/O and subprocess orchestration for arXiv, downloads, enrichment, and LLMs
-- `modals/` and `widgets/`: reusable UI building blocks
+- `modals/` and `widgets/`: reusable UI building blocks; recommendation and citation-graph
+  screens have separate owners under `modals/recommendations.py` and `modals/citations.py`
 
 ## Where New Features Belong
 
@@ -118,7 +122,10 @@ only to re-export legacy patch surfaces, and nothing under `src/` imports it.
 
 - `browser/core.py` owns app construction and orchestration; the CLI entrypoint lives in `cli.py`.
 - `arxiv_browser.app` is a small compatibility shim that preserves the CLI/bootstrap monkeypatch seam.
-- `browser/core.py` coordinates subsystem state and wires the browser mixins and action modules together.
+- `browser/core.py` coordinates subsystem state and wires the browser mixins and action modules together;
+  `browser/worker_runtime.py` owns background-task tracking, dataset epochs, cancellation, and shutdown.
+- `browser/content.py` owns paper-content retrieval, including the historical behavior exposed through
+  `arxiv_browser.app._fetch_paper_content_async`; the compatibility shim only injects its patchable dependencies.
 - `database.py` resolves a unified `cache.db`. When a pre-existing per-module SQLite file (`summaries.db`, `relevance.db`, `semantic_scholar.db`, `huggingface.db`) is present, `resolve_db_path()` uses it; otherwise all cached data lives in `cache.db`.
 - `Paper.source` is the local/API load origin. Cross-server identity lives separately in `Paper.provider` and `arxiv_browser.sources`, so arXiv-only workflows such as version checks, PDF downloads/previews, and arXiv HTML figure/full-text fetches reject DOI-based non-arXiv records before calling arXiv endpoints.
 

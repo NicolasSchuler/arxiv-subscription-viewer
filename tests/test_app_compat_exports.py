@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 
@@ -109,6 +110,7 @@ class TestAppCompatibilityExports:
         class _TempClient:
             def __init__(self, response: _Response) -> None:
                 self.response = response
+                self.calls: list[tuple[str, int, bool]] = []
 
             async def __aenter__(self):
                 return self
@@ -116,7 +118,8 @@ class TestAppCompatibilityExports:
             async def __aexit__(self, exc_type, exc, tb):
                 return False
 
-            async def get(self, *_args, **_kwargs):
+            async def get(self, url: str, *, timeout: int, follow_redirects: bool):
+                self.calls.append((url, timeout, follow_redirects))
                 return self.response
 
         paper = SimpleNamespace(
@@ -134,13 +137,110 @@ class TestAppCompatibilityExports:
         assert text == "abcdef"
         assert client.calls == [("https://arxiv.org/html/2401.99991", 4, True)]
 
+        compat_logger = MagicMock()
+        temp_client = _TempClient(_Response(404, ""))
         monkeypatch.delattr(app_module, "extract_text_from_html", raising=False)
+        monkeypatch.setattr(app_module, "logger", compat_logger)
         with patch(
             "arxiv_browser.app.httpx.AsyncClient",
-            return_value=_TempClient(_Response(404, "")),
+            return_value=temp_client,
         ):
             text = asyncio.run(fetch_paper_content(paper))
         assert text == "Abstract:\nFallback abstract."
+        assert temp_client.calls == [
+            (
+                "https://arxiv.org/html/2401.99991",
+                app_module.ARXIV_HTML_TIMEOUT,
+                True,
+            )
+        ]
+        compat_logger.warning.assert_called_once_with(
+            "arXiv HTML fetch returned %d for %s",
+            404,
+            "2401.99991",
+        )
+
+    def test_app_fetch_paper_content_async_preserves_error_and_parser_fallbacks(
+        self, monkeypatch
+    ) -> None:
+        import arxiv_browser.app as app_module
+
+        class _Response:
+            status_code = 200
+            text = "<p>x</p>"
+
+        class _Client:
+            def __init__(self, *, error: Exception | None = None) -> None:
+                self.error = error
+
+            async def get(self, *_args, **_kwargs):
+                if self.error is not None:
+                    raise self.error
+                return _Response()
+
+        fetch_paper_content = cast(Any, app_module._fetch_paper_content_async)
+        paper = SimpleNamespace(
+            arxiv_id="2401.99993",
+            abstract=None,
+            abstract_raw="Raw fallback.",
+        )
+        compat_logger = MagicMock()
+        monkeypatch.setattr(app_module, "logger", compat_logger)
+
+        text = asyncio.run(
+            fetch_paper_content(paper, client=_Client(error=httpx.HTTPError("boom")))
+        )
+        assert text == "Abstract:\nRaw fallback."
+        compat_logger.warning.assert_called_once_with(
+            "Failed to fetch HTML for %s",
+            "2401.99993",
+            exc_info=True,
+        )
+
+        monkeypatch.delattr(app_module, "extract_text_from_html", raising=False)
+        monkeypatch.setattr(app_module, "_extract_text_from_html", lambda _html: "abcdefgh")
+        monkeypatch.setattr(app_module, "MAX_PAPER_CONTENT_LENGTH", 4)
+        text = asyncio.run(fetch_paper_content(paper, client=_Client()))
+        assert text == "abcd"
+
+    def test_app_fetch_paper_content_async_delegates_to_canonical_owner(self, monkeypatch) -> None:
+        import arxiv_browser.app as app_module
+        import arxiv_browser.browser.content as browser_content
+
+        captured_requests: list[Any] = []
+
+        async def fetch_legacy(request: Any) -> str:
+            captured_requests.append(request)
+            return "delegated"
+
+        parser = MagicMock()
+        client_factory = MagicMock()
+        compat_logger = MagicMock()
+        to_thread = MagicMock()
+        client = MagicMock()
+        paper = SimpleNamespace(arxiv_id="2401.99992", abstract="", abstract_raw="")
+
+        monkeypatch.setattr(browser_content, "_fetch_legacy_paper_content", fetch_legacy)
+        monkeypatch.setattr(app_module, "extract_text_from_html", parser, raising=False)
+        monkeypatch.setattr(app_module.httpx, "AsyncClient", client_factory)
+        monkeypatch.setattr(app_module, "logger", compat_logger)
+        monkeypatch.setattr(app_module, "asyncio", SimpleNamespace(to_thread=to_thread))
+        monkeypatch.setattr(app_module, "ARXIV_HTML_TIMEOUT", 13)
+        monkeypatch.setattr(app_module, "MAX_PAPER_CONTENT_LENGTH", 17)
+
+        result = asyncio.run(cast(Any, app_module._fetch_paper_content_async)(paper, client=client))
+
+        assert result == "delegated"
+        assert len(captured_requests) == 1
+        request = captured_requests[0]
+        assert request.paper is paper
+        assert request.client is client
+        assert request.timeout == 13
+        assert request.max_content_length == 17
+        assert request.extract_html is parser
+        assert request.client_factory is client_factory
+        assert request.to_thread is to_thread
+        assert request.log is compat_logger
 
     def test_app_getattr_dir_and_missing_attr(self) -> None:
         import arxiv_browser.app as app_module

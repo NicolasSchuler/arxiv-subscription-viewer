@@ -1,4 +1,4 @@
-"""Query parsing, matching, sorting, and text formatting utilities."""
+"""Stable query surface plus matching, sorting, and text formatting utilities."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from rich.markup import escape as escape_markup
 
+from arxiv_browser import query_syntax as _query_syntax
 from arxiv_browser.authors import author_matches_exact
 from arxiv_browser.models import (
     Paper,
@@ -33,6 +34,71 @@ if TYPE_CHECKING:
     from arxiv_browser.huggingface import HuggingFacePaper
     from arxiv_browser.semantic_scholar import SemanticScholarPaper
     from arxiv_browser.triage_model import TriagePrediction
+
+
+# Keep the established ``arxiv_browser.query`` import and patch surface while
+# ``query_syntax`` owns token grammar and reconstruction behavior.
+_FIELD_NAMES = _query_syntax._FIELD_NAMES
+_parse_field_value = _query_syntax._parse_field_value
+_parse_plain_term = _query_syntax._parse_plain_term
+_parse_quoted_phrase = _query_syntax._parse_quoted_phrase
+_remove_orphaned_query_ops = _query_syntax._remove_orphaned_query_ops
+_token_to_str = _query_syntax._token_to_str
+insert_implicit_and = _query_syntax.insert_implicit_and
+pill_label_for_token = _query_syntax.pill_label_for_token
+to_rpn = _query_syntax.to_rpn
+
+
+def tokenize_query(query: str) -> list[QueryToken]:
+    """Tokenize a query string into terms and operators."""
+    tokens: list[QueryToken] = []
+    i = 0
+    query_len = len(query)
+    while i < query_len:
+        if query[i].isspace():
+            i += 1
+            continue
+        if query[i] == '"':
+            token, i = _parse_quoted_phrase(query, i + 1, query_len)
+            tokens.append(token)
+            continue
+        start = i
+        # Phase 1: advance until whitespace or ':' to check for a field prefix
+        while i < query_len and not query[i].isspace() and query[i] != ":":
+            i += 1
+        if i < query_len and query[i] == ":":
+            field = query[start:i].lower()
+            if field in _FIELD_NAMES:
+                token, i = _parse_field_value(query, i + 1, query_len, field)
+                tokens.append(token)
+                continue
+        # Phase 2: no valid field prefix found; re-use 'start' to parse from
+        # the beginning of this chunk as a plain term or boolean operator
+        token, i = _parse_plain_term(query, start, i, query_len)
+        tokens.append(token)
+    return tokens
+
+
+def reconstruct_query(tokens: list[QueryToken], exclude_index: int) -> str:
+    """Rebuild a query without one token, cleaning up orphaned operators."""
+    if exclude_index < 0 or exclude_index >= len(tokens):
+        return " ".join(_token_to_str(token) for token in tokens)
+
+    remaining = [token for index, token in enumerate(tokens) if index != exclude_index]
+    cleaned = _remove_orphaned_query_ops(remaining)
+    return " ".join(_token_to_str(token) for token in cleaned)
+
+
+def get_query_tokens(query: str) -> list[QueryToken]:
+    """Tokenize a query after trimming surrounding whitespace."""
+    normalized_query = query.strip()
+    return tokenize_query(normalized_query) if normalized_query else []
+
+
+def remove_query_token(query: str, token_index: int) -> str:
+    """Remove one token from a query string and rebuild it."""
+    tokens = get_query_tokens(query)
+    return reconstruct_query(tokens, token_index)
 
 
 _QUEUE_RELEVANCE_WEIGHT = 0.40
@@ -237,201 +303,6 @@ def highlight_text(text: str, terms: list[str], color: str) -> str:
         return escaped_text
     pattern = _highlight_pattern_for_terms(normalized)
     return pattern.sub(lambda match: f"[bold {color}]{match.group(0)}[/]", escaped_text)
-
-
-# ============================================================================
-# Query Parser Functions (extracted for testability)
-# ============================================================================
-
-
-_FIELD_NAMES = frozenset({"title", "author", "abstract", "cat", "tag"})
-
-
-def _parse_quoted_phrase(query: str, i: int, query_len: int) -> tuple[QueryToken, int]:
-    """Parse a quoted phrase starting after the opening quote."""
-    start = i
-    while i < query_len and query[i] != '"':
-        i += 1
-    value = query[start:i]
-    return QueryToken(kind="term", value=value, phrase=True), i + 1
-
-
-def _parse_field_value(query: str, i: int, query_len: int, field: str) -> tuple[QueryToken, int]:
-    """Parse the value after a field:colon, handling both quoted and unquoted."""
-    exact_prefix = field == "author" and i < query_len and query[i] == "="
-    if exact_prefix:
-        i += 1
-    if i < query_len and query[i] == '"':
-        i += 1
-        value_start = i
-        while i < query_len and query[i] != '"':
-            i += 1
-        value = query[value_start:i]
-        if exact_prefix:
-            value = f"={value}"
-        return QueryToken(kind="term", value=value, field=field, phrase=True), i + 1
-    value_start = i
-    while i < query_len and not query[i].isspace():
-        i += 1
-    value = query[value_start:i]
-    if exact_prefix:
-        value = f"={value}"
-    return QueryToken(kind="term", value=value, field=field), i
-
-
-def _parse_plain_term(query: str, start: int, i: int, query_len: int) -> tuple[QueryToken, int]:
-    """Parse a plain term or boolean operator, advancing past it."""
-    while i < query_len and not query[i].isspace():
-        i += 1
-    raw = query[start:i]
-    upper = raw.upper()
-    if upper in {"AND", "OR", "NOT"}:
-        return QueryToken(kind="op", value=upper), i
-    return QueryToken(kind="term", value=raw), i
-
-
-def tokenize_query(query: str) -> list[QueryToken]:
-    """Tokenize a query string into terms and operators."""
-    tokens: list[QueryToken] = []
-    i = 0
-    query_len = len(query)
-    while i < query_len:
-        if query[i].isspace():
-            i += 1
-            continue
-        if query[i] == '"':
-            token, i = _parse_quoted_phrase(query, i + 1, query_len)
-            tokens.append(token)
-            continue
-        start = i
-        # Phase 1: advance until whitespace or ':' to check for a field prefix
-        while i < query_len and not query[i].isspace() and query[i] != ":":
-            i += 1
-        if i < query_len and query[i] == ":":
-            field = query[start:i].lower()
-            if field in _FIELD_NAMES:
-                token, i = _parse_field_value(query, i + 1, query_len, field)
-                tokens.append(token)
-                continue
-        # Phase 2: no valid field prefix found; re-use 'start' to parse from
-        # the beginning of this chunk as a plain term or boolean operator
-        token, i = _parse_plain_term(query, start, i, query_len)
-        tokens.append(token)
-    return tokens
-
-
-def pill_label_for_token(token: QueryToken) -> str:
-    """Return a human-readable label for a query token pill.
-
-    Examples: cat:cs.AI, "exact phrase", author:"John Smith", transformer
-    """
-    value = token.value
-    if token.field == "author" and value.startswith("="):
-        exact_value = value[1:]
-        if token.phrase:
-            return f'{token.field}:="{exact_value}"'
-        return f"{token.field}:={exact_value}"
-    if token.field and token.phrase:
-        return f'{token.field}:"{value}"'
-    if token.field:
-        return f"{token.field}:{value}"
-    if token.phrase:
-        return f'"{value}"'
-    return value
-
-
-def reconstruct_query(tokens: list[QueryToken], exclude_index: int) -> str:
-    """Rebuild query string omitting the token at exclude_index.
-
-    Cleans up orphaned boolean operators adjacent to the removed term.
-    Boolean operators (AND/OR/NOT) are structural and not directly removable.
-    """
-    if exclude_index < 0 or exclude_index >= len(tokens):
-        return " ".join(_token_to_str(t) for t in tokens)
-
-    remaining = [t for i, t in enumerate(tokens) if i != exclude_index]
-    cleaned = _remove_orphaned_query_ops(remaining)
-    return " ".join(_token_to_str(t) for t in cleaned)
-
-
-def _remove_orphaned_query_ops(tokens: list[QueryToken]) -> list[QueryToken]:
-    """Drop leading, adjacent, and trailing Boolean operators after token removal."""
-
-    cleaned: list[QueryToken] = []
-    for tok in tokens:
-        if tok.kind == "op" and (not cleaned or cleaned[-1].kind == "op"):
-            continue
-        cleaned.append(tok)
-
-    if cleaned and cleaned[-1].kind == "op":
-        cleaned.pop()
-    return cleaned
-
-
-def get_query_tokens(query: str) -> list[QueryToken]:
-    """Tokenize a query after trimming surrounding whitespace."""
-    normalized_query = query.strip()
-    return tokenize_query(normalized_query) if normalized_query else []
-
-
-def remove_query_token(query: str, token_index: int) -> str:
-    """Remove one token from a query string and rebuild it."""
-    tokens = get_query_tokens(query)
-    return reconstruct_query(tokens, token_index)
-
-
-def _token_to_str(token: QueryToken) -> str:
-    """Convert a QueryToken back to its query string representation."""
-    if token.kind == "op":
-        return token.value
-    if token.field == "author" and token.value.startswith("="):
-        exact_value = token.value[1:]
-        if token.phrase:
-            return f'{token.field}:="{exact_value}"'
-        return f"{token.field}:={exact_value}"
-    if token.field and token.phrase:
-        return f'{token.field}:"{token.value}"'
-    if token.field:
-        return f"{token.field}:{token.value}"
-    if token.phrase:
-        return f'"{token.value}"'
-    return token.value
-
-
-def insert_implicit_and(tokens: list[QueryToken]) -> list[QueryToken]:
-    """Insert implicit AND operators between adjacent terms."""
-    result: list[QueryToken] = []
-    prev_was_term = False
-    for token in tokens:
-        # NOT begins a new term group but is itself an operator, so it triggers
-        # an implicit AND insertion without setting prev_was_term afterward.
-        token_is_term_start = token.kind == "term" or token.value == "NOT"
-        if prev_was_term and token_is_term_start:
-            result.append(QueryToken(kind="op", value="AND"))
-        result.append(token)
-        # Only a resolved term (not an operator) advances the "prev_was_term" flag
-        prev_was_term = token.kind == "term"
-    return result
-
-
-def to_rpn(tokens: list[QueryToken]) -> list[QueryToken]:
-    """Convert tokens to reverse polish notation using operator precedence."""
-    output: list[QueryToken] = []
-    ops: list[QueryToken] = []
-    # Precedence: OR < AND < NOT (higher value = binds tighter)
-    precedence = {"OR": 1, "AND": 2, "NOT": 3}
-    for token in tokens:
-        if token.kind == "term":
-            output.append(token)
-            continue
-        # Pop operators with >= precedence (left-associative: equal priority flushes first)
-        while ops and precedence[ops[-1].value] >= precedence[token.value]:
-            output.append(ops.pop())
-        ops.append(token)
-    # Drain any remaining operators onto the output queue
-    while ops:
-        output.append(ops.pop())
-    return output
 
 
 @functools.lru_cache(maxsize=256)

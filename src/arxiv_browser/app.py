@@ -9,10 +9,12 @@ import sys
 
 import httpx
 
-from arxiv_browser.browser.content import ARXIV_HTML_TIMEOUT, MAX_PAPER_CONTENT_LENGTH
+import arxiv_browser.browser.content as _browser_content
 from arxiv_browser.parsing import extract_text_from_html as _extract_text_from_html
 
 logger = logging.getLogger(__name__)
+ARXIV_HTML_TIMEOUT = _browser_content.ARXIV_HTML_TIMEOUT
+MAX_PAPER_CONTENT_LENGTH = _browser_content.MAX_PAPER_CONTENT_LENGTH
 
 _PUBLIC_EXPORTS = [
     "ArxivBrowser",
@@ -43,36 +45,19 @@ _EXPORT_SPECS = {
 async def _fetch_paper_content_async(
     paper, client: httpx.AsyncClient | None = None, timeout: int | None = None
 ) -> str:
-    """Fetch full paper text through the compatibility module patch surface."""
-    html_url = f"https://arxiv.org/html/{paper.arxiv_id}"
-    request_timeout = ARXIV_HTML_TIMEOUT if timeout is None else timeout
-    extract_html = globals().get("extract_text_from_html", _extract_text_from_html)
-
-    try:
-        if client is not None:
-            response = await client.get(html_url, timeout=request_timeout, follow_redirects=True)
-        else:
-            async with httpx.AsyncClient() as temp_client:
-                response = await temp_client.get(
-                    html_url,
-                    timeout=request_timeout,
-                    follow_redirects=True,
-                )
-        if response.status_code == 200:
-            text = await asyncio.to_thread(extract_html, response.text)
-            if text:
-                return text[:MAX_PAPER_CONTENT_LENGTH]
-        else:
-            logger.warning(
-                "arXiv HTML fetch returned %d for %s",
-                response.status_code,
-                paper.arxiv_id,
-            )
-    except (httpx.HTTPError, OSError):
-        logger.warning("Failed to fetch HTML for %s", paper.arxiv_id, exc_info=True)
-
-    abstract = paper.abstract or paper.abstract_raw or ""
-    return f"Abstract:\n{abstract}" if abstract else ""
+    """Delegate legacy fetch behavior while preserving the app patch surface."""
+    return await _browser_content._fetch_legacy_paper_content(
+        _browser_content._LegacyPaperContentRequest(
+            paper=paper,
+            client=client,
+            timeout=ARXIV_HTML_TIMEOUT if timeout is None else timeout,
+            max_content_length=MAX_PAPER_CONTENT_LENGTH,
+            extract_html=globals().get("extract_text_from_html", _extract_text_from_html),
+            client_factory=httpx.AsyncClient,
+            to_thread=asyncio.to_thread,
+            log=logger,
+        )
+    )
 
 
 def __getattr__(name: str):

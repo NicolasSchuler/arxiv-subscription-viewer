@@ -20,6 +20,7 @@ just check
 `just check` runs both configured type checkers: Pyright and Pyrefly.
 
 Use `just quality` before release or when a change touches shared architecture, packaging, security-sensitive IO, or dependency boundaries.
+It includes `just check` plus the CI-enforced complexity, security, dependency-audit, and production source-size gates.
 
 ## Docs map
 

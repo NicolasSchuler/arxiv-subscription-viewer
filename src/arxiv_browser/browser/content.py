@@ -6,11 +6,13 @@ import asyncio
 import hashlib
 import logging
 import sqlite3
+from collections.abc import Awaitable, Callable
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
+from typing import Any, Protocol
 
 import httpx
 
@@ -49,7 +51,34 @@ class PaperContentFetchResult:
     cached: bool = False
 
 
-def _abstract_fallback(paper: Paper) -> str:
+class _LegacyPaperContentSource(Protocol):
+    """Structural paper fields supported by the historical app helper."""
+
+    @property
+    def arxiv_id(self) -> str: ...
+
+    @property
+    def abstract(self) -> str | None: ...
+
+    @property
+    def abstract_raw(self) -> str | None: ...
+
+
+@dataclass(slots=True, frozen=True)
+class _LegacyPaperContentRequest:
+    """Compatibility inputs kept out of the public ``arxiv_browser.app`` shim."""
+
+    paper: _LegacyPaperContentSource
+    client: httpx.AsyncClient | None
+    timeout: int
+    max_content_length: int
+    extract_html: Callable[[str], str]
+    client_factory: Callable[[], httpx.AsyncClient]
+    to_thread: Callable[..., Awaitable[Any]]
+    log: logging.Logger
+
+
+def _abstract_fallback(paper: _LegacyPaperContentSource) -> str:
     abstract = paper.abstract or paper.abstract_raw or ""
     return f"Abstract:\n{abstract}" if abstract else ""
 
@@ -128,6 +157,44 @@ async def _get_with_temp_client(
         return await client.get(url, timeout=timeout, follow_redirects=True)
     async with httpx.AsyncClient() as tmp_client:
         return await tmp_client.get(url, timeout=timeout, follow_redirects=True)
+
+
+async def _fetch_legacy_paper_content(request: _LegacyPaperContentRequest) -> str:
+    """Preserve the historical app-shim fetch behavior in its canonical owner."""
+    html_url = f"https://arxiv.org/html/{request.paper.arxiv_id}"
+
+    try:
+        if request.client is not None:
+            response = await request.client.get(
+                html_url,
+                timeout=request.timeout,
+                follow_redirects=True,
+            )
+        else:
+            async with request.client_factory() as temp_client:
+                response = await temp_client.get(
+                    html_url,
+                    timeout=request.timeout,
+                    follow_redirects=True,
+                )
+        if response.status_code == 200:
+            text = await request.to_thread(request.extract_html, response.text)
+            if text:
+                return text[: request.max_content_length]
+        else:
+            request.log.warning(
+                "arXiv HTML fetch returned %d for %s",
+                response.status_code,
+                request.paper.arxiv_id,
+            )
+    except (httpx.HTTPError, OSError):
+        request.log.warning(
+            "Failed to fetch HTML for %s",
+            request.paper.arxiv_id,
+            exc_info=True,
+        )
+
+    return _abstract_fallback(request.paper)
 
 
 async def _fetch_html_content(request: PaperContentFetchRequest) -> str | None:

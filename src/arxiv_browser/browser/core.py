@@ -7,7 +7,7 @@ import asyncio
 import logging
 import time
 from collections import deque
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -739,57 +739,6 @@ class ArxivBrowser(
         except NoMatches:
             return
         self._track_task(date_nav.update_dates(self._history_files, self._current_date_index))
-
-    def _capture_dataset_epoch(self) -> int:
-        """Capture the current dataset epoch for stale-task guards."""
-        return getattr(self, "_dataset_epoch", 0)
-
-    def _is_current_dataset_epoch(self, epoch: int) -> bool:
-        """Return whether a task epoch still matches the live dataset."""
-        return not getattr(self, "_shutting_down", False) and epoch == getattr(
-            self, "_dataset_epoch", 0
-        )
-
-    def _advance_dataset_epoch(self) -> int:
-        """Invalidate dataset-bound async work and return the new epoch."""
-        self._dataset_epoch = getattr(self, "_dataset_epoch", 0) + 1
-        self._cancel_dataset_tasks()
-        return self._dataset_epoch
-
-    def _cancel_dataset_tasks(self) -> None:
-        """Cancel in-flight async work whose results belong to the prior dataset."""
-        dataset_tasks = list(getattr(self, "_dataset_tasks", set()))
-        for task in dataset_tasks:
-            if not task.done():
-                task.cancel()
-        if hasattr(self, "_dataset_tasks"):
-            self._dataset_tasks.clear()
-
-    def _track_task(
-        self, coro: Coroutine[Any, Any, None], *, dataset_bound: bool = False
-    ) -> asyncio.Task[None]:
-        """Create an asyncio task and track it to prevent garbage collection."""
-        task = asyncio.create_task(coro)
-        self._background_tasks.add(task)
-        task.add_done_callback(self._background_tasks.discard)
-        if dataset_bound:
-            self._dataset_tasks.add(task)
-            task.add_done_callback(self._dataset_tasks.discard)
-        task.add_done_callback(self._on_task_done)
-        return task
-
-    def _track_dataset_task(self, coro: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
-        """Track background work that must be cancelled on dataset swaps."""
-        tracker = self._track_task
-        if getattr(tracker, "__func__", None) is ArxivBrowser._track_task:
-            return tracker(coro, dataset_bound=True)
-        task = tracker(coro)
-        if isinstance(task, asyncio.Task):
-            dataset_tasks = getattr(self, "_dataset_tasks", None)
-            if dataset_tasks is not None:
-                dataset_tasks.add(task)
-                task.add_done_callback(dataset_tasks.discard)
-        return task
 
     def _on_task_done(self, task: asyncio.Task[None]) -> None:
         """Log unhandled exceptions from background tasks and notify user."""
