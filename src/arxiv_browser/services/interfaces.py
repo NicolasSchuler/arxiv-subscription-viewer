@@ -9,14 +9,17 @@ from typing import Protocol, runtime_checkable
 
 import httpx
 
+from arxiv_browser.judging import JudgeBattle, JudgeScore
 from arxiv_browser.llm import PaperDebateResult
 from arxiv_browser.llm_providers import LLMProvider
 from arxiv_browser.models import ArxivSearchRequest, Paper, UserConfig
 from arxiv_browser.services import arxiv_api_service as _arxiv_api
 from arxiv_browser.services import download_service as _download
 from arxiv_browser.services import enrichment_service as _enrichment
+from arxiv_browser.services import judge_service as _judge
 from arxiv_browser.services import llm_service as _llm
 from arxiv_browser.services.download_service import DownloadResult
+from arxiv_browser.services.judge_service import JudgeRequest, PairwiseJudgeRequest
 
 
 @runtime_checkable
@@ -78,6 +81,14 @@ class LlmService(Protocol):
         timeout_seconds: int,
     ) -> tuple[int, str] | None:
         """Score one paper for relevance."""
+        ...
+
+    async def score_impact_once(self, request: JudgeRequest) -> JudgeScore | None:
+        """Score one paper for potential scientific impact."""
+        ...
+
+    async def compare_impact_pair(self, request: PairwiseJudgeRequest) -> JudgeBattle | None:
+        """Compare two papers for potential scientific impact."""
         ...
 
     async def generate_paper_remix(
@@ -275,6 +286,14 @@ class DefaultLlmService:
             provider=provider,
             timeout_seconds=timeout_seconds,
         )
+
+    async def score_impact_once(self, request: JudgeRequest) -> JudgeScore | None:
+        """Score one paper for potential scientific impact."""
+        return await _judge.score_impact_once(request)
+
+    async def compare_impact_pair(self, request: PairwiseJudgeRequest) -> JudgeBattle | None:
+        """Compare two papers for potential scientific impact."""
+        return await _judge.compare_impact_pair(request)
 
     async def generate_paper_remix(
         self,

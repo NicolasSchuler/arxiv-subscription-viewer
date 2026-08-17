@@ -109,6 +109,7 @@ class FooterModeBadgeState:
     in_arxiv_api_mode: bool
     selected_count: int
     detail_focus: bool = False
+    judge_scoring_active: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,6 +261,8 @@ def build_footer_mode_badge(
     orange = colors["orange"]
     green = colors["green"]
     panel_alt = colors["panel_alt"]
+    if resolved_state.judge_scoring_active:
+        return f"[bold {pink} on {panel_alt}] JUDGING [/]"
     if resolved_state.relevance_scoring_active:
         return f"[bold {pink} on {panel_alt}] SCORING [/]"
     if resolved_state.version_checking:

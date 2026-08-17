@@ -23,7 +23,11 @@ class CacheSection:
 
 
 CACHE_SECTIONS: tuple[CacheSection, ...] = (
-    CacheSection("llm", "LLM summaries and relevance", ("summaries", "relevance_scores")),
+    CacheSection(
+        "llm",
+        "LLM summaries, relevance, and impact judging",
+        ("summaries", "relevance_scores", "judge_scores", "judge_battles"),
+    ),
     CacheSection("semantic", "Semantic search embeddings", ("semantic_embeddings",)),
     CacheSection("paper-content", "Full-paper content", ("paper_content",)),
     CacheSection(

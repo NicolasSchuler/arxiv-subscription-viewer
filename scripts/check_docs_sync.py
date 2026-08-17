@@ -42,6 +42,7 @@ REQUIRED_KEYBINDINGS: set[str] = {
     "C",
     "Ctrl+g",
     "Ctrl+h",
+    "Ctrl+j",
     "L",
     "Ctrl+l",
     "Ctrl+p",

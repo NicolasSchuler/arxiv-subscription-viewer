@@ -1233,7 +1233,7 @@ class TestSmartQueueSortPapers:
             watched_paper_ids=None,
             today=datetime(2026, 5, 15),
         )
-        assert _queue_score(high, context) == pytest.approx(0.40)
+        assert _queue_score(high, context) == pytest.approx(0.30)
         assert _queue_score(low, context) == 0.0
 
     def test_queue_missing_caches_and_equal_scores_are_stable(self, make_paper):

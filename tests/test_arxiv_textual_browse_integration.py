@@ -226,7 +226,9 @@ class TestTextualIntegration:
                 assert app._sort_index == SORT_OPTIONS.index("queue")
                 await pilot.press("s")
                 assert app._sort_index == SORT_OPTIONS.index("triage")
-                # Should cycle back to 0 after triage
+                await pilot.press("s")
+                assert app._sort_index == SORT_OPTIONS.index("impact")
+                # Should cycle back to 0 after impact
                 await pilot.press("s")
                 assert app._sort_index == 0
 

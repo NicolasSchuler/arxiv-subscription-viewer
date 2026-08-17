@@ -206,7 +206,7 @@ class CLIProvider:
 
     Wraps the existing subprocess pattern: build shell command from template,
     run with asyncio.create_subprocess_shell, capture stdout/stderr.
-    Never raises — returns LLMResult with success=False on any error.
+    Returns LLMResult with success=False on errors and propagates task cancellation.
     Supports configurable retry with exponential backoff for transient failures.
     """
 
@@ -251,8 +251,8 @@ class CLIProvider:
         """Execute a single LLM command attempt without retry logic.
 
         Builds the invocation plan, launches the subprocess, and captures
-        stdout/stderr.  Never raises; all error conditions are encoded in the
-        returned ``LLMResult``.
+        stdout/stderr. Error conditions are encoded in the returned
+        ``LLMResult``; task cancellation terminates the subprocess and propagates.
 
         Args:
             prompt: The fully resolved prompt string to pass to the LLM CLI.
@@ -291,6 +291,10 @@ class CLIProvider:
                 )
             try:
                 stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            except asyncio.CancelledError:
+                _terminate_process(proc, use_shell=plan.use_shell)
+                await proc.wait()
+                raise
             except TimeoutError:
                 _terminate_process(proc, use_shell=plan.use_shell)
                 await proc.wait()

@@ -15,6 +15,7 @@ from arxiv_browser.conference_deadlines import (
     format_deadline_time,
 )
 from arxiv_browser.huggingface import HuggingFacePaper
+from arxiv_browser.judging import JUDGE_DIMENSIONS, JudgeScore
 from arxiv_browser.models import LineAnnotation, Paper
 from arxiv_browser.query import (
     escape_rich_text,
@@ -271,6 +272,7 @@ class PaperDetails(Static):
                 state.tag_namespace_colors,
             ),
             self._render_relevance(state.relevance, "relevance" in collapsed, state.theme_colors),
+            self._render_judge(state.judge_score, "judge" in collapsed, state.theme_colors),
             self._render_deadlines(
                 state.submission_targets,
                 "deadlines" in collapsed,
@@ -398,6 +400,12 @@ class PaperDetails(Static):
             score_sym = _relevance_symbol_for_mode(score_sym)
             parts.append(
                 _decision_part("Rel", f"[{score_color}]{score_sym}{score}/10[/]", score_color)
+            )
+        if state.judge_score is not None:
+            impact = state.judge_score.ranking_score
+            score_color, _score_sym = _relevance_badge_parts(impact, theme_colors=colors)
+            parts.append(
+                _decision_part("Impact", f"[{score_color}]{impact:.1f}/10[/]", score_color)
             )
         if state.s2_loading:
             parts.append(_decision_part("S2", "loading", colors["green"]))
@@ -556,6 +564,51 @@ class PaperDetails(Static):
         if rel_reason:
             safe_reason = escape_rich_text(rel_reason)
             lines.append(f"  [{resolved_theme_colors['text']}]{safe_reason}[/]")
+        return "\n".join(lines)
+
+    def _render_judge(
+        self,
+        score: JudgeScore | None,
+        is_collapsed: bool,
+        theme_colors: Mapping[str, str] | None = None,
+    ) -> str:
+        """Return local AI-judge dimensions and their cached explanations."""
+        if score is None:
+            return ""
+        colors = theme_colors or theme_colors_for(self, self._theme_colors)
+        collapsed_glyph = _ACTIVE_DETAIL_GLYPHS["collapsed"]
+        expanded_glyph = _ACTIVE_DETAIL_GLYPHS["expanded"]
+        impact = score.ranking_score
+        if is_collapsed:
+            return _toggle_header(
+                "judge",
+                f"[{colors['accent']}]{collapsed_glyph} AI Impact Judge ({impact:.1f}/10)[/]",
+            )
+        lines = [
+            _toggle_header(
+                "judge",
+                f"[bold {colors['accent']}]{expanded_glyph} AI Impact Judge[/]",
+            ),
+            f"  [bold {colors['accent']}]Impact:[/] {impact:.1f}/10",
+            "  "
+            + "  ".join(
+                f"[bold]{dimension.title()}:[/] {getattr(score, dimension):.1f}"
+                for dimension in JUDGE_DIMENSIONS
+                if dimension != "impact"
+            ),
+        ]
+        if score.pairwise_matches:
+            lines.append(
+                f"  [dim]Pairwise refinement: {score.pairwise_wins:g}/"
+                f"{score.pairwise_matches} wins[/]"
+            )
+        for dimension in JUDGE_DIMENSIONS:
+            reason = getattr(score.reasons, dimension)
+            if reason:
+                lines.append(
+                    f"  [{colors['muted']}]{dimension.title()}:[/] "
+                    f"[{colors['text']}]{escape_rich_text(reason)}[/]"
+                )
         return "\n".join(lines)
 
     def _render_deadlines(

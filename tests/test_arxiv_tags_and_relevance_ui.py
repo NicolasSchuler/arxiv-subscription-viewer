@@ -756,4 +756,5 @@ class TestRelevanceSortOptions:
             "relevance",
             "queue",
             "triage",
+            "impact",
         ]

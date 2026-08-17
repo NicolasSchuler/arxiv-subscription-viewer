@@ -595,6 +595,7 @@ class TestConstants:
             "relevance",
             "queue",
             "triage",
+            "impact",
         ]
 
     def test_default_category_color_is_hex(self):

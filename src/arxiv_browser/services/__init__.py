@@ -22,6 +22,7 @@ from arxiv_browser.services.interfaces import (
     LlmService,
     build_default_app_services,
 )
+from arxiv_browser.services.judge_service import compare_impact_pair, score_impact_once
 from arxiv_browser.services.llm_service import (
     compare_papers,
     generate_summary,
@@ -36,6 +37,7 @@ __all__ = [
     "EnrichmentService",
     "LlmService",
     "build_default_app_services",
+    "compare_impact_pair",
     "compare_papers",
     "download_pdf",
     "enforce_rate_limit",
@@ -48,6 +50,7 @@ __all__ = [
     "load_or_fetch_s2_paper_result",
     "load_or_fetch_s2_recommendations_cached",
     "load_or_fetch_s2_recommendations_result",
+    "score_impact_once",
     "score_relevance_once",
     "suggest_tags_once",
 ]

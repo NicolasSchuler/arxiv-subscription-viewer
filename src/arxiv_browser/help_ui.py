@@ -77,6 +77,7 @@ HELP_SECTION_ACTIONS: list[tuple[str, list[str]]] = [
             "compare_papers",
             "remix_papers",
             "score_relevance",
+            "judge_impact",
             "edit_interests",
             "auto_tag",
             "serendipity",
@@ -126,6 +127,7 @@ HELP_BADGE_LEGEND: list[tuple[str, str]] = [
     ("S2:n", "Semantic Scholar citation count"),
     ("HF:^n", "HuggingFace upvotes"),
     ("Rel:*n/10", "Relevance score"),
+    ("J:n", "Local AI-judge impact score"),
     ("v1->v2", "Available arXiv version update"),
 ]
 

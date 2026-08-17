@@ -20,6 +20,7 @@ SORT_OPTIONS = [
     "relevance",
     "queue",
     "triage",
+    "impact",
 ]
 
 # Watch list entry types
@@ -39,6 +40,7 @@ DETAIL_SECTION_KEYS: list[str] = [
     "abstract",
     "tags",
     "relevance",
+    "judge",
     "deadlines",
     "summary",
     "s2",
@@ -50,6 +52,7 @@ DETAIL_SECTION_NAMES: dict[str, str] = {
     "abstract": "Abstract",
     "tags": "Tags",
     "relevance": "Relevance",
+    "judge": "AI Impact Judge",
     "deadlines": "Submission Targets",
     "summary": "AI Summary",
     "s2": "Semantic Scholar",
@@ -57,7 +60,15 @@ DETAIL_SECTION_NAMES: dict[str, str] = {
     "version": "Version Update",
 }
 DETAIL_MODES = ("scan", "full")
-DEFAULT_COLLAPSED_SECTIONS: list[str] = ["tags", "relevance", "summary", "s2", "hf", "version"]
+DEFAULT_COLLAPSED_SECTIONS: list[str] = [
+    "tags",
+    "relevance",
+    "judge",
+    "summary",
+    "s2",
+    "hf",
+    "version",
+]
 PANE_SPLIT_MIN = 1
 PANE_SPLIT_DEFAULT = 2
 PANE_SPLIT_MAX = 4
@@ -351,6 +362,8 @@ class UserConfig:
     )
     conference_deadlines_cache_ttl_hours: int = 24
     research_interests: str = ""  # Free-text research interest description for relevance scoring
+    judge_paper_limit: int = 50  # Maximum selected/visible papers scored per explicit judge run
+    judge_pairwise_top_k: int = 0  # Optional pairwise refinement cohort; 0 disables it
     collapsed_sections: list[str] = field(default_factory=lambda: list(DEFAULT_COLLAPSED_SECTIONS))
     pdf_viewer: str = (
         ""  # External PDF viewer command, e.g. "zathura {path}" or "open -a Skim {path}"

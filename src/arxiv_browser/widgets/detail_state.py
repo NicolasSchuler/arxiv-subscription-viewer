@@ -9,6 +9,7 @@ from typing import Any
 
 from arxiv_browser.conference_deadlines import SubmissionTarget
 from arxiv_browser.huggingface import HuggingFacePaper
+from arxiv_browser.judging import JudgeScore
 from arxiv_browser.models import LineAnnotation, Paper
 from arxiv_browser.semantic_scholar import SemanticScholarPaper
 from arxiv_browser.themes import (
@@ -35,6 +36,7 @@ class DetailRenderState:
     summary_mode: str = ""
     tags: tuple[str, ...] = ()
     relevance: tuple[int, str] | None = None
+    judge_score: JudgeScore | None = None
     submission_targets: tuple[SubmissionTarget, ...] = ()
     deadline_countdown_key: str = ""
     is_read: bool = False
@@ -71,6 +73,7 @@ def _normalize_detail_state(state: DetailRenderState) -> DetailRenderState:
         summary_mode=state.summary_mode,
         tags=tuple(state.tags or ()),
         relevance=state.relevance,
+        judge_score=state.judge_score,
         submission_targets=tuple(state.submission_targets or ()),
         deadline_countdown_key=state.deadline_countdown_key,
         is_read=state.is_read,
@@ -180,6 +183,7 @@ def _detail_cache_key_for_state(state: DetailRenderState, *, glyph_mode: str) ->
         state.summary_mode,
         state.tags,
         state.relevance,
+        state.judge_score,
         state.submission_targets,
         state.deadline_countdown_key,
         state.is_read,

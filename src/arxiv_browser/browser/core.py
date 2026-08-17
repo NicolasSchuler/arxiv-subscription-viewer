@@ -27,6 +27,7 @@ from arxiv_browser import ui_constants as _ui_constants
 from arxiv_browser.actions import comparison_actions as _comparison_actions
 from arxiv_browser.actions import constants as _action_constants
 from arxiv_browser.actions import external_io_actions as _external_io_actions
+from arxiv_browser.actions import judge_actions as _judge_actions
 from arxiv_browser.actions import library_actions as _library_actions
 from arxiv_browser.actions import llm_actions as _llm_actions
 from arxiv_browser.actions import search_api_actions as _search_api_actions
@@ -132,6 +133,7 @@ class ArxivBrowser(
     _auto_tag_progress: tuple[int, int] | None
     _pending_similarity_paper_id: str | None
     _scoring_progress: tuple[int, int] | None
+    _judge_progress: tuple[int, int] | None
     _tfidf_corpus_key: str | None
     _tfidf_index: TfidfIndex | None
     _show_abstract_preview: reactive[bool] = reactive(False, init=False)  # type: ignore[bad-override]
@@ -245,6 +247,7 @@ class ArxivBrowser(
     _generate_paper_remix_async = _llm_actions._generate_paper_remix_async
     action_debate_paper = _action_debate_paper
     action_score_relevance = _llm_actions.action_score_relevance
+    action_judge_impact = _judge_actions.action_judge_impact
     _start_score_relevance_flow = _llm_actions._start_score_relevance_flow
     _on_interests_saved_then_score = _llm_actions._on_interests_saved_then_score
     _start_relevance_scoring = _llm_actions._start_relevance_scoring

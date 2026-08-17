@@ -322,7 +322,7 @@ APP_VERTICAL_BREAKPOINTS: list[tuple[int, str]] = [
 #   m/'  marks          R  similar          G  citation graph
 #   V    versions       e  S2 fetch         Ctrl+s  AI summary
 #   C    chat           Ctrl+v compare      debate/remix (palette-only)
-#   L    relevance      y  read aloud
+#   L    relevance      Ctrl+j  impact judge      y  read aloud
 #   Ctrl+g  auto-tag
 #   Ctrl+t  theme       Ctrl+d  sections    Ctrl+k  collections
 #   Ctrl+h  HF toggle   Ctrl+e  S2 toggle   Ctrl+l  interests
@@ -404,6 +404,7 @@ APP_BINDINGS: list[BindingType] = [
     Binding("G", "citation_graph", "Citation Graph", show=False),
     # Relevance scoring
     Binding("L", "score_relevance", "Score Relevance", show=False),
+    Binding("ctrl+j", "judge_impact", "Judge Impact", show=False),
     Binding("ctrl+l", "edit_interests", "Edit Interests", show=False),
     Binding("ctrl+g", "auto_tag", "Auto-Tag", show=False),
     Binding("ctrl+r", "mark_visible_read", "Mark Visible Read", show=False),

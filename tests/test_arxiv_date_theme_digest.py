@@ -1257,7 +1257,8 @@ class TestCollapsibleSections:
             DETAIL_SECTION_NAMES,
         )
 
-        assert len(DETAIL_SECTION_KEYS) == 9
+        assert len(DETAIL_SECTION_KEYS) == 10
         assert "deadlines" in DETAIL_SECTION_KEYS
+        assert "judge" in DETAIL_SECTION_KEYS
         for key in DETAIL_SECTION_KEYS:
             assert key in DETAIL_SECTION_NAMES

@@ -97,6 +97,42 @@ class TestCLIProvider:
         assert result.success is False
         assert "exec failed" in result.error
 
+    async def test_cancellation_terminates_subprocess(self):
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        provider = CLIProvider("echo {prompt}")
+        started = asyncio.Event()
+
+        async def communicate():
+            started.set()
+            await asyncio.Future()
+
+        proc = MagicMock()
+        proc.communicate = communicate
+        proc.wait = AsyncMock(return_value=0)
+        proc.returncode = None
+        with (
+            patch(
+                "arxiv_browser.llm_providers.asyncio.create_subprocess_exec",
+                new_callable=AsyncMock,
+                return_value=proc,
+            ),
+            patch("arxiv_browser.llm_providers._terminate_process") as terminate,
+        ):
+            task = asyncio.create_task(provider.execute("test", timeout=30))
+            await started.wait()
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            else:
+                raise AssertionError("provider cancellation did not propagate")
+
+        terminate.assert_called_once_with(proc, use_shell=False)
+        proc.wait.assert_awaited_once()
+
     async def test_stderr_truncated_in_error(self):
         from unittest.mock import AsyncMock, patch
 

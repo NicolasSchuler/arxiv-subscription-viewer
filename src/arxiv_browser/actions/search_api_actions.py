@@ -62,6 +62,12 @@ def action_cancel_search(app: "ArxivBrowser") -> None:
     if app._relevance_scoring_active or app._auto_tag_progress is not None:
         app._cancel_batch_requested = True
         app.notify("Cancelling batch operation...", title="Cancel")
+    if getattr(app, "_judge_scoring_active", False):
+        app._judge_cancel_requested = True
+        judge_task = getattr(app, "_judge_task", None)
+        if judge_task is not None and not judge_task.done():
+            judge_task.cancel()
+        app.notify("Cancelling impact judging...", title="Cancel")
 
 
 def action_exit_arxiv_search_mode(app: "ArxivBrowser") -> None:

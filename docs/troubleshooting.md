@@ -130,7 +130,7 @@ If `--output` points at a directory, unwritable path, or invalid parent location
 
 ## LLM Not Working
 
-**Symptom:** `Ctrl+s` (summary), `Ctrl+v` then `g` (AI comparison), `L` (relevance), `Ctrl+g` (auto-tag), or `C` (chat) does nothing or shows an error.
+**Symptom:** `Ctrl+s` (summary), `Ctrl+v` then `g` (AI comparison), `L` (relevance), `Ctrl+j` (impact judge), `Ctrl+g` (auto-tag), or `C` (chat) does nothing or shows an error.
 
 **No preset configured:**
 
@@ -305,7 +305,7 @@ Installs that predate the unified cache may also have legacy per-module files (`
 
 **Symptom:** The queue sort mode (cycle to it with `s`) is active, but papers appear mostly ordered by recency or watch-list matches.
 
-Queue mode uses the signals that are currently available. Until you run relevance scoring (`L`), enable HuggingFace (`Ctrl+h`), or enrich papers with Semantic Scholar (`Ctrl+e` / `e`), the ranking is mostly recency plus watch-list matches. Missing enrichment is expected to contribute zero rather than blocking the queue.
+Queue mode uses the signals that are currently available. Until you run relevance scoring (`L`) or impact judging (`Ctrl+j`), enable HuggingFace (`Ctrl+h`), or enrich papers with Semantic Scholar (`Ctrl+e` / `e`), the ranking is mostly recency plus watch-list matches. Missing enrichment is expected to contribute zero rather than blocking the queue.
 
 ---
 

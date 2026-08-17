@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Added a local, provider-independent AI scientific-impact judge with cached significance, novelty, rigor, and clarity ratings, an optional pairwise tournament, `impact` sorting, detail reasons, and a `Ctrl+j` workflow.
+
+### Changed
+- Rebalanced the Smart Reading Queue to include local judge impact alongside relevance, watch-list, recency, HuggingFace, and Semantic Scholar signals.
+
 ## [0.3.8] - 2026-08-11
 
 ### Changed

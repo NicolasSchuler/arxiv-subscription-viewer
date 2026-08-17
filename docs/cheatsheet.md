@@ -47,7 +47,8 @@ arxiv-viewer completions bash|zsh|fish          # Shell completions
 | `C` | Chat with paper | | `G` | Citation graph |
 | `Ctrl+v` | Compare papers | | `R` | Similar papers |
 | `L` | Relevance score | | `Ctrl+h` | HuggingFace trending |
-| `Ctrl+g` | Auto-tag (LLM) | | `V` | Check versions |
+| `Ctrl+j` | Judge scientific impact | | `Ctrl+g` | Auto-tag (LLM) |
+| `V` | Check versions | | | |
 
 ## Read, export & view
 

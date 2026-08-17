@@ -32,6 +32,7 @@ from arxiv_browser.triage_model import (
 
 if TYPE_CHECKING:
     from arxiv_browser.huggingface import HuggingFacePaper
+    from arxiv_browser.judging import JudgeScore
     from arxiv_browser.semantic_scholar import SemanticScholarPaper
     from arxiv_browser.triage_model import TriagePrediction
 
@@ -101,11 +102,12 @@ def remove_query_token(query: str, token_index: int) -> str:
     return reconstruct_query(tokens, token_index)
 
 
-_QUEUE_RELEVANCE_WEIGHT = 0.40
-_QUEUE_WATCH_WEIGHT = 0.25
-_QUEUE_RECENCY_WEIGHT = 0.15
+_QUEUE_RELEVANCE_WEIGHT = 0.30
+_QUEUE_WATCH_WEIGHT = 0.20
+_QUEUE_RECENCY_WEIGHT = 0.10
 _QUEUE_HF_WEIGHT = 0.10
 _QUEUE_VELOCITY_WEIGHT = 0.10
+_QUEUE_JUDGE_WEIGHT = 0.20
 _QUEUE_RECENCY_DECAY_DAYS = 30.0
 _DAYS_PER_YEAR = 365.25
 _VIRTUAL_QUERY_TERMS = frozenset({"unread", "starred", "review-due"})
@@ -116,6 +118,7 @@ class _QueueScoreContext:
     s2_cache: dict[str, SemanticScholarPaper] | None
     hf_cache: dict[str, HuggingFacePaper] | None
     relevance_cache: dict[str, tuple[int, str]] | None
+    judge_cache: dict[str, JudgeScore] | None
     watched_paper_ids: set[str]
     today: datetime
     max_hf_upvote_log: float
@@ -129,6 +132,7 @@ class PaperSortSignals:
     s2_cache: dict[str, SemanticScholarPaper] | None = None
     hf_cache: dict[str, HuggingFacePaper] | None = None
     relevance_cache: dict[str, tuple[int, str]] | None = None
+    judge_cache: dict[str, JudgeScore] | None = None
     watched_paper_ids: set[str] | None = None
     triage_predictions: dict[str, TriagePrediction] | None = None
 
@@ -597,26 +601,27 @@ def paper_matches_watch_entry(paper: Paper, entry: WatchListEntry) -> bool:
 
 def _build_queue_score_context(
     papers: list[Paper],
-    s2_cache: dict[str, SemanticScholarPaper] | None,
-    hf_cache: dict[str, HuggingFacePaper] | None,
-    relevance_cache: dict[str, tuple[int, str]] | None,
-    watched_paper_ids: set[str] | None,
+    signals: PaperSortSignals | None = None,
     today: datetime | None = None,
+    **legacy_signals: object,
 ) -> _QueueScoreContext:
+    signals = _resolve_sort_signals(signals, legacy_signals)
     resolved_today = today or datetime.now()
     context = _QueueScoreContext(
-        s2_cache=s2_cache,
-        hf_cache=hf_cache,
-        relevance_cache=relevance_cache,
-        watched_paper_ids=watched_paper_ids or set(),
+        s2_cache=signals.s2_cache,
+        hf_cache=signals.hf_cache,
+        relevance_cache=signals.relevance_cache,
+        judge_cache=signals.judge_cache,
+        watched_paper_ids=signals.watched_paper_ids or set(),
         today=resolved_today,
         max_hf_upvote_log=0.0,
         max_velocity_log=0.0,
     )
     return _QueueScoreContext(
-        s2_cache=s2_cache,
-        hf_cache=hf_cache,
-        relevance_cache=relevance_cache,
+        s2_cache=signals.s2_cache,
+        hf_cache=signals.hf_cache,
+        relevance_cache=signals.relevance_cache,
+        judge_cache=signals.judge_cache,
         watched_paper_ids=context.watched_paper_ids,
         today=resolved_today,
         max_hf_upvote_log=max((_queue_hf_upvote_log(p, context) for p in papers), default=0.0),
@@ -639,6 +644,7 @@ def _queue_score(paper: Paper, context: _QueueScoreContext) -> float:
         * _normalized_log(_queue_hf_upvote_log(paper, context), context.max_hf_upvote_log)
         + _QUEUE_VELOCITY_WEIGHT
         * _normalized_log(_queue_velocity_log(paper, context), context.max_velocity_log)
+        + _QUEUE_JUDGE_WEIGHT * _queue_judge_score(paper, context)
     )
 
 
@@ -651,6 +657,13 @@ def _queue_relevance_score(paper: Paper, context: _QueueScoreContext) -> float:
 
 def _queue_watch_score(paper: Paper, context: _QueueScoreContext) -> float:
     return 1.0 if paper.arxiv_id in context.watched_paper_ids else 0.0
+
+
+def _queue_judge_score(paper: Paper, context: _QueueScoreContext) -> float:
+    score = context.judge_cache.get(paper.arxiv_id) if context.judge_cache else None
+    if score is None:
+        return 0.0
+    return max(0.0, min(score.ranking_score, 10.0)) / 10.0
 
 
 def _queue_recency_score(paper: Paper, context: _QueueScoreContext) -> float:
@@ -699,6 +712,7 @@ def _resolve_sort_signals(
         "s2_cache",
         "hf_cache",
         "relevance_cache",
+        "judge_cache",
         "watched_paper_ids",
         "triage_predictions",
     }
@@ -712,6 +726,7 @@ def _resolve_sort_signals(
         s2_cache=legacy_signals.get("s2_cache", base.s2_cache),  # type: ignore[arg-type]
         hf_cache=legacy_signals.get("hf_cache", base.hf_cache),  # type: ignore[arg-type]
         relevance_cache=legacy_signals.get("relevance_cache", base.relevance_cache),  # type: ignore[arg-type]
+        judge_cache=legacy_signals.get("judge_cache", base.judge_cache),  # type: ignore[arg-type]
         watched_paper_ids=legacy_signals.get("watched_paper_ids", base.watched_paper_ids),  # type: ignore[arg-type]
         triage_predictions=legacy_signals.get(
             "triage_predictions",
@@ -745,18 +760,18 @@ def sort_papers(
 ) -> list[Paper]:
     """Sort papers by the given key, returning a new sorted list.
 
-    For cache-backed sort modes (``citations``, ``trending``, ``relevance``),
+    For cache-backed sort modes (``citations``, ``trending``, ``relevance``, ``impact``),
     papers with a cache entry sort before papers without one using a two-tuple
     key ``(0, -value)`` < ``(1, 0)``.  Within the first group the value is
     negated to produce a descending order. The ``queue`` mode combines cached
-    relevance, watch-list matches, recency, HF upvotes, and a local S2 citation
-    velocity proxy into one stable priority rank.
+    relevance, judge impact, watch-list matches, recency, HF upvotes, and a local
+    S2 citation velocity proxy into one stable priority rank.
 
     Args:
         papers: List of papers to sort.
         sort_key: One of ``"title"``, ``"date"``, ``"arxiv_id"``,
             ``"citations"``, ``"trending"``, ``"relevance"``, ``"queue"``,
-            ``"triage"``.
+            ``"triage"``, ``"impact"``.
         signals: Optional grouped cache inputs used by cache-backed sort modes.
         legacy_signals: Backward-compatible keyword inputs such as
             ``relevance_cache`` and ``watched_paper_ids``.
@@ -801,16 +816,17 @@ def sort_papers(
 
         return sorted(papers, key=_relevance_key)
     elif sort_key == "queue":
-        context = _build_queue_score_context(
-            papers,
-            signals.s2_cache,
-            signals.hf_cache,
-            signals.relevance_cache,
-            signals.watched_paper_ids,
-        )
+        context = _build_queue_score_context(papers, signals)
         return sorted(papers, key=lambda p: _queue_sort_key(p, context))
     elif sort_key == "triage":
         return sorted(papers, key=lambda p: _triage_sort_key(p, signals.triage_predictions))
+    elif sort_key == "impact":
+
+        def _impact_key(p: Paper) -> tuple[int, float]:
+            score = signals.judge_cache.get(p.arxiv_id) if signals.judge_cache else None
+            return (0, -score.ranking_score) if score is not None else (1, 0.0)
+
+        return sorted(papers, key=_impact_key)
     return list(papers)
 
 

@@ -51,6 +51,12 @@ class EnrichmentScoringRuntimeState:
     relevance_scores: dict[str, tuple[int, str]] = field(default_factory=dict)
     relevance_scoring_active: bool = False
     scoring_progress: tuple[int, int] | None = None
+    judge_scores: dict[str, Any] = field(default_factory=dict)
+    judge_hash: str = ""
+    judge_scoring_active: bool = False
+    judge_progress: tuple[int, int] | None = None
+    judge_cancel_requested: bool = False
+    judge_task: Any = None
     auto_tag_active: bool = False
     auto_tag_progress: tuple[int, int] | None = None
     paper_remix_active: bool = False
@@ -74,6 +80,10 @@ class EnrichmentScoringRuntimeState:
 
     @property
     def relevance_db_path(self) -> Path:
+        return self.cache_db_path
+
+    @property
+    def judge_db_path(self) -> Path:
         return self.cache_db_path
 
 
@@ -115,6 +125,13 @@ def attach_enrichment_scoring_runtime(app: Any, state: EnrichmentScoringRuntimeS
     app._relevance_scoring_active = state.relevance_scoring_active
     app._scoring_progress = state.scoring_progress
     app._relevance_db_path = state.relevance_db_path
+    app._judge_scores = state.judge_scores
+    app._judge_hash = state.judge_hash
+    app._judge_scoring_active = state.judge_scoring_active
+    app._judge_progress = state.judge_progress
+    app._judge_cancel_requested = state.judge_cancel_requested
+    app._judge_task = state.judge_task
+    app._judge_db_path = state.judge_db_path
     app._auto_tag_active = state.auto_tag_active
     app._auto_tag_progress = state.auto_tag_progress
     app._paper_remix_active = state.paper_remix_active

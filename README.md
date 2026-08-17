@@ -67,7 +67,7 @@ Press `?` in-app for help and `Ctrl+p` for the command palette.
 
 1. **Install** the CLI and run `arxiv-viewer doctor`.
 2. **Scan** papers with `arxiv-viewer search ...` or `arxiv-viewer browse` from a `history/` archive.
-3. **Enrich** promising papers with Semantic Scholar (`e`/`Ctrl+e`), HuggingFace (`Ctrl+h`), version checks (`V`), or LLM summaries (`Ctrl+s`).
+3. **Enrich** promising papers with Semantic Scholar (`e`/`Ctrl+e`), HuggingFace (`Ctrl+h`), version checks (`V`), LLM summaries (`Ctrl+s`), or local impact judging (`Ctrl+j`).
 4. **Organize** the queue with read state, stars, tags, notes, bookmarks, marks, collections, and spaced-review scheduling.
 5. **Export** selected papers or collections as BibTeX, RIS, CSV, Markdown, or PDFs.
 6. **Configure** defaults, API keys, export paths, and themes in `config.json` when the built-in defaults stop being enough.
@@ -146,10 +146,11 @@ If something looks off, run `arxiv-viewer doctor` to check config, history disco
 | 🔍 | **Fuzzy search** with filters (`cat:cs.AI`, `tag:`, `unread`, `starred`) | `/` |
 | ⚡ | **Quick triage** — review visible unread papers one at a time | `T` |
 | 📈 | **Trend Radar & author profiles** — local history trends and exact author tracking | `Ctrl+p` |
-| 🤖 | **AI summaries, chat, comparison, paper remix & auto-tag** via any LLM CLI (Claude, Copilot, llm, …) | `Ctrl+s` / `C` / `Ctrl+v` / `Ctrl+p` / `Ctrl+g` |
+| 🤖 | **AI summaries, chat, comparison, paper remix & auto-tag** via a configured CLI or HTTP LLM | `Ctrl+s` / `C` / `Ctrl+v` / `Ctrl+p` / `Ctrl+g` |
+| ⚖️ | **Local AI impact judge** — cached significance, novelty, rigor, clarity, and optional pairwise rankings | `Ctrl+j` |
 | 📊 | **Citation graph** and recommendations via Semantic Scholar | `G` / `R` |
 | 🔥 | **HuggingFace trending** — upvotes, keywords, GitHub links | `Ctrl+h` |
-| 🧭 | **Smart Reading Queue** — priority sort from relevance, watch matches, recency, HF, and S2 signals | `s` |
+| 🧭 | **Smart Reading Queue** — priority sort from relevance, impact, watch matches, recency, HF, and S2 signals | `s` |
 | 🧪 | **Local triage model** — sklearn buckets for likely stars, unsure papers, and likely skips | `Ctrl+p` |
 | 📨 | **Markdown digests & inboxes** — cron-friendly briefs or interactive digest review | `arxiv-viewer digest` / `--tui` |
 | 🏷️ | **Tags, notes, stars** — organize your reading | `t` / `n` / `x` |
@@ -182,18 +183,19 @@ If something looks off, run `arxiv-viewer doctor` to check config, history disco
 | `z` | Compact list (titles only) | | `v` | Detail mode |
 | `Alt+Left` / `Alt+Right` | Resize list/details | | `Alt+0` | Reset pane sizes |
 | `L` | Relevance score | | `t` | Tags |
-| `Ctrl+p` | Command palette | | `V` | Check versions |
-| `Ctrl+g` | Auto-tag (LLM) | | `Ctrl+b` | Save bookmark |
-| `G` | Citation graph | | `m` / `'` | Set / jump to mark |
-| `R` | Similar papers | | `Ctrl+l` | Edit interests |
-| `1-9` | Jump to bookmark | | `Ctrl+d` | Detail pane sections |
-| `w` / `W` | Watch list | | `Ctrl+t` | Cycle theme |
-| `Ctrl+e` | Toggle S2 / Exit API mode | | `Ctrl+r` | Mark visible as read |
-| `Ctrl+h` | HuggingFace trending | | `Ctrl+Shift+b` | Remove bookmark |
-| `,` | Settings | | `?` | Help / shortcuts |
-| `Tab` | Focus detail pane | | `e` | Semantic Scholar enrich |
-| `a` | Select all | | `u` | Clear selection |
-| `[` / `]` | Previous / next date | | `F1` | What's New (release notes) |
+| `Ctrl+j` | Judge scientific impact | | `Ctrl+p` | Command palette |
+| `V` | Check versions | | `Ctrl+g` | Auto-tag (LLM) |
+| `Ctrl+b` | Save bookmark | | `G` | Citation graph |
+| `m` / `'` | Set / jump to mark | | `R` | Similar papers |
+| `Ctrl+l` | Edit interests | | `1-9` | Jump to bookmark |
+| `Ctrl+d` | Detail pane sections | | `w` / `W` | Watch list |
+| `Ctrl+t` | Cycle theme | | `Ctrl+e` | Toggle S2 / Exit API mode |
+| `Ctrl+r` | Mark visible as read | | `Ctrl+h` | HuggingFace trending |
+| `Ctrl+Shift+b` | Remove bookmark | | `,` | Settings |
+| `?` | Help / shortcuts | | `Tab` | Focus detail pane |
+| `e` | Semantic Scholar enrich | | `a` | Select all |
+| `u` | Clear selection | | `[` / `]` | Previous / next date |
+| `F1` | What's New (release notes) | | | |
 
 ### Marks
 

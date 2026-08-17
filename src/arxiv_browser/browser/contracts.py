@@ -46,6 +46,33 @@ class _PaletteAppState:
     has_target_papers: bool
     s2_active: bool
     s2_data_loaded: bool
+    judge_llm_configured: bool = False
+
+
+def _palette_llm_blocked_reason(action_name: str, state: _PaletteAppState) -> str:
+    """Return the unmet LLM requirement for a command-palette action."""
+    if action_name not in {
+        "generate_summary",
+        "chat_with_paper",
+        "debate_paper",
+        "remix_papers",
+        "score_relevance",
+        "judge_impact",
+        "auto_tag",
+    }:
+        return ""
+    if action_name == "judge_impact":
+        if not state.judge_llm_configured:
+            return "LLM provider"
+    elif not state.llm_configured:
+        return "LLM command"
+    if action_name == "debate_paper" and not state.has_current_paper:
+        return "selection"
+    if action_name == "remix_papers" and state.selected_count not in {2, 3}:
+        return "2-3 selected papers"
+    if action_name not in {"score_relevance", "judge_impact"} and not state.has_target_papers:
+        return "selection"
+    return ""
 
 
 _PALETTE_BLOCKED_COPY = {
@@ -58,7 +85,8 @@ _PALETTE_BLOCKED_COPY = {
     "starred papers": "Star at least one paper first",
     "Semantic Scholar enabled": "Enable Semantic Scholar first",
     "S2 data": "Fetch S2 data for this paper first",
-    "LLM configuration": "Configure an LLM command first",
+    "LLM command": "Configure an LLM command first",
+    "LLM provider": "Configure an LLM provider first",
     "2-3 selected papers": "Select exactly 2 or 3 papers first",
 }
 
@@ -138,6 +166,7 @@ COMMAND_PALETTE_GROUPS: dict[str, str] = {
     "compare_papers": "Research",
     "remix_papers": "Research",
     "score_relevance": "Research",
+    "judge_impact": "Research",
     "edit_interests": "Research",
     "auto_tag": "Research",
     "show_similar": "Research",
@@ -300,7 +329,7 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
     ("Toggle Selection", "Toggle selection on current paper", "Space", "toggle_select"),
     (
         "Cycle Sort",
-        "Cycle sort: title/date/arxiv_id/citations/trending/relevance/queue/triage",
+        "Cycle sort: title/date/arxiv_id/citations/trending/relevance/queue/triage/impact",
         "s",
         "cycle_sort",
     ),
@@ -387,6 +416,12 @@ COMMAND_PALETTE_COMMANDS: list[tuple[str, str, str, str]] = [
         "LLM-score loaded papers by research interests (requires LLM configuration)",
         "L",
         "score_relevance",
+    ),
+    (
+        "Judge Scientific Impact",
+        "Locally rate selected or visible papers with the configured LLM",
+        "Ctrl+j",
+        "judge_impact",
     ),
     ("Edit Interests", "Edit research interests for relevance scoring", "Ctrl+l", "edit_interests"),
     (
@@ -479,4 +514,5 @@ __all__ = [
     "TARGET_PAPER_PALETTE_ACTIONS",
     "TaskTrackingApp",
     "_PaletteAppState",
+    "_palette_llm_blocked_reason",
 ]

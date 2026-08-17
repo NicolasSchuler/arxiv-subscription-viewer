@@ -11,6 +11,11 @@ from textual.css.query import NoMatches
 
 from arxiv_browser.actions.llm_actions import _resolve_llm_command
 from arxiv_browser.actions.ui_actions import count_hf_matches
+from arxiv_browser.browser.badge_refresh import (
+    BADGE_REFRESH_KINDS,
+    badge_refresh_ids,
+    is_sort_sensitive_badge,
+)
 from arxiv_browser.browser.constants import (
     BADGE_COALESCE_DELAY,
     MAX_ABSTRACT_LOADS,
@@ -26,6 +31,7 @@ from arxiv_browser.browser.contracts import (
     _palette_ctrl_e_copy,
     _palette_detail_mode_copy,
     _palette_hf_copy,
+    _palette_llm_blocked_reason,
     _palette_preview_copy,
     _PaletteAppState,
 )
@@ -33,6 +39,7 @@ from arxiv_browser.browser.detail_annotations import DetailAnnotationMixin
 from arxiv_browser.conference_deadline_ui import build_detail_submission_targets
 from arxiv_browser.config import save_config
 from arxiv_browser.help_ui import build_help_sections
+from arxiv_browser.llm_providers import resolve_provider
 from arxiv_browser.models import SORT_OPTIONS, Paper, SessionState, UserConfig
 from arxiv_browser.palette import PaletteCommand
 from arxiv_browser.parsing import HISTORY_DATE_FORMAT, clean_latex
@@ -49,8 +56,6 @@ from arxiv_browser.widgets.listing import (
 )
 
 _LIST_PANE_WIDTH_FRACTION = 2 / 5
-
-_BADGE_REFRESH_KINDS = frozenset({"s2", "hf", "version", "relevance", "triage"})
 
 
 def _footer_progress_bindings(
@@ -222,6 +227,7 @@ class DetailPaneMixin(DetailAnnotationMixin):
             summary_mode=self._summary_mode_label.get(arxiv_id, ""),
             tags=tuple(self._tags_for(arxiv_id) or ()),
             relevance=self._relevance_scores.get(arxiv_id),
+            judge_score=getattr(self, "_judge_scores", {}).get(arxiv_id),
             submission_targets=deadline_targets,
             deadline_countdown_key=deadline_countdown_key,
             is_read=bool(metadata and metadata.is_read),
@@ -279,6 +285,7 @@ class DetailPaneMixin(DetailAnnotationMixin):
             hf_data=self._hf_cache.get(aid) if self._hf_active else None,
             version_update=self._version_updates.get(aid),
             relevance_score=self._relevance_scores.get(aid),
+            judge_score=getattr(self, "_judge_scores", {}).get(aid),
             triage_prediction=getattr(self, "_triage_predictions", {}).get(aid),
             inbox_labels=tuple(
                 inbox_context.section_labels_by_id.get(aid, ()) if inbox_context else ()
@@ -527,17 +534,7 @@ class DetailPaneMixin(DetailAnnotationMixin):
         return dirty_ids, refresh_all
 
     def _badge_refresh_ids_for_kind(self, kind: str) -> tuple[set[str], bool]:
-        if kind == "s2":
-            return (set(self._s2_cache), False) if self._s2_active else (set(), True)
-        if kind == "hf":
-            return (set(self._hf_cache), False) if self._hf_active else (set(), True)
-        if kind == "version":
-            return set(self._version_updates), False
-        if kind == "relevance":
-            return set(self._relevance_scores), False
-        if kind == "triage":
-            return set(getattr(self, "_triage_predictions", {})), False
-        return set(), True
+        return badge_refresh_ids(self, kind)
 
     def _needs_full_badge_refresh(
         self,
@@ -545,7 +542,7 @@ class DetailPaneMixin(DetailAnnotationMixin):
         dirty_ids: set[str],
         refresh_all: bool,
     ) -> bool:
-        return not dirty or refresh_all or (not dirty_ids and not dirty <= _BADGE_REFRESH_KINDS)
+        return not dirty or refresh_all or (not dirty_ids and not dirty <= BADGE_REFRESH_KINDS)
 
     def _all_visible_indices(self) -> list[int]:
         return list(range(len(self.filtered_papers)))
@@ -573,13 +570,7 @@ class DetailPaneMixin(DetailAnnotationMixin):
         if sort_index < 0 or sort_index >= len(SORT_OPTIONS):
             return False
         sort_key = SORT_OPTIONS[sort_index]
-        return (
-            (badge_kind == "s2" and sort_key == "citations")
-            or (badge_kind == "hf" and sort_key == "trending")
-            or (badge_kind == "relevance" and sort_key == "relevance")
-            or (badge_kind == "triage" and sort_key == "triage")
-            or (sort_key == "queue" and badge_kind in {"s2", "hf", "relevance"})
-        )
+        return is_sort_sensitive_badge(badge_kind, sort_key)
 
     def _schedule_sort_sensitive_refresh(self, *badge_types: str, immediate: bool = False) -> None:
         """Debounce re-sorts triggered by async cache updates."""
@@ -690,6 +681,7 @@ class DetailPaneMixin(DetailAnnotationMixin):
             has_target_papers=has_selection or current_paper is not None,
             s2_active=bool(getattr(self, "_s2_active", False)),
             s2_data_loaded=bool(current_paper and current_paper.arxiv_id in s2_cache),
+            judge_llm_configured=bool(isinstance(config, UserConfig) and resolve_provider(config)),
         )
 
     def _palette_suggested_actions(self, state: _PaletteAppState) -> set[str]:
@@ -760,6 +752,11 @@ class DetailPaneMixin(DetailAnnotationMixin):
             action_name,
             (
                 ({"select_all"}, state.has_visible_papers, "visible papers"),
+                (
+                    {"judge_impact"},
+                    state.has_visible_papers or state.has_selection,
+                    "visible papers",
+                ),
                 ({"quick_triage"}, state.has_visible_papers, "visible papers"),
                 ({"show_due_reviews"}, state.has_visible_papers, "visible papers"),
                 ({"clear_selection"}, state.has_selection, "selection"),
@@ -798,24 +795,7 @@ class DetailPaneMixin(DetailAnnotationMixin):
         state: _PaletteAppState,
     ) -> str:
         """Return LLM-related blockers for a palette action."""
-        if action_name not in {
-            "generate_summary",
-            "chat_with_paper",
-            "debate_paper",
-            "remix_papers",
-            "score_relevance",
-            "auto_tag",
-        }:
-            return ""
-        if not state.llm_configured:
-            return "LLM configuration"
-        if action_name == "debate_paper" and not state.has_current_paper:
-            return "selection"
-        if action_name == "remix_papers" and state.selected_count not in {2, 3}:
-            return "2-3 selected papers"
-        if action_name != "score_relevance" and not state.has_target_papers:
-            return "selection"
-        return ""
+        return _palette_llm_blocked_reason(action_name, state)
 
     def _build_command_palette_commands(self) -> list[PaletteCommand]:
         """Return command palette rows with labels adapted to current app state."""
@@ -876,6 +856,8 @@ class DetailPaneMixin(DetailAnnotationMixin):
         for builder in (
             self._scoring_progress_footer_bindings,
             self._scoring_busy_footer_bindings,
+            self._judge_progress_footer_bindings,
+            self._judge_busy_footer_bindings,
             self._version_progress_footer_bindings,
             self._version_busy_footer_bindings,
             self._download_progress_footer_bindings,
@@ -896,6 +878,14 @@ class DetailPaneMixin(DetailAnnotationMixin):
         if not self._relevance_scoring_active:
             return None
         return _footer_busy_bindings("Scoring papers")
+
+    def _judge_progress_footer_bindings(self) -> list[tuple[str, str]] | None:
+        return _footer_progress_bindings("Judging", getattr(self, "_judge_progress", None))
+
+    def _judge_busy_footer_bindings(self) -> list[tuple[str, str]] | None:
+        if not getattr(self, "_judge_scoring_active", False):
+            return None
+        return _footer_busy_bindings("Judging papers")
 
     def _version_progress_footer_bindings(self) -> list[tuple[str, str]] | None:
         return _footer_progress_bindings("Versions", self._version_progress)
@@ -981,6 +971,7 @@ class DetailPaneMixin(DetailAnnotationMixin):
         theme_runtime = self._resolved_theme_runtime()
         return _widget_chrome.build_footer_mode_badge(
             relevance_scoring_active=self._relevance_scoring_active,
+            judge_scoring_active=getattr(self, "_judge_scoring_active", False),
             version_checking=self._version_checking,
             search_visible=search_visible,
             in_arxiv_api_mode=self._in_arxiv_api_mode,

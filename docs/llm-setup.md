@@ -163,8 +163,18 @@ Score all loaded papers 1-10 based on your research interests.
 - Press `L` to score all papers
 - Press `Ctrl+l` to edit interests (clears cached scores)
 - Cycle the sort order with `s` until it reaches the Relevance mode
-- Smart Reading Queue sort also uses these relevance scores as its strongest signal
+- Smart Reading Queue sort uses these relevance scores as a 30% signal
 - Score badges: 🟢 green (8-10), 🟡 yellow (5-7), dim (1-4)
+
+## Scientific Impact Judge (`Ctrl+j`)
+
+Press `Ctrl+j` to estimate interest-independent scientific impact with your configured local CLI or OpenAI-compatible HTTP LLM. If papers are selected, only the selection is judged; otherwise the visible filtered list is judged, up to `judge_paper_limit` (default 50).
+
+Each paper receives cached 1-10 ratings for overall impact, significance, novelty, rigor, and clarity. The `J:n` list badge shows the overall score, the **AI Impact Judge** detail section shows the dimension scores and reasons, and cycling `s` reaches a dedicated `impact` sort. The rubric tells the model to ignore author reputation and instructions embedded in paper text, but these remain model estimates rather than peer review.
+
+Scores are namespaced by provider/model and rubric version, then invalidated when the supplied paper metadata or abstract changes. `arxiv-viewer cache-clear --llm --yes` clears judge scores and pairwise decisions together with other LLM caches.
+
+Pairwise comparison is opt-in because it adds LLM calls. Set `judge_pairwise_top_k` to `2..32` to run two cached round-robin refinement rounds over the highest absolute scores; leave it at `0` to use one absolute-scoring call per uncached paper. The Smart Reading Queue blends local impact at 20% alongside relevance (30%), watch matches (20%), recency (10%), HuggingFace (10%), and Semantic Scholar citation velocity (10%).
 
 ## Auto-Tag (`Ctrl+g`)
 
@@ -179,6 +189,7 @@ Press `Ctrl+g` to have the LLM suggest tags for the current or selected papers b
 | `Ctrl+v` | Compare 2-3 selected papers locally; press `g` inside for AI comparison |
 | `Ctrl+p` | Open command palette; run Debate Paper or Paper Remix |
 | `L` | Score all papers by relevance |
+| `Ctrl+j` | Judge selected or visible papers for scientific impact |
 | `Ctrl+l` | Edit research interests |
 | `Ctrl+g` | Auto-tag current/selected papers |
 

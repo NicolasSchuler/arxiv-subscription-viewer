@@ -63,7 +63,7 @@ def test_cache_info_reports_existing_database_counts(tmp_path, monkeypatch, caps
     assert cache_cli.run_cache_info() == 0
 
     out = capsys.readouterr().out
-    assert "LLM summaries and relevance: 2 rows" in out
+    assert "LLM summaries, relevance, and impact judging: 2 rows" in out
     assert "Semantic search embeddings: 1 row" in out
 
 

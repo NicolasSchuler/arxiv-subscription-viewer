@@ -908,7 +908,10 @@ class TestBrowserHelperCoverage:
         app._detail_mode = "scan"
         app._history_files = []
         app._s2_cache = {}
-        with patch("arxiv_browser.browser.detail_pane._resolve_llm_command", return_value=""):
+        with (
+            patch("arxiv_browser.browser.detail_pane._resolve_llm_command", return_value=""),
+            patch("arxiv_browser.browser.detail_pane.resolve_provider", return_value=None),
+        ):
             commands = app._build_command_palette_commands()
         assert (
             next(cmd for cmd in commands if cmd.action == "fetch_s2").blocked_reason
@@ -938,8 +941,12 @@ class TestBrowserHelperCoverage:
             (date(2026, 3, 23), Path("2026-03-23.txt")),
         ]
         app._s2_cache = {paper1.arxiv_id: object()}
-        with patch(
-            "arxiv_browser.browser.detail_pane._resolve_llm_command", return_value="llm {prompt}"
+        with (
+            patch(
+                "arxiv_browser.browser.detail_pane._resolve_llm_command",
+                return_value="llm {prompt}",
+            ),
+            patch("arxiv_browser.browser.detail_pane.resolve_provider", return_value=object()),
         ):
             commands = app._build_command_palette_commands()
         assert (

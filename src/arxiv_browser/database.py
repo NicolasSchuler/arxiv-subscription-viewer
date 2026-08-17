@@ -43,6 +43,29 @@ _CREATE_TABLE_SQL: tuple[str, ...] = (
     "  created_at TEXT NOT NULL,"
     "  PRIMARY KEY (arxiv_id, interests_hash)"
     ")",
+    # judging.py — local LLM scientific-impact ratings
+    "CREATE TABLE IF NOT EXISTS judge_scores ("
+    "  arxiv_id TEXT NOT NULL,"
+    "  judge_hash TEXT NOT NULL,"
+    "  rubric_version TEXT NOT NULL,"
+    "  context_hash TEXT NOT NULL,"
+    "  payload_json TEXT NOT NULL,"
+    "  created_at TEXT NOT NULL,"
+    "  PRIMARY KEY (arxiv_id, judge_hash, rubric_version)"
+    ")",
+    # judging.py — cached pairwise comparisons
+    "CREATE TABLE IF NOT EXISTS judge_battles ("
+    "  left_arxiv_id TEXT NOT NULL,"
+    "  right_arxiv_id TEXT NOT NULL,"
+    "  judge_hash TEXT NOT NULL,"
+    "  rubric_version TEXT NOT NULL,"
+    "  left_context_hash TEXT NOT NULL,"
+    "  right_context_hash TEXT NOT NULL,"
+    "  winner_arxiv_id TEXT,"
+    "  reason TEXT NOT NULL,"
+    "  created_at TEXT NOT NULL,"
+    "  PRIMARY KEY (left_arxiv_id, right_arxiv_id, judge_hash, rubric_version)"
+    ")",
     # browser/content.py — extracted full-paper text
     "CREATE TABLE IF NOT EXISTS paper_content ("
     "  arxiv_id TEXT PRIMARY KEY,"

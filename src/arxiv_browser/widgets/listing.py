@@ -14,6 +14,7 @@ from textual.css.query import NoMatches
 from textual.widgets import ListItem, Static
 
 from arxiv_browser.huggingface import HuggingFacePaper
+from arxiv_browser.judging import JudgeScore
 from arxiv_browser.models import Paper, PaperMetadata
 from arxiv_browser.query import (
     escape_rich_text,
@@ -159,6 +160,7 @@ class PaperRowRenderState:
     hf_data: HuggingFacePaper | None = None
     version_update: tuple[int, int] | None = None
     relevance_score: tuple[int, str] | None = None
+    judge_score: JudgeScore | None = None
     triage_prediction: TriagePrediction | None = None
     inbox_labels: tuple[str, ...] = ()
     meta_line_budget: int = META_LINE_BUDGET
@@ -337,6 +339,10 @@ def _build_meta_parts(state: PaperRowRenderState) -> tuple[list[str], int]:
         score, _ = state.relevance_score
         color, sym = _relevance_badge_parts(score, theme_colors=state.theme_colors)
         parts.append(f"[{color}]Rel:{sym}{score}/10[/]")
+    if state.judge_score is not None:
+        impact = state.judge_score.ranking_score
+        color, _sym = _relevance_badge_parts(impact, theme_colors=state.theme_colors)
+        parts.append(f"[{color}]J:{impact:.1f}[/]")
     if state.triage_prediction is not None:
         color = _triage_badge_color(state.triage_prediction, state.theme_colors)
         badge = escape_rich_text(
@@ -405,7 +411,7 @@ def _render_title_line(state: PaperRowRenderState) -> str:
 
 
 def _relevance_badge_parts(
-    score: int,
+    score: float,
     theme_colors: Mapping[str, str] | None = None,
 ) -> tuple[str, str]:
     """Return (color, symbol) for a relevance score badge.

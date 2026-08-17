@@ -99,6 +99,8 @@ Configure AI summaries, paper chat, comparison, relevance scoring, and auto-tagg
 | `llm_api_base_url` | `string` | `""` | Base URL for the HTTP provider, e.g. `"https://api.openai.com"` or `"http://localhost:11434"`. Required when `llm_provider_type` is `"http"`. |
 | `llm_api_key` | `string` | `""` | API key for the HTTP provider. Leave empty for local models that don't require auth. |
 | `llm_api_model` | `string` | `""` | Model name for the HTTP provider, e.g. `"gpt-4o"`, `"llama3"`. |
+| `judge_paper_limit` | `int` | `50` | Maximum selected or visible papers scored by one explicit `Ctrl+j` run. Clamped to `1..500`. |
+| `judge_pairwise_top_k` | `int` | `0` | Highest absolute-impact papers included in two pairwise refinement rounds. `0` disables pairwise calls; otherwise clamped to `2..32` at runtime. |
 | `paper_content_cache_ttl_days` | `int` | `7` | Days to cache extracted full-paper text used by LLM summaries and chat. Range `1..365`. |
 | `paper_content_pdf_fallback` | `bool` | `true` | When arXiv HTML text is unavailable, download/read the PDF and extract text before falling back to the abstract. |
 | `trusted_llm_command_hashes` | `list[str]` | `[]` | SHA-256 hashes of LLM commands the user has approved. **Managed by the app** — do not edit. |
@@ -164,7 +166,7 @@ Configure file exports and PDF handling. See [export.md](export.md) for detailed
 | `theme_name` | `string` | `"monokai"` | Active color theme. Built-ins: `"monokai"`, `"catppuccin-mocha"`, `"solarized-dark"`, `"solarized-light"`, `"high-contrast"`, `"dracula"`, `"nord"`, `"gruvbox-dark"`, `"tokyo-night"`, `"everforest-dark"`, `"github-light"`. Can also name an entry in `custom_themes`. Cycle with `Ctrl+t`. |
 | `theme` | `dict[str, str]` | `{}` | Per-color overrides layered over the active built-in or custom theme. |
 | `custom_themes` | `dict[str, dict[str, str]]` | `{}` | Named user palettes. Each palette may override any key from the built-in theme color map; omitted keys inherit from Monokai. Custom names appear after built-ins when cycling with `Ctrl+t`. |
-| `collapsed_sections` | `list[str]` | `["tags", "relevance", "summary", "s2", "hf", "version"]` | Detail pane sections that start collapsed. Valid keys: `"authors"`, `"abstract"`, `"tags"`, `"relevance"`, `"deadlines"`, `"summary"`, `"s2"`, `"hf"`, `"version"`. Toggle with `Ctrl+d`. |
+| `collapsed_sections` | `list[str]` | `["tags", "relevance", "judge", "summary", "s2", "hf", "version"]` | Detail pane sections that start collapsed. Valid keys: `"authors"`, `"abstract"`, `"tags"`, `"relevance"`, `"judge"`, `"deadlines"`, `"summary"`, `"s2"`, `"hf"`, `"version"`. Toggle with `Ctrl+d`. |
 
 ### Custom Theme Example
 
@@ -221,7 +223,7 @@ Restored automatically on next run. **Managed by the app** — generally no need
 |-----|------|---------|-------------|
 | `session.scroll_index` | `int` | `0` | Last scroll position in the paper list. |
 | `session.current_filter` | `string` | `""` | Last active search query. |
-| `session.sort_index` | `int` | `0` | Index into sort order cycle: `0`=title, `1`=date, `2`=arxiv_id, `3`=citations, `4`=trending, `5`=relevance, `6`=queue, `7`=triage. |
+| `session.sort_index` | `int` | `0` | Index into sort order cycle: `0`=title, `1`=date, `2`=arxiv_id, `3`=citations, `4`=trending, `5`=relevance, `6`=queue, `7`=triage, `8`=impact. |
 | `session.selected_ids` | `list[str]` | `[]` | arXiv IDs of papers selected at exit. |
 | `session.current_date` | `string \| null` | `null` | Current date in history mode (`YYYY-MM-DD`), or `null` for non-history mode. |
 

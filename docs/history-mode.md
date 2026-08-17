@@ -28,9 +28,9 @@ Session state (including the current date) persists across runs.
 
 ## Smart Reading Queue
 
-Cycle the sort order with `s` until the queue mode appears to use the Smart Reading Queue. Queue mode is a priority sort over the loaded date file: relevance scores, watch-list matches, recency, HuggingFace upvotes, and Semantic Scholar citation velocity all contribute when available. It does not create a separate queue or change read/unread state.
+Cycle the sort order with `s` until the queue mode appears to use the Smart Reading Queue. Queue mode is a priority sort over the loaded date file: relevance scores (30%), local AI-judge impact (20%), watch-list matches (20%), recency (10%), HuggingFace upvotes (10%), and Semantic Scholar citation velocity (10%) contribute when available. It does not create a separate queue or change read/unread state.
 
-The relevance, HuggingFace, and Semantic Scholar contributions only apply once those features are enabled (see [llm-setup.md](llm-setup.md), [huggingface.md](huggingface.md), and [semantic-scholar.md](semantic-scholar.md)); a default install ranks mostly by recency and watch-list matches.
+The relevance, impact-judge, HuggingFace, and Semantic Scholar contributions only apply once those features are run or enabled (see [llm-setup.md](llm-setup.md), [huggingface.md](huggingface.md), and [semantic-scholar.md](semantic-scholar.md)); a default install ranks mostly by recency and watch-list matches.
 
 When queue mode is selected, it stays active as you move between date files, so each newly loaded digest is auto-ranked with the same priority formula.
 

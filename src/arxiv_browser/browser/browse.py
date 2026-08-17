@@ -26,6 +26,7 @@ from arxiv_browser.browser.constants import (
     PDF_DOWNLOAD_TIMEOUT,
     logger,
 )
+from arxiv_browser.browser.dataset_reset import reset_dataset_enrichment_state
 from arxiv_browser.embedding_backends import (
     EmbeddingBackend,
     EmbeddingBackendError,
@@ -455,6 +456,7 @@ class BrowseMixin:
             s2_cache=self._s2_cache,
             hf_cache=self._hf_cache,
             relevance_cache=self._relevance_scores,
+            judge_cache=getattr(self, "_judge_scores", {}),
             watched_paper_ids=self._watched_paper_ids,
             triage_predictions=getattr(self, "_triage_predictions", {}),
         )
@@ -850,30 +852,12 @@ class BrowseMixin:
             self._get_paper_details_widget().clear_cache()
         except NoMatches:
             pass
-        self._paper_summaries.clear()
-        self._summary_loading.clear()
-        self._summary_mode_label.clear()
-        self._summary_command_hash.clear()
-        self._s2_cache.clear()
-        self._s2_loading = set()
-        self._s2_api_error = False
-        self._hf_cache.clear()
-        self._hf_loading = False
-        self._hf_api_error = False
-        self._version_updates.clear()
-        self._version_checking = False
-        self._version_progress = None
-        self._relevance_scores.clear()
-        self._relevance_scoring_active = False
-        self._scoring_progress = None
+        reset_dataset_enrichment_state(self)
         if not hasattr(self, "_triage_predictions"):
             self._triage_predictions = {}
         self._triage_predictions.clear()
         self._triage_model_info = None
         self._triage_training_active = False
-        self._auto_tag_active = False
-        self._auto_tag_progress = None
-        self._cancel_batch_requested = False
         self._tfidf_index = None
         self._tfidf_corpus_key = None
         self._pending_similarity_paper_id = None

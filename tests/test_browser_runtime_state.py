@@ -19,6 +19,7 @@ def test_runtime_state_defaults_share_cache_paths(tmp_path) -> None:
     assert enrichment_state.s2_db_path == cache_path
     assert enrichment_state.hf_db_path == cache_path
     assert enrichment_state.relevance_db_path == cache_path
+    assert enrichment_state.judge_db_path == cache_path
     assert enrichment_state.read_event_timestamps.maxlen == 240
 
 
@@ -39,4 +40,8 @@ def test_runtime_state_attach_helpers_preserve_legacy_attribute_surface(tmp_path
     assert app._s2_db_path == cache_path
     assert app._hf_db_path == cache_path
     assert app._relevance_db_path == cache_path
+    assert app._judge_db_path == cache_path
+    assert app._judge_scores is enrichment_state.judge_scores
+    assert app._judge_hash == ""
+    assert app._judge_task is None
     assert app._read_event_timestamps is enrichment_state.read_event_timestamps
